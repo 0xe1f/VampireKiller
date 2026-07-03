@@ -16,6 +16,7 @@ segments/           one file per 8 KiB segment
   seg01..15         included as binary (regenerated from the ROM; not committed)
 tools/              helper scripts + symbol/block files (see below)
 docs/               notes (game behaviour, text encoding, sprites) + progress
+gfx/                readable graphics catalogue (manifest committed; dumps regen)
 Makefile            build / verify
 ```
 
@@ -50,6 +51,12 @@ against the original so it stays byte-for-byte identical.
 
 Text is stored as `ASCII - 0x10`; a small `vk()` helper (in `VampireKiller.asm`)
 lets strings be written as readable ASCII while emitting the exact original bytes.
+
+Graphics are SCREEN 5 (4bpp) bitmaps and 16×16 hardware sprites, stored
+RLE-compressed. `make gfx` decompresses the streams listed in `gfx/manifest.tsv`
+into readable `.bin`/`.txt` dumps (plus `.png` sheets for clarity) for
+inspection/editing; `tools/rleenc.py` re-packs them. The committed build keeps
+the original compressed bytes, so it stays byte-exact.
 
 See `docs/` for reverse-engineering notes and `docs/progress.md` for current
 status and next steps.

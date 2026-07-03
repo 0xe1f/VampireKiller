@@ -1,0 +1,14 @@
+# Vampire Killer graphics catalogue - edit this, then run: make gfx
+# Columns are TAB-separated:
+#   name        comma-separated ROM file offsets of RLE streams (decompressed & concatenated)
+#   sources     "
+#   dest        VRAM destination the game loads it to (informational)
+#   kind        sprite16 (16x16 1bpp hardware sprite) | tile4 (16x16 4bpp SCREEN 5 tile)
+#   planes      1 = plain 1bpp; N>1 = MSX2 multicolor sprite, N consecutive 1bpp
+#               planes are OR-combined into one visible sprite (the .png composites
+#               them; the .txt keeps every plane separate for editing)
+#   notes       free text
+#
+# name	sources	dest	kind	planes	notes
+intro_simon	0x1A319,0x1A351,0x1A38C,0x1A3CA,0x1A40B,0x1A447,0x1A480,0x1A4BC	0xF800	sprite16	2	Intro (Simon arriving at the castle): 8 two-plane Simon sprites. seg13, loaded after sub_5369h at 0x5682-0x56c7.
+intro_sky	0x1B895	0xFA00	sprite16	1	Intro sky (one stream, 10 patterns): patterns 0-7 = cloud shapes, patterns 8-9 = 2-frame bat flap (wings down / wings up). seg13, loaded at 0x56d0.

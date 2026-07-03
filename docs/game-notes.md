@@ -100,6 +100,136 @@ TODO (next session): add an sjasmplus macro to author these as readable ASCII
 (emit char-0x10) and convert the region to a data block byte-exactly; mark
 `l4c07h..0x4D4D` in tools/seg00.blocks as data.
 
+## Code layout & where the "main loop" is
+
+There is no classic `while(1)` loop. Boot parks the CPU in a spin (`jr $` at
+0x40C3); everything runs off the 60 Hz timer interrupt `H.TIMI` -> `INT_HANDLER`
+(0x4028), which each frame calls the game tick `sub_414dh`. That tick is the
+master state machine (primary state 0xC000 -> `main_state_tbl`).
+
+Segment 0 is the resident **kernel/orchestrator** only: interrupt handler, frame
+tick + state dispatch, graphics/RLE loaders, bank switching, and the
+entity-dispatch shell at 0x5FD0. All 14 `main_state_tbl` handlers live in seg0
+(0x417D-0x441B) but are thin - they call out into banked ROM:
+- state 0 (logo): `call 0x6253`   state 3 (in-game): `call 0x63DA`
+- per-entity behaviour (player/enemy AI) via `entity_tbl` -> 0xA000+
+
+During normal play the default banks (set by `sub_533dh`) are seg 1 @ 0x6000,
+seg 2 @ 0x8000, seg 3 @ 0xA000. So the substantive gameplay (movement, AI,
+collision, item logic) lives in **code segments 1/2/3**, still `INCBIN`'d and not
+yet disassembled - that's the next disassembly target, followed from seg0's
+state handlers and `entity_tbl`.
+
+## Graphics format (sprite/tile hunt)
+
+Video mode is **SCREEN 5** (VDP mode G4: 256x212, 16 colours, 4 bits/pixel
+bitmap). Set in `sub_4b60h`: `ld a,5 / call CHGMOD (0x005f)`. Consequences:
+
+- Backgrounds/tiles/logos are stored as **4bpp bitmap data** (high nibble = left
+  pixel, colour index 0-15, colour 0 = transparent/background). They are copied
+  to VRAM with the **VDP command engine** (`out (c)` streams to R17-indirect +
+  the command registers) via `sub_48e3h`, `l4911h`, and helpers `sub_48fdh` /
+  `sub_4907h` / `sub_487ch` / `sub_485ch` - NOT as 1bpp pattern tables.
+- Actors (Simon, enemies, items) are drawn with **hardware sprites** (mode 2,
+  16x16, **1bpp** patterns). A multicolour character is built from several 1bpp
+  planes the VDP OR-combines (the `CC` bit, 0x40, in the sprite colour byte);
+  the sprite attribute table is assembled by `sub_554fh` (nested 4x4 loops
+  writing 4-byte OAM records via `sub_4a58h`), so large characters are grids of
+  hardware sprites. Only the background is 4bpp - the sprites are never 4bpp.
+  Evidence: seg13/0xA319 patterns alternate sparse/dense pixel counts
+  (52,164, 49,145, ...), each sparse plane nearly a subset of the next dense
+  one - so `intro_simon` is 8 two-plane sprites, not 16 frames. The
+  catalogue's `planes` column composites planes in the `.png` preview while the
+  `.txt`/`.bin` keep each plane separate for editing.
+
+Bank classification (by entropy / zero-fill, `tools/gfxview.py` + a quick scan):
+- **seg 0-3**: code (entropy ~7, top byte 0xCD/0xC4/0xDD opcodes).
+- **seg 4-9, 15**: 4bpp bitmap graphics (low entropy 4.3-5.5, zero-heavy, a
+  single dominant background colour). These hold the title logo, HUD, stage and
+  actor artwork.
+- **seg 10-14**: mixed code + data tables.
+
+Title graphics load (`sub_454ch`, called from the title builder): copies from
+ROM `0x7F0B`, `0x930B`, `0xB70B` (banked pages 1b/2a/2b) to VRAM `0x1212`,
+`0x2212`, `0x4212` with `c` = block count via `sub_48e3h`.
+
+### Graphics are RLE-compressed (format cracked)
+
+Graphics ROM data is **not** raw pixels - it is packed with a small RLE scheme
+and unpacked straight into VRAM by the decompressor `sub_46f8h` / `l46f2h`
+(0x46F2). `sub_46b6h` sets the VRAM write pointer from HL; the stream is then
+streamed to data port 0x98. Control-byte grammar:
+
+| byte        | meaning                                        |
+|-------------|------------------------------------------------|
+| `0x00`      | end of stream                                  |
+| `0x80 lo hi`| set VRAM write pointer = `hi<<8 | lo`           |
+| `0x01..0x7F`| RUN: repeat the next single byte N times       |
+| `0x81..0xFF`| LITERAL: copy `N & 0x7F` bytes verbatim         |
+
+Callers pass `HL` = VRAM dest, `DE` = ROM source, e.g. (segment 0, ~0x5688):
+
+```
+call sub_5369h            ; page seg 13 into 0xA000-0xBFFF
+ld hl,0f800h ; ld de,0a319h ; call sub_46f8h   ; -> sprite pattern gen table
+ld hl,0f840h ; ld de,0a351h ; call sub_46f8h   ; next 2 sprites ...
+```
+
+`0xF800` = VRAM page 1, offset `0x7800` = the **sprite pattern generator table**
+(SCREEN 5, sprite mode 2). Each stream unpacks 64 bytes = **two 16x16 sprites**
+(32 bytes each). The 8-call block at 0x5688 fills 0xF800-0xFA00 = 16 sprites
+(one actor's animation set). Confirmed by decompressing and rendering: clean
+walking-creature frames.
+
+### Bank switching for graphics loads
+
+Konami mapper windows: writes to `0x6000`/`0x8000`/`0xA000` select the segment
+paged into page 1b / 2a / 2b. Helper routines (each also shadows the value at
+0xF0F1-0xF0F3 for INT_HANDLER to restore):
+- `sub_5369h` -> seg 11 @ 0x6000, seg 12 @ 0x8000, seg 13 @ 0xA000  (level/sprite gfx)
+- `sub_5381h` -> seg  9 @ 0x8000, seg 10 @ 0xA000                   (front-end/title gfx)
+- `sub_533dh` -> seg  1 @ 0x6000, seg  2 @ 0x8000, seg  3 @ 0xA000  (default/game banks)
+
+So a page-2b source `0xAxxx` read right after `sub_5369h` maps to file offset
+`13*0x2000 + (addr-0xA000)` (e.g. 0xA319 -> file 0x1A319).
+
+### Tools for the graphics pipeline
+
+- `tools/rledec.py <rom> <src-off> --dest 0xF800 --out x.bin` replays the RLE
+  grammar above to extract a decompressed block.
+- `tools/gfxview.py x.bin 0 --bpp 1 --size 16 --count 16 --cols 8` renders 16x16
+  1bpp sprites as ASCII art (also `--bpp 4` for SCREEN 5 tiles, `--raw` bitmaps).
+- `tools/rleenc.py x.bin --verify <rom> <src-off>` re-packs a flat buffer. It is
+  an optimal-length packer and always round-trips, but does NOT always reproduce
+  Konami's exact bytes (their packer uses a specific tie-break for equal-cost
+  run/literal splits; measured ~1-3/10 exact). This is why the catalogue keeps
+  the original compressed bytes authoritative rather than assembling from source.
+
+### Editable graphics catalogue (chosen workflow: "path A")
+
+The ROM stays guaranteed byte-exact because the graphics banks remain the
+original compressed bytes (`INCBIN` of the split segment binaries). Editable
+copies live in `gfx/`, generated by `tools/gfxdump.py` from `gfx/manifest.tsv`
+(run `make gfx`):
+- `gfx/<name>.bin` - decompressed raw pixels (edit these)
+- `gfx/<name>.txt` - ASCII-art preview (definitive human-readable source)
+- `gfx/<name>.png` - scaled PNG sheet, for extra clarity (via the dependency-free
+  writer `tools/pngwrite.py`)
+- `gfx/index.md`   - table of all catalogued sets (embeds the PNG previews)
+Only `gfx/manifest.tsv` is committed; the dumps are ROM-derived and regenerated.
+To mod a sprite: edit its `.bin`, re-pack with `tools/rleenc.py`, and patch the
+stream into the ROM (the base build stays byte-exact until you patch).
+
+Catalogued so far (extend `manifest.tsv` as more sets are identified):
+- `intro_simon` - seg13, 8 streams 0x1A319-0x1A4BC, 8 two-plane Simon sprites
+  (intro: Simon arriving at the castle).
+- `intro_sky` - seg13, 0x1B895, 8 cloud patterns + a 2-frame bat flap.
+
+TODO (next): map the remaining sprite/tile sets - which streams belong to Simon
+vs each enemy/boss/item - many are reached through per-level/per-actor pointer
+tables (e.g. l55deh, 0xA281+A, 0xA2D1+A); resolve those tables to fill out the
+catalogue.
+
 ## Reference: Metal Gear disassembly
 
 Cloned to `reference/MetalGear` (GuillianSeed/MetalGear). Same Konami MSX2 engine

@@ -14,7 +14,11 @@ gfx/index.md
 tools/sjasmplus
 
 # Local reference clones / scratch
-reference/
+references/
+
+# Temporarily generated files (disassembler scratch, etc.); never committed.
+# Regenerate with tools/regen-seg.sh; fold the clean .generated.asm into segNN.asm.
+generated/
 
 # Python scratch
 tools/__pycache__/

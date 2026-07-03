@@ -1,5 +1,7 @@
 # Vampire Killer (MSX2) — disassembly
 
+> This project is a human-guided, largely AI-executed workflow.
+
 A work-in-progress, **byte-exact and reassemblable** disassembly of Konami's
 *Vampire Killer* (*Akumajō Dracula*, 1986) for the MSX2 — a 128 KiB Konami
 MegaROM (Konami4, no SCC).

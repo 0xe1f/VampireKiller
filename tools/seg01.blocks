@@ -1,0 +1,26 @@
+; z80dasm block map for segment 1 (runs at 0x6000, page 1b).
+; Entry points are called from segment 0's state machine and from within the
+; segment; the leading region is a set of data tables, not code.
+
+; Leading data table (48 bytes) before the first routine at 0x6030.
+data_6000: start 0x6000 end 0x6030 type bytedata
+
+; 0x6030-0x605e: two small routines (entry points 0x6030 and 0x604f), left as code.
+
+; Byte tables (per-entry counts / small parameters) preceding a word table.
+data_605f: start 0x605f end 0x608d type bytedata
+; Word-pointer table: 46 entries, all pointing into the 0x61xx data below.
+ptr_tbl_608d: start 0x608d end 0x60e9 type worddata
+; More byte tables up to the routine at 0x615b.
+data_60e9: start 0x60e9 end 0x615b type bytedata
+
+; Konami logo tile-layout stream consumed by sub_6276h (0xFE=newline, 0xFF=end).
+logo_layout: start 0x6296 end 0x62d7 type bytedata
+; Per-row event table for sub_633ah: one byte each (column<<4 | event); 0xFF=none.
+event_tbl_6376: start 0x6376 end 0x6389 type bytedata
+; Per-row screen-position table for sub_6409h: 2 bytes/row (pos&0xFE -> 0xC425,
+; low bit -> 0xC42C flag; 2nd byte -> 0xC427).
+pos_tbl_6426: start 0x6426 end 0x644c type bytedata
+; Multi-sprite (dx,dy) offset lists selected by the 0x80/0x81/0x82 stream codes
+; in the actor->sprite builder at 0x644c.
+sprite_ofs_64d4: start 0x64d4 end 0x64ec type bytedata

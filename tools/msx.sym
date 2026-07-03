@@ -128,3 +128,8 @@ ADD_HL_A: equ 0x4061	; HL += A (unsigned)
 ADD_DE_A: equ 0x4066	; DE += A (unsigned)
 DISPATCH_A: equ 0x406b	; jump via inline word table indexed by A
 INIT: equ 0x4075	; cartridge entry point
+
+; ---- Vampire Killer banked routines (segment 1 @ 0x6000) -----------------
+KONAMI_LOGO_DRAW: equ 0x6209	; draw Konami logo + seed the top-to-bottom wipe
+KONAMI_LOGO_STEP: equ 0x6253	; reveal one more row of the logo (poll 0xC422)
+LOOKUP_WORD_TBL: equ 0x6549	; DE = ((word*)DE)[A]  (generic word-table lookup)

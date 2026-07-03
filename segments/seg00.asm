@@ -5,24 +5,9 @@
 ;  (Origin is set by PHASE 0x4000 in VampireKiller.asm; regenerate the raw
 ;   disassembly with  tools/regen-seg.sh 0 0x4000 tools/seg00.blocks .)
 ;
-;  BIOS entry-point names below are for readability only - they resolve to the
-;  fixed MSX main-ROM addresses and are not emitted into the ROM.
+;  MSX/MSX2 BIOS entry-point names used below (ENASLT, WRTVDP, ...) are defined
+;  once in segments/bios.inc, included by VampireKiller.asm before this file.
 ; ===========================================================================
-; ---- MSX main-ROM BIOS jump table ----------------------------------------
-CHKRAM:	equ 0x0000
-SYNCHR:	equ 0x0008
-RDSLT:	equ 0x000c
-CHRGTR:	equ 0x0010
-WRSLT:	equ 0x0014
-DCOMPR:	equ 0x0020
-ENASLT:	equ 0x0024
-WRTVDP:	equ 0x0047
-CHGMOD:	equ 0x005f
-WRTPSG:	equ 0x0093
-RDPSG:	equ 0x0096
-RSLREG:	equ 0x0138
-SNSMAT:	equ 0x0141
-
 
 ; --- 16-byte MSX cartridge header (ROM offset 0) ---------------------------
 ;   +0  "AB"      magic identifying an MSX ROM cartridge
@@ -304,8 +289,8 @@ main_state_tbl:
 	defw 0441bh             ; 13 in-game phase
 main_state_tbl_end:
 	djnz l418ah
-	call 06253h
-	ld a,(0c422h)
+	call KONAMI_LOGO_STEP   ; wipe the Konami logo in one more row (seg1)
+	ld a,(0c422h)           ; 0xC422 set once the reveal has finished
 	or a
 	ret z
 	xor a
@@ -320,7 +305,7 @@ l418ah:
 	jp l424bh
 l4198h:
 	call sub_47c0h
-	call 06209h
+	call KONAMI_LOGO_DRAW   ; draw Konami logo + start the top-to-bottom wipe (seg1)
 	jr l41cch
 	ld hl,0c004h
 	dec (hl)

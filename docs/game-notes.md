@@ -232,7 +232,7 @@ catalogue.
 
 ## Reference: Metal Gear disassembly
 
-Cloned to `reference/MetalGear` (GuillianSeed/MetalGear). Same Konami MSX2 engine
+Cloned to `references/MetalGear` (GuillianSeed/MetalGear). Same Konami MSX2 engine
 era; very useful for shared idioms. Notable files:
 - `data/texts.asm`, `gfx/font.asm` - text/charset (confirmed ASCII scheme)
 - `constants/structures.asm` - sprite/object (OBJ) struct layout

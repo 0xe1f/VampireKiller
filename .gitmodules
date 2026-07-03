@@ -1,0 +1,4 @@
+[submodule "tools/CocoaMSX"]
+	path = tools/CocoaMSX
+	url = git@github.com:CocoaMSX/CocoaMSX.git
+	branch = disasm-tracing

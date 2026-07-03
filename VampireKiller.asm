@@ -32,6 +32,9 @@
     OUTPUT "VampireKiller.rom"
     ORG 0x0000
 
+; Shared MSX/MSX2 BIOS entry-point names (readability only; not emitted).
+    INCLUDE "segments/bios.inc"
+
 ; --- vk() text helper -------------------------------------------------------
 ;  The game's font is loaded into VRAM starting at tile 0x10, so on-screen text
 ;  is stored as (ASCII - 0x10).  vk() lets the disassembly spell strings out in
@@ -55,9 +58,9 @@
     INCLUDE "segments/seg00.asm"
     DEPHASE
 
-; --- segment 1 : initial 0x6000-0x7FFF --------------------------------------
+; --- segment 1 : initial 0x6000-0x7FFF (DISASSEMBLY IN PROGRESS) -------------
     PHASE 0x6000
-    INCBIN "segments/seg01.bin"
+    INCLUDE "segments/seg01.asm"
     DEPHASE
 
 ; --- segment 2 : initial 0x8000-0x9FFF --------------------------------------

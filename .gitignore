@@ -1,0 +1,14 @@
+# Copyrighted game data - never committed (regenerate with tools/split-rom.sh)
+segments/*.bin
+
+# Build output
+*.rom
+
+# Toolchain built from source (see README)
+tools/sjasmplus
+
+# Local reference clones / scratch
+reference/
+
+# OS cruft
+.DS_Store

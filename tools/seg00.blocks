@@ -1,0 +1,15 @@
+; z80dasm block map for segment 0 (runs at 0x4000).
+; The 16-byte MSX cartridge header is data, not code.
+rom_header: start 0x4000 end 0x4010 type bytedata
+; 0x4010-0x4027: data table sitting between the header and the interrupt
+; handler at 0x4028; decoding it as code mis-aligns the handler.
+data_4010: start 0x4010 end 0x4028 type bytedata
+
+; Main state-machine jump table: DISPATCH_A at 0x415e indexes this by the
+; primary game state (0xC000).  14 word entries -> state handlers.
+main_state_tbl: start 0x4161 end 0x417d type worddata
+
+; Entity-behaviour jump table: DISPATCH_A at 0x5fd0 indexes this by object
+; type (ix+0)-1.  Targets live in the banked 0xA000 ROM, so they can't be
+; local labels.  Runs to the end of the segment.
+entity_tbl: start 0x5fd3 end 0x6000 type worddata

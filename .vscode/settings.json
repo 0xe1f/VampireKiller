@@ -1,0 +1,11 @@
+{
+  // Mark the disassembly sources read-only IN THE EDITOR so they can't be typed
+  // into by accident. This does NOT change file permissions: the build scripts
+  // (tools/regen-seg.sh, strip-listing.py) and the agent can still write them.
+  // To edit one by hand anyway: Command Palette > "File: Toggle Active Editor
+  // Read-only in Session".
+  "files.readonlyInclude": {
+    "**/*.asm": true,
+    "**/*.inc": true
+  }
+}

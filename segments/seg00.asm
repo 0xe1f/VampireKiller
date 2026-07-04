@@ -11,7 +11,7 @@
 
 ; --- 16-byte MSX cartridge header (ROM offset 0) ---------------------------
 ;   +0  "AB"      magic identifying an MSX ROM cartridge
-;   +2  INIT      entry point called at boot           -> 0x4075
+;   +2  init      entry point called at boot           -> 0x4075
 ;   +4  STATEMENT expansion BASIC statement handler    -> none (0)
 ;   +6  DEVICE    expansion device handler             -> none (0)
 ;   +8  TEXT      BASIC program pointer                -> none (0)
@@ -19,8 +19,8 @@
 rom_header_start:
 	defb 041h               ; 'A'  cartridge magic
 	defb 042h               ; 'B'
-	defb 075h               ; INIT lo  \ entry = 0x4075
-	defb 040h               ; INIT hi  /
+	defb 075h               ; init lo  \ entry = 0x4075
+	defb 040h               ; init hi  /
 	defb 000h
 	defb 000h
 	defb 000h
@@ -63,11 +63,11 @@ data_4010_start:
 	defb 0c4h
 data_4010_end:
 ; ===========================================================================
-;  INT_HANDLER - timer interrupt (H.TIMI hook, installed by INIT at 0xFD9F).
+;  int_handler - timer interrupt (H.TIMI hook, installed by init at 0xFD9F).
 ;  Runs once per VDP frame: per-frame sound/VDP work out of segs 14/15, then
 ;  the game tick.  Two guards keep a slow tick from re-entering itself.
 ; ===========================================================================
-INT_HANDLER:
+int_handler:
 	di
 	ld a,(0e600h)           ; hard re-entrancy guard (outer)
 	or a
@@ -122,12 +122,12 @@ DISPATCH_A:
 	ex de,hl
 	jp (hl)                 ; jump to selected handler
 ; ===========================================================================
-;  INIT - cartridge entry point (from header +2).  Called by the BIOS at boot:
+;  init - cartridge entry point (from header +2).  Called by the BIOS at boot:
 ;  find this ROM's slot, page it into CPU page 2 (0x8000-0xBFFF), clear RAM,
 ;  init subsystems, install the interrupt hook, then idle - the game then runs
-;  entirely from INT_HANDLER.
+;  entirely from int_handler.
 ; ===========================================================================
-INIT:
+init:
 	di
 	ld sp,0f0f0h            ; stack near top of RAM
 	call RSLREG             ; A = primary slot select register
@@ -163,14 +163,14 @@ INIT:
 	di
 	ld a,0c3h               ; opcode for JP
 	ld (0fd9fh),a           ; install timer-interrupt hook (H.TIMI)...
-	ld hl,data_4010_end     ; ...JP INT_HANDLER (=data_4010_end, 0x4028)
+	ld hl,data_4010_end     ; ...JP int_handler (=data_4010_end, 0x4028)
 	ld (0fda0h),hl
 	xor a
 	ld (0f3dbh),a
 	ei                      ; interrupts on: game now runs from the tick
 l40c3h:
-	jr l40c3h               ; idle forever; work happens in INT_HANDLER
-; l40c5h - light path when INT_HANDLER re-enters during a busy tick: just
+	jr l40c3h               ; idle forever; work happens in int_handler
+; l40c5h - light path when int_handler re-enters during a busy tick: just
 ; sample the SPACE key / joystick trigger so input isn't missed.
 l40c5h:
 	ld a,007h               ; scan keyboard matrix row 7...
@@ -248,7 +248,7 @@ sub_4132h:
 	jp WRTPSG
 ; ===========================================================================
 ;  sub_414dh - MAIN TICK / top-level game state machine.  Called once per
-;  frame from INT_HANDLER.  Two-level state:
+;  frame from int_handler.  Two-level state:
 ;     0xC000 = primary state  (C) -> selects a handler from main_state_tbl
 ;     0xC001 = secondary state (B) -> sub-phase, read by the `djnz` ladders
 ;              inside each handler (each `djnz` skips one sub-state).
@@ -295,7 +295,7 @@ main_state_tbl:
 	defw 0441bh             ; 13 in-game phase
 main_state_tbl_end:
 	djnz l418ah
-	call KONAMI_LOGO_STEP   ; wipe the Konami logo in one more row (seg1)
+	call konami_logo_step   ; wipe the Konami logo in one more row (seg1)
 	ld a,(0c422h)           ; 0xC422 set once the reveal has finished
 	or a
 	ret z
@@ -311,7 +311,7 @@ l418ah:
 	jp l424bh
 l4198h:
 	call sub_47c0h
-	call KONAMI_LOGO_DRAW   ; draw Konami logo + start the top-to-bottom wipe (seg1)
+	call konami_logo_draw   ; draw Konami logo + start the top-to-bottom wipe (seg1)
 	jr l41cch
 	ld hl,0c004h
 	dec (hl)
@@ -350,7 +350,7 @@ l41cch:
 	jp l4ad6h
 l41e4h:
 	djnz l41ech
-	call RESET_RUN_STATE   ; wipe run work RAM (0xC405..0xDFFF) + seed defaults
+	call reset_run_state   ; wipe run work RAM (0xC405..0xDFFF) + seed defaults
 	jp l41cch
 l41ech:
 	djnz l41fbh
@@ -742,13 +742,13 @@ sub_44bfh:
 	ld hl,0d070h
 	ld a,001h
 	jp sub_494dh
-; --- RESET_RUN_STATE (sub_44cdh) - wipe the run's work RAM & seed defaults ------
+; --- reset_run_state (sub_44cdh) - wipe the run's work RAM & seed defaults ------
 ;  Called from the intro handler (state 3) to start a fresh run.  Runtime trace
 ;  confirmed the ldir below zero-fills the entire game work block 0xC405..0xDFFF
 ;  in one sweep (event state 0xCE00+, actor arrays 0xD000+, etc.), then seeds the
 ;  starting counters at 0xC410..0xC412 from l44f0h and the view defaults
 ;  0xC415=0x20 / 0xC418=0x80.
-RESET_RUN_STATE:
+reset_run_state:
 	ld hl,0c405h           ; HL -> first byte to clear
 	ld bc,01bfbh           ; 0x1BFB bytes -> up through 0xE000 (exclusive)
 	ld d,h
@@ -796,8 +796,8 @@ sub_451ah:
 	ld hl,l4c07h
 	call l4ad2h
 	call sub_4542h
-	call sub_456dh
-	call sub_4575h
+	call draw_hearts_hud
+	call draw_lives_hud
 	call sub_45b7h
 	call sub_454ch
 	call 08ea1h
@@ -826,14 +826,15 @@ sub_454ch:
 	ld de,04212h
 	ld c,00eh
 	jp sub_48e3h
-; --- sub_456dh - draw the HEART counter (0xC417, BCD) to the HUD -------------
+; --- draw_hearts_hud (seg0 0x456D) - draw the HEART counter (0xC417, BCD) -----
 ;  hl -> BCD source, de -> VDP name-table cell; B counts source bytes (1 byte =
 ;  2 decimal digits).  Runtime-confirmed: 0xC417 is the heart total (cap 0x99).
-sub_456dh:
+;  draw_lives_hud (seg0 0x4575) is the same routine seeded for 0xC410 (lives).
+draw_hearts_hud:
 	ld hl,0c417h           ; hearts (packed BCD)
 	ld de,0c000h           ; HUD cell for the heart readout
 	jr l457bh
-sub_4575h:
+draw_lives_hud:
 	ld hl,0c410h           ; lives (packed BCD)
 	ld de,0e400h           ; HUD cell for the lives readout
 l457bh:
@@ -877,7 +878,7 @@ l45a5h:
 	daa
 l45b0h:
 	ld (hl),a
-	jp sub_456dh
+	jp draw_hearts_hud
 l45b4h:
 	xor a
 	jr l45b0h
@@ -885,10 +886,10 @@ sub_45b7h:
 	call sub_45c0h
 l45bah:
 	call sub_45c6h
-	jp l45ech
+	jp draw_enemy_meter
 sub_45c0h:
 	call sub_45cfh
-	jp l45d8h
+	jp draw_health_bar
 sub_45c6h:
 	ld hl,03b16h
 	ld bc,l4206h
@@ -898,8 +899,8 @@ sub_45cfh:
 	ld hl,03b0dh
 	ld bc,l4206h
 	jp l45cch
-; l45d8h - draw the HEALTH bar from 0xC415 (bar length = health*2 units).
-l45d8h:
+; draw_health_bar (seg0 0x45D8) - draw the HEALTH bar from 0xC415 (len = health*2).
+draw_health_bar:
 	ld hl,0c415h           ; Simon health (0..0x20)
 	ld a,(hl)
 	ld hl,03c0eh
@@ -911,8 +912,8 @@ l45d8h:
 	ld d,000h
 	ld a,011h
 	jp l4911h
-; l45ech - draw the ENEMY/BOSS energy meter from 0xC418 (cap 0x80).
-l45ech:
+; draw_enemy_meter (seg0 0x45EC) - draw the ENEMY/BOSS energy meter from 0xC418 (cap 0x80).
+draw_enemy_meter:
 	ld hl,0c418h           ; enemy/boss energy (0..0x80)
 	ld a,(hl)
 	ld hl,03c17h
@@ -933,8 +934,8 @@ l4602h:
 	ld d,000h
 	ld a,088h
 	jp l4911h
-; l460ch - restore HEALTH: 0xC415 += B, clamped to the 0x20 maximum.
-l460ch:
+; restore_health (seg0 0x460C) - restore HEALTH: 0xC415 += B, clamped to 0x20 max.
+restore_health:
 	ld hl,0c415h           ; Simon health
 	ld a,(hl)
 	add a,b                ; add restore amount
@@ -960,8 +961,8 @@ l461bh:
 l462eh:
 	ld (hl),a
 	jp l45bah
-; l4632h - subtract from HEALTH (damage): 0xC415 -= B, floored at 0.
-l4632h:
+; damage_health (seg0 0x4632) - subtract from HEALTH: 0xC415 -= B, floored at 0.
+damage_health:
 	ld hl,0c415h           ; Simon health
 	ld a,(hl)
 	cp b
@@ -990,9 +991,9 @@ l464bh:
 	ld (hl),a
 	jp l45bah
 	ld b,001h
-	jr l4632h
+	jr damage_health
 	ld b,001h
-	jp l460ch
+	jp restore_health
 	ld b,001h
 	jr l4643h
 sub_4661h:
@@ -2392,7 +2393,7 @@ sub_4e9ah:
 	jp 065abh
 	ld c,027h
 	ld de,0e048h
-	jp l5f24h
+	jp spawn_actor
 	ld (ix+006h),001h
 	ld (ix+00bh),094h
 	ld (ix+00eh),a
@@ -2402,13 +2403,13 @@ sub_4e9ah:
 	ld (ix+007h),a
 	ld de,0ffe0h
 l4ec4h:
-	jp 0a573h
+	jp actor_set_xvel
 	ld c,028h
 	ld de,09038h
-	call l5f24h
+	call spawn_actor
 	ld c,029h
 	ld de,03068h
-	jp l5f24h
+	jp spawn_actor
 	ld hl,0ffe0h
 	ld de,CHKRAM
 	bit 0,(ix+000h)
@@ -2416,9 +2417,9 @@ l4ec4h:
 	ld hl,DCOMPR
 	ld de,0fff0h
 l4ee9h:
-	call 0a564h
+	call actor_set_yvel
 	ex de,hl
-	call 0a573h
+	call actor_set_xvel
 	ld (ix+006h),001h
 	ld (ix+00bh),092h
 	xor a
@@ -2438,7 +2439,7 @@ l4ee9h:
 	ret
 	ld c,02ah
 	ld de,0f0c0h
-	jp l5f24h
+	jp spawn_actor
 	ld (ix+00bh),098h
 	xor a
 	ld (ix+001h),a
@@ -3001,7 +3002,7 @@ sub_5357h:
 	ret
 ; --- sub_5369h - page in the "level/sprite graphics" bank set: seg 11 @ 0x6000
 ;     (page 1b), seg 12 @ 0x8000 (page 2a), seg 13 @ 0xA000 (page 2b).  Shadow
-;     copies kept at 0xF0F1-0xF0F3 so INT_HANDLER can restore them.  Sources
+;     copies kept at 0xF0F1-0xF0F3 so int_handler can restore them.  Sources
 ;     like 0xA319 read after this call therefore live in segment 13.
 sub_5369h:
 	di
@@ -4349,7 +4350,7 @@ l5c63h:
 	call 098ech
 	call 09e38h
 	call 07d6fh
-	call 08678h
+	call brazier_tick_all   ; tick braziers/candles (seg2 0x8678)
 	call 091c5h
 	call 08a51h
 	call 088dfh
@@ -4793,27 +4794,34 @@ l5ebch:
 	rra
 	jp c,09deeh
 	ret
-l5f24h:
+; --- spawn_actor (seg0 0x5F24) - spawn an actor into a free slot ----------------
+; Entry: C = actor type id (>0), DE = spawn position word.  Actors live in 7
+; slots at 0xC800 with stride 0x80 (0xC800,0xC880,...,0xCB80); slot+0 holds the
+; type (0 = free).  Runtime-confirmed types: 1 = walking zombie, 0x1E = the
+; death-effect actor a killed enemy is converted into (plays a dissolve anim in
+; the same slot, +0C counting 0x10->0, then the slot frees back to 0).
+; Returns with the new slot initialised and its per-type handler dispatched.
+spawn_actor:
 	xor a
 	ld b,a
 	ld (0cffah),a
 	ld a,b
 	ld (0cffbh),a
 	xor a
-	ld (0cf31h),a
+	ld (0cf31h),a          ; spawn-succeeded flag = 0 (set to 1 once a slot is taken)
 	ld a,c
-	ld (0cff0h),a
-	ld (0cff1h),de
-	ld hl,0c800h
-	ld b,007h
+	ld (0cff0h),a          ; stash requested type id
+	ld (0cff1h),de         ; stash spawn position word
+	ld hl,0c800h           ; scan the actor slot table...
+	ld b,007h              ; ...7 slots...
 	xor a
-	ld de,00080h
+	ld de,00080h           ; ...stride 0x80
 l5f42h:
-	cp (hl)
+	cp (hl)                ; slot+0 == 0 -> free slot found
 	jr z,l5f49h
 	add hl,de
 	djnz l5f42h
-	ret
+	ret                    ; no free slot: give up
 l5f49h:
 	push hl
 	pop ix
@@ -4825,7 +4833,7 @@ l5f49h:
 	ld (ix+020h),a
 	ld c,a
 	and a
-	jr z,l5f7eh
+	jr z,spawn_actor_init
 	ld de,CHKRAM
 	ld hl,0d638h
 	ld b,00eh
@@ -4837,7 +4845,7 @@ l5f68h:
 	call 0604fh
 	inc e
 	dec c
-	jr z,l5f7eh
+	jr z,spawn_actor_init
 l5f76h:
 	inc d
 	inc l
@@ -4846,32 +4854,33 @@ l5f76h:
 	inc l
 	djnz l5f68h
 	ret
-l5f7eh:
+; spawn_actor_init (seg0 0x5F7E) - initialise the chosen slot (HL/IX -> slot+0).
+spawn_actor_init:
 	ld a,001h
-	ld (0cf31h),a
-	ld hl,(0cff3h)
+	ld (0cf31h),a          ; mark spawn as succeeded
+	ld hl,(0cff3h)         ; HL = slot base (+0)
 	ld a,(0cff0h)
-	ld (hl),a
+	ld (hl),a              ; slot+00 = actor type id (runtime-confirmed; 0=free)
 	inc l
-	ld (hl),000h
-	ld de,(0cff1h)
+	ld (hl),000h           ; slot+01 = 0
+	ld de,(0cff1h)         ; DE = spawn position word
 	inc l
-	ld (hl),000h
+	ld (hl),000h           ; slot+02 = 0
 	inc l
-	ld (hl),e
+	ld (hl),e              ; slot+03 = position lo
 	inc l
-	ld (hl),000h
+	ld (hl),000h           ; slot+04 = 0 (becomes X sub-pixel accumulator at runtime)
 	inc l
-	ld (hl),d
+	ld (hl),d              ; slot+05 = position hi (runtime-confirmed screen X)
 	inc l
-	ld (hl),000h
+	ld (hl),000h           ; slot+06 = 0
 	ld a,(0cffah)
-	ld (ix+00fh),a
+	ld (ix+00fh),a         ; slot+0f
 	ld a,(0cffbh)
-	ld (ix+01fh),a
+	ld (ix+01fh),a         ; slot+1f
 	ld (ix+07eh),001h
 	ld (ix+07fh),001h
-	ld (ix+00eh),007h
+	ld (ix+00eh),007h      ; slot+0e = 7 (alive flag; runtime-confirmed -> 0 on death)
 	ld de,0608bh
 	call 06030h
 	ld a,(0cff0h)
@@ -4889,12 +4898,12 @@ l5f7eh:
 ; paged into page 2b - so these are addresses in banked ROM, not local labels.
 ; (22 entries; the trailing 0x5FFF byte is padding to the segment boundary.)
 entity_tbl:
-	defw 0a93bh             ; entity type 1
-	defw 0a2e7h
-	defw 0a2e7h
-	defw 0b0d1h
-	defw 0a863h
-	defw 0a57ah
+	defw enemy_zombie_tick  ; entity type 1 - walking zombie (seg3 0xA93B)
+	defw 0a2e7h             ; type 2
+	defw 0a2e7h             ; type 3
+	defw 0b0d1h             ; type 4
+	defw enemy_dog_tick     ; type 5 - "sitting dog" (seg3 0xA863)
+	defw 0a57ah             ; type 6
 	defw 0b068h
 	defw 0a502h
 	defw 0af51h

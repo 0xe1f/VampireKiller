@@ -123,13 +123,43 @@ NRDVRM: equ 0x0174
 NWRVRM: equ 0x0177
 
 ; ---- Vampire Killer resident routines (segment 0) ------------------------
-INT_HANDLER: equ 0x4028	; timer-interrupt (H.TIMI) service routine
+int_handler: equ 0x4028	; timer-interrupt (H.TIMI) service routine
 ADD_HL_A: equ 0x4061	; HL += A (unsigned)
 ADD_DE_A: equ 0x4066	; DE += A (unsigned)
 DISPATCH_A: equ 0x406b	; jump via inline word table indexed by A
-INIT: equ 0x4075	; cartridge entry point
+init: equ 0x4075	; cartridge entry point
+reset_run_state: equ 0x44cd	; wipe run work RAM (0xC405..0xDFFF) + seed defaults
+draw_hearts_hud: equ 0x456d	; draw HEART counter (0xC417, BCD) to HUD
+draw_lives_hud: equ 0x4575	; draw LIVES counter (0xC410, BCD) to HUD
+draw_health_bar: equ 0x45d8	; draw HEALTH bar from 0xC415
+draw_enemy_meter: equ 0x45ec	; draw ENEMY/BOSS energy meter from 0xC418
+restore_health: equ 0x460c	; 0xC415 += B, clamp to 0x20
+damage_health: equ 0x4632	; 0xC415 -= B, floor 0
+spawn_actor: equ 0x5f24	; alloc a free actor slot (7 @ 0xC800, stride 0x80) + init
+spawn_actor_init: equ 0x5f7e	; init tail of spawn_actor
 
 ; ---- Vampire Killer banked routines (segment 1 @ 0x6000) -----------------
-KONAMI_LOGO_DRAW: equ 0x6209	; draw Konami logo + seed the top-to-bottom wipe
-KONAMI_LOGO_STEP: equ 0x6253	; reveal one more row of the logo (poll 0xC422)
-LOOKUP_WORD_TBL: equ 0x6549	; DE = ((word*)DE)[A]  (generic word-table lookup)
+konami_logo_draw: equ 0x6209	; draw Konami logo + seed the top-to-bottom wipe
+konami_logo_step: equ 0x6253	; reveal one more row of the logo (poll 0xC422)
+lookup_word_tbl: equ 0x6549	; DE = ((word*)DE)[A]  (generic word-table lookup)
+simon_action_tick: equ 0x6b40	; Simon per-frame action-state machine (0xC420)
+spend_5_hearts: equ 0x7154	; deduct 5 from heart total (0xC417, BCD)
+
+; ---- Vampire Killer banked routines (segment 2 @ 0x8000) -----------------
+brazier_tick_all: equ 0x8678	; per-frame update of the 8 brazier/candle slots (0xC470)
+brazier_tick: equ 0x8693	; update one brazier/candle (flame anim + hit test)
+brazier_destroyed: equ 0x87c1	; brazier/candle hit: clear it + run item drop
+flame_init: equ 0x9b67	; seed a destruction-flame effect (frame 0x85, timer 0x10)
+flame_tick: equ 0x9b78	; flame flicker 0x85/0x86; on expiry spawn 0x24 pickup
+actor_integrate: equ 0x99c0	; add velocity (+0x07/08 Y, +0x09/0A X) to position
+actor_cull_offscreen: equ 0x99ec	; free actor if pixel pos left the play area
+actor_free: equ 0x99fd	; clear actor slot (+0x00/+0x0E) and any linked sub-slot
+
+; ---- Vampire Killer banked routines (segment 3 @ 0xA000) -----------------
+enemy_zombie_tick: equ 0xa93b	; entity type 1 (walking zombie) behaviour handler
+enemy_dog_tick: equ 0xa863	; entity type 5 ("sitting dog") behaviour handler
+actor_add_yvel: equ 0xa550	; Yvel += DE, clamped to [0,0x7FF] (gravity/terminal)
+actor_set_yvel: equ 0xa564	; store DE -> Y velocity (+0x07/+0x08)
+actor_add_xvel: equ 0xa56b	; Xvel += DE (+0x09/+0x0A)
+actor_set_xvel: equ 0xa573	; store DE -> X velocity (+0x09/+0x0A)
+actor_set_xvel_scroll: equ 0xa65a	; set X velocity blended with room scroll (0xD012)

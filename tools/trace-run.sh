@@ -45,7 +45,7 @@ if [ ! -x "$app" ]; then
     exit 1
 fi
 
-rom="${1:-../VampireKiller.rom}"
+rom="${1:-references/VampireKiller.rom}"
 log="${LOG:-generated/disasmtrace.log}"
 snap="${SNAP:-generated/disasmsnap.bin}"
 mkdir -p "$(dirname "$log")" "$(dirname "$snap")"

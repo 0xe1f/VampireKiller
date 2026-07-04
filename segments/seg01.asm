@@ -64,7 +64,7 @@ data_6000_end:
 	and a
 	ret z
 	ld a,(ix+000h)
-	call LOOKUP_WORD_TBL
+	call lookup_word_tbl
 	ld hl,(0cff3h)
 	set 5,l
 	ld b,(hl)
@@ -369,7 +369,7 @@ l619bh:
 sub_61a5h:
 	ld a,(0d002h)          ; A = current cell/level index
 	ld de,08668h           ; DE = word-pointer table (in seg14)
-	call LOOKUP_WORD_TBL         ; DE = table[A]
+	call lookup_word_tbl         ; DE = table[A]
 	ex de,hl               ; HL = pointer to the packed object data
 	ret
 ; --- sub_61b0h - clear the 0xDB00 object list --------------------------------
@@ -446,15 +446,15 @@ l6200h:
 	djnz l61e2h
 	ret
 
-; --- KONAMI_LOGO_DRAW (0x6209) - set up the Konami logo screen ---------------
+; --- konami_logo_draw (0x6209) - set up the Konami logo screen ---------------
 ;  Boot front-end step, run from seg0's state machine.  Draws the Konami logo
 ;  (orange/red/grey) as a tile layout (l6243h + l6296h via sub_6276h) and sets
 ;  the VDP backdrop to white (R7 = 0x0F).  Then seeds the 3-byte block that the
-;  per-frame stepper KONAMI_LOGO_STEP (0x6253) uses to wipe the logo in:
+;  per-frame stepper konami_logo_step (0x6253) uses to wipe the logo in:
 ;     0xC420 = 0x3C frame divider (advance the wipe every other frame)
 ;     0xC421 = 0x31 remaining rows of the top-to-bottom reveal (49 -> 0)
 ;     0xC422 = done flag (0 = revealing, 1 = finished; seg0 polls this)
-KONAMI_LOGO_DRAW:
+konami_logo_draw:
 	call 047dbh             ; seg0 helper (screen prep - purpose not yet mapped)
 	call 0572eh             ; seg0 helper (purpose not yet mapped)
 	ld hl,l6243h            ; HL -> parameter table l6243h
@@ -493,13 +493,13 @@ l6243h:
 	rlca
 	rst 38h
 
-; --- KONAMI_LOGO_STEP (0x6253) - wipe the logo in by one row ----------------
+; --- konami_logo_step (0x6253) - wipe the logo in by one row ----------------
 ;  Seg0 calls this each frame while the logo state waits, then reads 0xC422
 ;  (0 = still revealing, 1 = finished).  0xC420 halves the rate (acts every 2nd
 ;  frame); each active frame decrements the 0xC421 row counter and reveals the
 ;  next horizontal band top-to-bottom (VDP fill of the 0x31-0xC421 rows exposed
 ;  so far, height 0xA8 at 0x2840).  When 0xC421 hits 0 it sets 0xC422 = 1.
-KONAMI_LOGO_STEP:
+konami_logo_step:
 	ld hl,0c420h            ; HL -> 0xC420 frame divider
 	dec (hl)               ; tick it down every call
 	ld a,(hl)
@@ -526,7 +526,7 @@ l6265h:
 ;     0xFF = end of stream
 ;     0xFE = move to next row (D += following byte, E += 8)
 ;     else = draw the tile in the byte via 0x4B36 / 0x4B56
-;  Used by KONAMI_LOGO_DRAW to paint the logo layout (tile data at l6296h).
+;  Used by konami_logo_draw to paint the logo layout (tile data at l6296h).
 sub_6276h:
 	push de                ; save the current row's start position
 l6277h:
@@ -631,7 +631,7 @@ l62eah:
 	call sub_633ah         ; set the current cell's event type (0xCE00)
 	call 04f98h
 	call 091c5h            ; seg2 helpers (tile/screen drawing)
-	call 08678h
+	call brazier_tick_all  ; tick braziers/candles (seg2 0x8678)
 	call 0914eh
 	call 08eedh
 	ld a,(0ce00h)          ; event code for this cell
@@ -850,7 +850,7 @@ l6426h:
 	ei
 	ld a,(ix+00bh)         ; A = shape id
 	ld de,0b473h           ; word table of shape streams (in seg6)
-	call LOOKUP_WORD_TBL   ; DE -> this actor's shape stream
+	call lookup_word_tbl   ; DE -> this actor's shape stream
 	push ix
 	pop hl
 	set 5,l                ; HL -> actor's sprite-attr block (ix | 0x20)
@@ -1038,10 +1038,10 @@ l6540h:
 	inc l
 	djnz l650fh
 	ret
-; --- LOOKUP_WORD_TBL - DE = ((word*)DE)[A] ----------------------------------
+; --- lookup_word_tbl - DE = ((word*)DE)[A] ----------------------------------
 ;  Generic word-table lookup: DE points at a table of little-endian words, A is
 ;  the index; returns the selected word in DE.  HL is clobbered.
-LOOKUP_WORD_TBL:
+lookup_word_tbl:
 	ld l,a
 	ld h,000h
 	add hl,hl               ; HL = A*2
@@ -1346,7 +1346,7 @@ sub_674ah:
 	ei
 	ld a,(0ce31h)          ; A = current script index
 	ld de,l6795h
-	call LOOKUP_WORD_TBL   ; DE -> script[index]
+	call lookup_word_tbl   ; DE -> script[index]
 	ex de,hl               ; HL -> keyframe {tick, action, ...}
 	ld a,(0ce33h)
 	cp (hl)                ; timeline tick == this keyframe's tick?
@@ -1695,14 +1695,14 @@ l69a7h:
 	inc (hl)
 	add a,a
 	ld de,l69ebh
-	call LOOKUP_WORD_TBL
-	call 0a564h
+	call lookup_word_tbl
+	call actor_set_yvel
 	inc hl
 	ld e,(hl)
 	inc hl
 	ld d,(hl)
-	call 0a573h
-	jp LOOKUP_WORD_TBL
+	call actor_set_xvel
+	jp lookup_word_tbl
 l69ebh:
 	ld b,b
 	ei
@@ -1784,17 +1784,17 @@ l6a50h:
 l6a70h:
 	ld (ix+00bh),002h
 	ld de,00300h
-	call 0a564h
+	call actor_set_yvel
 	ld hl,0cf32h
 	inc (hl)
 	ld a,(hl)
 	and 007h
 	ld de,l6a93h
-	call LOOKUP_WORD_TBL
+	call lookup_word_tbl
 	ld a,(0c427h)
 	sub (ix+005h)
 	call c,0a183h
-	jp 0a573h
+	jp actor_set_xvel
 l6a93h:
 	nop
 	ld bc,00280h
@@ -1808,7 +1808,7 @@ l6a93h:
 	ld bc,l7eddh
 	ld bc,004feh
 	ld de,0ffd0h
-	call nz,0a550h
+	call nz,actor_add_yvel
 	ld a,(ix+001h)
 	call DISPATCH_A
 	cp (hl)
@@ -1856,7 +1856,7 @@ sub_6b00h:
 	ld (0c006h),a
 l6b13h:
 	call sub_771fh
-	call sub_6b40h
+	call simon_action_tick
 	ld a,(0c5ach)
 	cp 002h
 	jr z,l6b2bh
@@ -1873,10 +1873,10 @@ l6b2bh:
 	call sub_75dbh
 	call sub_760bh
 	jp l761fh
-; sub_6b40h - Simon's per-frame action-state machine.  0xC420 is the action
+; simon_action_tick (seg1 0x6B40) - Simon's per-frame action-state machine.  0xC420 is the action
 ; state (runtime-confirmed: 0=normal, 3=whip, 5=hurt/knockback, 6=dead among
 ; others); DISPATCH_A jumps through the inline word table below by that index.
-sub_6b40h:
+simon_action_tick:
 	call 0852bh
 	ld a,(0c420h)          ; Simon action state
 	call DISPATCH_A
@@ -2708,13 +2708,14 @@ l713dh:
 	rra
 	rra
 	rra
-	call c,sub_7154h
+	call c,spend_5_hearts
 	pop af
 	rla
 	rla
 	call c,sub_7166h
 	ret
-sub_7154h:
+; spend_5_hearts (seg1 0x7154) - deduct 5 from the heart total (0xC417, BCD).
+spend_5_hearts:
 	ld a,(0c417h)
 	cp 005h
 	ret c
@@ -4839,7 +4840,7 @@ l7f07h:
 	jr z,l7f47h
 	call 08253h
 	jr nc,l7f47h
-	call 099fdh
+	call actor_free
 	pop bc
 	ld a,(0c434h)
 	and a

@@ -80,6 +80,7 @@ TAPOON:  equ 0x00ea
 TAPOUT:  equ 0x00ed
 TAPOOF:  equ 0x00f0
 STMOTR:  equ 0x00f3
+RIGHTC:  equ 0x00fc
 LEFTC:   equ 0x00ff
 UPC:     equ 0x0102
 TUPC:    equ 0x0105

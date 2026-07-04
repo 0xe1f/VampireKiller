@@ -21,8 +21,8 @@ Usage:
                    [--cols C] [--bpp 1|4] [--raw --width W --rows R]
 
 Examples:
-  tools/gfxview.py ../VampireKiller.rom 0x8000 --bpp 4 --size 16 --count 8 --cols 8
-  tools/gfxview.py ../VampireKiller.rom 0x8000 --bpp 4 --raw --width 64 --rows 32
+  tools/gfxview.py references/VampireKiller.rom 0x8000 --bpp 4 --size 16 --count 8 --cols 8
+  tools/gfxview.py references/VampireKiller.rom 0x8000 --bpp 4 --raw --width 64 --rows 32
 """
 import argparse
 

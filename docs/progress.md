@@ -3,12 +3,26 @@
 Running status of the disassembly. `docs/game-notes.md` holds the detailed
 reverse-engineering findings; this file is the high-level checklist.
 
+## End goal
+
+The entire ROM should ultimately live in the repo as source: every byte is either
+`.asm` or a data form that builds back into `.asm`/the ROM (e.g. our `gfx/` PNG+txt
+-> RLE pipeline, the `vk()` text tables) - **no committed binaries in the final
+state** (like Konamiman's Metal Gear disassembly, which has zero `incbin`). The
+`segments/segNN.bin` + `INCBIN` in `VampireKiller.asm` are an interim "not yet
+reversed" placeholder: each segment graduates incbin -> annotated disassembly (code)
+or extracted data assets (graphics/tables) as it's understood, always keeping
+`make verify` byte-exact. Postponed for now - we reverse segments incrementally
+(seg0 done, seg1 largely done, seg2/seg3 now imported as disassembly and being
+annotated; seg4-15 still INCBIN) rather than mass-converting bins to opaque `db`
+dumps.
+
 ## Done
 
 - Toolchain + build: `VampireKiller.asm` stitches 16 segments; `make verify`
   confirms the rebuilt ROM is byte-identical to the original.
 - Segment 0 (resident bank) disassembled with MSX/MSX2 BIOS symbol names.
-  Annotated: cartridge header, `INIT`, `INT_HANDLER` (H.TIMI), the dispatch
+  Annotated: cartridge header, `init`, `int_handler` (H.TIMI), the dispatch
   helpers (`ADD_HL_A`, `ADD_DE_A`, `DISPATCH_A`), the main tick `sub_414dh`
   (two-level state machine + `main_state_tbl`), the front-end transition
   `l4398h`, and the entity dispatch/`entity_tbl` at `0x5FD0`.
@@ -33,14 +47,14 @@ reverse-engineering findings; this file is the high-level checklist.
   (byte-exact), shared BIOS names moved to `segments/bios.inc`. Leading data map
   in `tools/seg01.blocks` (tables at 0x6000-0x602f, 0x605f-0x615a incl. a word
   table at 0x608d). Annotated so far:
-  - `KONAMI_LOGO_DRAW`/`KONAMI_LOGO_STEP` (0x6209/0x6253): logo screen + the
+  - `konami_logo_draw`/`konami_logo_step` (0x6209/0x6253): logo screen + the
     top-to-bottom wipe (confirmed by the author); `sub_6276h` tile-string interp.
   - Object-list loader cluster 0x615b-0x6208: `sub_615bh` unpacks the current
     cell's object list from seg 14 into the 4-byte-slot tables at 0xDB00/DC00/DD00
     (`sub_6188h` unpacker, `sub_61a5h` per-level pointer, `sub_61b0h` clear,
     `l61c2h` emits hardware sprites via seg0 0x5F26). RAM: 0xD000/D001/D002 =
     current row/col/level index.
-  - `LOOKUP_WORD_TBL` (0x6549): generic word-table lookup (DE=table, A=index).
+  - `lookup_word_tbl` (0x6549): generic word-table lookup (DE=table, A=index).
   - Screen/level build cluster (annotated):
     - 0x62d7: arms mode bytes 0xC415=0x20/0xC418=0x80, then jp seg0 0x53BD.
     - 0x62ed: full screen builder - clears state, paints tiles (seg2 helpers),
@@ -117,7 +131,7 @@ reverse-engineering findings; this file is the high-level checklist.
       (writers 0x41d7/0x4209/0x424e/0x41a4/0x4190/0x41cc).  State 4 = a brief
       bridge that builds the first stage; state 5 = in-stage play.
     * 0xC003 confirmed as the per-frame free-running counter (writer 0x4151).
-    * On game start the intro handler calls RESET_RUN_STATE (sub_44cdh, writer
+    * On game start the intro handler calls reset_run_state (sub_44cdh, writer
       0x44da): a single ldir zero-fills the whole run work block 0xC405..0xDFFF
       (event state 0xCE00+, actor arrays 0xD000+), then seeds 0xC410..0xC412 and
       view defaults 0xC415=0x20 / 0xC418=0x80.  seg1 sub_6389h (0x633e-0x634a)
@@ -160,6 +174,83 @@ reverse-engineering findings; this file is the high-level checklist.
     * STILL TBD: the heart/score/lives counters live below 0xC420 (~0xC40x), which
       the movement watch window did not cover, so pickup *values* (1 vs 5) weren't
       captured.  A 0xC400-0xC41F watch pass would pin them.
+  - Sixth session (whip destructible wall -> grab white key -> whip candle -> grab
+    small heart), via F8 snapshot timeline (baseline frame 357).  Pins the inventory
+    that sat below 0xC420, plus the destructible-wall / pickup-actor mechanism:
+    * **0xC417 = heart counter** - incremented 0x14 -> 0x15 exactly on the small-heart
+      pickup (frame 501).  Confirmed BCD (seg0 0x834 already labelled it "packed BCD";
+      the spend path seg1 sub_7166h/0x7176 does `sub 5 / daa`), so 0x15 = "15" hearts.
+    * **0xC700-0xC70F = inventory / item block** (NOT a single flag).  0xC701 is an
+      item *bitfield*: bit 0 = white key (0 -> 1 on the key pickup, frame 414); other
+      bits are sub-weapons that cost hearts (seg1 l713dh shifts 0xC701 and does
+      `call c,spend_5_hearts` on bit 3 / `call c,sub_7166h` on bit 6); bit 7 is a
+      timed item (seg2 0x95C0-area counts 0xC70F down then `res 7,(0xC701)`).  The
+      per-life reset sub_70e3h (seg1 0x70E3) keeps only bit 7 (`and 0x80`), so the
+      white key etc. are lost on death but the bit-7 item persists.  Other bytes seen:
+      0xC704 = vendor item, 0xC706 = vendor timer, 0xC707 = price, 0xC708 = item id
+      (seg2 0x94C0 vendor-purchase compares 0xC417 hearts >= 0xC707 price).
+      CORRECTION: earlier in this note 0xC701 was called a "white-key held flag" -
+      it's the item bitfield; white key is specifically bit 0.
+    * **Destructible scenery share the 0xC470 block** (stride 0x10, +0 = state
+      2=present/0=gone) with braziers/candles: the WALL slot was 0xC490 (destroyed
+      frame 390), the CANDLE slot 0xC4C0 (destroyed frame 459, its +6 flame phase at
+      0xC4C6 free-running every frame).  So walls, braziers and candles are all the
+      same "destructible object" type, differing only by contents/graphics.
+    * **Pickup-item actor block at 0xC520** (separate from the 0xC800 actors): when the
+      wall broke (frame 390) a pickup actor spawned here (+0 type/frame byte = 0x84 for
+      the white key); touching it cleared the slot (0x84 -> 0) and set 0xC701.  So a
+      destroyed wall's bonus is emitted as a 0xC520 pickup actor.
+    * 0xC419 toggles on every pickup (1 -> 0x18 on the key, 0x18 -> 1 on the heart) -
+      role TBD (HUD/pickup-message or "last pickup" latch).
+    * NEXT: targeted WATCH on 0xC417 + 0xC701 (+ 0xC520) to grab the writer PCs and
+      annotate the pickup/inventory routines; and a rollover test to settle
+      binary-vs-BCD on the heart count.
+
+- Segments 2 & 3 imported as disassembled source (byte-exact): both graduated
+  from INCBIN to INCLUDE (org 0x8000 / 0xA000, pages 2a / 2b).  Raw disassembly
+  folded into `segments/seg02.asm` / `seg03.asm` (equ block + z80dasm header
+  stripped; `bios.inc` gained the missing `RIGHTC` 0x00FC).  Tooling fix:
+  `strip-listing.py` now also cleans z80dasm's `;illegal sequence` defb lines
+  (the code group is `.*?` so it spans that earlier comment).  First annotations
+  in seg3 (confirmed via the enemy traces + entity_tbl):
+  - `enemy_zombie_tick` (seg3 0xA93B, entity type 1): spawn/init path - marks the
+    slot alive (+0x06=1), reads zombie X (+0x05), and picks walk direction from
+    which half of the screen it's on (vel +0x0220 right / 0xFDE0 left, anim
+    0x3d/0x3b, facing +0x10).  Confirms zombie logical X = +0x05.
+  - `enemy_dog_tick` (seg3 0xA863, entity type 5): compares dog pos (+0x05) to
+    Simon X (0xC427) to choose idle frame 0x43 (far) / 0x3f (near); stores anim
+    (+0x0B), alive (+0x06), clears timer (+0x0C).  This is the flee-right dog.
+  Both names added to `tools/msx.sym`; seg0 `entity_tbl[0]`/`[4]` now reference
+  the labels (byte-exact).  NOTE the earlier dog/zombie X-offset puzzle: the code
+  uses +0x05 as the AI/compare X for BOTH; runtime showed +0x03 moving for the dog
+  - still worth a c800-c80f watch to see how +0x03 vs +0x05 relate during the flee.
+
+- Seg2/seg3 annotation batch (all byte-exact, `make verify` clean).  Confirmed the
+  candle -> flame -> heart chain AND the core actor slot layout straight from code:
+  - Actor slot fields (nailed via the seg2 integrator `actor_integrate` 0x99C0):
+    `+0x02/+0x03` = Y pos (frac/pixel), `+0x04/+0x05` = X pos (frac/pixel),
+    `+0x06` = alive flag, `+0x07/+0x08` = Y velocity, `+0x09/+0x0A` = X velocity.
+    (`+0x05`=X reconfirmed: `enemy_dog_tick` compares `+0x05` to Simon X 0xC427.)
+  - Braziers/candles (seg2): `brazier_tick_all` (0x8678, loop over 8 slots @ 0xC470
+    stride 0x10, called each frame from seg0/seg1) -> `brazier_tick` (0x8693, advances
+    flame phase `+0x06`, hit test on `+0x03`) -> `brazier_destroyed` (0x87C1, clears
+    the slot and runs the item drop; `+0x04` = drop selector, `+0x05` = param).
+  - Destruction flame (seg2): `flame_init` (0x9B67, sprite 0x85 + lifetime 0x10) and
+    `flame_tick` (0x9B78) - flickers 0x85<->0x86 on bit 2 of the countdown, then on
+    expiry, if the drop gate `+0x1F` is set, `jp spawn_actor` with type 0x24 at its
+    spot.  This is the runtime-observed candle -> flame(0x85/86) -> heart(0x24) chain;
+    0x85/0x86 = the flame sprite, 0x24 = the settled small heart.
+  - Physics core (seg2): `actor_integrate` (0x99C0), `actor_cull_offscreen` (0x99EC,
+    frees when pixel pos leaves the field), `actor_free` (0x99FD).
+  - Velocity helpers (seg3): `actor_set_yvel` (0xA564) / `actor_set_xvel` (0xA573)
+    store DE; `actor_add_yvel` (0xA550) adds with a [0,0x7FF] clamp (gravity/terminal
+    fall); `actor_add_xvel` (0xA56B); `actor_set_xvel_scroll` (0xA65A) blends in room
+    scroll (0xD012 * 32) so actors track the scrolling background.
+  All names in `tools/msx.sym`; cross-segment `call 0aXXXh` sites in seg0/1/2 now use
+  the labels.  (Audit correction: the "0xB473 sprite-shape table" note was wrong -
+  0xB473 is code, a `jr` target inside an actor routine, not data.)
+  Tooling: fixed CRLF line endings in `tools/split-rom.sh` (it wouldn't run, which is
+  what had left seg02-04.bin missing); it now regenerates seg01-15.bin cleanly.
 
 ## In progress / next
 
@@ -247,15 +338,70 @@ Known live RAM map (runtime-confirmed this session):
     0xC42A knockback velocity/impulse (0->0b->0d->0, NOT the timer).
     knockback throws Simon back (0xC427 X down) and up (0xC425 Y down, restored
       to 0xC0 ground on recovery).
-  0xC450-C46F whip sprite buffer   0xC470/80 brazier objects (stride 0x10;
-         +0x04 alive-flag -> 0 when destroyed)
-  0xC800 actor slots, stride 0x80 (0xC800, 0xC880, ...); also used for the
-         orb->item pickup.  Runtime-confirmed enemy fields (2-zombie capture):
-           +0x00 active flag (0xC880 flips 0->1 when 2nd zombie spawns)
-           +0x05 X position (counts DOWN as enemy walks left: eb->b8->5f)
-           +0x0B animation frame (walk-cycle)   +0x0C anim/state phase
-           +0x04 Y / sub-position (TBD)
-         (0xC801 orb->item state, 0xC80C 0x14 timer seen in the pickup role)
+  0xC450-C46F whip sprite buffer
+  0xC470 block: destructible scenery objects (braziers/candles), stride 0x10, up
+         to 4 per room (0xC470/80/90/A0).  +0x00 = state (0x02 = lit/present ->
+         0x00 the frame the whip destroys it); +0x06 = free-running flame-anim
+         phase (increments every frame).  Runtime-confirmed (castle candle room,
+         F8 recording): whipping candle 0xC490 cleared 0xC490 02->00 on the whip-
+         contact frame, candle 0xC470 likewise; unwhipped candles stayed 0x02.
+         (Writer PC not yet captured - WATCH this block next run to name the
+         candle-hit routine.)
+  0xC800 actor slots: 7 slots, stride 0x80 (0xC800, 0xC880, ...); also used for
+         the orb->item pickup.  Allocated/initialised by seg0 l5f24h (0x5F24):
+         scans the 7 slots for slot+0==0, fills the struct, then DISPATCH_A's the
+         per-type behaviour handler (entity_tbl at ~0x5F8F, indexed by type-1).
+         entity_tbl targets are banked addresses in page 2b (seg3 during play).
+         Runtime-mapped handlers so far: type 1 (walking zombie) = entity_tbl[0] =
+         0xA93B (seg3); type 5 (dog) = entity_tbl[4] = 0xA863 (seg3).  Both confirmed
+         by the anim/mover writer PCs clustering just past those addresses (03:a9xx,
+         03:a87x).  Seg3 is still INCBIN - annotate these when it's disassembled.
+         (Generic per-frame writers 02:99xx = sprite-attr composer, 03:a9xx = shared
+         actor animator/mover; they operate on any slot via IX/IY, so writer PCs
+         alone do NOT identify an enemy - the per-type handler comes from entity_tbl.)
+         Runtime-confirmed fields (2-zombie whip capture, 86-frame F8 recording):
+           +0x00 actor TYPE id: 0=free, 1=walking zombie, 0x1E=FLAME.
+                 0x1E is the generic destruction FLAME: when most objects are
+                 whipped and their health drops below 0 they turn into this flame
+                 before disappearing (game-mechanic confirmed by the author).  A
+                 whipped zombie is converted IN PLACE to type 0x1E (written by the
+                 spawner at 00:5f89), burns as a stationary flicker, then frees to
+                 0.  (So "kill" = despawn enemy + spawn the 0x1E flame in the slot.)
+           +0x04/+0x05 = 16-bit X (sub-pixel lo / screen-X hi; +05 counts DOWN as
+                 the zombie walks left, e9->3f, frozen once dying)
+           +0x0B animation frame (walk 0x3B/0x3C <-> death 0x85/0x86)
+           +0x0C state/anim timer (walk-anim phase while alive; 0x10->0 dissolve
+                 countdown while type==0x1E, then slot frees)
+           +0x06 / +0x0E alive sub-flags (init 1 / 7; both drop to 0 on death)
+         Zombies are 1-hit kills: no HP decrement was observed - +0x00 goes
+         straight 1 -> 0x1E on the whip's contact frame (whip phase 0xC422 -> 2).
+         DOG enemy (type 0x05; a DIFFERENT room from the zombie captures - a castle
+         "sitting dog" room with NO zombies, not the original zombie room).  F8
+         recording: idle actor that sits at fixed X=0x80 cycling an idle anim (+0x0B
+         frames 0x43/0x45/0x46) until Simon approaches within ~0x26 (38px: Simon
+         0xC427 walked 0xdc->0xa6), then FLEES right, accelerating (+0x03 X-hi
+         7e->7f->81->83->85->8d->91, i.e. ~1,2,2,2,8,4 px/frame) and DESPAWNS
+         (+0x00 05->00) once off-screen.  NOTE the dog's X was observed at
+         +0x02(sub/vel)/+0x03(hi), whereas the zombie's X was recorded at +0x04/+0x05.
+         These are separate enemy types captured in separate rooms, so the offset may
+         legitimately differ per type (not necessarily a mis-index) - verify with a
+         side-by-side WATCH=c800-c80f on each before assuming a single shared layout.
+         Candle -> FLAME -> SMALL-heart DROP lifecycle (runtime-confirmed in slot
+         0xC880; do NOT conflate with the large heart): whipping a candle spawns an
+         actor in a free 0xC800-block slot via spawn_actor (seg0 0x5F8A):
+           +0x00 = 0x1E = FLAME (destruction effect, same type as enemy death): X/Y
+                 hold STATIONARY for ~13 frames while +0x0B flickers 0x85<->0x86
+                 (seg2 animator 0x9B8B) - a burning-in-place flicker, NOT motion.
+           +0x00 = 0x24 = the SMALL HEART itself: now X/Y move (X-hi b1->b4, X-lo
+                 swings e0/a0/40/20/60/80, Y toggles) = the side-to-side UNDULATING
+                 fall the author described.  Freed to 0x00 when Simon touches it ->
+                 0xC417 += 1.
+         So the visible order is candle -> flame (0x1E) -> undulating small heart
+         (0x24) -> pickup.  Contrast the LARGE heart (slot 0xC800): appears as an
+         ORB, drops quickly to the floor, then turns into the large heart (older
+         0xC801 orb->heart two-phase / 0xC80C 0x14-frame timer, +5 hearts).
+         (0x1E vs 0x24 flame-vs-heart split is inferred from the motion profile;
+         WATCH=c880-c88f on a candle whip will confirm and give the handler PCs.)
   0xD000 stage row/flag  0xD001 room index (seg13 0xB98A)  level change = seg0
          0x4362/65
 
@@ -263,6 +409,17 @@ Snapshot session (F9 x7: baseline -> 5 braziers -> castle) nailed the inventory
 block that every prior movement WATCH missed.  Method note: the F9 RAM-diff alone
 identified 0xC417/0xC416/0xC411 (no EXEC/WATCH needed); static xref then found the
 routines.  The `daa` after add/sub on 0xC417 is the proof it's BCD.
+
+Candle/small-heart session (F8 recording, 176 frames, WATCH=c800-c8ff): whipped
+two castle candles, each dropped a SMALL heart.  Pinned (a) the destructible-
+scenery block at 0xC470 (+0x00 state, +0x06 flame anim; candles 0xC490 and 0xC470
+cleared on whip-contact) and (b) the destroy->drop lifecycle: type 0x1E = FLAME
+(stationary flicker 0x85<->0x86, the "objects turn into a flame when whipped"
+effect) -> 0x24 = the small heart (undulates side-to-side as it falls) -> pickup
+(+1 heart), reconfirming 0xC417 as BCD hearts (12->13->14).  (Large hearts differ:
+orb -> quick drop -> large heart; not captured here.)
+Next: rerun WATCH=c470-c4bf to capture the candle-hit writer PC and name the
+routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler PCs.
 
 ## Working notes
 
@@ -286,6 +443,30 @@ routines.  The `daa` after add/sub on 0xC417 is the proof it's BCD.
 - Data regions go in a `.blocks` file (see `tools/seg00.blocks`, `tools/seg01.blocks`);
   a `.blocks` file only changes code-vs-data rendering, never the emitted bytes.
   BIOS names live once in `segments/bios.inc`; routine names go in `tools/msx.sym`.
+- Naming (STANDING PRACTICE): as soon as we have enough context to be confident of
+  a routine's (or label's) purpose, rename it - proactively, without being asked.
+  Do NOT rename speculatively: keep the `z80dasm` name until the purpose is actually
+  established.  Same rule applies to named RAM/data addresses where the role is
+  confirmed.
+- Casing: `UPPER_SNAKE` is reserved for external/hardware and macro-like helpers
+  only - MSX BIOS entry points and the pseudo-instruction helpers that read like
+  opcodes (`ADD_HL_A`, `ADD_DE_A`, `DISPATCH_A`).  Everything that is our own game
+  code/data uses `lower_snake` (e.g. `init`, `int_handler`, `konami_logo_draw`,
+  `reset_run_state`, `draw_hearts_hud`, `simon_action_tick`).
+- Renaming mechanics: rename its `z80dasm` label
+  (`sub_XXXXh`/`lXXXXh`) to a descriptive `snake_case` name.  Labels are symbolic,
+  so renaming (definition + every reference, all in the disassembled `.asm` files -
+  the `incbin` segments only reference code by embedded address bytes) never changes
+  the emitted ROM; `make verify` catches any inconsistency.  Keep the original ROM
+  address in the block-header comment (e.g. `(seg0 0x5F24)`) so names still line up
+  with WATCH-log PCs, and add the same name to `tools/msx.sym` so regen emits it.
+  Renamed so far - seg0: draw_hearts_hud/draw_lives_hud/draw_health_bar/
+  draw_enemy_meter/restore_health/damage_health/spawn_actor(+_init);
+  seg1: simon_action_tick, spend_5_hearts.
 - Every `vk()`-emitting Lua block MUST use `LUA ALLPASS` — plain `LUA` emits only
   on the final pass and drifts all later labels.
 - After any edit, run `make verify` before moving on.
+- Reusable methodology (for disassembling OTHER Konami MSX games later) lives in
+  workspace skills at `.agents/skills/` (`konami-msx-disasm`, `msx-runtime-tracing`).
+  When we discover a generally-useful pattern/tool/gotcha, fold it into those skills
+  (keep them lean - they load every session) and keep VK-specific findings here.

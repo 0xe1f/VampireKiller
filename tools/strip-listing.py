@@ -13,8 +13,13 @@ Usage:  tools/strip-listing.py <file.asm> [more.asm ...]      (edits in place)
 """
 import re, sys
 
+# The listing comment is always the LAST comment on the line and has the rigid
+# structure ";<4-hex-addr>\t<hex bytes>\t<ascii>".  Using `.*?` (rather than
+# `[^;]*?`) for the code lets it span an earlier z80dasm comment such as
+# "; illegal sequence" so that comment is preserved and only the trailing
+# listing is dropped.
 LINE = re.compile(
-    r'^(?P<code>[^;]*?)\s*;[0-9a-fA-F]{4}\t'
+    r'^(?P<code>.*?)\s*;[0-9a-fA-F]{4}\t'
     r'(?P<bytes>[0-9a-fA-F]{2}(?: [0-9a-fA-F]{2})*)[ \t]*(?P<tail>.*)$')
 COMMENT_COL = 32
 

@@ -22,8 +22,8 @@ cd "$(dirname "$0")/.."
 
 seg="$1"; org="$2"; blocks="${3:-}"
 segnn=$(printf "%02d" "$seg")
-rom="VampireKiller.rom"
-[ -f "$rom" ] || rom="../VampireKiller.rom"
+rom="references/VampireKiller.rom"      # gitignored reference ROM
+[ -f "$rom" ] || rom="VampireKiller.rom"        # fallback: build output in the root
 
 tmpbin="$(mktemp)"
 dd if="$rom" of="$tmpbin" bs=8192 skip="$seg" count=1 status=none

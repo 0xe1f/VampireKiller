@@ -17,7 +17,7 @@ Usage:
   tools/rledec.py <romfile> <src-hex-offset> [--dest 0xF800] [--out out.bin]
 
 Example (Simon/enemy sprite patterns, seg13 @ file 0x1A319 -> VRAM 0xF800):
-  tools/rledec.py ../VampireKiller.rom 0x1A319 --dest 0xF800 --out /tmp/spr.bin
+  tools/rledec.py references/VampireKiller.rom 0x1A319 --dest 0xF800 --out /tmp/spr.bin
   tools/gfxview.py /tmp/spr.bin 0 --bpp 1 --size 16 --count 16 --cols 8
 """
 import argparse

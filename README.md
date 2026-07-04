@@ -32,8 +32,9 @@ You need two things that are not in the repo:
 1. **sjasmplus** — the assembler. Build it from source
    ([z00m128/sjasmplus](https://github.com/z00m128/sjasmplus)) and place the
    binary at `tools/sjasmplus`.
-2. **An original `VampireKiller.rom`** (128 KiB) placed one directory above this
-   repo (`../VampireKiller.rom`).
+2. **An original `VampireKiller.rom`** (128 KiB) placed at
+   `references/VampireKiller.rom`. It is gitignored (copyrighted) and is used both
+   to create the segment binaries and to verify the build.
 
 Then:
 
@@ -42,7 +43,8 @@ make segments   # split the ROM into segments/seg01..15.bin (run once)
 make verify     # assemble and confirm the output is byte-identical to the ROM
 ```
 
-`make` alone produces `VampireKiller.rom` in the repo root.
+`make` alone produces `VampireKiller.rom` in the repo root (gitignored build
+output; the reference ROM lives in `references/`).
 
 ## How it works
 

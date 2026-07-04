@@ -72,6 +72,9 @@ def main():
     ap.add_argument("-a", type=int, default=None, help="index of 'before' snapshot")
     ap.add_argument("-b", type=int, default=None, help="index of 'after' snapshot")
     ap.add_argument("-r", "--range", default=None, help="restrict to hex range, e.g. c400-c4ff")
+    ap.add_argument("-t", "--track", default=None,
+                    help="print a value timeline for a hex addr or range across ALL "
+                         "snapshots (e.g. c805 or c800-c80f); great for auto-capture (F8)")
     args = ap.parse_args()
 
     snaps = load(args.file)
@@ -81,6 +84,15 @@ def main():
     if args.list:
         for i, (seq, base, data) in enumerate(snaps):
             print(f"[{i}] seq={seq} {base:04x}-{base + len(data) - 1:04x} ({len(data)} bytes)")
+        return
+
+    if args.track:
+        lo, hi = parse_range(args.track)
+        addrs = list(range(lo, hi + 1))
+        print("idx seq | " + " ".join(f"{a:04x}" for a in addrs))
+        for i, (seq, base, data) in enumerate(snaps):
+            vals = " ".join(f"  {data[a - base]:02x}" for a in addrs)
+            print(f"{i:3d} {seq:3d} | {vals}")
         return
 
     rng = parse_range(args.range) if args.range else None

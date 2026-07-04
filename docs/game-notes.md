@@ -28,6 +28,43 @@ not yet confirmed in code is marked *(unconfirmed)*.
   - Pick it up → **life refills** and advance to the next level.
   - Leave it → still advance, but **life is not refilled**.
 
+## World structure (hubs / stages / rooms)
+
+The world is a hierarchy: **hub → stage → room**.
+
+- **Hubs** — a hub is a themed area of ~3 stages ending in a boss. Stages in a hub
+  mostly share an aesthetic: **tile set** and **enemy set** (though some enemies are
+  common enough to be reused across hubs). This is the level of the boss cadence in
+  *Levels / bosses* above.
+- **Stages** — a stage is a set of connected rooms, usually ending in a **door**.
+  Exiting the door requires a **large white key** (see below); without it Simon
+  can't leave the stage. Exception: the **courtyard** has an open doorway (no door,
+  no key needed).
+- **Rooms** — MSX has no smooth hardware scrolling, so (like most MSX games) VK does
+  **not scroll**; the world is split into single-screen rooms. Transitions:
+  - **Walk off** a screen edge that has no wall → adjacent room.
+  - **Diagonal staircase** → climb into another room.
+  - **Drop down** → fall into the room below (if one exists). Rooms on the lowest
+    level have nothing below → **dropping is instant death**.
+
+### Keys, doors, chests, destructibles
+
+- **Large white key** — one per stage, needed to open the stage-exit **door**. Keys
+  are deliberately **hidden / awkward to reach**: behind walls, or requiring a tricky
+  jump.
+- **Destructible walls** — some walls can be destroyed; a destroyed wall **sometimes
+  reveals a bonus**, including keys.
+- **Small yellow key** — unlocks a **chest** (chests hold bonuses; a chest can't be
+  opened without one). Simon can carry **only 1** yellow key at a time.
+- **Staff** — an alternative to the yellow key: a staff opens **3 chests** before it
+  disappears.
+
+*Reversing hooks:* expect per-stage state for **key held (white / yellow / staff
+charges)**, **door locked/unlocked**, **chest opened** flags, and a **room/stage/hub
+index** driving which tile set + enemy set + room layout loads. Destructible-wall and
+chest contents are likely table-driven per room. Instant-death-on-drop implies a
+"no room below" check in the fall/room-transition code.
+
 ## Player (Simon)
 
 Default weapon: **leather whip**. Can be replaced by pickups:
@@ -103,7 +140,7 @@ TODO (next session): add an sjasmplus macro to author these as readable ASCII
 ## Code layout & where the "main loop" is
 
 There is no classic `while(1)` loop. Boot parks the CPU in a spin (`jr $` at
-0x40C3); everything runs off the 60 Hz timer interrupt `H.TIMI` -> `INT_HANDLER`
+0x40C3); everything runs off the 60 Hz timer interrupt `H.TIMI` -> `int_handler`
 (0x4028), which each frame calls the game tick `sub_414dh`. That tick is the
 master state machine (primary state 0xC000 -> `main_state_tbl`).
 
@@ -185,7 +222,7 @@ walking-creature frames.
 
 Konami mapper windows: writes to `0x6000`/`0x8000`/`0xA000` select the segment
 paged into page 1b / 2a / 2b. Helper routines (each also shadows the value at
-0xF0F1-0xF0F3 for INT_HANDLER to restore):
+0xF0F1-0xF0F3 for int_handler to restore):
 - `sub_5369h` -> seg 11 @ 0x6000, seg 12 @ 0x8000, seg 13 @ 0xA000  (level/sprite gfx)
 - `sub_5381h` -> seg  9 @ 0x8000, seg 10 @ 0xA000                   (front-end/title gfx)
 - `sub_533dh` -> seg  1 @ 0x6000, seg  2 @ 0x8000, seg  3 @ 0xA000  (default/game banks)

@@ -6,15 +6,15 @@
 #   make gfx        (re)build the readable graphics catalogue in gfx/
 #   make clean      remove build output
 #
-# Prerequisites (not committed - see README):
+# Prerequisites (not committed, both gitignored - see README):
 #   - tools/sjasmplus : assembler, built from source
-#   - ../VampireKiller.rom : an original ROM, used to (re)create the segment
-#     binaries and to verify the build is byte-identical.
+#   - references/VampireKiller.rom : an original ROM (the reference), used to
+#     (re)create the segment binaries and to verify the build is byte-identical.
 
 ASM      := tools/sjasmplus
 SRC      := VampireKiller.asm
 OUT      := VampireKiller.rom
-ORIGINAL := ../VampireKiller.rom
+ORIGINAL := references/VampireKiller.rom
 BINS     := $(wildcard segments/seg[01][0-9].bin)
 
 .PHONY: all verify segments gfx clean

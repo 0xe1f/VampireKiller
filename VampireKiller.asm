@@ -63,14 +63,14 @@
     INCLUDE "segments/seg01.asm"
     DEPHASE
 
-; --- segment 2 : initial 0x8000-0x9FFF --------------------------------------
+; --- segment 2 : initial 0x8000-0x9FFF (DISASSEMBLY IN PROGRESS) -------------
     PHASE 0x8000
-    INCBIN "segments/seg02.bin"
+    INCLUDE "segments/seg02.asm"
     DEPHASE
 
-; --- segment 3 : initial 0xA000-0xBFFF --------------------------------------
+; --- segment 3 : initial 0xA000-0xBFFF (DISASSEMBLY IN PROGRESS) -------------
     PHASE 0xA000
-    INCBIN "segments/seg03.bin"
+    INCLUDE "segments/seg03.asm"
     DEPHASE
 
 ; --- segments 4..15 : paged in on demand (page/role determined later) -------

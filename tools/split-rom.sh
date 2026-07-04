@@ -8,11 +8,11 @@
 #
 #   tools/split-rom.sh [path-to-VampireKiller.rom]
 #
-# Default ROM path is ../VampireKiller.rom (one level above the repo).
+# Default ROM path is references/VampireKiller.rom (the gitignored reference ROM).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-rom="${1:-../VampireKiller.rom}"
+rom="${1:-references/VampireKiller.rom}"
 if [ ! -f "$rom" ]; then
   echo "error: ROM not found: $rom" >&2
   echo "usage: tools/split-rom.sh [path-to-VampireKiller.rom]" >&2

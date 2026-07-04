@@ -184,6 +184,25 @@ see the tracer notes below).  The tracer only logs bank switches unless EXEC
 and/or WATCH ranges are given, and it reads them once at launch (change ranges =
 relaunch = replay from the logo).
 
+**State snapshots (F9).** New this session: press **F9** in the emulator to dump
+the whole work-RAM window (default 0xC000-0xDFFF, set `SNAPRANGE`) to the
+snapshot file (`generated/disasmsnap.bin`, set `SNAP`).  This works with EXEC and
+WATCH both empty, so it needs no pre-chosen ranges and no replay-on-change - just
+play, snap, keep playing.  The intended workflow is "snap before an action, snap
+after", then diff offline:
+
+  tools/snapdiff.py generated/disasmsnap.bin        # diff each consecutive pair
+  tools/snapdiff.py -l generated/disasmsnap.bin     # list captured snapshots
+  tools/snapdiff.py -a 0 -b 1 -r c400-c4ff ...      # pick snaps + restrict range
+
+Output is "addr: old -> new" per changed byte, which reads directly against the
+live RAM map below.  This is the fastest way to find *where* a counter/flag lives
+(snap, do the thing once, snap) before committing a WATCH range to it - and it
+catches the persistent inventory bytes below 0xC420 that the movement watches
+kept missing.  (Impl: F9 is caught in CMKeyboardManager's IOHID callback under
+`#ifdef DISASMTRACE` and swallowed; disasmTraceRequestSnapshot() sets a flag that
+R800's fetch loop honours at the next opcode via the CPU's own RAM reader.)
+
 Highest-value next capture - pin the persistent inventory/counters, which sit
 BELOW 0xC420 and every movement watch so far has missed:
   WATCH=c400-c41f,c470-c4ff,c800-c8ff,d000-d0ff   EXEC=  (off)
@@ -200,11 +219,50 @@ After that, trigger the still-dark machinery:
 
 Known live RAM map (runtime-confirmed this session):
   0xC000 primary state  0xC001 sub-state  0xC003 frame ctr  0xC004 phase timer
+  0xC411 stage/area number (0=courtyard, 1=castle; set with 0xD000/0xC413 at
+         seg0 0x2286)
+  0xC415 HEALTH / energy bar (full 0x20=32; zombie hit = -2; draw seg0 l45d8h
+         bar=HP*2, restore l460ch clamp 0x20, damage l4632h).  health 0 -> death.
+         Part of player-stats block 0xC410-C417 (lives/stage/?/?/HP/weapon/hearts).
+  0xC418 ENEMY/BOSS energy meter (full 0x80; draw seg0 l45ech, restore at 0x461f
+         clamp 0x80) - structural twin of the 0xC415 health bar.
+  Death -> respawn (captured across the fatal hit): 0xC420 action state = 6 is
+         DEATH/dying (set when 0xC415 reaches 0).  On respawn: 0xC410 lives -1,
+         0xC415 -> full 0x20, 0xC427 X -> room-entry 0x10, 0xC416 weapon -> 0
+         (chain whip lost), 0xC417 hearts 0x12 -> 0x05 (death penalty / restore).
+  0xC416 equipped weapon/whip ID (0=leather, 1=chain, ...; cp 2/4/5 in attack
+         code; reset via xor a at seg1 ~0x7148)
+  0xC417 HEARTS, packed BCD, cap 0x99 (draw: seg0 sub_456dh -> VRAM 0xC000;
+         add:  seg0 0x4596 add a,b/daa/clamp99;  spend-5: seg1 sub_7154h
+         sub 5/daa).  Confirmed +1 small heart, +5 large heart.
+  0xC410 LIVES, packed BCD (drawn by seg0 sub_4575h -> VRAM 0xE400); held at
+         0x02 for the whole courtyard run (no death/1-up)
   0xC425 Simon Y  0xC426/27 Simon X  0xC42C facing(0=R/1=L)  0xC428 jump phase
   0xC422 whip phase  0xC429 whip timer  0xC42E/2F anim frames (scratch)
-  0xC450-C46F whip sprite buffer   0xC470/80 brazier objects (stride 0x10)
-  0xC800 pickup/actor slot (0xC801 orb->item state, 0xC80C 0x14 timer)
-  0xD000 room row  0xD001 room index (seg13 0xB98A)   level change = seg0 0x4362/65
+  Damage/knockback (zombie-hit before/after + two during-blink captures):
+    0xC42D INVULN/BLINK timer, starts 0x4e=78, -1 per frame (verified against
+      0xC003: 35 frames elapsed = 35 counts); blink ends at 0.
+    0xC420 action state ->5 (hurt), 0xC423 ->1 hurt/invuln flag, 0xC42C facing,
+      0xC42E/2F hurt-anim frames - all cleared to 0 on recovery.
+    0xC42A knockback velocity/impulse (0->0b->0d->0, NOT the timer).
+    knockback throws Simon back (0xC427 X down) and up (0xC425 Y down, restored
+      to 0xC0 ground on recovery).
+  0xC450-C46F whip sprite buffer   0xC470/80 brazier objects (stride 0x10;
+         +0x04 alive-flag -> 0 when destroyed)
+  0xC800 actor slots, stride 0x80 (0xC800, 0xC880, ...); also used for the
+         orb->item pickup.  Runtime-confirmed enemy fields (2-zombie capture):
+           +0x00 active flag (0xC880 flips 0->1 when 2nd zombie spawns)
+           +0x05 X position (counts DOWN as enemy walks left: eb->b8->5f)
+           +0x0B animation frame (walk-cycle)   +0x0C anim/state phase
+           +0x04 Y / sub-position (TBD)
+         (0xC801 orb->item state, 0xC80C 0x14 timer seen in the pickup role)
+  0xD000 stage row/flag  0xD001 room index (seg13 0xB98A)  level change = seg0
+         0x4362/65
+
+Snapshot session (F9 x7: baseline -> 5 braziers -> castle) nailed the inventory
+block that every prior movement WATCH missed.  Method note: the F9 RAM-diff alone
+identified 0xC417/0xC416/0xC411 (no EXEC/WATCH needed); static xref then found the
+routines.  The `daa` after add/sub on 0xC417 is the proof it's BCD.
 
 ## Working notes
 

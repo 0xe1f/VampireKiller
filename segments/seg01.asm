@@ -603,9 +603,9 @@ l62d1h:
 ;  Sets the mode/flag bytes 0xC415 = 0x20 and 0xC418 = 0x80, runs three setup
 ;  helpers, then tail-jumps into seg0 at 0x53BD.
 	ld a,020h
-	ld (0c415h),a
+	ld (0c415h),a          ; Simon health = full (0x20)
 	ld a,080h
-	ld (0c418h),a
+	ld (0c418h),a          ; enemy/boss energy meter = full (0x80)
 	call sub_70e3h
 	call 05494h
 	call 0576fh
@@ -1873,9 +1873,12 @@ l6b2bh:
 	call sub_75dbh
 	call sub_760bh
 	jp l761fh
+; sub_6b40h - Simon's per-frame action-state machine.  0xC420 is the action
+; state (runtime-confirmed: 0=normal, 3=whip, 5=hurt/knockback, 6=dead among
+; others); DISPATCH_A jumps through the inline word table below by that index.
 sub_6b40h:
 	call 0852bh
-	ld a,(0c420h)
+	ld a,(0c420h)          ; Simon action state
 	call DISPATCH_A
 	ld e,c
 	ld l,e
@@ -2495,13 +2498,13 @@ l6f88h:
 	ld a,013h
 	call nz,050a6h
 	ld a,05ah
-	ld (0c42dh),a
+	ld (0c42dh),a          ; arm state timer (0xC42D); in hurt = i-frame/blink
 	ld a,(0c42bh)
 	and a
 	jp z,l6fc3h
-	ld a,(0c415h)
+	ld a,(0c415h)          ; Simon health
 	and a
-	jr z,l6fc3h
+	jr z,l6fc3h            ; health 0 -> death/knockdown branch
 	ld a,003h
 	ld (0c420h),a
 	ld a,002h
@@ -2534,18 +2537,18 @@ l6fdeh:
 	and a
 	ret z
 l6ff9h:
-	ld a,(0c425h)
+	ld a,(0c425h)          ; Simon Y, snapped to an 8px grid on landing
 	and 0f8h
 	ld (0c425h),a
 	ld a,003h
-	ld (0c423h),a
-	ld a,(0c415h)
+	ld (0c423h),a          ; hurt sub-state = 3
+	ld a,(0c415h)          ; health: alive -> short knockback, dead -> long
 	and a
 	ld a,004h
 	jr nz,l7010h
 	ld a,010h
 l7010h:
-	ld (0c42ah),a
+	ld (0c42ah),a          ; knockback velocity/timer (0xC42A)
 	ld de,(0c42eh)
 	inc d
 	inc e
@@ -2556,13 +2559,13 @@ l7010h:
 	ld a,(0c439h)
 	and a
 	call nz,sub_6bb6h
-	ld hl,0c42ah
+	ld hl,0c42ah           ; knockback counts down; while nonzero Simon slides
 	dec (hl)
 	ret nz
-	xor a
-	ld (0c420h),a
+	xor a                  ; knockback done: clear the whole hurt state
+	ld (0c420h),a          ; action state -> normal
 	ld (0c421h),a
-	ld (0c423h),a
+	ld (0c423h),a          ; hurt sub-state -> 0
 	ld (0c422h),a
 	ld (0c42ah),a
 	ld (0c428h),a

@@ -530,7 +530,7 @@ sub_4314h:
 	ld a,0ffh
 	ld (0d000h),a
 	ld a,020h
-	ld (0c415h),a
+	ld (0c415h),a          ; Simon health = full (0x20)
 	ld hl,0cf34h
 	inc (hl)
 	ld a,(hl)
@@ -761,9 +761,9 @@ RESET_RUN_STATE:
 	ld bc,00003h
 	ldir
 	ld a,020h
-	ld (0c415h),a          ; view/scroll defaults
+	ld (0c415h),a          ; Simon health = full (0x20); runtime-confirmed HP
 	ld a,080h
-	ld (0c418h),a
+	ld (0c418h),a          ; enemy/boss energy meter = full (0x80)
 	ret
 l44f0h:
 	inc bc
@@ -826,42 +826,47 @@ sub_454ch:
 	ld de,04212h
 	ld c,00eh
 	jp sub_48e3h
+; --- sub_456dh - draw the HEART counter (0xC417, BCD) to the HUD -------------
+;  hl -> BCD source, de -> VDP name-table cell; B counts source bytes (1 byte =
+;  2 decimal digits).  Runtime-confirmed: 0xC417 is the heart total (cap 0x99).
 sub_456dh:
-	ld hl,0c417h
-	ld de,0c000h
+	ld hl,0c417h           ; hearts (packed BCD)
+	ld de,0c000h           ; HUD cell for the heart readout
 	jr l457bh
 sub_4575h:
-	ld hl,0c410h
-	ld de,0e400h
+	ld hl,0c410h           ; lives (packed BCD)
+	ld de,0e400h           ; HUD cell for the lives readout
 l457bh:
-	ld b,001h
+	ld b,001h              ; 1 byte -> 2 digits
 	jr l457fh
 l457fh:
 	ld a,(hl)
-	rra
+	rra                    ; isolate the high nibble (tens digit)
 	rra
 	rra
 	rra
 	call sub_458fh
-	ld a,(hl)
+	ld a,(hl)              ; low nibble (ones digit)
 	call sub_458fh
 	dec hl
 	djnz l457fh
 	ret
 sub_458fh:
-	and 00fh
-	add a,020h
+	and 00fh               ; digit 0..9
+	add a,020h             ; -> numeral tile code
 	call sub_4aeeh
 	ld a,d
-	add a,008h
+	add a,008h             ; advance to the next digit cell
 	ld d,a
 	ret
+; add B hearts to 0xC417 (BCD), clamp at 99 - the pickup path (B=1 small heart,
+; B=5 large heart; runtime-confirmed both increments).
 	ld hl,0c417h
 	ld a,(hl)
 	add a,b
-	daa
+	daa                    ; keep the total decimal (BCD)
 	jr nc,l45a5h
-	ld a,099h
+	ld a,099h              ; clamp at 99 hearts
 l45a5h:
 	jr l45b0h
 	ld hl,0c417h
@@ -893,11 +898,12 @@ sub_45cfh:
 	ld hl,03b0dh
 	ld bc,l4206h
 	jp l45cch
+; l45d8h - draw the HEALTH bar from 0xC415 (bar length = health*2 units).
 l45d8h:
-	ld hl,0c415h
+	ld hl,0c415h           ; Simon health (0..0x20)
 	ld a,(hl)
 	ld hl,03c0eh
-	add a,a
+	add a,a                ; bar length = health * 2
 	or a
 	ret z
 	ld b,a
@@ -905,8 +911,9 @@ l45d8h:
 	ld d,000h
 	ld a,011h
 	jp l4911h
+; l45ech - draw the ENEMY/BOSS energy meter from 0xC418 (cap 0x80).
 l45ech:
-	ld hl,0c418h
+	ld hl,0c418h           ; enemy/boss energy (0..0x80)
 	ld a,(hl)
 	ld hl,03c17h
 	ld b,a
@@ -926,37 +933,40 @@ l4602h:
 	ld d,000h
 	ld a,088h
 	jp l4911h
+; l460ch - restore HEALTH: 0xC415 += B, clamped to the 0x20 maximum.
 l460ch:
-	ld hl,0c415h
+	ld hl,0c415h           ; Simon health
 	ld a,(hl)
-	add a,b
+	add a,b                ; add restore amount
 	cp 021h
 	jr c,l461bh
-	ld a,020h
+	ld a,020h              ; clamp to full (0x20)
 	sub (hl)
 	ld b,a
 	ld a,020h
 l461bh:
 	ld (hl),a
 	jp sub_45c0h
-	ld hl,0c418h
+; restore ENEMY/BOSS energy: 0xC418 += B, clamped to the 0x80 maximum.
+	ld hl,0c418h           ; enemy/boss energy
 	ld a,(hl)
 	add a,b
 	cp 081h
 	jr c,l462eh
-	ld a,080h
+	ld a,080h              ; clamp to full (0x80)
 	sub (hl)
 	ld b,a
 	ld a,080h
 l462eh:
 	ld (hl),a
 	jp l45bah
+; l4632h - subtract from HEALTH (damage): 0xC415 -= B, floored at 0.
 l4632h:
-	ld hl,0c415h
+	ld hl,0c415h           ; Simon health
 	ld a,(hl)
 	cp b
 	jr nc,l463ah
-	ld b,a
+	ld b,a                 ; can't drop below 0: clamp damage to current HP
 l463ah:
 	ld a,b
 	or a
@@ -2287,9 +2297,9 @@ sub_4deeh:
 	ld (0d000h),a
 	ld (0cf3ah),a
 	ld a,020h
-	ld (0c415h),a
+	ld (0c415h),a          ; Simon health = full (0x20)
 	ld a,080h
-	ld (0c418h),a
+	ld (0c418h),a          ; enemy/boss energy meter = full (0x80)
 	call 062d7h
 	call 062edh
 	jp sub_451ah

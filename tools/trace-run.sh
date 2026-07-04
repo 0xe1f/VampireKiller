@@ -7,6 +7,8 @@
 #   EXEC   exec address ranges to log, e.g. "6552-66c0,64ec-6551" (hex, CPU addrs)
 #   WATCH  memory-write address ranges to log, e.g. "ce00-ce02,c00f"
 #   LOG    output file (default generated/disasmtrace.log)
+#   SNAP   snapshot file (default generated/disasmsnap.bin)
+#   SNAPRANGE  RAM window per snapshot (default c000-dfff)
 #   DEDUP  set to 0 to log every executed address (default 1: collapse repeats)
 #   SOFTGL set to 0 to use hardware OpenGL (default 1: force Apple's software GL
 #          renderer). On Apple Silicon the Metal-backed GL shim segfaults on the
@@ -19,6 +21,10 @@
 #
 # NOTE: with EXEC and WATCH both empty the tracer logs ONLY bank switches. It
 # reads the ranges once at launch, so changing them means relaunching.
+#
+# STATE SNAPSHOTS: press F9 in the emulator to dump the SNAPRANGE RAM window to
+# the snapshot file (works even with EXEC/WATCH empty). Capture once before an
+# action and once after; then diff them with:  tools/snapdiff.py <snapfile>
 #
 # Handy presets (see docs/progress.md "Next tracing session"):
 #   inventory/counters:  WATCH=c400-c41f,c470-c4ff,c800-c8ff,d000-d0ff
@@ -41,9 +47,11 @@ fi
 
 rom="${1:-../VampireKiller.rom}"
 log="${LOG:-generated/disasmtrace.log}"
-mkdir -p "$(dirname "$log")"
+snap="${SNAP:-generated/disasmsnap.bin}"
+mkdir -p "$(dirname "$log")" "$(dirname "$snap")"
 
 echo "tracing -> $log   (exec='${EXEC:-}' watch='${WATCH:-}')"
+echo "snapshots -> $snap (press F9 to capture; range ${SNAPRANGE:-c000-dfff})"
 if [ "${SOFTGL:-1}" != "0" ]; then
     export COCOAMSX_SOFTWARE_GL=1
 fi
@@ -52,4 +60,6 @@ export DISASM_DEDUP="${DEDUP:-1}"
 export DISASM_EXEC="${EXEC:-}"
 export DISASM_WATCH="${WATCH:-}"
 export DISASM_LOG="$log"
+export DISASM_SNAP="$snap"
+export DISASM_SNAP_RANGE="${SNAPRANGE:-c000-dfff}"
 exec "$app" "$rom"

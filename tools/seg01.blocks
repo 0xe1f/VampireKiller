@@ -24,3 +24,14 @@ pos_tbl_6426: start 0x6426 end 0x644c type bytedata
 ; Multi-sprite (dx,dy) offset lists selected by the 0x80/0x81/0x82 stream codes
 ; in the actor->sprite builder at 0x644c.
 sprite_ofs_64d4: start 0x64d4 end 0x64ec type bytedata
+; Inline DISPATCH_A word table for the 0xCE01 event state machine (sub_65b7h);
+; 11 handler pointers.
+evt_dispatch_65bd: start 0x65bd end 0x65d3 type worddata
+; Inline DISPATCH_A word table for the 0xCE40 post-event machine (0x66c1);
+; 4 handler pointers.
+evt_dispatch_66c8: start 0x66c8 end 0x66d0 type worddata
+; Script-step pointer table (indexed by 0xCE31) for the cutscene player in
+; sub_674ah; entries point into seg 5 (0x83xx/0x84xx) and seg 8 (0xBFxx).
+script_ptr_6795: start 0x6795 end 0x67eb type worddata
+; Triangle-ramp animation table (19 bytes, indexed by 0xCE39) used by sub_67ebh.
+ramp_tbl_6804: start 0x6804 end 0x6817 type bytedata

@@ -760,13 +760,15 @@ l63d1h:
 	inc l
 	djnz l63d1h
 	ret
-; --- 0x63DA - (seg0 entry) centre the view and redraw the screen -----------
-;  Sets both position bytes 0xC425/0xC427 to 0x80 (centred), hides all sprites,
-;  then runs the seg0/seg1 draw chain (tail-jump to seg0 0x47CE).
+; --- 0x63DA - (seg0 entry) place Simon at the room centre and redraw ---------
+;  Seeds Simon's position (0xC425=Y, 0xC427=X) to 0x80,0x80 - the room-entry
+;  spawn - hides all sprites, then runs the seg0/seg1 draw chain (tail-jump to
+;  seg0 0x47CE).  (Runtime-confirmed: 0xC425 traces the jump Y-arc and 0xC427
+;  the walk X-ramp; there is no camera - the game is room-based, not scrolling.)
 	call 047c0h
 	ld a,080h
-	ld (0c425h),a          ; position X = 0x80 (centred)
-	ld (0c427h),a          ; position Y = 0x80
+	ld (0c425h),a          ; Simon Y = 0x80
+	ld (0c427h),a          ; Simon X = 0x80
 	call 05677h
 	call 0573ah
 	call 0567fh
@@ -781,9 +783,10 @@ l63f4h:
 	call 04f8ah
 	call 04f98h
 	jp 047ceh              ; -> seg0
-; --- sub_6409h - set the screen scroll/position from the per-row table ------
-;  Looks up l6426h[row=0xD000] (2 bytes): byte0 with bit0 masked off -> 0xC425
-;  position and bit0 -> 0xC42C flag; byte1 -> 0xC427.
+; --- sub_6409h - set Simon's spawn position + facing from the per-row table -
+;  Looks up l6426h[row=0xD000] (2 bytes): byte0 with bit0 masked off -> Simon Y
+;  (0xC425) and bit0 -> facing flag 0xC42C (0=right, 1=left); byte1 -> Simon X
+;  (0xC427).  So each room row carries Simon's entry Y, X and facing.
 sub_6409h:
 	ld a,(0d000h)          ; A = current row
 	ld hl,l6426h
@@ -793,12 +796,12 @@ sub_6409h:
 	inc hl
 	ld c,a
 	and 0feh               ; drop bit0 ...
-	ld (0c425h),a          ; ... -> 0xC425 position
+	ld (0c425h),a          ; ... -> Simon Y (0xC425)
 	ld a,(hl)
-	ld (0c427h),a          ; byte1 -> 0xC427
+	ld (0c427h),a          ; byte1 -> Simon X (0xC427)
 	ld a,c
 	and 001h               ; bit0 ...
-	ld (0c42ch),a          ; ... -> 0xC42C flag
+	ld (0c42ch),a          ; ... -> facing flag 0xC42C (0=right, 1=left)
 	ret
 l6426h:
 	or b
@@ -1106,237 +1109,268 @@ l65abh:
 	ld de,0f400h
 	ld bc,00280h
 	jp 0467ch              ; -> seg0 CPU->VRAM copy helper
-	ld a,(0ce01h)
-	call DISPATCH_A
-	out (065h),a
-	push hl
-	ld h,l
-	jp m,00965h
-	ld h,(hl)
-	jr nz,l662dh
-	ld b,l
-	ld h,(hl)
-	ld e,h
-	ld h,(hl)
-	ld a,(hl)
-	ld h,(hl)
-	sub e
-	ld h,(hl)
-	sbc a,(hl)
-	ld h,(hl)
-	or b
-	ld h,(hl)
+; --- sub_65b7h - event sub-state machine (dispatched on 0xCE01) -------------
+;  Event-driven: it does NOT run during logo/title/attract/normal stage play
+;  (confirmed by tracing), so the trigger is a specific event - boss / death /
+;  transition - still TBD.  0xCE01 selects one of 11 handlers through the inline
+;  word table below; each handler tail-jumps to the shared epilogue 0xBE44 (in
+;  page 2b).  0xCE02 serves as a per-step frame timer, and the last handler
+;  clears 0xCE00 and raises the 0xCE40 "done" flag (same pattern as the logo).
+sub_65b7h:
+	ld a,(0ce01h)          ; A = event sub-state index
+	call DISPATCH_A        ; jump via the inline word table that follows
+	defw 065d3h            ; 0  init: seed the 0xC0D0 block (0x11 entries, 0x5F24)
+	defw 065e5h            ; 1  wait on 0xCE16, then re-run 0xAD9A
+	defw 065fah            ; 2  sub_6856h; arm frame timer 0xCE02 = 0x78
+	defw 06609h            ; 3  count 0xCE02 down; when 0 and 0xC800==0 -> 0x50A6(0)
+	defw 06620h            ; 4  0x50A6(0x88); 0xC418=0x80; falls into l662dh
+	defw 06645h            ; 5  sub_68cbh; when 0xCE36==2, arm 0xCE37 = 0xC0
+	defw 0665ch            ; 6  branch on 0xCE15 (two sub-flows)
+	defw 0667eh            ; 7  sub_68afh; when 0xCE36==0, 0x50A6(0x8D), timer 0xB4
+	defw 06693h            ; 8  count 0xCE02 down; then 0x6A03
+	defw 0669eh            ; 9  sub_6a15h; then 0x47B8/0x4805, timer = 8
+	defw 066b0h            ; 10 count down; then 0xCE00 = 0, 0xCE40 = 1 (done)
+; --- CE01=0: initialise the event -------------------------------------------
 	xor a
-	ld (0ce16h),a
-	ld (0ce0eh),a
-	ld de,0c0d0h
-	ld c,011h
-	call 05f24h
-	jp 0be44h
-	call 0ad9ah
+	ld (0ce16h),a          ; clear the "active" flag ...
+	ld (0ce0eh),a          ; ... and its companion
+	ld de,0c0d0h           ; DE -> 0xC0D0 work block
+	ld c,011h              ; 0x11 entries
+	call 05f24h            ; seg1 block-fill/setup helper
+	jp 0be44h              ; -> shared epilogue (page 2b)
+; --- CE01=1: wait for 0xCE16, then step ------------------------------------
+	call 0ad9ah            ; seg2b per-frame update
 	ld a,(0ce16h)
 	and a
-	ret z
+	ret z                  ; not ready yet -> stay in this state
 	xor a
 	ld (0ce15h),a
 	ld (0ce0eh),a
 	call 0ad9ah
 	jp 0be44h
+; --- CE01=2: arm the dwell timer -------------------------------------------
 	xor a
 	ld (0ce12h),a
 	call sub_6856h
 	ld a,078h
-	ld (0ce02h),a
+	ld (0ce02h),a          ; frame timer = 0x78
 	jp 0be44h
+; --- CE01=3: wait out the timer, gated on 0xC800 ---------------------------
 	ld hl,0ce02h
 	ld a,(hl)
 	and a
 	jr z,l6611h
-	dec a
+	dec a                  ; tick the timer down (not below 0)
 l6611h:
 	ld (hl),a
-	ret nz
+	ret nz                 ; timer still running -> stay
 	ld a,(0c800h)
 	and a
-	ret nz
+	ret nz                 ; first actor slot still busy -> stay
 	ld a,000h
-	call 050a6h
+	call 050a6h            ; trigger action 0
 	jp 0be44h
+; --- CE01=4: (then fall through to l662dh) ---------------------------------
 	ld a,088h
-	call 050a6h
+	call 050a6h            ; trigger action 0x88
 	ld a,080h
 	ld (0c418h),a
 	call 045ech
 l662dh:
 	call sub_698bh
 	ld c,017h
-	ld de,08049h
+	ld de,08049h           ; source table in seg2 (0x8049)
 	call 05f24h
 	call 057bbh
 	xor a
-	ld (0ce36h),a
+	ld (0ce36h),a          ; reset the pair of progress counters
 	ld (0ce37h),a
 	jp 0be44h
+; --- CE01=5: advance until 0xCE36 reaches 2 --------------------------------
 	call sub_68cbh
 	ld a,(0ce36h)
 	sub 002h
-	ret nz
+	ret nz                 ; not at step 2 yet -> stay
 	ld (0ce38h),a
 	ld (0ce39h),a
 	ld a,0c0h
-	ld (0ce37h),a
+	ld (0ce37h),a          ; arm counter 0xCE37 = 0xC0
 	jp 0be44h
+; --- CE01=6: branch on 0xCE15 ----------------------------------------------
 	ld a,(0ce15h)
 	and a
 	jr nz,l666eh
-	call sub_67ebh
+	call sub_67ebh         ; 0xCE15 == 0 path
 	call sub_6875h
 	call sub_681fh
 	jp l6a50h
 l666eh:
-	call l69a7h
+	call l69a7h            ; 0xCE15 != 0 path
 	call sub_6817h
 	call sub_780dh
 	xor a
 	ld (0ce37h),a
 	jp 0be44h
+; --- CE01=7: advance until 0xCE36 reaches 0 --------------------------------
 	call sub_68afh
 	ld a,(0ce36h)
 	and a
-	ret nz
+	ret nz                 ; not done yet -> stay
 	ld a,08dh
-	call 050a6h
+	call 050a6h            ; trigger action 0x8D
 	ld a,0b4h
-	ld (0ce02h),a
+	ld (0ce02h),a          ; frame timer = 0xB4
 	jp 0be44h
+; --- CE01=8: wait out the timer, then 0x6A03 -------------------------------
 	ld hl,0ce02h
 	dec (hl)
 	ret nz
 	call 06a03h
 	jp 0be44h
+; --- CE01=9: finish, then short dwell --------------------------------------
 	call sub_6a15h
-	ret nz
+	ret nz                 ; sub_6a15h still working -> stay
 	call 047b8h
 	call 04805h
 	ld a,008h
-	ld (0ce02h),a
+	ld (0ce02h),a          ; frame timer = 8
 	jp 0be44h
+; --- CE01=10: dwell, then end the event ------------------------------------
 	ld hl,0ce02h
 	dec (hl)
 	ret nz
-	ld hl,CHKRAM
-	ld (0ce00h),hl
+	ld hl,CHKRAM           ; 0x0000 (CHKRAM equ) -> reset event pointer
+	ld (0ce00h),hl         ; 0xCE00 = 0 (no event)
 	ld a,001h
-	ld (0ce40h),a
+	ld (0ce40h),a          ; raise the "event done" flag
 	ret
-	ld a,(0ce40h)
-	dec a
-	call DISPATCH_A
-	ret nc
-	ld h,(hl)
-	ld h,(ix-019h)
-	ld h,(hl)
-	ret m
-	ld h,(hl)
+; --- sub_66c1h - post-event sequence (dispatched on 0xCE40) -----------------
+;  Runs once the 0xCE01 event machine has finished (it raises 0xCE40 = 1).
+;  0xCE40 (1..4) minus 1 selects one of 4 handlers via the inline table; each
+;  advances 0xCE40 (via l66d8h) to step to the next.  This drives the cutscene
+;  script player and, at the end, bumps the level counter 0xD012 and pokes a
+;  VDP register.  Also event-gated (does not run in normal play).
+sub_66c1h:
+	ld a,(0ce40h)          ; A = post-event step (1..4)
+	dec a                  ; -> 0-based index
+	call DISPATCH_A        ; jump via the inline table below
+	defw 066d0h            ; 0 (0xCE40=1) start: init script player, advance
+	defw 066ddh            ; 1 (0xCE40=2) run the script each frame until done
+	defw 066e7h            ; 2 (0xCE40=3) wait on 0x5310, arm timer, advance
+	defw 066f8h            ; 3 (0xCE40=4) dwell, then end + bump level 0xD012
+; --- CE40=1: kick off the script player ------------------------------------
 	ld a,08eh
-	call 050a6h
-	call sub_6719h
+	call 050a6h            ; trigger action 0x8E
+	call sub_6719h         ; reset script-player state
 l66d8h:
 	ld hl,0ce40h
-	inc (hl)
+	inc (hl)               ; advance to the next post-event step
 	ret
-	call sub_6736h
+; --- CE40=2: pump the script until it flags completion ---------------------
+	call sub_6736h         ; run one script step
 	ld a,(0ce32h)
 	and a
-	ret z
-	jr l66d8h
+	ret z                  ; script not finished -> stay
+	jr l66d8h              ; done -> advance
+; --- CE40=3: wait on 0x5310, then arm a dwell timer ------------------------
 	call 05310h
-	ret nz
+	ret nz                 ; not ready -> stay
 	ld a,01eh
-	ld (0ce02h),a
+	ld (0ce02h),a          ; frame timer = 0x1E
 	call 047b8h
 	call 047dbh
-	jr l66d8h
+	jr l66d8h              ; advance
+; --- CE40=4: dwell, then finish and advance the level ----------------------
 	ld hl,0ce02h
 	dec (hl)
-	ret nz
+	ret nz                 ; timer running -> stay
 	xor a
 	ld (0ce34h),a
-	ld (0ce40h),a
+	ld (0ce40h),a          ; clear the post-event step (sequence over)
 	inc a
-	ld (0c409h),a
+	ld (0c409h),a          ; 0xC409 = 1 (signal next phase)
 	ld hl,0d012h
 	ld a,(hl)
 	inc a
 	cp 003h
-	jr nc,l6712h
-	ld (hl),a
+	jr nc,l6712h           ; cap the level counter at 3
+	ld (hl),a              ; 0xD012 = min(level+1, ...)
 l6712h:
 	ld b,000h
-	ld c,017h
+	ld c,017h              ; VDP register 23 (R23 = vertical scroll)
 	jp WRTVDP
+; --- sub_6719h - reset the cutscene script-player state --------------------
 sub_6719h:
 	call 053e5h
 	xor a
-	ld (0ce30h),a
-	ld (0ce33h),a
-	ld (0ce31h),a
-	ld (0ce32h),a
+	ld (0ce30h),a          ; clear the script cursors/counters ...
+	ld (0ce33h),a          ; 0xCE33 = per-step tick
+	ld (0ce31h),a          ; 0xCE31 = script index (into script_ptr_6795)
+	ld (0ce32h),a          ; 0xCE32 = done flag
 	inc a
-	ld (0ce34h),a
+	ld (0ce34h),a          ; 0xCE34 = 1 (player active)
 	ld a,00eh
 	ld d,0ffh
 	ld e,00fh
-	jp 0481bh
+	jp 0481bh              ; seg0 VRAM setup/fill helper
+; --- sub_6736h - advance the cutscene sequencer one frame ------------------
 sub_6736h:
-	call sub_673fh
-	call sub_674ah
-	jp l6831h
+	call sub_673fh         ; tick the timeline clock (every 4th frame)
+	call sub_674ah         ; fire any keyframe due at this tick
+	jp l6831h              ; refresh the on-screen effect (ramp/scroll)
+; --- sub_673fh - timeline clock: bump 0xCE33 every 4th frame ---------------
 sub_673fh:
 	ld a,(0c003h)
 	and 003h
-	ret nz
+	ret nz                 ; only act on 1 frame in 4 (slows the sequence)
 	ld hl,0ce33h
-	inc (hl)
+	inc (hl)               ; 0xCE33 = timeline tick
 	ret
+; --- sub_674ah - keyframe player: fire the entry due at the current tick ----
+;  Pages seg 8 (0xA000) and seg 5 (0x8000) - where the script + payload live -
+;  then looks up the current script (0xCE31) in script_ptr_6795.  Each script
+;  is a list of {tick, action} keyframes; if the head keyframe's tick matches
+;  0xCE33 it fires: action 0xFF ends the script (raise done flag 0xCE32, call
+;  0x50A6(0xFF)); otherwise it blits the payload row for this tick to 0xD8xx and
+;  steps to the next script (0xCE31++).  0x533D restores the original banks.
 sub_674ah:
 	di
 	ld a,008h
-	ld (0a000h),a
+	ld (0a000h),a          ; page seg 8 into page 2b (script pointers/data)
 	ld (0f0f3h),a
 	ei
 	di
 	ld a,005h
-	ld (08000h),a
+	ld (08000h),a          ; page seg 5 into page 2a (payload)
 	ld (0f0f2h),a
 	ei
-	ld a,(0ce31h)
+	ld a,(0ce31h)          ; A = current script index
 	ld de,l6795h
-	call LOOKUP_WORD_TBL
-	ex de,hl
+	call LOOKUP_WORD_TBL   ; DE -> script[index]
+	ex de,hl               ; HL -> keyframe {tick, action, ...}
 	ld a,(0ce33h)
-	cp (hl)
-	jp nz,0533dh
+	cp (hl)                ; timeline tick == this keyframe's tick?
+	jp nz,0533dh           ; not yet -> restore banks and return
 	inc hl
-	ld a,(hl)
+	ld a,(hl)              ; action byte
 	inc hl
 	inc a
-	jr z,l6788h
-	ld d,a
+	jr z,l6788h            ; 0xFF -> end of script
+	ld d,a                 ; D = payload source high byte
 	ld a,(0ce33h)
 	add a,0d8h
-	ld e,a
+	ld e,a                 ; DE -> payload row (0xD8xx + tick)
 	ld c,0ffh
-	call 04adch
+	call 04adch            ; blit the keyframe payload
 	ld hl,0ce31h
-	inc (hl)
-	jp 0533dh
+	inc (hl)               ; advance to the next script/keyframe
+	jp 0533dh              ; restore banks and return
 l6788h:
 	ld a,001h
-	ld (0ce32h),a
+	ld (0ce32h),a          ; raise "script finished" flag
 	ld a,0ffh
-	call 050a6h
-	jp 0533dh
+	call 050a6h            ; trigger the end-of-script action
+	jp 0533dh              ; restore banks and return
 l6795h:
 	jr nz,$-63
 	add hl,sp

@@ -270,15 +270,21 @@ l415eh:
 	call DISPATCH_A         ; jump to main_state_tbl[primary state]
 
 ; main_state_tbl - primary game-state handlers (indexed by 0xC000).
-; Roles are inferred from the boot flow / behaviour (see docs/game-notes.md);
-; the front-end trio matches logo -> title -> attract.
+; Front-end trio (0..2) = logo -> title -> attract.  Runtime trace of a fresh
+; start walked 1 -> 3 -> 4 -> 5:  state 3 runs the intro cutscene (Simon nears
+; the castle) as a timed animation (0xC004 counter, sub-phases in 0xC001), state
+; 4 is a brief bridge, and state 5 is in-stage play (builds the screen via the
+; seg1 62edh pipeline and runs the 6552h frame refresh).  The state-5 handler
+; also reads the game-event flags (0xC408/09/0A/0B/0C, 0xC413/1B) to pick the
+; next state, so 6..13 are the death / level-clear / boss / game-over phases
+; (exact roles still TBD - not exercised by the boot trace).
 main_state_tbl:
 	defw 0417dh             ; 0  front-end: Konami logo        (*)
 	defw 041a0h             ; 1  front-end: title screen       (*)
 	defw 041abh             ; 2  front-end: attract / demo     (*)
-	defw 041d1h             ; 3  in-game phase
-	defw 0422ch             ; 4  in-game phase
-	defw 04257h             ; 5  in-game phase
+	defw 041d1h             ; 3  intro cutscene (Simon -> castle; timed via 0xC004)
+	defw 0422ch             ; 4  bridge: build first stage, advance to play
+	defw 04257h             ; 5  in-stage play (per-frame tick + next-state select)
 	defw 04294h             ; 6  in-game phase
 	defw 042b2h             ; 7  in-game phase
 	defw 04324h             ; 8  in-game phase
@@ -344,7 +350,7 @@ l41cch:
 	jp l4ad6h
 l41e4h:
 	djnz l41ech
-	call sub_44cdh
+	call RESET_RUN_STATE   ; wipe run work RAM (0xC405..0xDFFF) + seed defaults
 	jp l41cch
 l41ech:
 	djnz l41fbh
@@ -736,20 +742,26 @@ sub_44bfh:
 	ld hl,0d070h
 	ld a,001h
 	jp sub_494dh
-sub_44cdh:
-	ld hl,0c405h
-	ld bc,01bfbh
+; --- RESET_RUN_STATE (sub_44cdh) - wipe the run's work RAM & seed defaults ------
+;  Called from the intro handler (state 3) to start a fresh run.  Runtime trace
+;  confirmed the ldir below zero-fills the entire game work block 0xC405..0xDFFF
+;  in one sweep (event state 0xCE00+, actor arrays 0xD000+, etc.), then seeds the
+;  starting counters at 0xC410..0xC412 from l44f0h and the view defaults
+;  0xC415=0x20 / 0xC418=0x80.
+RESET_RUN_STATE:
+	ld hl,0c405h           ; HL -> first byte to clear
+	ld bc,01bfbh           ; 0x1BFB bytes -> up through 0xE000 (exclusive)
 	ld d,h
 	ld e,l
-	inc e
+	inc e                  ; DE = HL+1 (classic ldir zero-fill)
 	ld (hl),000h
-	ldir
-	ld hl,l44f0h
-	ld de,0c410h
+	ldir                   ; 0xC405..0xDFFF = 0
+	ld hl,l44f0h           ; seed the starting counters...
+	ld de,0c410h           ; ...into 0xC410..0xC412
 	ld bc,00003h
 	ldir
 	ld a,020h
-	ld (0c415h),a
+	ld (0c415h),a          ; view/scroll defaults
 	ld a,080h
 	ld (0c418h),a
 	ret

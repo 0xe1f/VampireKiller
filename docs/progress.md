@@ -406,10 +406,11 @@ dumps.
       00 50 00 at idx 2722, right after the vendor left (0xC70C=6 at idx 2697).
       Individual whips add 0 (a "did nothing" whip = outcome 5).
     * **Offer** armed by `vendor_make_offer` (0x938E): sets item/price and the
-      0xC706 timer (=0x14). Reached from the reveal path via the object's stored
-      handler pointer (the 0x938E address isn't referenced statically anywhere -
-      the one open plumbing detail). Empirically the first offer fired at reveal
-      (idx 2331: 0xC706=0x14, 0xC707=0x50, 0xC708=0x1B).
+      0xC706 timer (=0x14). Empirically the first offer fired at reveal (idx 2331:
+      0xC706=0x14, 0xC707=0x50, 0xC708=0x1B). [RESOLVED later via tools/romscan.py:
+      the caller is the **resident** vendor state machine at seg0 l4411h
+      (`call 0938eh`), which a `segments/*.bin` grep missed because seg0 has no bin.
+      seg0 also calls 0x94C1 (vendor_purchase_tick body) and 0x950E (offer dismiss).]
     * **Price** = `vendor_price_tbl` (0x942F), 9 rows of {id, normal, half, double};
       `vendor_select_price` (0x941F) uses 0xC702 bit7 (white bible = halve) / bit6
       (black bible = double). Knife = 50 / 30 / 90 -> the "50 hearts" offer is the
@@ -444,6 +445,13 @@ dumps.
       (0xC417 0x35 -> 0x40, +5, @ idx 3023). Score +100 @ idx 2979 (candle
       destructible; boss energy 0xC418 untouched = one-hit kill, not a boss).
 
+- Tooling: added `tools/romscan.py` (static xref + dispatch-table decoder) to
+  automate the two look-ups we do every session. `xref` splits real control
+  transfers (`code`) from bare word matches (`data?`); `table` decodes jump/handler
+  tables (with `--index-base 1` for `dec a` dispatchers). It reads each bank
+  straight from the ROM, so it sees **seg0** (which has no committed `.bin`). First
+  use immediately found the resident caller of `vendor_make_offer` (seg0 l4411h) that
+  a `segments/*.bin` grep had missed. Recipes folded into the two skills.
 - Segments 2 & 3 imported as disassembled source (byte-exact): both graduated
   from INCBIN to INCLUDE (org 0x8000 / 0xA000, pages 2a / 2b).  Raw disassembly
   folded into `segments/seg02.asm` / `seg03.asm` (equ block + z80dasm header

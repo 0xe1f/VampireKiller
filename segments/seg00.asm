@@ -639,22 +639,25 @@ l43cbh:
 	ld a,005h
 	jp l41b6h
 	djnz l4402h
-	call 094c1h
+	call 094c1h             ; vendor_purchase_tick body (seg2): poll buy/refuse
 	ret nz
 	ld a,00fh
 	jp l41c9h
+; Vendor-interaction states (this resident state machine drives the vendor code
+; in seg2, which is paged at 0x8000): 0x94C1 = vendor_purchase_tick body, 0x950E
+; = offer dismiss, vendor_make_offer (0x938E) = arm a sale.
 l4402h:
 	djnz l4411h
 	ld hl,0c004h
-	dec (hl)
+	dec (hl)               ; hold the offer for 0xC004 frames...
 	ret nz
-	call 0950eh
+	call 0950eh            ; ...then run the vendor offer-dismiss (seg2)
 	ld a,005h
 	jp l41b6h
 l4411h:
 	xor a
-	ld (0c40ch),a
-	call 0938eh
+	ld (0c40ch),a          ; clear the whip-hit flag
+	call vendor_make_offer ; arm a sale (seg2 0x938E)
 	jp l41cch
 	djnz l4453h
 	ld a,(0c006h)

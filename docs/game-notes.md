@@ -256,9 +256,10 @@ nothing, an offer appears, or he leaves. Score only changes on **departure**
 (+5000 via `ld de,0x5000 / jp 0x44F3` → `add_score`); individual whips do not add
 score (a whip that "does nothing" is outcome 5).
 
-**Making / taking an offer** (`vendor_make_offer` 0x938E, reached from the reveal
-path): picks the item (`vendor_set_offer_item` 0x9406 → 0xC708) and its price, and
-starts the 0xC706 timer. Price comes from `vendor_price_tbl` (0x942F), 9 rows of
+**Making / taking an offer** (`vendor_make_offer` 0x938E, called by the resident
+vendor state machine at seg0 `l4411h` while seg2 is paged in): picks the item
+(`vendor_set_offer_item` 0x9406 → 0xC708) and its price, and starts the 0xC706
+timer. Price comes from `vendor_price_tbl` (0x942F), 9 rows of
 `{item id, normal, halved, doubled}`; `vendor_select_price` (0x941F) picks the
 column from the 0xC702 bible flags:
 

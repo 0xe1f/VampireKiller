@@ -57,6 +57,29 @@ segment currently paged in (`X 06:be44` = seg 6, PC 0xBE44).
    PC's `seg:offset` and rename it/the RAM field per the `konami-msx-disasm` naming
    rule.
 
+## Snapdiff idioms (copy-paste)
+
+- **Collapse a tracked address to just its changes** (the workhorse — turns a
+  per-frame dump into an event list):
+  `snapdiff.py -t c417 | awk 'NR>1 && $1>BASE{if($4!=p)print "idx "$1": "$4; p=$4}'`
+  where `BASE` = the pre-recording frame count so you only see new frames.
+- **Track a whole state block** to find a subsystem's RAM layout at once:
+  `snapdiff.py -t c700-c70f | awk 'NR>1{k="";for(i=4;i<=NF;i++)k=k" "$i; if(k!=p)print "idx "$1":"k; p=k}'`
+  Watch which bytes move together during the interaction — that contiguous cluster
+  is the feature's state block; then hand it to `romscan xref` / grep in code.
+- **Habit: diff the score/HP/hearts on every recording** even when studying
+  something else — a value that does/doesn't change is often the cleanest confirmation
+  (e.g. "boss energy 0xC418 untouched ⇒ it was a one-hit kill, not a boss").
+
+## Snapshot → WATCH loop
+
+1. F8-record the action; `snapdiff` to find *which* addresses change and roughly when.
+2. If you need the *writer PC*, relaunch with a **tight** `WATCH` on just those
+   addresses and repeat the action; grep the log for ` aaaa=` to get the `seg:pc`.
+3. Map that PC to code and annotate. For "who calls this?" go static instead:
+   `tools/romscan.py xref 0xPC` (it reads seg0/the resident bank too, which a
+   `segments/*.bin` grep misses).
+
 ## Analysis tips
 
 - Give the user a stationary/known actor as a control (e.g. an enemy that doesn't

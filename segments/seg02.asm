@@ -3247,8 +3247,9 @@ sub_937fh:
 ; --- vendor_make_offer (0x938E) -----------------------------------------------
 ; Arm a sale: pick the item + price (vendor_set_offer_item -> 0xC708 item, 0xC707 price),
 ; start the 0xC706 offer countdown (0x14 = 20 ticks), play the "offer" jingle
-; (sfx 0x19) and draw the price/item bubble (l939eh).  Reached from the vendor
-; spawn/reveal path via the object's stored handler pointer.
+; (sfx 0x19) and draw the price/item bubble (l939eh).  Called from the resident
+; vendor state machine (seg0 l4411h) while seg2 is paged in.
+vendor_make_offer:
 	call vendor_set_offer_item
 	ld a,014h
 	ld (0c706h),a          ; offer timer = 0x14; decremented in vendor_purchase_tick

@@ -37,8 +37,9 @@ Paths below are relative to this repo root.
   (code/data split maps). Anything needed to reassemble or regenerate belongs here.
 - `docs/` — `progress.md` (checklist + RAM map + working notes), `game-notes.md`
   (detailed findings).
-- `tools/` — `regen-seg.sh`, `split-rom.sh`, `strip-listing.py`, gfx pipeline, and
-  the tracing tools (see `msx-runtime-tracing`). Executable tooling only.
+- `tools/` — `regen-seg.sh`, `split-rom.sh`, `strip-listing.py`, `romscan.py`
+  (static xref / table decode), gfx pipeline, and the tracing tools (see
+  `msx-runtime-tracing`). Executable tooling only.
 - `gfx/` — editable graphics assets (PNG + txt); original compressed bytes stay
   authoritative.
 
@@ -88,16 +89,60 @@ of `<Game>.asm`.
 ## Konami idioms to expect
 
 - Inline word-table dispatch by index in A (VK's `DISPATCH_A`): a `call` followed
-  by an inline `dw` table, handler picked by A.
+  by an inline `dw` table, handler picked by A. Other dispatch shapes: `ld hl,tbl;
+  ADD_HL_A; ld a,(hl)` (byte table → sub-index/action id), and `ld de,tbl;
+  ADD_DE_A` with a multiply (`add a,a` x3 = ×8) for **row** tables (N-byte rows).
+- **Off-by-one dispatch**: a `dec a` (or `sub base`) right before the dispatch means
+  id N uses `table[N-1]`. Always check for it — decoding the table from the wrong
+  base shifts every entry. (VK's `collect_bonus` does `dec a`; black bible id 0x10
+  → `table[0x0f]`.)
+- **RNG via `ld a,r`** (the refresh register) — a cheap pseudo-random source. If a
+  mechanic behaves differently run-to-run for the same input, grep for `ld a,r`
+  near its state machine; the branch after it is the coin-flip.
+- **Packed BCD everywhere**: `add a,001h; daa` (and `daa` chains across bytes) =
+  a BCD increment. Scores, heart/money counters, prices, and many on-screen numbers
+  are stored packed-BCD, little-endian, often /100 (a table byte of 0x50 = "50").
+- **Subsystem state blocks**: a feature usually parks all its state in one
+  contiguous RAM block (VK vendor = 0xC700..0xC70F). Find the block by F8-diffing
+  while the feature is active (see `msx-runtime-tracing`), then `romscan xref` /
+  grep the block bytes to reach the handler.
 - State machines driven by a per-frame tick off the 60 Hz timer IRQ (`H.TIMI`).
 - Actor/object slot arrays (fixed count, fixed stride) with a type/active byte at
   offset 0; a per-type behaviour handler table indexed by type. Cross-reference
   Metal Gear's `references/MetalGear/constants/structures.asm` — Konami reused
   structures across games.
 
+## Rooting out logic (static analysis)
+
+`tools/romscan.py` automates the two look-ups we do constantly:
+
+- `romscan xref 0xADDR [--segs a,b]` — every reference to an address, split into
+  **`code`** (real `call`/`jp`/`jr`/`djnz`, absolute + relative) vs **`data?`**
+  (bare little-endian word match). The `code`/`data?` split is the whole point: a
+  word match is often a pointer-table entry but can be a coincidence inside a data
+  curve — verify before trusting it.
+- `romscan table 0xADDR --words N [--index-base 1]` (or `--bytes N`) — decode a
+  dispatch/jump table into its entries; `--index-base 1` mirrors a `dec a`
+  dispatcher so the printed indices match the real ids.
+
+Gotchas this encodes (learned the hard way):
+
+- **Search the resident bank too.** Seg 0 has no committed `.bin` (it's `INCLUDE`d),
+  so grepping `segments/*.bin` silently misses every resident-bank caller. `romscan`
+  reads each bank straight from the ROM, so it sees seg0. A routine that looks
+  "never referenced" in the paged banks is often driven from seg0.
+- **Cross-bank calls are normal.** The resident bank (0x4000-0x7FFF, always mapped)
+  freely `call`s into whatever is paged at 0x8000/0xA000. When the callee is a named
+  label, use it across banks — sjasmplus resolves the global label to the exact
+  address, so `call vendor_make_offer` from seg0 stays byte-exact. Add a comment
+  noting the callee's bank.
+- "No `code` xref" ≠ dead code: an entry can be reached via a **stored/computed
+  pointer** (handler written into an object field) rather than a static transfer.
+
 ## Cost discipline
 
-- Prefer the existing tools over ad-hoc shell. Reuse `regen-seg.sh`, `snapdiff.py`.
+- Prefer the existing tools over ad-hoc shell. Reuse `regen-seg.sh`, `snapdiff.py`,
+  `romscan.py` (don't re-hand-roll xref/table-decode python each time).
 - Don't read whole 5 KLOC segment files linearly; use Grep/semantic search to the
   region of interest.
 - Batch independent shell/reads in one turn. `make verify` is fast (<1 s) — run it

@@ -84,9 +84,56 @@ Each hub's data holds 3 stages x up to 16 rooms x up to 4 objects; per object,
 id bit7 = scenery flag, low 7 bits = sprite id, and one attr byte packs the in-room
 cell position (hi nibble X, lo nibble Y, each *16 px). Stage 0 (courtyard) has no
 object-list entries. `tools/roommap.py` decodes and renders all of this
-(`gfx/map_*.png`). NOTE this is the object LAYOUT only - the visible wall/floor
-geometry is separate per-room RLE bitmap data, and room-to-room connectivity
-(stairs/drops/key-doors) lives in the still-INCBIN seg13 transition code (0xB98A).
+(`gfx/map_*.png`). NOTE this is the object LAYOUT only - the wall/floor geometry
+is the separate metatile map documented next.
+
+## Room geometry / tile map (CONFIRMED, static + runtime, byte-exact)
+
+Every room is an **8 wide x 6 tall grid of METATILES**; each metatile is a **4x4
+block of 8x8 tile ids (16 bytes)**, so a room expands to a **32x24 tile-name map**
+held in work RAM at **0xD100** (rows 0-1 are the HUD; the drawer seg0 0x4f98
+paints the playfield from 0xD140). `seg0 room_map_build` (0x4fb6) does the
+expansion on room entry; `seg1 map_cell_at` (0x7d36) reads it for collision.
+
+Storage (during the build the mapper pages bank 0x0b->0x6000, 0x0c->0x8000,
+0x0d->0xA000, then restores banks 1/2/3):
+- **rowbase[]** - byte table at bank 0x0b **0x6000**; index = rowbase[row]+col.
+  Rooms in a world row = rowbase[row+1]-rowbase[row] (row 1 / stage 1 = 8 rooms).
+- **room stream ptr** = word at bank 0x0b **0x6013 + 2*index** -> the room's
+  **48-byte metatile-id stream** (row-major 8x6), also in bank 0x0b (e.g. stage 1
+  streams start at 0x620b, stride 0x30).
+- **metatile defs** = per-row word table at bank 0x0b **0x7ebb + 2*row**; def(id)
+  = 16 bytes at defbase + id*16 (stage 1 defbase 0x80b1 = bank 0x0c). The special
+  path (0xC41A!=0, e.g. intro) uses a fixed stream 0x614b + defs 0xA041 (bank 0x0d).
+
+**Tile id classes (stage 1).** Walls and floors are the **structural brick family**
+**01..04** (solid SURFACE) + **09..0b** (brick BODY under/behind the surface),
+laid out as a repeating (surface, body) metatile - so a wall column reads
+01/09/01/09... top to bottom. Passable ids: **0x0e..0x17** (open air + far-wall
+decoration); **stairs** - paired tiles **06/0c** (ascending one way) and **07/0d**
+(the mirror), climbable; the **08/05** pair (a fixed 2-tile background graphic
+near the pillar tops - NOT wall/floor and NOT an enemy generator, see below;
+exact depiction unconfirmed); and the decorative blocks **0x2c+** (background
+windows, columns). So the permeability map = solid iff id in {01..04, 09..0b}.
+
+**Engine collision** is stricter than the drawn geometry: `seg1 tile_is_solid`
+(0x7c65) blocks Simon only when **(id-1) < row_solid_thresh[0xD000]** (byte table
+0x7c7f; stage 1 -> 4; "event 6" cells force 6) - i.e. only the 01..04 SURFACES.
+The brick body never needs to be solid because Simon can't get inside a wall, and
+horizontal bounds also come from screen edges / room transitions. (Decorative
+0x2c+ columns are pass-through: e.g. room 0 has no real walls, only a floor.)
+
+`tools/roomperm.py` decodes any world row straight from ROM and renders one
+per-stage contact sheet (`gfx/perm_s<row>_sheet.png`, each room labelled with its
+number); `--all` renders every stage (world rows 0..17; the last rowbase entry is
+an end sentinel). `--collision` shows the strict 01..04-surface view, `--visual`
+adds the 0x2c+ scenery. Validated byte-exact against 0xD100 RAM snapshots for all
+7 recorded stage-1 rooms. Note metatile-definition tables can straddle the
+seg12/seg13 (0x8000/0xA000) window boundary, so the decoder treats banks
+0x0b/0x0c/0x0d as one flat 0x6000-0xBFFF buffer.
+
+Room-to-room connectivity (stairs/drops/key-doors) still lives in the INCBIN
+seg13 transition code (0xB98A).
 
 ## Player (Simon)
 
@@ -202,12 +249,38 @@ Sub-items / consumables:
     - The enemy spawner (seg0 **room_spawner @0x5EBF**) is called every frame from the
       actor-update loop (seg2 0x98F0) whenever 0xD010==0 (normal play). Its first act
       is `ld a,(0c440h) / and a / ret nz` -> while the rosary timer is nonzero it
-      spawns nothing. When 0==C440, it reads the per-(stage 0xD000, room 0xD001)
-      descriptor via seg14 table 0x85A6 and calls spawn generators (0x9CED, 0x9D52,
-      ...) that place actors via spawn_actor into the 0xC800 slots.
+      spawns nothing. When 0==C440, it reads a per-room **spawn bitmask** and
+      dispatches one generator per set bit (see below).
     - **Effect is immediate and current-room** (the gate is checked per frame in
       whatever room you're in), not deferred to the next room. It only suppresses
       *new* spawns; enemies already in the 0xC800 slots are untouched.
+
+### Continuous enemy generators (spawn bitmask)  (CONFIRMED, byte-exact)
+- `room_spawner` (seg0 0x5EBF) indexes seg14 word table **0x85A6** by stage
+  (0xD000), then indexes the resulting byte table by room (0xD001) to fetch a
+  **spawn bitmask**. Stage 1's byte table is at **0x85CF**. Each set bit fires
+  one rate-gated generator; the generators are in seg2:
+
+  | bit | generator (seg2) | actor type | enemy |
+  |-----|------------------|-----------|-------|
+  | 0 | `zombie_generator` 0x9CED | 0x01 | zombie |
+  | 1 | 0x9D52 | 0x02 | (unconfirmed) |
+  | 2 | 0x9D59 | 0x03 | (unconfirmed) |
+  | 3 | 0x9D9E | 0x04 | bat (undulates vertically, moves one horizontal way) |
+  | 4 | 0x9DCA | ? | (unconfirmed) |
+  | 5 | 0x9DDC | ? | (unconfirmed) |
+  | 6 | 0x9DEE | ? | (unconfirmed) |
+
+  Stage 1 confirmed: rooms 0/1/5/6 spawn zombies (bit0), room 4 spawns bats (bit3).
+- Each generator is rate-gated by `sub_9ccah` (per-generator 0xCF00+ counter vs a
+  threshold table, scaled by the 0xD012 difficulty/mood). The spawn **position is
+  hardcoded per stage/room** in `sub_9d03h` (and the bat's `sub_9e1dh`) - it is
+  **NOT** read from the tile map. E.g. stage-1 room-0 zombies enter at X=0xC0
+  (col 24). This is why the small 08/05 tile pair (see "Room geometry") is *not* a
+  generator: its positions don't line up with spawns, and rooms spawn regardless
+  of whether the pair is present.
+- Other enemies (e.g. the dog, type 0x05) come from the per-room **object list**,
+  not this continuous spawner.
   - NOTE: 0xC5E5/0xC5E6 (00->FF/20 at pickup) is the generic pickup-popup message +
     timer set by 0x8F2A for *every* pickup, NOT a rosary-specific state.
   - Still TODO: confirm which of the two rosary types this is and the second's bonus id.

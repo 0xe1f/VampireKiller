@@ -445,6 +445,78 @@ dumps.
       (0xC417 0x35 -> 0x40, +5, @ idx 3023). Score +100 @ idx 2979 (candle
       destructible; boss energy 0xC418 untouched = one-hit kill, not a boss).
 
+- Seventeenth session (ROOM GEOMETRY / MAP DATA - room-to-room transition
+  recordings, idx up to 3167): found where rooms are stored and cracked the layout.
+    * **Tile map = 0xD100** (32x24 tile-name bytes; rows 0-1 HUD). Found via a
+      cross-room RAM page-diff (0xD100..0xD3FF changes wholesale per room), then
+      confirmed by the collision reader `map_cell_at` (seg1 0x7d36, renamed) which
+      indexes `0xD100 + ((Y-0x10)>>3)*32 + (X>>3)` (clamped to 0xD3FF) and the
+      drawer seg0 0x4f98 (paints from 0xD140).
+    * **Build = seg0 room_map_build** (0x4fb6, renamed from l4fb6h): a room is an
+      **8x6 grid of metatiles**, each metatile a **4x4 tile block (16 bytes)**.
+      Data banks (paged in during the build): rowbase[] byte table @ bank 0x0b
+      0x6000 (index = rowbase[row]+col; rooms/row = rowbase[row+1]-rowbase[row]);
+      room stream ptr = word @ 0x6013+2*index -> a 48-byte metatile-id stream (stage
+      1 streams at 0x620b, stride 0x30); per-row metatile-def table @ 0x7ebb (stage
+      1 -> 0x80b1 in bank 0x0c). NOTE `entity_tbl_end` is a misnomer - it is the
+      Konami mapper register at 0x6000 (seg0 ends exactly there).
+    * **Tile classes.** Walls/floors = the structural brick family **0x01..0x0d**
+      (01..04 solid surface + 05..0d brick body, in a repeating (surface,body)
+      metatile - so a wall column reads 01/09/01/09... top to bottom). Passable:
+      air 0x0e..0x17, stairs (paired 06/0c and mirror 07/0d, drawn amber), and
+      decorative blocks **0x2c+** (background
+      windows/columns/curtains). User confirmed: room 0 has no walls (only a
+      floor); room 4's left wall is solid top-to-bottom (classifying only the
+      surface gave horizontal stripes - fixed by filling the whole 01..0d family).
+    * **Engine collision** is stricter: `tile_is_solid` (seg1 0x7c65, renamed from
+      l7c65h) blocks only when `(id-1) < row_solid_thresh[0xD000]` (byte table
+      0x7c7f, renamed; stage 1 -> 4) = the 01..04 surfaces; the brick body needn't
+      be solid since Simon can't enter a wall.
+    * **Tool: `tools/roomperm.py`** decodes any world row straight from ROM and
+      renders black/white permeability (`gfx/perm_s1_*.png` + contact sheet);
+      `--collision` = strict surface view, `--visual` = + 0x2c+ scenery.
+      `--validate` byte-checks the ROM decode against the 0xD100 RAM snapshots:
+      **0 mismatches** across all 7 recorded stage-1 rooms; room 3 (never visited)
+      now decodes from ROM too.
+    * Renamed labels this session (seg0/seg1, all in-source + msx.sym):
+      room_map_build, map_cell_at, tile_is_solid, row_solid_thresh. `make verify`
+      still byte-identical.
+
+- Eighteenth session (ENEMY GENERATORS + all-stage map rendering):
+    * **Continuous enemy spawner cracked.** `room_spawner` (seg0 0x5EBF) indexes
+      seg14 word table **0x85A6** by stage (0xD000), then the resulting byte table
+      by room (0xD001) to fetch a per-room **spawn bitmask** (stage 1 bytes at
+      **0x85CF**). Each set bit (LSB first) fires one rate-gated generator in seg2:
+      bit0 `zombie_generator` 0x9CED -> type 01 (zombie); bit1 0x9D52 -> type 02;
+      bit2 0x9D59 -> type 03; bit3 0x9D9E -> type 04 (bat: vertical undulation, one
+      horizontal way); bits 4-6 0x9DCA/0x9DDC/0x9DEE (types unconfirmed). Stage 1
+      confirmed: rooms 0/1/5/6 spawn zombies, room 4 spawns bats.
+    * Each generator is rate-gated by `sub_9ccah` (per-generator 0xCF00+ counter vs
+      a threshold table scaled by 0xD012 difficulty). **Spawn position is hardcoded
+      per stage/room** in `sub_9d03h` (annotated) - NOT read from the tile map
+      (stage-1 room-0 zombies enter at X=0xC0). Renamed `zombie_generator`
+      (seg0 call site + msx.sym); `make verify` byte-identical.
+    * **The 08/05 "artifacts" are inert background art, NOT generators.** Ruled out
+      by: spawning is bitmask-driven, positions are hardcoded and don't line up with
+      the 08/05 cells, and rooms spawn regardless of the pair's presence. Their
+      actual picture is still unidentified - tile PATTERNS live in a VRAM page the
+      game RLE-decodes from ROM per room (not captured by RAM snapshots), and the
+      background tileset isn't in the gfx catalogue yet (only sprites are). Decoding
+      the per-room tileset loader (seg0 l471bh/l4845h path) is the open next step.
+    * **`roomperm.py` upgrades:** room-number labels drawn in a widened dark-gray
+      band per cell (3x5 bitmap font); stopped writing per-room PNGs (one contact
+      sheet per stage only); **`--all`** renders every stage - world rows **0..17**
+      (the last rowbase entry, 146, is an end sentinel). Fixed a cross-bank read:
+      metatile-def tables can straddle the seg12/seg13 (0x8000/0xA000) boundary, so
+      the decoder now treats banks 0x0b/0x0c/0x0d as one flat 0x6000-0xBFFF buffer.
+      Stage 1 still validates **0 mismatches**; stages 2-17 render but are not yet
+      snapshot-validated (need transition recordings in those stages to confirm).
+    * Room-index vs spatial layout: the geometry data stores **no (x,y) per room** -
+      just a linear per-stage list (rowbase/roomptr). The contact sheet matching the
+      real layout is because rooms were authored in physical reading order (so L/R
+      neighbours are consecutive indices) AND the 4-column sheet happens to equal
+      stage 1's physical width (T/B alignment is lucky, not guaranteed per stage).
+
 - Tooling: added `tools/romscan.py` (static xref + dispatch-table decoder) to
   automate the two look-ups we do every session. `xref` splits real control
   transfers (`code`) from bare word matches (`data?`); `table` decodes jump/handler
@@ -736,8 +808,10 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   address in the block-header comment (e.g. `(seg0 0x5F24)`) so names still line up
   with WATCH-log PCs, and add the same name to `segments/msx.sym` so regen emits it.
   Renamed so far - seg0: draw_hearts_hud/draw_lives_hud/draw_health_bar/
-  draw_enemy_meter/restore_health/damage_health/spawn_actor(+_init);
-  seg1: simon_action_tick, spend_5_hearts.
+  draw_enemy_meter/restore_health/damage_health/spawn_actor(+_init),
+  advance_stage, room_map_build, zombie_generator;
+  seg1: simon_action_tick, spend_5_hearts, map_cell_at, tile_is_solid,
+  row_solid_thresh.
 - Every `vk()`-emitting Lua block MUST use `LUA ALLPASS` — plain `LUA` emits only
   on the final pass and drifts all later labels.
 - After any edit, run `make verify` before moving on.

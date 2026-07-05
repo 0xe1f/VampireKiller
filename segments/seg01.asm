@@ -4302,16 +4302,16 @@ sub_7b6fh:
 	ld e,a
 	ld a,(0c427h)
 	ld d,a
-	call sub_7d36h
-	jp l7c65h
+	call map_cell_at
+	jp tile_is_solid
 sub_7b7fh:
 	ld a,(0c425h)
 	sub 02ch
 	ld e,a
 	ld a,(0c427h)
 	ld d,a
-	call sub_7d36h
-	jp l7c65h
+	call map_cell_at
+	jp tile_is_solid
 sub_7b8fh:
 	ld a,(0c425h)
 	ld e,a
@@ -4324,14 +4324,14 @@ l7b99h:
 	add a,005h
 	ld d,a
 sub_7b9fh:
-	call sub_7d36h
-	call l7c65h
+	call map_cell_at
+	call tile_is_solid
 	ret c
 	ld a,d
 	sub 00ah
 	ld d,a
-	call sub_7d36h
-	jp l7c65h
+	call map_cell_at
+	jp tile_is_solid
 sub_7bb0h:
 	ld a,(0c425h)
 	ld e,a
@@ -4352,14 +4352,14 @@ l7bc7h:
 	ld a,d
 	add a,b
 	ld d,a
-	call sub_7d36h
-	call l7c65h
+	call map_cell_at
+	call tile_is_solid
 	ret c
 	ld a,e
 	sub 008h
 	ld e,a
-	call sub_7d36h
-	call l7c65h
+	call map_cell_at
+	call tile_is_solid
 	ret c
 	ld a,(0cff0h)
 	cp 002h
@@ -4367,8 +4367,8 @@ l7bc7h:
 	ld a,e
 	sub 008h
 	ld e,a
-	call sub_7d36h
-	call l7c65h
+	call map_cell_at
+	call tile_is_solid
 	ret c
 	ld a,(0cff0h)
 	and a
@@ -4382,8 +4382,8 @@ l7c02h:
 	ld a,e
 	sub 008h
 	ld e,a
-	call sub_7d36h
-	jp l7c65h
+	call map_cell_at
+	jp tile_is_solid
 sub_7c0ch:
 	ld a,(0c425h)
 	ld e,a
@@ -4404,14 +4404,14 @@ l7c23h:
 	ld a,d
 	sub b
 	ld d,a
-	call sub_7d36h
-	call l7c65h
+	call map_cell_at
+	call tile_is_solid
 	ret c
 	ld a,e
 	sub 008h
 	ld e,a
-	call sub_7d36h
-	call l7c65h
+	call map_cell_at
+	call tile_is_solid
 	ret c
 	ld a,(0cff0h)
 	cp 002h
@@ -4419,8 +4419,8 @@ l7c23h:
 	ld a,e
 	sub 008h
 	ld e,a
-	call sub_7d36h
-	call l7c65h
+	call map_cell_at
+	call tile_is_solid
 	ret c
 	ld a,(0cff0h)
 	and a
@@ -4434,25 +4434,34 @@ l7c5eh:
 	ld a,e
 	sub 008h
 	ld e,a
-	call sub_7d36h
-l7c65h:
+	call map_cell_at
+; --- tile_is_solid - classify a room tile id as blocking ---------------------
+;  In:  A = tile id from map_cell_at (0 outside the 0xD100..0xD3FF window).
+;  Out: carry set = solid (Simon's feet/head are blocked here).
+;  A tile is solid iff (id-1) < threshold, where the threshold is per world row
+;  (row_solid_thresh[0xD000]); the "event 6" cells (0xCE00==6) force threshold 6.
+;  Stage 1 (row 1) threshold = 4, so only the floor/platform surface ids 01..04
+;  block Simon - the thick wall/brick metatiles (ids 0x2c+) are visual only.
+tile_is_solid:
 	ld c,a
-	ld a,(0ce00h)
+	ld a,(0ce00h)          ; current cell event code
 	cp 006h
-	jr z,l7c7ah
-	ld a,(0d000h)
-	ld hl,l7c7fh
-	call ADD_HL_A
+	jr z,l7c7ah            ; event-6 cells use a fixed threshold of 6
+	ld a,(0d000h)          ; A = world row
+	ld hl,row_solid_thresh
+	call ADD_HL_A          ; HL -> threshold for this row
 	ld a,c
 	dec a
-	cp (hl)
+	cp (hl)                ; carry = (id-1) < threshold -> solid
 	ret
 l7c7ah:
 	ld a,c
 	dec a
-	cp 006h
+	cp 006h                ; event-6: solid iff (id-1) < 6
 	ret
-l7c7fh:
+; row_solid_thresh: one byte per world row (0xD000); see tile_is_solid.  Bytes:
+;   02 04 04 04 04 04 04 04 04 04 09 09 09 04 04 04 09 09 08 ...
+row_solid_thresh:
 	ld (bc),a
 	inc b
 	inc b
@@ -4486,13 +4495,13 @@ l7c9bh:
 	inc c
 	ld a,(bc)
 	ld d,a
-	call sub_7d36h
+	call map_cell_at
 	cp 004h
 	ret z
 	ld a,(bc)
 	add a,008h
 	ld d,a
-	call sub_7d36h
+	call map_cell_at
 	cp 004h
 	ret nz
 	ld a,(bc)
@@ -4514,13 +4523,13 @@ l7cc3h:
 	inc c
 	ld a,(bc)
 	ld d,a
-	call sub_7d36h
+	call map_cell_at
 	cp 003h
 	ret z
 	ld a,(bc)
 	sub 008h
 	ld d,a
-	call sub_7d36h
+	call map_cell_at
 	cp 003h
 	ret nz
 	ld a,(bc)
@@ -4544,12 +4553,12 @@ l7cebh:
 	ld a,(bc)
 	sub 008h
 	ld d,a
-	call sub_7d36h
+	call map_cell_at
 	cp 00dh
 	ret z
 	ld a,(bc)
 	ld d,a
-	call sub_7d36h
+	call map_cell_at
 	cp 00dh
 	ret nz
 	ld a,(bc)
@@ -4573,12 +4582,12 @@ l7d15h:
 	ld a,(bc)
 	add a,008h
 	ld d,a
-	call sub_7d36h
+	call map_cell_at
 	cp 00ch
 	ret z
 	ld a,(bc)
 	ld d,a
-	call sub_7d36h
+	call map_cell_at
 	cp 00ch
 	ret nz
 	ld a,(bc)
@@ -4586,13 +4595,21 @@ l7d15h:
 	ld (bc),a
 	xor a
 	ret
-sub_7d36h:
+; --- map_cell_at - read the room tile id under a pixel position --------------
+;  In:  E = Y pixel, D = X pixel.  Out: A = tile id at that cell (0 if outside).
+;  The room tile-name map is a 32-wide x 24-tall grid of 8x8 cells at 0xD100
+;  (rows 0-1 are the HUD; the drawer seg0 0x4f98 paints from 0xD140).  Cell:
+;      cell = ((Y-0x10)>>3)*32 + (X>>3)   ->  addr = 0xD100 + cell
+;  clamped to the 0xD100..0xD3FF window (returns 0 above/below it).  The map is
+;  expanded from ROM metatiles by seg0 room_map_build; callers pair this with
+;  tile_is_solid to test terrain.
+map_cell_at:
 	ld a,e
-	sub 010h
-	and 0f8h
+	sub 010h               ; drop the 0x10px top margin
+	and 0f8h               ; align to 8px cell
 	rrca
 	rrca
-	rrca
+	rrca                   ; A = (Y-0x10)/8 = tile row
 	add a,a
 	add a,a
 	add a,a

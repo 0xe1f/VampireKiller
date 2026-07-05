@@ -4807,22 +4807,32 @@ l9ce9h:
 	ld (hl),a
 	xor a
 	ret
+; --- zombie_generator (0x9ced) - continuous zombie spawner (room_spawner bit0) -
+;  Rate-gated by sub_9ccah (0xCF00 counter, threshold table l9d4ah scaled by the
+;  0xD012 difficulty/mood).  When it fires, sub_9d03h picks the spawn position
+;  (hardcoded per stage/room - NOT read from the tile map), then spawns actor
+;  type 01 (zombie).  Stage 1 room 0 spawns at X=0xC0 (col 24).
+zombie_generator:
 	ld hl,0cf00h
 	ld de,l9d4ah
-	call sub_9ccah
+	call sub_9ccah         ; time to spawn?
 	ret nz
-	call sub_9d03h
+	call sub_9d03h         ; DE = spawn position (per stage/room)
 	call sub_9e1dh
-	ret c
-	ld c,001h
+	ret c                  ; bail if the slot area / cap says no
+	ld c,001h              ; actor type 01 = zombie
 	jp spawn_actor
+; --- sub_9d03h - pick a generator spawn position by stage/room -----------------
+;  Out: DE = spawn position (E=X, D=Y; D flips 0xF0<->0x10 = bottom/top by a
+;  per-actor flag).  Reads stage 0xD000 (L) and room 0xD001 (H) and returns a
+;  HARDCODED X for that cell - the tile map (and the 08/05 pair) is not consulted.
 sub_9d03h:
-	ld a,(0c425h)
+	ld a,(0c425h)          ; Simon Y (used by some stage branches)
 	ld c,a
-	ld hl,(0d000h)
+	ld hl,(0d000h)         ; L = stage (0xD000), H = room (0xD001)
 	ld a,l
 	dec a
-	jr z,l9d2fh
+	jr z,l9d2fh            ; stage 1
 	dec a
 	jr z,l9d22h
 	dec a

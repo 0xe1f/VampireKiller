@@ -144,7 +144,9 @@ hurt_simon_contact: equ 0x8173	; Simon -= 2*l81d5h[type].odd on enemy contact (s
 hurt_simon_projectile: equ 0x85ad	; Simon -= 8/16 from a 0xC580 hazard slot, sets hurt state
 weapon_hit_damage: equ 0x7e33	; whip/sub-weapon damage to enemy 0xC418 (per weapon+type table)
 advance_stage: equ 0x434e	; next stage: 0xD000++ (stage), 0xD001=0 (room), bump 0xC410/11, transition 4
-room_spawner: equ 0x5ebf	; per-frame enemy spawner; bails while 0xC440 (rosary/pickup no-spawn timer) != 0
+room_map_build: equ 0x4fb6	; expand a room's 8x6 metatiles (4x4 tiles ea) into the 0xD100 tile map
+room_spawner: equ 0x5ebf	; per-frame enemy spawner; per-room bitmask (seg14 0x85a6[stage]) dispatches generators; bails while 0xC440 != 0
+zombie_generator: equ 0x9ced	; room_spawner bit0: rate-gated zombie (actor type 01) spawner
 spawn_actor: equ 0x5f24	; alloc a free actor slot (7 @ 0xC800, stride 0x80) + init
 spawn_actor_init: equ 0x5f7e	; init tail of spawn_actor
 
@@ -154,6 +156,9 @@ konami_logo_step: equ 0x6253	; reveal one more row of the logo (poll 0xC422)
 lookup_word_tbl: equ 0x6549	; DE = ((word*)DE)[A]  (generic word-table lookup)
 simon_action_tick: equ 0x6b40	; Simon per-frame action-state machine (0xC420)
 spend_5_hearts: equ 0x7154	; deduct 5 from heart total (0xC417, BCD)
+tile_is_solid: equ 0x7c65	; carry=solid iff (tile-1) < row_solid_thresh[0xD000]
+row_solid_thresh: equ 0x7c7f	; per-world-row solidity threshold byte table
+map_cell_at: equ 0x7d36	; A = room tile id under pixel (D=X,E=Y) from the 0xD100 map
 
 ; ---- Vampire Killer banked routines (segment 2 @ 0x8000) -----------------
 collect_bonus: equ 0x8d33	; apply picked-up bonus id A (latch 0xC419, table @ 0x8D45)

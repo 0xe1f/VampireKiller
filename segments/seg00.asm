@@ -2511,12 +2511,18 @@ l4f86h:
 	sbc a,c
 	sbc a,d
 	sbc a,c
+; --- 0x4f8a - build + draw the current room (entry to room_map_build) --------
+;  HL = 0xD100 (destination tile-name map), B = world row (0xD000), C = column
+;  (0xD001).  room_map_build expands the room's metatiles into 0xD100..0xD3FF.
 	ld hl,0d100h
 	ld a,(0d000h)
 	ld b,a
 	ld a,(0d001h)
 	ld c,a
-	jp l4fb6h
+	jp room_map_build
+; --- 0x4f98 - paint the 32x22 playfield of the tile map to the screen --------
+;  Walks 0xD140 (map row 2, skipping the 2 HUD rows) as 22 rows x 32 cols and
+;  draws each tile via sub_4b12h (dest advances 8px per cell / 8px per row).
 	ld hl,0d140h
 	ld de,DCOMPR
 	ld b,016h
@@ -2537,21 +2543,36 @@ l4fa3h:
 	ld e,a
 	djnz l4fa0h
 	ret
-l4fb6h:
-	ld (0c5d5h),hl
-	ld (0c5d7h),bc
+; --- room_map_build (0x4fb6) - expand a room's metatiles into the 0xD100 map -
+;  In: HL = dest (0xD100), B = world row (0xD000), C = column (0xD001).
+;  A room = 8 wide x 6 tall METATILES; each metatile = 4x4 tile ids (16 bytes).
+;  The build pages the map-data banks into the upper windows (mapper regs at
+;  0x6000/0x8000/0xA000; entity_tbl_end is the 0x6000 register at seg0's end),
+;  then for the normal case (0xC41A==0):
+;    stream ptr = word[ 0x6013 + 2*(rowbase[row] + col) ]   (bank 0x0b @ 0x6000)
+;       where rowbase[] is the byte table at 0x6000; stream = 48 metatile ids
+;       (row-major, 8x6).  rooms-in-row = rowbase[row+1]-rowbase[row].
+;    def base  = word[ 0x7ebb + 2*row ]  (per-row metatile defs; row 1 -> 0x80b1
+;       in bank 0x0c @ 0x8000).  def(id) = 16 bytes at defbase + id*16.
+;  (0xC41A!=0 uses a fixed stream at 0x614b and def base 0xA041 in bank 0x0d.)
+;  The 16 def bytes are copied as a 4x4 block (4 tiles, +0x20 to next map row).
+;  Banks are restored (0x6000/0x8000/0xA000 <- 1/2/3) before returning.
+;  See tools/roomperm.py for a byte-exact reimplementation of this decoder.
+room_map_build:
+	ld (0c5d5h),hl         ; 0xC5D5 = dest map ptr (0xD100)
+	ld (0c5d7h),bc         ; 0xC5D7 = column, 0xC5D8 = world row
 	di
-	ld hl,0f0f1h
+	ld hl,0f0f1h           ; RAM shadow of the mapper bank registers
 	ld a,00bh
-	ld (entity_tbl_end),a
+	ld (entity_tbl_end),a  ; page bank 0x0b -> 0x6000 window (map tables/streams)
 	ld (hl),a
 	inc l
 	inc a
-	ld (08000h),a
+	ld (08000h),a          ; page bank 0x0c -> 0x8000 window (row-1 metatile defs)
 	ld (hl),a
 	inc l
 	inc a
-	ld (0a000h),a
+	ld (0a000h),a          ; page bank 0x0d -> 0xA000 window (default metatile defs)
 	ld (hl),a
 	ei
 	ld a,(0c41ah)
@@ -4797,45 +4818,47 @@ room_spawner:
 	ld (08000h),a
 	ld (0f0f2h),a
 	ei
-	ld a,(0d000h)
-	ld de,085a6h
-	call 06549h
-	ld a,(0d001h)
+	ld a,(0d000h)          ; stage row
+	ld de,085a6h           ; seg14 word table: per-stage spawn-bitmask pointer
+	call 06549h            ; DE = word[stage]  (stage 1 -> 0x85cf)
+	ld a,(0d001h)          ; room (column)
 	call ADD_DE_A
-	ld a,(de)
+	ld a,(de)              ; A = this room's spawn bitmask (bit N = generator N on)
 	push af
 	di
-	ld a,002h
+	ld a,002h              ; page seg2 into 0x8000 (the generator routines)
 	ld (08000h),a
 	ld (0f0f2h),a
 	ei
+	; dispatch one generator per set bit (LSB first).  Each is rate-gated and
+	; spawns a fixed actor type at a hardcoded per-room position:
 	pop af
 	rra
 	push af
-	call c,09cedh
+	call c,zombie_generator ; bit0 -> spawn actor type 01 (zombie)
 	pop af
 	rra
 	push af
-	call c,09d52h
+	call c,09d52h          ; bit1 -> actor type 02
 	pop af
 	rra
 	push af
-	call c,09d59h
+	call c,09d59h          ; bit2 -> actor type 03
 	pop af
 	rra
 	push af
-	call c,09d9eh
+	call c,09d9eh          ; bit3 -> actor type 04 (bat: vertical undulation, one way)
 	pop af
 	rra
 	push af
-	call c,09dcah
+	call c,09dcah          ; bit4 -> generator (type unconfirmed)
 	pop af
 	rra
 	push af
-	call c,09ddch
+	call c,09ddch          ; bit5 -> generator (type unconfirmed)
 	pop af
 	rra
-	jp c,09deeh
+	jp c,09deeh            ; bit6 -> generator (type unconfirmed)
 	ret
 ; --- spawn_actor (seg0 0x5F24) - spawn an actor into a free slot ----------------
 ; Entry: C = actor type id (>0), DE = spawn position word.  Actors live in 7

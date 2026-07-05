@@ -65,6 +65,21 @@ index** driving which tile set + enemy set + room layout loads. Destructible-wal
 chest contents are likely table-driven per room. Instant-death-on-drop implies a
 "no room below" check in the fall/room-transition code.
 
+*CONFIRMED (runtime + static, see progress.md "Eighth session"):* the hub/stage/room
+index is a RAM trio:
+- **0xD002 = hub** (6 hubs, 0-5) - selects the packed object dataset in seg14
+  (pointer table @ 0x8668); chosen from the stage via the seg0 0x5E71 table which
+  groups stages in 3s (so ~3 stages per hub, matching the design).
+- **0xD000 = stage** (0 = courtyard, 1-18 = the 18 stages).
+- **0xD001 = room** within the stage (increments walking right).
+Each hub's data holds 3 stages x up to 16 rooms x up to 4 objects; per object,
+id bit7 = scenery flag, low 7 bits = sprite id, and one attr byte packs the in-room
+cell position (hi nibble X, lo nibble Y, each *16 px). Stage 0 (courtyard) has no
+object-list entries. `tools/roommap.py` decodes and renders all of this
+(`gfx/map_*.png`). NOTE this is the object LAYOUT only - the visible wall/floor
+geometry is separate per-room RLE bitmap data, and room-to-room connectivity
+(stairs/drops/key-doors) lives in the still-INCBIN seg13 transition code (0xB98A).
+
 ## Player (Simon)
 
 Default weapon: **leather whip**. Can be replaced by pickups:
@@ -261,11 +276,24 @@ Catalogued so far (extend `manifest.tsv` as more sets are identified):
 - `intro_simon` - seg13, 8 streams 0x1A319-0x1A4BC, 8 two-plane Simon sprites
   (intro: Simon arriving at the castle).
 - `intro_sky` - seg13, 0x1B895, 8 cloud patterns + a 2-frame bat flap.
+- `simon_cell0` - seg13, 40 two-plane frames via pointer table 0xA281 (indexed by
+  0xC42E). Simon's **lower body** (legs): walk/jump/crouch/climb poses.
+- `simon_cell1` - seg13, 36 frames via pointer table 0xA2D1 (indexed by 0xC42F).
+  Simon's **upper body**: torso/head/arm and the **whip** (whip-crack arcs).
 
-TODO (next): map the remaining sprite/tile sets - which streams belong to Simon
-vs each enemy/boss/item - many are reached through per-level/per-actor pointer
-tables (e.g. l55deh, 0xA281+A, 0xA2D1+A); resolve those tables to fill out the
-catalogue.
+In-game Simon is two stacked, independently-animated 16x16 hardware-sprite cells
+(legs + torso/whip), refreshed each frame by `load_simon_sprites` (seg0 0x56E8):
+it reads the two frame indices (0xC42E legs, 0xC42F torso), looks up the seg13
+pointer tables (0xA281 / 0xA2D1), and RLE-decompresses the chosen streams into the
+sprite pattern generator (0xF800 = cell 0, 0xF840 = cell 1).  The two-table design
+is why legs and upper body can animate on different cadences (e.g. whipping while
+standing still).
+
+TODO (next): map the remaining sprite/tile sets - which streams belong to each
+enemy/boss/item. Simon's two pointer tables are now resolved (0xA281 legs / 0xA2D1
+torso+whip, via load_simon_sprites 0x56E8 -> simon_cell0/1). Still to resolve:
+the per-level/per-actor tables (e.g. l55deh; the seg13 stream region 0xA319-0xBFFF
+holds more actor art beyond Simon) and the enemy sprite loaders.
 
 ## Reference: Metal Gear disassembly
 

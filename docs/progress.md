@@ -43,6 +43,14 @@ dumps.
   authoritative (ROM byte-exact), readable dumps live in `gfx/`. Added
   `tools/rleenc.py` (optimal RLE packer), `tools/gfxdump.py` + `gfx/manifest.tsv`
   + `make gfx`. Seeded catalogue with two confirmed sprite sets (seg 13).
+- Simon in-game sprites catalogued: `load_simon_sprites` (seg0 0x56E8) draws Simon
+  as two stacked 16x16 cells, each animated independently - cell 0 = legs (seg13
+  pointer table 0xA281, indexed by 0xC42E, 40 frames), cell 1 = torso+arm+whip
+  (table 0xA2D1, 0xC42F, 36 frames). Tables bounded exactly (A281 ends where A2D1
+  begins; A2D1 ends where stream data starts at 0xA319). Added to manifest as
+  `simon_cell0` / `simon_cell1`; rendered previews confirm legs vs whip poses.
+  Also fixed CRLF line endings on all tools/*.py (they broke direct `./tool`
+  execution with `env: python3\r`).
 - Segment 1 (banked code @ 0x6000) brought into the build as disassembled source
   (byte-exact), shared BIOS names moved to `segments/bios.inc`. Leading data map
   in `tools/seg01.blocks` (tables at 0x6000-0x602f, 0x605f-0x615a incl. a word
@@ -52,8 +60,9 @@ dumps.
   - Object-list loader cluster 0x615b-0x6208: `sub_615bh` unpacks the current
     cell's object list from seg 14 into the 4-byte-slot tables at 0xDB00/DC00/DD00
     (`sub_6188h` unpacker, `sub_61a5h` per-level pointer, `sub_61b0h` clear,
-    `l61c2h` emits hardware sprites via seg0 0x5F26). RAM: 0xD000/D001/D002 =
-    current row/col/level index.
+    `l61c2h` emits hardware sprites via seg0 0x5F26). RAM: 0xD000 = stage (0=court-
+    yard, 1-18), 0xD001 = room within stage, 0xD002 = hub / seg14 object-dataset
+    (6 hubs of 3 stages; row->hub table at seg0 0x5E71). See "Eighth session".
   - `lookup_word_tbl` (0x6549): generic word-table lookup (DE=table, A=index).
   - Screen/level build cluster (annotated):
     - 0x62d7: arms mode bytes 0xC415=0x20/0xC418=0x80, then jp seg0 0x53BD.
@@ -86,8 +95,11 @@ dumps.
       handlers, inline word table now decoded to defw). 0xCE02 = per-step timer;
       the last handler clears 0xCE00 and raises 0xCE40 (done).
     - sub_66c1h (0x66c1): post-event machine, DISPATCH_A on (0xCE40-1) (4
-      handlers). Drives the cutscene script player, then bumps level counter
-      0xD012 (cap 3) and writes VDP R23.
+      handlers). Drives the cutscene script player, then bumps the progress /
+      difficulty tier 0xD012 (incremented per level-advance, capped at 3) and
+      resets VDP R23 (vertical offset) to 0.  0xD012 is read by enemy handlers to
+      scale behaviour (e.g. actor_set_xvel_speedup adds 0xD012*32 to enemy speed).
+      NOTE: VK does not scroll (room-based); 0xD012 is a speed/difficulty ramp.
     - Cutscene sequencer: sub_6719h resets it; sub_6736h/sub_673fh advance a
       timeline tick 0xCE33 (every 4th frame); sub_674ah pages seg 8 + seg 5 and
       fires the keyframe due at the current tick from the script indexed by
@@ -200,11 +212,89 @@ dumps.
       wall broke (frame 390) a pickup actor spawned here (+0 type/frame byte = 0x84 for
       the white key); touching it cleared the slot (0x84 -> 0) and set 0xC701.  So a
       destroyed wall's bonus is emitted as a 0xC520 pickup actor.
-    * 0xC419 toggles on every pickup (1 -> 0x18 on the key, 0x18 -> 1 on the heart) -
-      role TBD (HUD/pickup-message or "last pickup" latch).
-    * NEXT: targeted WATCH on 0xC417 + 0xC701 (+ 0xC520) to grab the writer PCs and
-      annotate the pickup/inventory routines; and a rollover test to settle
-      binary-vs-BCD on the heart count.
+    * 0xC419 = **last-collected-bonus id latch** (RESOLVED): `collect_bonus` (seg2
+      0x8D33) writes A here as its first act; it's the bonus id (1 small heart, 0x18
+      staff, etc.), used to pick the pickup HUD/message. Not a toggle - it just holds
+      whatever was collected last.
+
+- Seventh session (whip brazier -> small heart undulates + falls -> collect, x2), via
+  F8 snapshot timeline (fresh file). Nails the small-heart drop lifecycle AND the
+  shared bonus-collect dispatcher, all statically corroborated:
+    * **Heart drop actor chain** (all in the 0xC800 actor list, stride 0x80):
+      type 0x1E (initial spawn, seg2 sub_9a5fh `ld c,01eh`) -> type **0x24** (the
+      undulating faller) -> on landing, freed and re-emitted as a **0x84 settled
+      pickup** in the 0xC500 pickup list (8 slots, stride 0x20) -> Simon touches it
+      -> collected. (Runtime seq per cycle: 0x1E@f45 -> 0x24@f57 -> land/0x84@f82 ->
+      pickup@f103; cycle 2 identical at f150/162/187/209.)
+    * **Falling-heart (0x24) physics** decoded from the slot: +3 = Y integer (rises
+      steadily = constant-speed fall), +5 = X integer which swings out then back
+      (the side-to-side undulation), driven by a signed X-velocity at +9/+0xA that
+      ramps down through zero, plus a phase counter at +0xC. So the "undulation" is
+      a decaying/reversing horizontal velocity, not a sine LUT position.
+    * **collect_bonus (seg2 0x8D33)** = the shared "apply bonus id A" routine: latches
+      A -> 0xC419, then `DISPATCH_A` through a 25-entry word table at 0x8D45 (index
+      A-1). Confirmed entries: **value 1 = small heart (+1)**, **value 2 = large
+      heart (+5)** (both `call add_hearts` with B=1/5), health refills via
+      restore_health (+8/+32), keys/sub-weapons OR a bit into 0xC701/0xC702.
+      Reached from BOTH pickup paths: the mid-air 0x24 heart (seg2 sub_9a72h ->
+      collect_bonus(1)) and the settled 0xC500 list (collision -> collect).
+    * **add_hearts (seg0 0x459B)** / **spend_hearts (0x45A7)** now labelled: BCD add
+      (clamp 99) / subtract (floor 0) on 0xC417; heart counter confirmed BCD again
+      (small +1 gave 00->01->02, no binary carry weirdness).
+    * NEXT: decode the rest of the collect_bonus table (values 3-25: which are keys,
+      staff, sub-weapons, invincibility) and the 0x24->0x84 landing/convert routine.
+
+- Eighth session (LOCATION / WORLD STRUCTURE - walk right through courtyard rooms
+  0,1,2 then enter the castle), F8 timeline (baseline frame 275). Pins the
+  hub/stage/room hierarchy so recordings can be tagged by location and we never
+  conflate enemy/object positions between rooms. **KEY CORRECTION vs first pass:**
+  the trio is a hub/stage/room hierarchy, NOT a raw pixel row/column:
+    * **0xD002 = HUB** (object-data set), 6 hubs (0-5). Chosen from the stage via the
+      seg0 row->dataset table at 0x5E71 = `0 0 0 0 |1 1 1|2 2 2|3 3 3|4 4 4|5 5 5`
+      for stages 0..18 - i.e. stages are grouped in 3s per hub (matches "a hub has
+      ~3 stages"). Each hub's packed object data is in seg14 (pointer table @ 0x8668).
+    * **0xD000 = STAGE** number: 0 = courtyard, 1..18 = the 18 stages (3 per hub).
+      Changed once during the walk (0->1) exactly at the courtyard->castle boundary
+      (frame 585). Stage 0 (courtyard) carries NO object-list entries: the sprite
+      emitter l61c2h does `dec a; ret m` on stage 0, so it draws nothing (consistent
+      with "no animals in the courtyard").
+    * **0xD001 = ROOM** index within the stage (walk right): stepped 0 ->1 (f377) ->2
+      (f474) through the three courtyard rooms, then reset to 0 on entering the castle.
+    * **0xC411 = stage/area label** (HUD "STAGE" value): 0 courtyard -> 1 castle at
+      f585. Clamp range differs from D000 (C411 < 0x19, D000 < 0x13) so it is a
+      separate counter, not identical to the stage number - exact relation TBD.
+    * Data path (static): seg1 `sub_615bh` unpacks hub D002's data into 0xDB00/DC00/
+      DD00 (3 streams = the hub's 3 stages); `sub_6188h` grammar = (id,attr) pairs,
+      0x00 = next room cell (0x10 apart), 0xFF = end. Per object: id bit7 = scenery,
+      low7 = sprite id; attr hi nibble = X cell, lo nibble = Y cell (x/y * 16 px).
+      Reader `l61c2h`: stageStream = (D000-1) - D002*3; room = D001.
+    * **Room/object map extracted for ALL 18 stages** -> `tools/roommap.py` (decodes
+      seg14 + the row table, renders `gfx/map_*.png` + a per-room object breakdown).
+      `--datasets all` = whole world (each row = a stage, each cell = a room, dots =
+      objects); `--datasets N` = one hub. This is the OBJECT-LAYOUT layer only (not
+      wall/floor artwork, which is separate per-room RLE bitmap data).
+    * Transition frames this recording: f377 (room 0->1), f474 (room 1->2), f585
+      (stage 0->1 = enter castle: C411 0->1, D000 0->1, D001 ->0).
+    * WORKFLOW going forward: at the start of every recording, note (C411, D002 hub,
+      D000 stage, D001 room) so each captured action is tagged with its location;
+      re-check after any room/stage change before comparing actor/object slots.
+    * NEXT to fully rebuild stages "with room relations": (1) disassemble seg13 (the
+      room-transition brain, writer at 0xB98A - still INCBIN) for room bounds + exits
+      (stairs/drops/key-doors); (2) map per-room background bitmaps for actual
+      geometry; (3) name the object ids (0x0d/0x10 common scenery, 0x05 dog, ...).
+
+- Ninth session (dog hits Simon -> knocked back across a room boundary), F8 timeline
+  (frames ~628-732). Two useful results:
+    * **Validates the object map**: Simon was in stage 1 (D000=1), room 3 (D001=3);
+      roommap's decode of hub0/stage1 puts a dog (id 0x05) in room 3 (col 3) - exactly
+      where the hit came from. So the seg14 object decode matches live play.
+    * **Confirms horizontal room adjacency + transition trigger**: the dog hit (f664,
+      health 0x1e->0x18) knocked Simon LEFT; his X counted down 0x30..0x08 then wrapped
+      to 0xF6 (crossed the left screen edge, f681), and **D001 went 3 -> 2** - i.e.
+      walking/knocked off the left edge enters room N-1 and re-enters at the right edge.
+      So room links along a stage are D001 +/-1 via edge-crossing (D000 stage unchanged).
+    * 0xC41B = candidate hit/knockback or transition-pending flag (0x03 during the
+      knockback, cleared to 0 at the room transition, f682) - confirm next session.
 
 - Segments 2 & 3 imported as disassembled source (byte-exact): both graduated
   from INCBIN to INCLUDE (org 0x8000 / 0xA000, pages 2a / 2b).  Raw disassembly
@@ -244,8 +334,10 @@ dumps.
     frees when pixel pos leaves the field), `actor_free` (0x99FD).
   - Velocity helpers (seg3): `actor_set_yvel` (0xA564) / `actor_set_xvel` (0xA573)
     store DE; `actor_add_yvel` (0xA550) adds with a [0,0x7FF] clamp (gravity/terminal
-    fall); `actor_add_xvel` (0xA56B); `actor_set_xvel_scroll` (0xA65A) blends in room
-    scroll (0xD012 * 32) so actors track the scrolling background.
+    fall); `actor_add_xvel` (0xA56B); `actor_set_xvel_speedup` (0xA65A) sets X
+    velocity plus a progress speed bias (0xD012 tier * 32, in the travel
+    direction) so enemies get faster as the game advances - NOT scrolling (VK is
+    room-based and does not scroll).
   All names in `tools/msx.sym`; cross-segment `call 0aXXXh` sites in seg0/1/2 now use
   the labels.  (Audit correction: the "0xB473 sprite-shape table" note was wrong -
   0xB473 is code, a `jr` target inside an actor routine, not data.)

@@ -860,8 +860,10 @@ sub_458fh:
 	add a,008h             ; advance to the next digit cell
 	ld d,a
 	ret
-; add B hearts to 0xC417 (BCD), clamp at 99 - the pickup path (B=1 small heart,
-; B=5 large heart; runtime-confirmed both increments).
+; add_hearts (seg0 0x459B) - add B hearts to 0xC417 (BCD), clamp at 99. The pickup
+; path funnels here via collect_bonus (seg2): B=1 small heart, B=5 large heart
+; (both increments runtime-confirmed).
+add_hearts:
 	ld hl,0c417h
 	ld a,(hl)
 	add a,b
@@ -870,6 +872,8 @@ sub_458fh:
 	ld a,099h              ; clamp at 99 hearts
 l45a5h:
 	jr l45b0h
+; spend_hearts (seg0 0x45A7) - subtract B hearts from 0xC417 (BCD), floor at 0.
+spend_hearts:
 	ld hl,0c417h
 	ld a,(hl)
 	cp b
@@ -3521,27 +3525,36 @@ l566ch:
 	ld bc,00180h
 	call sub_467ch
 	jp sub_533dh
-sub_56e8h:
-	call sub_5369h
-	ld a,(0c42eh)
-	add a,a
-	ld hl,0a281h
+; ---------------------------------------------------------------------------
+;  load_simon_sprites (seg0 0x56E8) - refresh Simon's two hardware-sprite cells
+;  from the current animation frame.  Simon is drawn as two stacked 16x16 cells,
+;  each animated independently: cell 0 = legs/lower body, cell 1 = torso+arm+whip.
+;  0xC42E indexes the leg-cell stream table (0xA281), 0xC42F the torso-cell table
+;  (0xA2D1); both tables and their streams live in seg13.  Each selected stream is
+;  RLE-decompressed into the sprite pattern generator (0xF800 / 0xF840).
+;  Catalogued as gfx/simon_cell0 + gfx/simon_cell1.
+; ---------------------------------------------------------------------------
+load_simon_sprites:
+	call sub_5369h          ; page seg 11/12/13 (sprite gfx) in
+	ld a,(0c42eh)           ; legs frame index
+	add a,a                 ; *2 (word table)
+	ld hl,0a281h            ; seg13 leg-cell pointer table
 	call ADD_HL_A
 	ld e,(hl)
 	inc hl
-	ld d,(hl)
-	ld hl,0f800h
-	call sub_46f8h
-	ld a,(0c42fh)
+	ld d,(hl)               ; DE = leg stream source
+	ld hl,0f800h            ; sprite cell 0 (legs)
+	call sub_46f8h          ; decompress into VRAM
+	ld a,(0c42fh)           ; torso/whip frame index
 	add a,a
-	ld hl,0a2d1h
+	ld hl,0a2d1h            ; seg13 torso-cell pointer table
 	call ADD_HL_A
 	ld e,(hl)
 	inc hl
-	ld d,(hl)
-	ld hl,0f840h
+	ld d,(hl)               ; DE = torso stream source
+	ld hl,0f840h            ; sprite cell 1 (torso + whip)
 	call sub_46f8h
-	jp sub_533dh
+	jp sub_533dh            ; restore default game banks
 	call sub_572eh
 	call sub_5381h
 	ld hl,0bea7h
@@ -4339,11 +4352,11 @@ l5c44h:
 	call z,0ad9ah
 	ld a,001h
 	ld (0c40ah),a
-	call sub_56e8h
+	call load_simon_sprites
 	ld a,0fdh
 	jp sub_50a6h
 l5c63h:
-	call sub_56e8h
+	call load_simon_sprites
 	call 06b06h
 	call 0783eh
 	call 0b6b2h

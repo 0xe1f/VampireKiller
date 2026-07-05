@@ -130,11 +130,14 @@ DISPATCH_A: equ 0x406b	; jump via inline word table indexed by A
 init: equ 0x4075	; cartridge entry point
 reset_run_state: equ 0x44cd	; wipe run work RAM (0xC405..0xDFFF) + seed defaults
 draw_hearts_hud: equ 0x456d	; draw HEART counter (0xC417, BCD) to HUD
+add_hearts: equ 0x459b	; add B hearts to 0xC417 (BCD, clamp 99); B=1 small, B=5 large
+spend_hearts: equ 0x45a7	; subtract B hearts from 0xC417 (BCD, floor 0)
 draw_lives_hud: equ 0x4575	; draw LIVES counter (0xC410, BCD) to HUD
 draw_health_bar: equ 0x45d8	; draw HEALTH bar from 0xC415
 draw_enemy_meter: equ 0x45ec	; draw ENEMY/BOSS energy meter from 0xC418
 restore_health: equ 0x460c	; 0xC415 += B, clamp to 0x20
 damage_health: equ 0x4632	; 0xC415 -= B, floor 0
+load_simon_sprites: equ 0x56e8	; refresh Simon's 2 sprite cells (legs 0xA281/C42E, torso+whip 0xA2D1/C42F)
 spawn_actor: equ 0x5f24	; alloc a free actor slot (7 @ 0xC800, stride 0x80) + init
 spawn_actor_init: equ 0x5f7e	; init tail of spawn_actor
 
@@ -146,6 +149,7 @@ simon_action_tick: equ 0x6b40	; Simon per-frame action-state machine (0xC420)
 spend_5_hearts: equ 0x7154	; deduct 5 from heart total (0xC417, BCD)
 
 ; ---- Vampire Killer banked routines (segment 2 @ 0x8000) -----------------
+collect_bonus: equ 0x8d33	; apply picked-up bonus id A (latch 0xC419, table @ 0x8D45)
 brazier_tick_all: equ 0x8678	; per-frame update of the 8 brazier/candle slots (0xC470)
 brazier_tick: equ 0x8693	; update one brazier/candle (flame anim + hit test)
 brazier_destroyed: equ 0x87c1	; brazier/candle hit: clear it + run item drop
@@ -162,4 +166,4 @@ actor_add_yvel: equ 0xa550	; Yvel += DE, clamped to [0,0x7FF] (gravity/terminal)
 actor_set_yvel: equ 0xa564	; store DE -> Y velocity (+0x07/+0x08)
 actor_add_xvel: equ 0xa56b	; Xvel += DE (+0x09/+0x0A)
 actor_set_xvel: equ 0xa573	; store DE -> X velocity (+0x09/+0x0A)
-actor_set_xvel_scroll: equ 0xa65a	; set X velocity blended with room scroll (0xD012)
+actor_set_xvel_speedup: equ 0xa65a	; set X velocity + progress speed bias (0xD012 tier * 32)

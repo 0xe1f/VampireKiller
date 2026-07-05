@@ -700,7 +700,7 @@ la50ch:
 la51ch:
 	ld de,0fd80h
 la51fh:
-	jp actor_set_xvel_scroll
+	jp actor_set_xvel_speedup
 	ld c,071h
 	ld a,(0d000h)
 	cp 015h
@@ -812,7 +812,7 @@ la5e3h:
 	jr nc,la5fch
 	ld de,0fea0h
 la5fch:
-	call actor_set_xvel_scroll
+	call actor_set_xvel_speedup
 	ld (ix+011h),001h
 	jr la616h
 la605h:
@@ -869,28 +869,32 @@ sub_a649h:
 	pop af
 	ret
 ; ---------------------------------------------------------------------------
-;  actor_set_xvel_scroll (0xA65A) - set X velocity (DE) but fold in the room's
-;  horizontal scroll speed (0xD012 * 32) so the actor tracks with the scrolling
-;  background.  DE == 0 short-circuits to a plain store.  Ends by storing to
-;  +0x09/+0x0A via actor_set_xvel.
+;  actor_set_xvel_speedup (0xA65A) - set X velocity (DE) with a progress-based
+;  speed bias added in the direction of travel.  0xD012 is a game-progress /
+;  difficulty tier (0..3, bumped each level-advance in seg1 0x66FC and capped at
+;  3), so enemies move faster the deeper you get.  Adds 0xD012 * 32 to the speed:
+;  when the velocity is negative (moving left) the addend is negated first
+;  (sub_a183h) so the magnitude grows either way.  DE == 0 -> plain store.  Ends
+;  by storing to +0x09/+0x0A via actor_set_xvel.  (VK does not scroll; this is a
+;  speed ramp, not background scrolling.)
 ; ---------------------------------------------------------------------------
-actor_set_xvel_scroll:
+actor_set_xvel_speedup:
 	ld a,d
 	or e
 	jp z,actor_set_xvel     ; zero velocity: just store
 	push hl
 	ex de,hl                ; HL = requested X velocity
-	ld a,(0d012h)           ; A = scroll speed
+	ld a,(0d012h)           ; A = progress/difficulty tier (0..3)
 	add a,a
 	add a,a
 	add a,a
 	add a,a
-	add a,a                 ; A = scroll * 32
+	add a,a                 ; A = tier * 32
 	ld d,000h
 	ld e,a
 	bit 7,h
-	call nz,sub_a183h       ; sign-extend/adjust when velocity negative
-	add hl,de               ; blend scroll into velocity
+	call nz,sub_a183h       ; negate the bias when moving left
+	add hl,de               ; add the speed bias in the travel direction
 	ex de,hl
 	pop hl
 	jp actor_set_xvel
@@ -1258,7 +1262,7 @@ enemy_zombie_tick:
 la952h:
 	ld (ix+011h),e          ; store 16-bit X velocity (+0x11/+0x12)
 	ld (ix+012h),d
-	call actor_set_xvel_scroll
+	call actor_set_xvel_speedup
 	ld (ix+00bh),b          ; walk anim frame (+0x0B = 0x3d / 0x3b)
 	ld (ix+00ch),008h       ; anim timer (+0x0C = 8)
 	ld (ix+010h),c          ; facing flag (+0x10 = 0 right / 1 left)
@@ -1289,7 +1293,7 @@ la98bh:
 	call actor_set_yvel
 	ld e,(ix+011h)
 	ld d,(ix+012h)
-	call actor_set_xvel_scroll
+	call actor_set_xvel_speedup
 	ld (ix+006h),001h
 sub_a9a9h:
 	ld a,(ix+003h)
@@ -1852,7 +1856,7 @@ sub_add9h:
 	ld (ix+006h),001h
 	ld de,CHKRAM
 	call actor_set_yvel
-	call actor_set_xvel_scroll
+	call actor_set_xvel_speedup
 	ld (ix+00bh),05fh
 	ld (ix+010h),000h
 	ld (ix+011h),03ch
@@ -1877,7 +1881,7 @@ lae13h:
 	ld de,0fec0h
 	ld (ix+00bh),05fh
 lae34h:
-	call actor_set_xvel_scroll
+	call actor_set_xvel_speedup
 	ld de,CHKRAM
 	jp actor_set_yvel
 lae3dh:
@@ -1912,7 +1916,7 @@ lae6bh:
 	jr c,lae87h
 	ld de,0fec0h
 lae87h:
-	call actor_set_xvel_scroll
+	call actor_set_xvel_speedup
 	ld (ix+010h),001h
 	jr laea9h
 lae90h:
@@ -1924,7 +1928,7 @@ lae90h:
 	jr nc,laea2h
 	ld de,0fec0h
 laea2h:
-	call actor_set_xvel_scroll
+	call actor_set_xvel_speedup
 	ld (ix+010h),000h
 laea9h:
 	ld a,(ix+005h)
@@ -2059,7 +2063,7 @@ lafb7h:
 	ld (ix+00bh),023h
 	ld de,0fde0h
 lafc2h:
-	jp actor_set_xvel_scroll
+	jp actor_set_xvel_speedup
 	ld a,(ix+005h)
 	bit 7,(ix+00ah)
 	ld c,010h
@@ -2097,7 +2101,7 @@ lb004h:
 	ld e,(ix+009h)
 	ld d,(ix+00ah)
 	call sub_a183h
-	call actor_set_xvel_scroll
+	call actor_set_xvel_speedup
 lb018h:
 	bit 2,(ix+00ch)
 	ld c,021h
@@ -2188,7 +2192,7 @@ lb0cdh:
 	ld a,(0c427h)
 	sub (ix+005h)
 	call c,sub_a183h
-	call actor_set_xvel_scroll
+	call actor_set_xvel_speedup
 	ld (ix+006h),001h
 	ld (ix+011h),000h
 	ld a,(ix+002h)
@@ -2470,7 +2474,7 @@ lb345h:
 	jr nc,lb35ah
 	ld de,0fdc0h
 lb35ah:
-	call actor_set_xvel_scroll
+	call actor_set_xvel_speedup
 	ld de,CHKRAM
 	call actor_set_yvel
 	ld (ix+006h),001h
@@ -2525,7 +2529,7 @@ lb3b0h:
 	jr c,lb3cah
 	ld de,0fdc0h
 lb3cah:
-	call actor_set_xvel_scroll
+	call actor_set_xvel_speedup
 	ld a,(ix+012h)
 	and 006h
 	jr nz,lb3e2h
@@ -2543,7 +2547,7 @@ lb3e2h:
 	call 07bc5h
 	jr nc,lb40ah
 	ld de,0fdc0h
-	call actor_set_xvel_scroll
+	call actor_set_xvel_speedup
 	jr lb40ah
 lb3ffh:
 	call 07c21h
@@ -2584,7 +2588,7 @@ lb43eh:
 	ld e,(ix+009h)
 	ld d,(ix+00ah)
 lb455h:
-	jp actor_set_xvel_scroll
+	jp actor_set_xvel_speedup
 	ld bc,0080ch
 	ld e,(ix+003h)
 	ld d,(ix+005h)

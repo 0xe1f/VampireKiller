@@ -2129,11 +2129,22 @@ l8d19h:
 	ret
 sub_8d30h:
 	ld a,(ix+004h)
-sub_8d33h:
+; ---------------------------------------------------------------------------
+;  collect_bonus (seg2 0x8D33) - apply a picked-up bonus whose id is in A.
+;  Entry sub_8d33h pushes the common tail 0x50A6; sub_8d37h is the bare entry
+;  (caller supplies its own continuation).  Latches the bonus id into 0xC419
+;  (last-pickup latch, drives the pickup HUD/message) then dispatches through the
+;  25-entry word table at 0x8D45 (index = A-1; A>=0x1A falls through to l8d77h):
+;    1 = small heart (+1), 2 = large heart (+5), health refills via restore_health
+;    (+8 / +32), keys + sub-weapons OR their bit into 0xC701/0xC702, etc.
+;  Reached from both pickup paths: the mid-air 0xC800 heart (type 0x24, via
+;  sub_9a72h) and the settled 0xC500 pickup list.
+; ---------------------------------------------------------------------------
+collect_bonus:
 	ld hl,050a6h
 	push hl
 sub_8d37h:
-	ld (0c419h),a
+	ld (0c419h),a          ; latch last-collected bonus id
 	call 08f2ah
 	cp 01ah
 	jr nc,l8d77h
@@ -2217,7 +2228,7 @@ l8dafh:
 	jr l8d96h
 	ld b,001h
 l8db8h:
-	call 0459bh
+	call add_hearts         ; value 1 = small heart (+1); value 2 = large heart (+5)
 	ld a,00fh
 	ret
 	ld b,005h
@@ -3131,11 +3142,11 @@ l9307h:
 	ld a,00fh
 	call 050a6h
 	ld b,005h
-	jp 0459bh
+	jp add_hearts
 	ld a,01dh
 	call 050a6h
 	ld b,005h
-	jp 045a7h
+	jp spend_hearts
 	ld (ix+000h),000h
 	call sub_937fh
 	ld hl,0e580h
@@ -3377,7 +3388,7 @@ l94ceh:
 	cp 020h
 	push af
 	call c,sub_9514h
-	call 045a7h
+	call spend_hearts
 	ld a,(0c708h)
 	call sub_8d37h
 	pop af
@@ -4362,7 +4373,7 @@ l9aa0h:
 	push af
 	call actor_free
 	pop af
-	call sub_8d33h
+	call collect_bonus      ; type 0x24 heart touched in mid-air -> +1 heart
 	scf
 	ret
 l9aaah:

@@ -124,7 +124,7 @@ horizontal bounds also come from screen edges / room transitions. (Decorative
 0x2c+ columns are pass-through: e.g. room 0 has no real walls, only a floor.)
 
 `tools/roomperm.py` decodes any world row straight from ROM and renders one
-per-stage contact sheet (`gfx/perm_s<row>_sheet.png`, each room labelled with its
+per-stage minimap (`gfx/minimap_s<NN>.png`, each room labelled with its
 number); `--all` renders every stage (world rows 0..17; the last rowbase entry is
 an end sentinel). `--collision` shows the strict 01..04-surface view, `--visual`
 adds the 0x2c+ scenery. Validated byte-exact against 0xD100 RAM snapshots for all

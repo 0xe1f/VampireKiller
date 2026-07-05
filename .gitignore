@@ -1,10 +1,10 @@
 # Copyrighted game data - never committed (regenerate with tools/split-rom.sh)
 segments/*.bin
 
-# ROM-derived graphics dumps - regenerate with `make gfx` (manifest is committed)
+# ROM-derived graphics dumps - regenerate with `make gfx` (manifest is committed).
+# PNGs (sprite sheets, minimaps) ARE tracked so they're viewable without a rebuild.
 gfx/*.bin
 gfx/*.txt
-gfx/*.png
 gfx/index.md
 
 # Build output

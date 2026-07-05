@@ -19,15 +19,17 @@ HOW ROOMS ARE STORED (all offsets are CPU addresses within an 8KB bank window):
 
   Rooms in a row = rowbase[row+1] - rowbase[row].  World row 1 = stage 1 (8 rooms).
 
-PERMEABILITY (default) = the structural floor/wall brick family, tile ids
-0x01..0x0d (minus the climbable stairs 06/0c).  This family builds every wall and
-floor: solid surfaces are ids 01..04 and the brick BODY under/behind them is
-05..0d, laid out as a repeating (surface, body) metatile - so a wall column
-alternates 01/09/01/09..., which is why classifying only the surface produced
-horizontal stripes.  Everything else is passable: air 0x0e..0x17, stairs, the
-inert 08/05 tile pair (not wall/floor and not a spawn generator - role unknown),
-and the decorative blocks 0x2c+ (background windows, columns).  Stairs are the
-paired tiles 06/0c and 07/0d (mirror).
+PERMEABILITY (default) = the structural floor/wall brick family: solid surfaces
+01..04 and the brick BODY under/behind them 09..0b, laid out as a repeating
+(surface, body) metatile - so a wall column alternates 01/09/01/09..., which is
+why classifying only the surface produced horizontal stripes.  Everything else is
+passable: air 0x0e..0x17; the decorative blocks 0x2c+ (background windows,
+columns); and the passable decoration ids 05..08 (05/08 = the inert 2-tile pair;
+06/07 = stage 1's wide-stair edge / background wallpaper elsewhere).  Stairs are
+the CLIMBABLE diagonal tiles 0c (one way) and 0d (mirror) - drawn amber - which is
+exactly what the engine's stair-step code tests; other stages draw 1-tile-wide
+stairs (0c/0d only), while stage 1 pairs each step with a decorative 06/07 half
+(hence its "fat" 2-wide stairs).
 Colours: walls/floors white, empty black, climbable stairs amber.
 
 Two other views:
@@ -37,8 +39,9 @@ Two other views:
   --visual    : structural family PLUS the 0x2c+ decorative blocks (shows the
                 drawn artwork, but paints background scenery as if solid).
 
-Output: one contact sheet per stage, gfx/<tag>_s<row>_sheet.png (tag = perm |
-coll | vis), each cell labelled with its room number in a dark-gray band.
+Output: one minimap (contact sheet) per stage, gfx/minimap_s<NN>.png (the default
+permeability view; --collision/--visual add a _coll/_vis suffix), each cell
+labelled with its room number in a dark-gray band.
 
 Usage:
   tools/roomperm.py [--rom references/VampireKiller.rom] [--row 1 | --all]
@@ -49,9 +52,14 @@ import argparse, os
 
 COLS, ROWS = 32, 24
 PLAY_TOP = 2                    # rows 0-1 = HUD
-STAIRS = {0x06, 0x0c, 0x07, 0x0d}   # 06/0c ascend one way, 07/0d the mirror
-DECOR = {0x05, 0x08}                 # inert 08/05 pair: not wall/floor, not a
-                                     # spawn generator (verified) - role unknown
+STAIRS = {0x0c, 0x0d}   # the CLIMBABLE diagonal tiles (0c one way, 0d the mirror);
+                        # this is what the engine's stair-step routines actually
+                        # test (seg1 sub_7ce2h checks 0x0d, sub_7d0ch checks 0x0c).
+DECOR = {0x05, 0x06, 0x07, 0x08}     # passable decoration, never solid or climbable:
+                                     # 05/08 = the inert 2-tile pair; 06/07 = the
+                                     # decorative half of stage 1's 2-wide stairs
+                                     # (0c06/070d) and elsewhere just background
+                                     # wallpaper (e.g. stage 10) - NOT stairs.
 AIR = set(range(0x0e, 0x18)) | {0x00} | STAIRS | DECOR
 COLL_THRESH = {0: 2, 1: 4, 2: 4, 3: 4, 4: 4, 5: 4, 6: 4, 7: 4, 8: 4, 9: 4,
                10: 9, 11: 9, 12: 9, 13: 4, 14: 4, 15: 4, 16: 9, 17: 9, 18: 8}
@@ -210,7 +218,8 @@ def render_stage(rom, row, scale, mode, tag, out_dir, ascii_dump=False):
     if not images:
         return
     W, H, buf = contact_sheet(images, cols=4, gap=8)
-    sheet = f"{out_dir}/{tag}_s{row}_sheet.png"
+    suffix = "" if tag == "perm" else f"_{tag}"
+    sheet = f"{out_dir}/minimap_s{row:02d}{suffix}.png"
     write_rgb(sheet, W, H, buf)
     print(f"contact sheet -> {sheet} ({W}x{H})")
 

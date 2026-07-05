@@ -586,6 +586,31 @@ dumps.
    move), 0x6C3B/0x6C5E (facing), 0x6D15-0x6D67 (jump), 0x7213-0x728A (whip),
    0x7527 (whip multi-sprite emitter), 0x6B81/0x6CC6/0x7681 (anim frames).
 5. Continue disassembling segments 1-15.
+6. Room-map renderer (`tools/roomperm.py`) per-stage tile-semantics cleanup.
+   Tile-name id meaning is PER-STAGE (each stage's tileset reuses ids), so the
+   global classification (validated only on stage 1) misfires elsewhere. Settled
+   so far:
+   - **Stairs = climbable tiles 0x0c (one way) / 0x0d (mirror) ONLY** - this is
+     what the engine's stair-step code tests (seg1 sub_7ce2h=0x0d, sub_7d0ch=0x0c).
+     `06`/`07` are NOT stairs: they are decoration (stage 1 pairs each step with a
+     06/07 half -> its unique 2-wide "fat" stairs; other stages draw 1-wide 0c/0d;
+     stage 10 uses 06/07 as background wallpaper = the old "stair noise"). `06/07`
+     reclassified as passable decoration (with the inert 05/08 pair) in roomperm.py.
+   - **Residual per-stage errata to isolate** (user review of all 18 sheets):
+     * stage 0 - RESOLVED / not a bug: room 2's gate embeds a few genuine 0c/0d
+       stair tiles (same ids the engine climbs) as decoration; they're just
+       inaccessible in the intro. Decision: leave them coloured as stairs (a stair
+       tile is a stair tile whether or not it's reachable).
+     * stage 6 room 5 - one errant 0c.
+     * stage 15 rooms 6-9 - errant 0c/0d AND errant solid tiles.
+     * stage 10 rooms 2/3/4/6/7/8 - "solid noise": isolated 01-04/09-0b tiles used
+       as background render white (same per-stage problem, one layer down in the
+       SOLID classification, not stairs).
+     * stage 17 - RESOLVED by the 0c/0d-only rule: its false stairs were 06/07
+       (10 each), now reclassified as decoration.
+   - Likely next step: derive per-stage tile classes from the actual per-stage
+     tileset/metatile semantics rather than global id ranges (or gate solids by the
+     per-stage row_solid_thresh and stairs by structure+tileset group).
 
 ## Next tracing session (resume plan)
 

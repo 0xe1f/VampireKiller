@@ -482,6 +482,224 @@ dumps.
       room_map_build, map_cell_at, tile_is_solid, row_solid_thresh. `make verify`
       still byte-identical.
 
+- Twenty-third session (MINIMAP is now the ONLY layout; Dracula-room notes):
+    * **Dropped BFS entirely.** After comparing both, the user chose the game's own
+      authored geography. `tools/roomperm.py` now has a single `layout()` (the former
+      `minimap_layout`, seg2 0x9681 table); removed `bfs_layout`, `DIR_DELTA`,
+      `LAYOUT_OVERRIDE`, and the `--minimap` flag / `_gamemap` suffix. Connectivity
+      (`CONN_PTR`) is retained ONLY for door detection, never for placement. Deleted
+      the 19 `minimap_s*_gamemap.png` compare files and regenerated the full set
+      (s00..s18) from the minimap table. `make verify` unaffected (tool-only change).
+    * **Dracula's room (stage 18 room 9) = a heuristic dead-end (deferred).** Decoded
+      the room's raw tile grid and correlated it against two in-game screenshots. The
+      layout is: FLOOR at rows 22-23 (`06` surface / `0b` body); `0c/0d` decorative
+      pillars at cols 2-3 & 28-29; a big central PICTURE FRAME (unique metatile run
+      `0x10`..`0xf5`, cols 7-24) = Dracula's portrait; and brick strips (`06`-`0b`) down
+      cols 0-1, 4-6, 25-27, 30-31.
+        - **User ground truth: there are NO walls in this room.** Only the FLOOR is
+          impermeable (plus a couple of scripted jump-block ledges Simon bounces between
+          to climb). The picture frame and both side columns are background decoration.
+        - **Why no tile heuristic can render it faithfully.** The decorative side columns
+          are built from the SAME brick tile IDs (`06`-`0b`) as the real floor, so there
+          is no per-tile signal separating decoration from solid. Every rule fails the
+          same way: DECOR-set (`05`-`08` passable) drops the floor's `06` surface; the
+          engine's own per-stage solidity threshold (`tile_is_solid`, stage 18 = `8` ->
+          `01`-`08` solid) would paint all the side columns as WALLS that don't exist;
+          context-adjacency can't tell a column apart from a floor edge. The boss room
+          simply doesn't drive its geometry from tile collision (Simon is bounded by the
+          screen + scripted platforms).
+        - **Rejected** switching the permeability view to the engine collision threshold:
+          it mis-renders room 9 AND regresses other higher-threshold stages (measured:
+          stage 10 +16.1%, stage 18 +9.9%, stage 0 +4.6%), with no ground truth to
+          justify those. `0c/0d` also still render amber ("staircases that aren't
+          diagonal") because STAIRS is a global set.
+        - **Path forward (not yet done):** treat room 9 as a hand-authored per-room
+          override (floor-only, like `DOOR_OVERRIDE`) rather than chase a global rule.
+          Also all-edges-blocked -> the door heuristic fires cosmetic false doors there.
+
+- Twenty-second session (MINIMAP LAYOUT TABLE = ground-truth room geography):
+    * **The game ships hand-authored room positions.** Chasing why the connectivity-
+      BFS layout mis-placed rooms in stages 13/15, the user pointed at the in-game F2
+      "world map" item. Followed F2: seg0 **read_fkeys (0x4BFB)** samples kbd row 6
+      (F1/F2/F3 -> bits 0/1/2), edge-detected into **0xC00B**. seg2 **minimap_driver
+      (0x955A)** dispatches on map-screen state **0xCF38**; F2 needs the map item
+      (**0xC701 bit7**) and spends one of **0xC70F** uses (seeded to 3).
+    * **minimap_room_pos (seg2 0x9681)** is authoritative geography: per stage 0xD000
+      it indexes **0x969C** -> a per-room array of one-byte POSITION CODES, then maps
+      each code via **0x975E** to a packed coord (**hi byte = X** 0x20+0x20*col, 6 cols;
+      **lo byte = Y** 0x38+0x15*row, 5 rows) -> 0xCFF2. **minimap_room_count (0x95FD)**
+      = rooms per stage. Decoded straight from ROM for all **19 stages (0..18)**.
+    * **Offered as `--minimap` alongside the BFS default** in `tools/roomperm.py`
+      (`minimap_layout` vs `bfs_layout`; `_gamemap` suffix). The BFS reconstruction
+      stays the default - it reasons about physical adjacency, which is what a modder
+      thinks in - and the game table is opt-in for comparison. **BFS agrees with the
+      game map on 16/19 stages**; only portal/loop stages 12, 13, 18 differ (the game
+      table reproduces the user's hand corrections there: stage 13 room 10 right of 9,
+      etc.). `minimap_stages()`/`minimap_room_count()` drive `--all`, so both paths now
+      render **stage 18 (Dracula)** - its geometry rowbase delta is a garbage sentinel
+      (-23), so room count comes from the minimap table (10) while its room pointers/
+      defbase decode normally.
+    * **Why the heuristic was doomed (confirmed).** Connectivity is a NAVIGATION graph,
+      not spatial: it has wrap/portal edges on BOTH axes. Proof: stage 8 has a genuine
+      **vertical loop** (`4.down->7` AND `7.down->4`, yet 7 is above 4). The old rule
+      "horizontal can loop, vertical can't" was simply false - hence the authored table.
+    * Removed the now-dead BFS layout / `LAYOUT_OVERRIDE` (stage 12) / `stage_rows`;
+      deleted the `_doorA`/`_doorB` comparison PNGs. Annotated seg0 `read_fkeys` and the
+      seg2 minimap subsystem (driver, build loop, room_pos + tables); msx.sym updated.
+      `make verify` still byte-exact.
+    * **Context-aware solidity (fixed stage-18 stray blocks).** Stage 18's staircases
+      pair each stair (0c/0d) with a brick-BODY tile (09-0b) as a decorative support;
+      the permeability view painted those standalone bodies as stray 1x1 white blocks.
+      `is_solid_ctx` now counts 09-0b solid only when 4-adjacent to a SURFACE tile
+      01-08 (structural 01-04 plus the 05-08 pair, which is the floor/wall surface in
+      some stages - e.g. Dracula room 9's floor is a 06 surface over a 0b body), so
+      real walls/floors stay solid (no striping, unlike the engine-collision view)
+      while lone supports become passable. Used by render, ascii, and door detection.
+      (Chose this over the engine's raw per-stage collision threshold, which was
+      correct for stage 18 but changed ~33% of the higher-threshold stages like 10.)
+    * Open: stage 18 room 9 (Dracula's isolated arena) has all edges blocked, so the
+      door heuristic fires on its edge gaps - cosmetic false doors, to revisit with the
+      door work (door = blocked-edge + wall opening; not an object). Room 8's left
+      nibble is 9 (not blocked), so mechanism A can't see its real door either - same
+      class of miss as stage 15, for the door pass.
+- Twenty-first session (DOOR = placed object, data path decoded):
+    * **Key correction.** A door's TILES are universal: stage 15 room 8's door (left
+      edge) is **byte-for-byte identical** to room 0's right-edge opening that is NOT a
+      door - wall (01/02,0a/0b) rows 0-13, void (00) rows 14-19, floor below. Proof that
+      geometry alone can never separate a real door from a walled recess; door-ness is
+      DATA, not pixels.
+    * **Door is a placed special object (type 0x1F).** Traced the runtime path end to
+      end: the object renderer (seg2 ~0x87F6) treats display-type **0x1F** as a special
+      object. seg2 `l881bh` reads its attribute `ix+009`; if bits7-6 are set (`&0xC0 ==
+      0xC0`) it splits the attr into **subtype = bits5-2**, **slot = bits1-0** and calls
+      the spawner **`l9180h`** (0x9180). The spawner writes a 16-byte struct into
+      **0xC5B5** (or 0xC5C5): +0=active, +1/+2 = position, +4 = subtype, +5 = slot,
+      +7/+8 = latched position. `0xC5AD/0xC5AE` (= 0xC5B5 slot +? / the door coords the
+      proximity test reads) come straight from this object's placement.
+    * **Door state machine (0xC5AC).** seg2 `l914eh`/`sub_9175h`/`l916f`: 0xC5AC = door
+      sub-state (1 = armed, 0xFF = opening kicked off via 0x5403, 3 = fully open, 5 =
+      vertical variant). While in state 3 it advances a frame counter (+3) blitting the
+      opening frames via 0x494D until 0x2C. `sub_771fh` (seg1) dispatches on 0xC5AC and,
+      on overlap (0x8587) + white key (0xC701 bit0), spends the key and opens.
+    * **A/B comparison RULED OUT the placed-object door theory.** Added
+      `roomperm.py --compare-doors` (emits `_doorA` = mechanism A edge/geometry and
+      `_doorB` = placed-object overlay per stage). Result the user verified against the
+      real game: **doors are mechanism A** (blocked edge + opening), correct for EVERY
+      stage except 15. Mechanism B is a dead end for white-key doors: id-0x1f objects
+      exist in only **3 rooms game-wide** (stages 3 and 4), none a white-key door. So
+      the type-0x1F code path (seg2 `l881bh`/`l9180h`/`0xC5AC`) is real but it's the
+      **vendor / a rare special object**, NOT the stage door. (Stage-15 room 8's list
+      object `0x10 @ (11,10)` is the painting, confirming B doesn't mark the door.)
+    * **Shipped: mechanism A is now the default door detector.** `door_rects()` rewritten
+      to check all FOUR blocked edges (was left/right only) with an enclosed opening;
+      `--compare-doors` kept for future A/B checks. All `gfx/minimap_s*.png` regenerated:
+      stage 1 door = room 7 right edge (correct); stage 15 = room 8 only (via override).
+    * **Stage 15 is the lone exception (to revisit).** Its real door (room 8, left-wall
+      gap) is NOT a blocked edge (room 8 left → room 9), so A can't see it; it stays
+      pinned in `DOOR_OVERRIDE`. Mechanism still open - user wants to discuss later.
+    * **DOWN edges are NOT doors (fixed).** Falling off a bottom edge is a DEATH PIT
+      (engine's sub_7682h bottomless-pit path), not an exit - so `door_rects()` now
+      checks left/right/up only, never down (stage 15 room 6's bottom gap is death).
+    * **Layout: vertical-first placement (fixed circular rows).** Horizontal links can
+      loop, making L/R ambiguous; vertical (up/down) links never loop. `layout()` now
+      exhausts vertical before each single horizontal step, distinguishing two loop
+      kinds: (a) a 2-room loop where a room's left AND right point to the same neighbour
+      (stage 15: 4↔5, 2↔3) is DEFERRED so the room takes its column from its vertical
+      parent (8 down→5 puts 5 under 8); (b) a longer cycle with distinct L/R (stage 1's
+      0-1-2-3 bottom row) is unrolled RIGHT-before-LEFT so it grows forward and the
+      wrap edge lands on an already-placed target. Results: stage 1 stays 4567/0123,
+      stage 15 stacks 8-above-5 / 7-above-4, stage 13's 0-1-2 chain stays intact; no
+      room overlaps on any stage. (User diagnosed the loop cause and the vertical rule.)
+    * **Portal (asymmetric) links found.** Audited back-links (A d→B should give
+      B opp→A). Most one-way links are consistent DROPS (X down→Y, Y up→blocked - you
+      fall but can't climb back). Stage 13 is the only TRUE portal: 11 left→9 while
+      9 right→10 (two rooms both claim 9's right), so it can't be a perfect grid - the
+      portal edge is simply ignored for placement, which keeps the physical rooms sane.
+    * **Source annotated** (seg2, byte-exact): the type-0x1F special-object promoter
+      (0x881B / l8838h), the spawner `l9180h`, and the 0xC5AC door-open state machine
+      (`l914eh`/`sub_9175h`) - now understood to be the vendor/special-object path.
+
+- Twentieth session (STAGE-12 anchor + WHITE-KEY DOOR rendering):
+    * **Stage 12 layout.** Portal labyrinth = four physically-disconnected segments
+      ({0,1,2}, {3,4,5,6}, {7,8}, {9,10,11}, room 6 isolated); in-segment left/right
+      edges are portals, not adjacency. `LAYOUT_OVERRIDE[12]="row"` now lays it out
+      in index order anchored at room 0 (start room), keeping each segment contiguous.
+    * **Door mechanism (confirmed).** A stage exit fires when Simon walks/climbs off a
+      connectivity-blocked edge (nibble 0xF) → boundary flag **0xC408** → white-key
+      check → `advance_stage` (0x434E). Routed through the seg13 brain (`sub_5a35h`
+      seg0 0x5A35 → 0xB963), so it is **direction-agnostic**: stage 1's door is a
+      horizontal walk-off (room 7 right); **stage 15's door is an UP exit** (room 8
+      up=0xF) into a mid-room framed door. White-key check/consume: seg0 0x438B
+      (`and 0FEh` on 0xC701 bit0).
+    * **Door rendering (shipped, with a TODO).** `tools/roomperm.py door_rects()`
+      draws a red bar at blocked edges with an enclosed passable opening, sized to
+      the opening. Works for the common case; on by default (`--no-doors` to skip).
+    * **TWO door mechanisms (confirmed).** (a) **Edge door** = walk off a blocked
+      horizontal edge → 0xC408 boundary flag (stage 1 room 7; the geometric heuristic
+      handles these). (b) **Special-object door** = a placed door you approach; the
+      white-key check `sub_771fh` calls 0x8587, a PROXIMITY test vs the special object
+      at 0xC5AD/0xC5AE (0xC5B5/0xC700 subsystem) - NOT a tile lookup (stage 15 room 8,
+      an UP exit). Both spend the white key and advance the stage but via different code.
+    * **Why the heuristic mis-fired on stage 15** (all now understood): it only checks
+      left/right edges (missed room 8's UP/object door); a blocked edge + gap is not
+      uniquely a door (room 0 = walled recess, geometrically identical to a real edge
+      door); scenery columns (0x2c+, e.g. 0x6f) read as passable so the all-blocked
+      isolated decoy room 9 lit up both sides. No universal door TILE - and BOTH
+      framed boxes in room 8 (9c/9d-a1/a2 and 06/07-08/09 centres) are PAINTINGS (a
+      portrait-gallery motif recurring in stage-15 rooms 6,7,8,9), not doors. The
+      real door in room 8 is the empty (air) gap flush against the LEFT wall: cols
+      0-3 solid down to row 13, then rows 14-19 open.
+    * **Fix shipped: curated `DOOR_OVERRIDE` table** in roomperm.py (stage → {room:
+      [rects]}) that REPLACES the heuristic for hand-verified stages; rect size still
+      derived from the tile opening. Seeded stage 15 = room 8 only (the left-wall
+      air gap, NOT the two paintings). Heuristic stays the default
+      for un-curated stages (stage 1 etc.
+      still correct). REMAINING: verify the other stages vs the game map and pin any
+      the heuristic gets wrong; longer-term, decode the special-object door data
+      source (feeds 0xC5AD/0xC5AE) for principled detection.
+    * **Source annotated** (seg0/seg1, all in-source; `make verify` byte-identical):
+      seg1 room-edge crossing handler l77d8h (+ renamed `set_stage_boundary` 0x7807),
+      the edge/stair detector `sub_7682h` (sets pending dir 0xC41B by direction, with
+      the up/down/left/right cases + bottomless-pit path), the white-key door check
+      `sub_771fh`, and seg0 `sub_5a35h` (the seg13-paged transition-brain wrappers:
+      0xB963 lookup, 0xB99A permit load).
+    * **Door-detection lead (NEW, changes the approach).** `sub_771fh` loads Simon's
+      position (0xC425 Y, 0xC427 X) and calls **0x8587**, which is NOT a tile lookup -
+      it is a PROXIMITY test (Simon ± facing vs a bounding box) against the current
+      **special object** at **0xC5AD/0xC5AE**. So the white-key door is a *placed
+      special object* (0xC5B5/0xC700 vendor/special-object subsystem), NOT a tile-map
+      opening. That's exactly why the geometry heuristic mis-renders stage 15 (it
+      hunts wall gaps). **To fix door rendering: find where the per-room door special
+      object (0xC5AD/0xC5AE / 0xC5B5 list) is loaded from ROM** and mark that cell -
+      likely a specific object id in the seg14 per-room object list (candidate: id
+      0x10 sits alone in stage-15 room 8 @ cell (11,10)). Verify before trusting.
+
+- Nineteenth session (ROOM CONNECTIVITY + spatial minimaps):
+    * **Transition graph decoded (seg13).** Normal room-to-room movement is NOT
+      0xD001 arithmetic - it's a per-stage table. `CONN_PTR` word table @ **0xB9D3**
+      (18 entries by 0xD000) -> a per-room 2-byte record = **4 nibbles up/down/left/
+      right = destination room index** (0xF = blocked). Engine reads it at seg13
+      0xB963/0xB9BD and writes the result to 0xD001 at **seg13 0xB987**. Edge/stair
+      detector `sub_7682h` (seg1 0x7682) sets pending dir in 0xC41B (1=up 2=down
+      3=left 4=right); permit bytes 0xC41C-0xC41F come from the same nibbles (seg13
+      0xB99A). Stage advance (0xD000++) is separate (`advance_stage` 0x434E via the
+      0xC409 key-door / 0xC408 boundary flag). 0xD000 is never touched by the graph.
+    * Validated byte-exact: decode matches all recorded consecutive stage-1
+      transitions + the stage-1 horizontal loop (room3 right->0, room0 left->3).
+    * **Spatial minimaps.** `tools/roomperm.py` now places rooms by BFS over the
+      connectivity graph (right/down-first so room 0 stays top-left; horizontal
+      loops unroll; disconnected components stack vertically) instead of a fixed
+      4-wide index grid. Portal-labyrinth stages get `LAYOUT_OVERRIDE` - stage 12
+      is physically one row (0..11) but its table encodes portal loops -> "row".
+    * Placement bug fixed: a plain BFS rotated horizontal loops and dragged any
+      linear row hanging off the loop out of alignment (stage 1 wrongly came out
+      top 7,4,5,6 / bottom 3,0,1,2, with room 7 detached from its only neighbour
+      6). Fix: exhaust right/down chains before each left/up step so loops unroll
+      forward from the anchor. Stage 1 now correctly top 4,5,6,7 / bottom 0,1,2,3
+      (5 above 1, 7 above 3). All 18 stages: no cell overlaps, no missing rooms.
+    * Open: other portal stages, if any, still need identifying (user flags them
+      per review).
+
 - Eighteenth session (ENEMY GENERATORS + all-stage map rendering):
     * **Continuous enemy spawner cracked.** `room_spawner` (seg0 0x5EBF) indexes
       seg14 word table **0x85A6** by stage (0xD000), then the resulting byte table
@@ -836,7 +1054,7 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   draw_enemy_meter/restore_health/damage_health/spawn_actor(+_init),
   advance_stage, room_map_build, zombie_generator;
   seg1: simon_action_tick, spend_5_hearts, map_cell_at, tile_is_solid,
-  row_solid_thresh.
+  row_solid_thresh, set_stage_boundary.
 - Every `vk()`-emitting Lua block MUST use `LUA ALLPASS` — plain `LUA` emits only
   on the final pass and drifts all later labels.
 - After any edit, run `make verify` before moving on.

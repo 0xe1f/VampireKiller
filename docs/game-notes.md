@@ -54,7 +54,21 @@ The world is a hierarchy: **hub → stage → room**.
   jump. *Runtime:* held as **0xC701 bit 0**. Entering a white-key door runs the
   handler at **seg0 0x438B**, which spends the key (`and 0FEh` → clears bit 0) and
   falls into **advance_stage** (0x434E): stage id **0xD000 ++**, room id **0xD001 =
-  0** (confirmed stage1/room7 → stage2/room0).
+  0** (confirmed stage1/room7 → stage2/room0). **Mechanism (confirmed, universal):**
+  a stage exit fires when Simon walks/climbs off a **connectivity-blocked edge**
+  (nibble 0xF) → boundary flag **0xC408** → white-key check → advance_stage (routed
+  through the seg13 brain 0xB963, so it is **direction-agnostic** — any of the four
+  edges). This is user-verified against the real game for **every stage except 15**.
+  An A/B rendering test **ruled out** a placed-object door theory: the type-0x1F
+  special-object path (seg2 `l881bh`/`l9180h`/`0xC5AC` proximity test `sub_771fh`→
+  0x8587) is real, but id-0x1f objects appear in only **3 rooms** game-wide (stages 3
+  and 4) and none is a white-key door — that path is the **vendor / a rare special
+  object**, not the stage door. `tools/roomperm.py` marks doors on the minimap as a
+  **red bar** via `door_rects()` (any blocked edge with an enclosed passable opening;
+  height from the opening). **Stage 15 is the one exception:** its real door (room 8,
+  a left-wall air gap) is NOT a blocked edge (room 8 left → room 9), so the geometry
+  can't see it; it's pinned in `DOOR_OVERRIDE`. Its exact mechanism is still open (to
+  revisit). (`--compare-doors` re-emits the A/B sheets; `--no-doors` to skip.)
 - **Destructible walls** — some walls can be destroyed; a destroyed wall **sometimes
   reveals a bonus**, including keys.
 - **Small yellow key** — unlocks a **chest** (chests hold bonuses; a chest can't be
@@ -123,17 +137,41 @@ The brick body never needs to be solid because Simon can't get inside a wall, an
 horizontal bounds also come from screen edges / room transitions. (Decorative
 0x2c+ columns are pass-through: e.g. room 0 has no real walls, only a floor.)
 
-`tools/roomperm.py` decodes any world row straight from ROM and renders one
-per-stage minimap (`gfx/minimap_s<NN>.png`, each room labelled with its
-number); `--all` renders every stage (world rows 0..17; the last rowbase entry is
-an end sentinel). `--collision` shows the strict 01..04-surface view, `--visual`
-adds the 0x2c+ scenery. Validated byte-exact against 0xD100 RAM snapshots for all
-7 recorded stage-1 rooms. Note metatile-definition tables can straddle the
-seg12/seg13 (0x8000/0xA000) window boundary, so the decoder treats banks
-0x0b/0x0c/0x0d as one flat 0x6000-0xBFFF buffer.
+`tools/roomperm.py` decodes any stage straight from ROM and renders one per-stage
+minimap (`gfx/minimap_s<NN>.png`, each room labelled with its number); `--all`
+renders all **19 stages (0..18)**, driven by the game's minimap room-count table
+(stage 18/Dracula's rowbase delta is a garbage sentinel, so its room count comes
+from that table; its room pointers/geometry still decode normally).
+`--collision` shows the strict 01..04-surface view, `--visual` adds the 0x2c+
+scenery. Validated byte-exact against 0xD100 RAM snapshots for all 7 recorded
+stage-1 rooms. Note metatile-definition tables can straddle the seg12/seg13
+(0x8000/0xA000) window boundary, so the decoder treats banks 0x0b/0x0c/0x0d as one
+flat 0x6000-0xBFFF buffer.
 
-Room-to-room connectivity (stairs/drops/key-doors) still lives in the INCBIN
-seg13 transition code (0xB98A).
+**Room-to-room connectivity (CONFIRMED, byte-exact + runtime-validated).** The
+transition graph is a per-stage table in seg13: `CONN_PTR` word table at **0xB9D3**
+(18 entries, one pointer per world row 0xD000). For a room it points at a 2-byte
+record = **4 nibbles: up, down, left, right** = the DESTINATION room index for
+that exit (`0xF` = blocked). On an edge/stair transition the engine looks this up
+(seg13 0xB963/0xB9BD) and writes the result to 0xD001 (**seg13 0xB987**); the
+per-frame edge/stair detector `sub_7682h` (seg1 0x7682) sets the pending-exit
+direction in 0xC41B (1=up,2=down,3=left,4=right), and the four RAM permit bytes
+0xC41C-0xC41F are loaded from the same nibbles (seg13 0xB99A). Stage advance
+(0xD000++, 0xD001=0) is separate: `advance_stage` (seg0 0x434E), reached via the
+white-key door (0xC409) or the castle-boundary flag (0xC408). `0xD000` is never
+changed by the connectivity path - vertical moves stay within the stage.
+- Verified: decode matches all 6 recorded consecutive stage-1 transitions and the
+  stage-1 horizontal loop (room 3 right->0, room 0 left->3).
+- This is a **navigation graph, not a spatial one**: exits can wrap or teleport in
+  BOTH axes. E.g. stage 8 has a **vertical loop** (`4.down->7` and `7.down->4`
+  point at each other, though 7 sits above 4), and stages 12/13 have portal edges.
+  So it **cannot** be trusted to reconstruct 2D geography (an earlier BFS heuristic
+  that assumed "horizontal can loop, vertical can't" got a few stages wrong), and
+  `roomperm.py` uses it ONLY for door detection. Room POSITIONS come entirely from
+  the game's own hand-authored layout table (`minimap_room_pos` 0x9681 / tables at
+  0x969C, 0x975E; see the Map item above) - the authoritative in-ROM geography, which
+  reproduces the true portal/loop stages (8's vertical loop, 12/13 portals, Dracula's
+  stage 18). The old BFS reconstruction has been dropped.
 
 ## Player (Simon)
 
@@ -231,6 +269,16 @@ Other pickups replace the weapon:
 
 Sub-items / consumables:
 
+- **Map item** — picked up in-stage; sets **0xC701 bit 7** (map held) and seeds
+  **0xC70F = 3** uses. Pressing **F2** toggles a whole-stage minimap on/off, spending
+  one use per open. Driven by seg2 **minimap_driver (0x955A)** off F-key edges in
+  **0xC00B** (bit 1 = F2); the map-screen state is **0xCF38** (0 = playing, 1 = build,
+  2 = shown). The map layout is **hand-authored, not derived from connectivity**:
+  **minimap_room_pos (0x9681)** reads a per-room *position code* from the per-stage
+  table at **0x969C** and maps it via **0x975E** to a 6×5 grid cell (hi byte = X, lo
+  byte = Y). This table is the authoritative room geography for all 19 stages (0–18)
+  and is available in `tools/roomperm.py` via `--minimap` (default placement is the
+  BFS spatial reconstruction; the two are generated side by side for comparison).
 - **Hourglass** — pauses/freezes the game.
 - **Holy water** — thrown, high damage.
 - **Shields** — two types: one absorbs damage, one reflects it.

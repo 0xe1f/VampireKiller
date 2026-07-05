@@ -2043,11 +2043,16 @@ sub_4bc2h:
 	pop bc
 	or b
 	ret
+; read_fkeys (0x4BFB) - sample keyboard matrix row 6 (F1=bit5, F2=bit6, F3=bit7),
+; return them right-justified: bit0=F1, bit1=F2, bit2=F3.  The caller edge-detects
+; into 0xC00B (newly-pressed).  F2 drives the world-map feature (seg2 minimap_driver
+; 0x955A); F1 is handled in seg0 (0x43E1 / 0x5C48).
+read_fkeys:
 sub_4bfbh:
-	ld a,006h
+	ld a,006h              ; keyboard matrix row 6 = function keys...
 	call SNSMAT
-	cpl
-	rlca
+	cpl                    ; active-high
+	rlca                   ; rotate F1/F2/F3 (bits 5/6/7) down to bits 0/1/2
 	rlca
 	rlca
 	and 007h
@@ -4023,12 +4028,22 @@ l5a2ah:
 	call l4a6dh
 l5a32h:
 	jp sub_533dh
+; sub_5a35h (seg0 0x5A35): paged-call wrappers into the seg13 (bank 0x0d @ 0xA000)
+; room-transition code.  sub_5369h pages seg13 in, sub_533dh restores the banks.
+; Three sibling entry points share the pattern:
+;   0x5A35 -> 0xB963  the transition BRAIN: looks up the current room's 2-byte
+;                     connectivity record (4 nibbles up/down/left/right = dest
+;                     room, 0xF = blocked) for pending dir 0xC41B and writes the
+;                     new room to 0xD001 (0xB987).  Called from the frame handler.
+;   0x5A3E -> 0xB99A  loads the 4 exit-permit bytes 0xC41C-0xC41F from those same
+;                     nibbles (0xFF = blocked edge).
+;   0x5A47 -> 0xBB31  (further seg13 helper).
 sub_5a35h:
+	call sub_5369h         ; page in seg13 (bank 0x0d)
+	call 0b963h            ; seg13: connectivity lookup + 0xD001 update
+	jp sub_533dh           ; restore banks
 	call sub_5369h
-	call 0b963h
-	jp sub_533dh
-	call sub_5369h
-	call 0b99ah
+	call 0b99ah            ; seg13: load exit permits 0xC41C-0xC41F
 	jp sub_533dh
 	call sub_5369h
 	call 0bb31h

@@ -112,6 +112,83 @@ of `<Game>.asm`.
   Metal Gear's `references/MetalGear/constants/structures.asm` — Konami reused
   structures across games.
 
+## Deriving level / map structure
+
+Konami level data is layered pointer tables, not flat maps. Expect: a per-world
+`rowbase[]`/count table → a per-room pointer table → a compact **metatile stream**
+(e.g. VK: 8×6 metatiles, each a 4×4 block of 8×8 tile ids) that a build routine
+expands into a work-RAM tile map on room entry. Find the build routine (it pages
+the data banks in, expands, then restores banks), and mirror its exact indexing in
+a decoder tool (VK: `tools/roomperm.py`). Cross-validate the decode **byte-exact
+against RAM snapshots** of the live tile map.
+
+- **Room-to-room movement is usually TABLE-driven, not arithmetic.** Don't assume
+  "room id ± 1". VK uses a per-world connectivity table (nibbles up/down/left/right
+  = destination room, 0xF = blocked); a per-frame edge/stair detector sets a
+  pending-direction byte, and a "brain" routine looks up the table and writes the
+  new room id.
+- **A connectivity/transition graph is a NAVIGATION graph, not a spatial one — do
+  not reconstruct geography from it.** Exits can wrap or teleport on *both* axes, so
+  a BFS embedding is under-determined and will silently mis-place rooms. In VK I
+  built a BFS layout on the axiom "horizontal links can loop, vertical can't" — and
+  it was just false: stage 8 has a vertical loop (`4.down→7` **and** `7.down→4`,
+  though 7 is physically above 4), and other stages have portal edges. The fix was
+  not a smarter heuristic — after A/B comparison the BFS layout was dropped entirely
+  in favour of the game's own authored table (next bullet); keep the graph only for
+  what it actually models (navigation → door detection).
+- **Look for the game's OWN authored data / in-game viewer before reconstructing.**
+  If the game shows the thing you're trying to derive (a map screen, a level-select,
+  a debug menu), that display is driven by an *authoritative* table — find it and
+  decode it instead of inferring from a related-but-different structure. VK's F2
+  "world map" item led straight to a hand-authored per-room position table (seg2
+  `minimap_room_pos` 0x9681: stage→position-code array→coord), which is ground truth
+  for all 19 stages and reproduced every layout the user had hand-corrected. The
+  user's domain knowledge ("press F2") short-circuited a long, doomed static trace —
+  ask what the game itself exposes.
+- **Two distinct transition paths.** Normal in-stage moves (write the room id) vs
+  stage-advance (bump the stage id, reset room, spend a key). They're gated by
+  different flags — trace each separately.
+
+## Render it to validate (and to catch your own mistakes)
+
+Rendering ROM-derived structure to an image and eyeballing it against the real
+game is one of the highest-leverage checks. It repeatedly caught classification
+bugs in VK (which tile ids are solid vs decorative vs climbable stairs; where the
+doors are) that looked fine in the raw bytes. Let the user compare against the
+game and give per-stage/per-room feedback; fix the classification, re-render.
+
+- **Geometry heuristics have hard limits — prefer the engine's own test.** A
+  feature can be geometrically identical to a non-feature (VK: a white-key *door*
+  opening is byte-for-byte identical to a plain walled recess — both are "wall,
+  then a void gap, then floor"; a scenery column reads as passable). When a
+  heuristic is provably ambiguous, stop guessing and find where the engine *itself*
+  decides. Fall back to a small curated, human-verified table only as a stopgap;
+  ship the heuristic behind a flag with a `TODO` listing the failing cases.
+- **Sometimes the answer is "no rule can work here — use a per-instance override."**
+  A tile-index heuristic is only valid when the ID carries the meaning. VK's Dracula
+  boss room (stage 18 room 9) builds its purely-decorative side columns from the SAME
+  brick tile IDs (`06`-`0b`) as its one real solid (the floor), so decoration and
+  solid are byte-indistinguishable — DECOR sets, the engine's own per-stage solidity
+  threshold, and context-adjacency all fail identically. Confirm the dead-end by
+  measuring the blast radius of the "principled" fix (switching to the engine
+  threshold changed stage 10 by 16%, room 9 still wrong) before shipping it, then take
+  the cheap correct path: a hand-authored per-room override, not a cleverer global rule.
+- **When two mechanisms are plausible, render BOTH and let the human pick.** Don't
+  commit to a static-analysis hypothesis before validating it. In VK I traced a
+  slick object path (display-type 0x1F → seg2 `l881bh`/`l9180h` spawns a special-
+  object struct; `sub_771fh`→0x8587 proximity-tests it) and was ready to call doors
+  "placed objects." A quick A/B render (`roomperm.py --compare-doors`: one sheet
+  with the geometry heuristic, one overlaying the placed objects) **disproved** it —
+  the object type existed in only 3 rooms game-wide and matched no real door, while
+  the geometry (walk-off a connectivity-blocked edge) matched every stage but one.
+  Cheap comparison renders settle "which theory is right" far faster than deepening
+  a static trace. Keep the comparison flag around for the next ambiguous feature.
+- **A real signal from code can still be the WRONG feature.** The 0x1F object path
+  was genuine engine code — just for the *vendor / a rare special object*, not the
+  white-key door. Finding a mechanism that *could* explain something isn't proof it
+  *does*; confirm coverage (does it appear everywhere the feature does?) before
+  trusting it.
+
 ## Rooting out logic (static analysis)
 
 `tools/romscan.py` automates the two look-ups we do constantly:

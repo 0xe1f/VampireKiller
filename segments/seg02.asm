@@ -1335,9 +1335,9 @@ l87f0h:
 	call sub_8851h
 	call sub_8884h
 l87f6h:
-	ld a,(ix+005h)
+	ld a,(ix+005h)         ; A = object display-type
 	cp 01fh
-	jr z,l881bh
+	jr z,l881bh            ; type 0x1F = SPECIAL OBJECT (door / vendor) -> promote to 0xC5B5
 	cp 018h
 	jr z,l8845h
 	call sub_887bh
@@ -1356,17 +1356,25 @@ l8815h:
 	call sub_89eah
 l8818h:
 	jp l88ceh
+; --- special-object promoter (0x881B) ---------------------------------------
+;  Reached for a type-0x1F object.  ix+009 = the object's attribute byte, whose
+;  top two bits select the flavour:
+;    bits7-6 == 11  -> DOOR / vendor: split attr into subtype (bits5-2) and
+;                      slot (bits1-0) and spawn a special-object struct via
+;                      l9180h (into 0xC5B5 or 0xC5C5).
+;    otherwise      -> ordinary large object drawn via l8a1ah (subtype = bits4-0).
+;  ix+007/008 = the object's map position (H,L) forwarded to the spawner.
 l881bh:
 	pop de
 	pop bc
-	ld a,(ix+009h)
+	ld a,(ix+009h)         ; A = attribute byte
 	ld b,a
-	ld h,(ix+007h)
+	ld h,(ix+007h)         ; HL = object position (from +7/+8)
 	ld l,(ix+008h)
 	and 0c0h
 	cp 0c0h
 	ld a,b
-	jr z,l8838h
+	jr z,l8838h            ; bits7-6 set -> door/vendor special object
 	and 01fh
 	ld b,a
 	ld a,e
@@ -1375,14 +1383,14 @@ l881bh:
 	jp l8a1ah
 l8838h:
 	ld c,a
-	and 03ch
+	and 03ch               ; B = subtype (attr bits 5..2)
 	rrca
 	rrca
 	ld b,a
 	ld a,c
-	and 003h
+	and 003h               ; C = slot / variant (attr bits 1..0)
 	ld c,a
-	jp l9180h
+	jp l9180h              ; spawn special object into 0xC5B5/0xC5C5
 l8845h:
 	ld b,a
 	pop de
@@ -2848,39 +2856,54 @@ l9146h:
 	nop
 	call nc,0d010h
 	djnz l9122h
+; --- l914eh - door-open animation driver (0xC5AC state machine) --------------
+;  0xC5AC is the door sub-state: 0xFF while opening, 0x03 once fully open (and
+;  sub_771fh dispatches on it; state 5 = vertical door variant).  Here:
+;   0xC5AC+1 == 0 (was 0xFF) -> jp 0x5403 (kick off the open sequence)
+;   0xC5AC   != 3            -> nothing to do yet
+;  When == 3, 0xC5AD/0xC5AE (+1/+2) give the door position; the byte at +3 is a
+;  frame counter that advances each call, blitting the opening frames via 0x494D
+;  until it reaches 0x2C, then latches the door "open" (state stays 3 at l916fh).
 l914eh:
 	ld hl,0c5ach
 	ld a,(hl)
 	inc a
-	jp z,05403h
+	jp z,05403h            ; 0xFF -> start opening
 	cp 003h
-	ret nz
+	ret nz                 ; only animate in the "open" state
 	inc l
-	ld e,(hl)
+	ld e,(hl)              ; E = door X (0xC5AD)
 	inc l
-	ld d,(hl)
+	ld d,(hl)              ; D = door Y (0xC5AE)
 	inc l
-	inc (hl)
+	inc (hl)               ; advance the opening-frame counter (+3)
 	ld a,(hl)
 	cp 02ch
-	jr nc,l916fh
+	jr nc,l916fh           ; done animating
 	ld h,d
 	ld l,e
 	inc l
 	ld bc,0082fh
 	ld a,000h
-	jp 0494dh
+	jp 0494dh              ; blit the next open frame
 l916fh:
 	ld a,003h
-	ld (0c5ach),a
+	ld (0c5ach),a          ; hold "open" state
 	ret
 sub_9175h:
 	ld hl,0c5ach
 	ld a,(hl)
 	dec a
-	ret nz
-	ld (hl),0ffh
+	ret nz                 ; only when 0xC5AC == 1 (door armed)
+	ld (hl),0ffh           ; -> 0xFF: begin opening
 	jp l914eh
+; --- l9180h - spawn a special object (door / vendor) into a 0xC5B5/0xC5C5 slot -
+;  On entry HL = object map position, B = subtype, C = slot/variant.  sub_91a9h
+;  classifies the subtype (via table 0x5B12) and returns the target slot in A
+;  (1 -> 0xC5B5, else -> 0xC5C5), or NZ to reject.  The 16-byte struct is filled:
+;    +0 = 1 (active)   +1/+2 = E,D (position)   +4 = B (subtype)   +5 = C (slot)
+;    +7/+8 = 0xC70D (the position latched on entry).  The door proximity test
+;  0x8587 later reads this slot's coords from 0xC5AD/0xC5AE.
 l9180h:
 	ld (0c70dh),hl
 	call sub_91a9h
@@ -2890,24 +2913,24 @@ l9180h:
 	jr nz,l9190h
 	ld hl,0c5c5h
 l9190h:
-	ld (hl),001h
+	ld (hl),001h           ; +0 = active
 	inc l
-	ld (hl),e
+	ld (hl),e              ; +1 = pos lo
 	inc l
-	ld (hl),d
+	ld (hl),d              ; +2 = pos hi
 	inc l
 	ld (hl),000h
 	inc l
-	ld (hl),b
+	ld (hl),b              ; +4 = subtype
 	inc l
-	ld (hl),c
+	ld (hl),c              ; +5 = slot/variant
 	inc l
 	ld (hl),000h
 	inc l
 	ld de,(0c70dh)
-	ld (hl),d
+	ld (hl),d              ; +7 = latched pos hi
 	inc l
-	ld (hl),e
+	ld (hl),e              ; +8 = latched pos lo
 	ret
 sub_91a9h:
 	ld a,b
@@ -3560,34 +3583,40 @@ read_kbd_matrix_bit:                     ; read one keyboard-matrix bit (row in 
 	cpl
 	and 001h
 	ret
-	ld a,(0c002h)
-	and 040h
+; --- minimap_driver (0x955A) - the F2 "world map" feature.  Called every frame;
+;     0xCF38 is the map-screen state (0 = playing, 1 = build, 2 = displayed).
+;     The map item (picked up in-stage) sets 0xC701 bit7 and 0xC70F = 3 uses;
+;     each F2 press while displayed<->hidden consumes one use.  F-key edges come
+;     from 0xC00B (bit1 = F2 just pressed; see seg0 read_fkeys 0x4BFB).
+minimap_driver:
+	ld a,(0c002h)          ; input-enable flags...
+	and 040h               ; ...bit6 = input allowed?
 	ret z
-	ld a,(0ce00h)
+	ld a,(0ce00h)          ; suppress while a transition/cutscene is active
 	and a
 	ret nz
-	ld a,(0cf38h)
+	ld a,(0cf38h)          ; map-screen state
 	dec a
-	jr z,l95afh
+	jr z,l95afh            ; state 1 -> build the map (draw every room cell)
 	dec a
-	jr z,l95bah
-	ld a,(0c00bh)
-	bit 1,a
+	jr z,l95bah            ; state 2 -> displayed: wait for F2 to close it
+	ld a,(0c00bh)          ; state 0 (playing): F-key edges
+	bit 1,a                ; F2 just pressed?
 	ret z
-	ld a,(0c701h)
-	add a,a
-	ret nc
-	ld hl,0c70fh
+	ld a,(0c701h)          ; inventory flags...
+	add a,a               ; ...bit7 -> carry = map item held?
+	ret nc                 ; no map item -> ignore F2
+	ld hl,0c70fh           ; remaining map uses (seeded to 3 on pickup)
 	ld a,(hl)
 	and a
-	ret z
-	dec (hl)
+	ret z                  ; none left -> ignore
+	dec (hl)               ; spend one use
 	jr nz,l9589h
-	ld hl,0c701h
-	res 7,(hl)
+	ld hl,0c701h           ; last use spent...
+	res 7,(hl)             ; ...clear the map-held flag
 	call sub_8eedh
 l9589h:
-	call 04805h
+	call 04805h            ; switch to the map screen (VDP page/setup)
 	ld hl,DCOMPR
 	ld bc,QINLIN
 	xor a
@@ -3601,46 +3630,52 @@ l9589h:
 	ld a,019h
 	call 050a6h
 l95aah:
-	ld hl,0cf38h
+	ld hl,0cf38h           ; advance map-screen state (0->1->2)
 	inc (hl)
 	ret
-l95afh:
-	call sub_95d7h
+l95afh:                    ; state 1: build the map, then advance to "displayed"
+	call sub_95d7h         ; draw every room's cell (loops over all rooms)
 	call sub_981ch
 	call sub_985ah
 	jr l95aah
-l95bah:
+l95bah:                    ; state 2 (displayed): F2 again closes the map
 	ld a,(0c00bh)
-	bit 1,a
+	bit 1,a                ; F2 pressed?
 	ret z
-	call 04f98h
+	call 04f98h            ; restore the play screen and resume
 	call sub_902eh
 	call sub_9175h
 	call sub_9273h
 	call sub_870eh
 	call 04810h
 	xor a
-	ld (0cf38h),a
+	ld (0cf38h),a          ; back to state 0 (playing)
 	ret
+; --- sub_95d7h - build the whole minimap: loop room index 0xCFFD = 0..N-1,
+;     drawing each room's cell.  sub_9681h places the cell; the loop ends when the
+;     index reaches the per-stage room count in minimap_room_count (l95fdh[stage]).
 sub_95d7h:
 	xor a
-	ld (0cffdh),a
+	ld (0cffdh),a          ; room index = 0
 l95dbh:
 	call sub_9610h
-	call sub_9681h
+	call sub_9681h         ; look up + set this room's minimap cell position
 	call sub_979ah
 	call sub_980eh
 	ld a,(0cffdh)
 	inc a
-	ld (0cffdh),a
+	ld (0cffdh),a          ; ++room index
 	ld c,a
-	ld a,(0d000h)
-	ld hl,l95fdh
+	ld a,(0d000h)          ; stage
+	ld hl,l95fdh           ; minimap_room_count[stage]
 	call ADD_HL_A
 	ld a,c
 	cp (hl)
-	jr nz,l95dbh
+	jr nz,l95dbh           ; loop until all rooms drawn
 	ret
+; minimap_room_count: one byte per stage = number of rooms (== geometry rowbase
+; deltas for stages 0..17, and 10 for stage 18/Dracula whose rowbase is a sentinel).
+; z80dasm shows this DATA as instructions; it is never executed.  TODO: db pass.
 l95fdh:
 	inc bc
 	ex af,af'
@@ -3720,17 +3755,27 @@ l966fh:
 	dec c
 	jr nz,l966fh
 	ret
+; --- sub_9681h - MINIMAP ROOM POSITION LOOKUP.  This is the authoritative room
+;     geography: rooms are placed on the F2 map at HAND-AUTHORED cells, not derived
+;     from the room-connectivity graph (which is a navigation graph with wrap/portal
+;     edges).  Per stage 0xD000, l969ch[stage] points to an array of one-byte POSITION
+;     CODES (one per room 0xCFFD); minimap_coord_tbl (0x975E) maps a code to a packed
+;     screen coord (high byte X = 0x20+0x20*col over 6 columns, low byte Y = 0x38+
+;     0x15*row over 5 rows).  Result stored at 0xCFF2 = this room's draw position.
+;     Decoded for all 19 stages by tools/roomperm.py (its layout() reads this table).
 sub_9681h:
-	ld a,(0d000h)
-	ld de,l969ch
-	call lookup_word_tbl
-	ld a,(0cffdh)
+	ld a,(0d000h)          ; stage
+	ld de,l969ch           ; minimap_stage_ptr[]
+	call lookup_word_tbl   ; de = this stage's position-code array
+	ld a,(0cffdh)          ; room index
 	call ADD_DE_A
-	ld a,(de)
-	ld de,0975eh
-	call lookup_word_tbl
-	ld (0cff2h),de
+	ld a,(de)              ; a = room's position code
+	ld de,0975eh           ; minimap_coord_tbl
+	call lookup_word_tbl   ; de = packed (X,Y) screen coord for that code
+	ld (0cff2h),de         ; store as this room's minimap draw position
 	ret
+; minimap_stage_ptr: word[stage] -> per-room position-code array (see sub_9681h).
+; z80dasm shows the following as instructions; it is DATA and never executed.
 l969ch:
 	jp nz,0c596h
 	sub (hl)

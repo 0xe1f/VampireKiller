@@ -3457,34 +3457,42 @@ l7676h:
 l767eh:
 	ld (0c42eh),hl
 	ret
+; sub_7682h (seg1 0x7682): per-frame room-EDGE / stair detector.  Compares
+; Simon's Y (0xC425) and X (0xC427) against the screen bounds and, when he steps
+; past an edge, records the pending-exit direction in 0xC41B (1=up 2=down 3=left
+; 4=right) - which the transition brain (seg13 0xB963, via seg0 sub_5a35h) turns
+; into the new 0xD001.  Horizontal exits also gate on the cached permit bytes
+; 0xC41E/0xC41F (0xFF = blocked); a blocked horizontal edge is instead handled as
+; a stage boundary at l77d8h/set_stage_boundary.  0xC420 = Simon's action state
+; (3 = on stairs, 6 = mid-transition -> skip).
 sub_7682h:
 	ld a,(0c420h)
 	cp 006h
-	ret z
-	ld hl,0c41bh
-	ld de,0c425h
-	ld bc,0c427h
+	ret z                  ; already transitioning -> nothing to do
+	ld hl,0c41bh           ; hl -> pending-exit dir
+	ld de,0c425h           ; de -> Simon Y
+	ld bc,0c427h           ; bc -> Simon X
 	ld a,(0c420h)
-	cp 003h
-	ld a,(de)
+	cp 003h                ; on stairs?
+	ld a,(de)              ; A = Y
 	jr nz,l769dh
 	cp 030h
-	jr c,l76abh
+	jr c,l76abh            ; on stairs & near top -> up exit
 l769dh:
 	cp 0e1h
-	jr nc,l76c3h
-	ld a,(bc)
+	jr nc,l76c3h           ; past bottom -> down exit
+	ld a,(bc)              ; A = X
 	cp 008h
-	jr c,l7709h
+	jr c,l7709h            ; past left -> left exit (if permitted)
 	cp 0f8h
-	jr nc,l7714h
+	jr nc,l7714h           ; past right -> right exit (if permitted)
 	ret
-l76abh:
+l76abh:                        ; top edge (climbing off the top of a stairway)
 	ld a,(0c420h)
 	dec a
 	ret z
 	ld a,0e0h
-	ld (de),a
+	ld (de),a              ; wrap Y to bottom of the new (upper) room
 	ld a,(0c42ch)
 	and a
 	ld d,0f0h
@@ -3492,18 +3500,18 @@ l76abh:
 	ld d,010h
 l76bdh:
 	ld a,(bc)
-	add a,d
+	add a,d                ; nudge X toward the stair landing
 	ld (bc),a
-	ld (hl),001h
+	ld (hl),001h           ; pending dir = 1 (up)
 	ret
-l76c3h:
-	ld a,(0c41dh)
+l76c3h:                        ; past the bottom edge
+	ld a,(0c41dh)          ; down exit permit
 	inc a
-	jr nz,l76efh
-	xor a
+	jr nz,l76efh           ; there IS a room below -> normal down transition
+	xor a                  ; no room below: bottomless pit -> fall to death
 	ld (0c421h),a
 	ld a,006h
-	ld (0c420h),a
+	ld (0c420h),a          ; action state 6 (falling/dying)
 	ld a,0fah
 	ld (de),a
 	ld hl,0c428h
@@ -3520,9 +3528,9 @@ l76c3h:
 l76eah:
 	ld a,009h
 	jp 050a6h
-l76efh:
+l76efh:                        ; room below exists -> down transition
 	ld a,030h
-	ld (de),a
+	ld (de),a              ; wrap Y to top of the new (lower) room
 	ld a,(0c420h)
 	cp 003h
 	jr nz,l7706h
@@ -3536,26 +3544,36 @@ l7703h:
 	add a,d
 	ld (bc),a
 l7706h:
-	ld (hl),002h
+	ld (hl),002h           ; pending dir = 2 (down)
 	ret
-l7709h:
-	ld a,(0c41eh)
+l7709h:                        ; left edge
+	ld a,(0c41eh)          ; left exit permit
 	inc a
-	ret z
+	ret z                  ; 0xFF = blocked -> no horizontal room here
 	ld a,0f6h
-	ld (bc),a
-	ld (hl),003h
+	ld (bc),a              ; wrap X to right side of the new room
+	ld (hl),003h           ; pending dir = 3 (left)
 	ret
-l7714h:
-	ld a,(0c41fh)
+l7714h:                        ; right edge
+	ld a,(0c41fh)          ; right exit permit
 	inc a
-	ret z
+	ret z                  ; 0xFF = blocked -> no horizontal room here
 	ld a,00ah
-	ld (bc),a
-	ld (hl),004h
+	ld (bc),a              ; wrap X to left side of the new room
+	ld (hl),004h           ; pending dir = 4 (right)
 	ret
+; sub_771fh (seg1 0x771f): door interaction, dispatched by the door/special-object
+; sub-state 0xC5AC through an inline word table (the bytes below DISPATCH_A up to
+; "ld de,0c425h" are that dw table, mis-shown as opcodes).  One handler is the
+; WHITE-KEY DOOR CHECK below: it loads Simon's position (0xC425 = Y, 0xC427 = X)
+; and calls 0x8587, a PROXIMITY test against the current SPECIAL OBJECT at
+; 0xC5AD/0xC5AE (the door is a placed special object, part of the 0xC5B5/0xC700
+; vendor/special-object subsystem - NOT a tile-map opening).  On overlap it spends
+; the white key (unless in the courtyard) and plays the open effect.  This is the
+; "where do we check the white key" site: door placement comes from the per-room
+; special-object data, not geometry (see door TODO in progress.md).
 sub_771fh:
-	ld a,(0c5ach)
+	ld a,(0c5ach)          ; door / special-object sub-state
 	call DISPATCH_A
 	inc c
 	ld a,b
@@ -3565,25 +3583,25 @@ sub_771fh:
 	ld (hl),a
 	ld sp,09177h
 	ld (hl),a
-	ld de,0c425h
+	ld de,0c425h           ; de -> Simon Y
 	ld a,(de)
-	ld b,a
+	ld b,a                 ; B = Y
 	inc e
-	inc e
+	inc e                  ; de -> 0xC427
 	ld a,(de)
-	ld c,a
-	call 08587h
-	ret nc
-	ld hl,0c701h
+	ld c,a                 ; C = X
+	call 08587h            ; overlap with special object @ 0xC5AD/0xC5AE? carry=yes
+	ret nc                 ; not at the door -> nothing to open
+	ld hl,0c701h           ; inventory byte
 	ld a,(0d000h)
 	and a
-	jr z,l774ah
+	jr z,l774ah            ; stage 0 (courtyard): open freely, no key needed
 	ld a,(hl)
-	rra
-	ret nc
+	rra                    ; white key = bit 0 -> carry
+	ret nc                 ; no white key -> door stays shut
 l774ah:
-	res 0,(hl)
-	call 08ec1h
+	res 0,(hl)             ; spend the white key (clear bit 0)
+	call 08ec1h            ; play door-open effect
 	xor a
 	ld (0c422h),a
 	call sub_780dh
@@ -3650,38 +3668,45 @@ l77cbh:
 	sub b
 	cp 008h
 	ret nc
+; Simon reached a left/right screen edge - decide whether it's a normal room
+; crossing or a stage exit (white-key door).  Picks the matching cached exit
+; permit: 0xC41E = left, 0xC41F = right (loaded from the seg13 connectivity
+; nibbles, see 0xB99A).  Facing/heading is 0xC427 bit7 (rla -> carry: set = right).
 l77d8h:
-	ld hl,0c41eh
-	ld de,0c427h
+	ld hl,0c41eh           ; hl -> left exit permit (0xC41E)
+	ld de,0c427h           ; de -> Simon X / heading byte
 	ld a,(de)
-	rla
-	jr c,l77ebh
-	ld a,(hl)
+	rla                    ; carry = heading bit7 (set -> moving right)
+	jr c,l77ebh            ; right edge -> use the right permit
+	ld a,(hl)              ; left permit (0xC41E)
 	inc a
-	jr z,l7807h
-	ld bc,003f6h
+	jr z,set_stage_boundary ; 0xFF = blocked edge -> STAGE EXIT (white-key door)
+	ld bc,003f6h           ; b=3 pending dir "left"; c=0xF6 X-wrap to right side
 	jr l77f3h
 l77ebh:
-	inc hl
+	inc hl                 ; hl -> right exit permit (0xC41F)
 	ld a,(hl)
 	inc a
-	jr z,l7807h
-	ld bc,0040ah
+	jr z,set_stage_boundary ; 0xFF = blocked edge -> STAGE EXIT (white-key door)
+	ld bc,0040ah           ; b=4 pending dir "right"; c=0x0A X-wrap to left side
 l77f3h:
 	ld a,b
-	ld (0c41bh),a
+	ld (0c41bh),a          ; pending-exit dir (1=up 2=down 3=left 4=right)
 	ld a,c
-	ld (de),a
+	ld (de),a              ; wrap Simon's X to the far side of the new room
 	ld a,(0d000h)
-	cp 012h
+	cp 012h                ; stage 18? -> different transition action id
 	ld a,087h
 	jr nz,l7804h
 	ld a,086h
 l7804h:
-	jp 050a6h
-l7807h:
+	jp 050a6h              ; queue the room-transition action
+; set_stage_boundary (seg1 0x7807): a walked-off horizontally BLOCKED edge is a
+; stage boundary.  0xC408 is later seen by the frame dispatcher (seg0 0x424xh),
+; which runs the white-key check and, if spent, advance_stage (seg0 0x438B/0x434E).
+set_stage_boundary:
 	ld a,001h
-	ld (0c408h),a
+	ld (0c408h),a          ; stage-boundary flag = white-key door trigger
 	ret
 sub_780dh:
 	ld ix,0c800h

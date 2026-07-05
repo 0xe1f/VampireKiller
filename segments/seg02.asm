@@ -224,16 +224,27 @@ l816ah:
 	ld l,a
 	djnz l8127h
 	ret
+; --- hurt_simon_contact (seg2 0x8173) - Simon TAKES contact damage from actor IX -
+; Base damage B = the ODD byte of this actor type's l81d5h entry (the even byte is
+; the kill score - see l81d5h below).  Then:
+;   * If the shield is up (0xC701 bit 4): compare the hit direction (0xC427 Simon X
+;     vs actor +0x05, and facing 0xC42C).  A blocked hit takes B as-is and spends a
+;     shield charge (0xC441--; when it hits 0 the shield bit is cleared + sub_8eedh
+;     removes its HUD).  An unblocked/backstab hit falls to the doubling path.
+;   * Otherwise (no shield / not blocked): B is DOUBLED, so the real contact damage
+;     = 2 * (l81d5h odd byte).  Runtime-confirmed: zombie(t01) odd 1 -> 2, dog(t05)
+;     odd 3 -> 6 (0x1E->0x18).  Then jp damage_health (0xC415 -= B).
+hurt_simon_contact:
 	ld a,(ix+000h)
 	dec a
 	add a,a
 	ld hl,l81d5h
 	call ADD_HL_A
-	inc hl
+	inc hl                 ; -> odd byte = base contact damage for this type
 	ld b,(hl)
 	ld a,(0c701h)
-	bit 4,a
-	jr z,l819ah
+	bit 4,a                ; shield active?
+	jr z,l819ah            ; no shield -> full (doubled) damage
 	ld a,(0c427h)
 	sub (ix+005h)
 	ld a,(0c42ch)
@@ -245,21 +256,25 @@ l8197h:
 	and a
 	jr nz,l819fh
 l819ah:
-	ld a,b
+	ld a,b                 ; unshielded: double the base damage
 	add a,a
 	ld b,a
 	jr l81afh
 l819fh:
-	ld hl,0c441h
+	ld hl,0c441h           ; shielded hit: spend a shield charge
 	dec (hl)
 	jr nz,l81afh
 	ld hl,0c701h
-	res 4,(hl)
+	res 4,(hl)             ; charges gone -> drop the shield
 	push bc
 	call sub_8eedh
 	pop bc
 l81afh:
-	jp damage_health
+	jp damage_health       ; 0xC415 -= B
+; award_kill_score (seg2 0x81B2): give points for killing the actor in IX.
+; Looks up the per-type hundreds value D from table l81d5h[(type-1)] (E=0 low pair),
+; then picks the high pair C by type (0x11 -> 3, 0x17 -> 5, else 0) and calls
+; add_score with C:D:E.
 sub_81b2h:
 	ld a,(ix+000h)
 	ld b,a
@@ -268,16 +283,27 @@ sub_81b2h:
 	ld hl,l81d5h
 	call ADD_HL_A
 	ld e,000h
-	ld d,(hl)
+	ld d,(hl)               ; D = hundreds pair for this enemy type
 	ld a,b
 	cp 011h
 	ld c,003h
-	jp z,044f5h
+	jp z,add_score
 	ld c,005h
 	cp 017h
-	jp z,044f5h
+	jp z,add_score
 	ld c,000h
-	jp 044f5h
+	jp add_score
+; l81d5h - per-actor-type table, 2 bytes/entry, indexed by (type - 1):
+;   even byte = kill SCORE / 100 in BCD (read by award_kill_score above)
+;   odd  byte = base CONTACT damage to Simon (read by hurt_simon_contact; the
+;               real damage is 2x this when unshielded)
+;         type: 01   02   03   04   05   06   07   08   09   0a   0b   0c   0d
+;   score/100 :  1    2    2    1    1    2    2    2    2    3    2    1    2
+;   contact dmg:  x2 of odd byte -> zombie(t01)=2, dog(t05)=6 (confirmed in play)
+;   high types 0x0e=1000pts, 0x11 +30000, 0x12-14 2000, 0x17 +50000 [bosses].
+; Confirmed in play: t01 zombie score 100 / dmg 2; t05 dog score 100 / dmg 6;
+; t04 candle/destructible score 100 (matches the +100 candle whip).  Hearts/keys
+; are pickups (collect_bonus), not kills, so they award 0 here.
 l81d5h:
 	ld bc,00201h
 	ld (bc),a
@@ -899,34 +925,41 @@ l8597h:
 	sub d
 	cp 008h
 	ret
+; --- hurt_simon_projectile (seg2 0x85AD) - Simon TAKES damage from a hazard ------
+; Scans the 3 hazard/projectile slots at 0xC580; if Simon overlaps one (sub_85e5h
+; returns carry) it puts Simon into the hurt/knockback state (0xC420=5) and deals
+; fixed damage: B = 8, or B = 16 when bit 0 of the slot byte is set (stronger
+; hazard).  Skipped while Simon is already dying (0xC420==6) or during the 0xC42D /
+; 0xC43A i-frame / freeze timers.
+hurt_simon_projectile:
 	ld a,(0c420h)
 	cp 006h
-	ret z
+	ret z                  ; already dying -> ignore
 	ld a,(0c42dh)
 	and a
 	ret nz
 	ld a,(0c43ah)
 	and a
 	ret nz
-	ld hl,0c580h
+	ld hl,0c580h           ; 3 hazard/projectile slots
 	ld b,003h
 l85c2h:
 	ld a,(hl)
 	and a
 	jr z,l85ddh
 	push hl
-	call sub_85e5h
+	call sub_85e5h         ; overlap test vs Simon
 	pop hl
-	jr nc,l85ddh
+	jr nc,l85ddh           ; no hit -> next slot
 	ld a,005h
-	ld (0c420h),a
+	ld (0c420h),a          ; hurt/knockback state
 	ld a,(hl)
 	rra
-	ld b,008h
+	ld b,008h              ; base hazard damage = 8
 	jr nc,l85dah
-	ld b,010h
+	ld b,010h              ; flagged hazard = 16
 l85dah:
-	jp damage_health
+	jp damage_health       ; 0xC415 -= B
 l85ddh:
 	ld a,008h
 	call ADD_HL_A
@@ -2192,19 +2225,29 @@ sub_8d37h:
 	adc a,(hl)
 	dec de
 	adc a,(hl)
+; --- weapon pickup (bonus id >= 0x1A) ---------------------------------------
+; index = id - 0x19; index 5 is special (l8d94h). Otherwise store the new weapon
+; id in 0xC416, run sub_8ea1h, then FALL THROUGH into the rosary code below - so a
+; weapon pickup also arms the 0xC440 no-spawn timer (brief pickup grace window).
 l8d77h:
 	sub 019h
 	cp 005h
 	jr z,l8d94h
-	ld (0c416h),a
+	ld (0c416h),a          ; set equipped weapon id
 	call sub_8ea1h
-	ld a,(0c431h)
+; --- collect_bonus[6] = Rosary (temporary "no new enemies" power-up) ---------
+; Arms the enemy-spawn suppression timer 0xC440: while nonzero, room_spawner
+; (seg0 0x5EBF) bails every frame and no new enemies spawn. Duration depends on
+; 0xC431 bit 2: 0xF0 (240 frames ~4s) if set, else 0x96 (150 frames ~2.5s) - the
+; likely difference between the two rosary types. 0xC440 counts down each frame in
+; seg1 0x75C7. Effect is immediate/current-room; existing 0xC800 actors are kept.
+	ld a,(0c431h)          ; power-up flag bit 2 selects the duration
 	and 004h
-	ld a,0f0h
+	ld a,0f0h              ; -> 240-frame timer
 	jr nz,l8d8eh
-	ld a,096h
+	ld a,096h              ; -> 150-frame timer
 l8d8eh:
-	ld (0c440h),a
+	ld (0c440h),a          ; arm the no-spawn timer
 l8d91h:
 	ld a,012h
 	ret
@@ -2280,16 +2323,18 @@ l8e11h:
 	call sub_8713h
 	ld b,001h
 	jr l8e34h
+; bonus id 0x10 = BLACK BIBLE: set 0xC702 bit6 -> vendor price doubled
 	ld hl,0c702h
-	res 7,(hl)
-	ld b,040h
+	res 7,(hl)             ; drop the white-bible bit (mutually exclusive)
+	ld b,040h              ; bit6 = black bible (double price)
 	jr l8e34h
+; bonus id 0x11 = WHITE BIBLE: set 0xC702 bit7 -> vendor price halved
 	ld hl,0c702h
-	res 6,(hl)
-	ld b,080h
+	res 6,(hl)             ; drop the black-bible bit (mutually exclusive)
+	ld b,080h              ; bit7 = white bible (half price)
 l8e34h:
-	call sub_8e79h
-	ld a,012h
+	call sub_8e79h         ; 0xC702 |= B
+	ld a,012h              ; pickup popup message id
 	ret
 	ld hl,0c431h
 	set 6,(hl)
@@ -2318,6 +2363,7 @@ l8e4ch:
 	ret
 	pop hl
 	ret
+; OR bit-mask B into an inventory byte: sub_8e74h -> 0xC701, sub_8e79h -> 0xC702
 sub_8e74h:
 	ld hl,0c701h
 	jr l8e7ch
@@ -2434,10 +2480,12 @@ l8f20h:
 	ret nc
 	push ix
 	push af
+; Show the on-screen pickup popup (the little item name/message). This runs for
+; EVERY pickup (via 0x8F2A), so 0xC5E5/0xC5E6 are generic - NOT rosary-specific.
 	ld a,0ffh
-	ld (0c5e5h),a
+	ld (0c5e5h),a          ; 0xC5E5 = popup active (0xFF)
 	ld a,020h
-	ld (0c5e6h),a
+	ld (0c5e6h),a          ; 0xC5E6 = popup display timer (0x20 frames)
 	call sub_8f51h
 	ld de,0d00ch
 	ld a,(0c419h)
@@ -2451,10 +2499,12 @@ sub_8f51h:
 	xor a
 	ld d,a
 	jp 04911h
+; Pickup-popup tick: if 0xC5E5==0xFF (active), every 0x40 frames decrement the
+; 0xC5E6 timer; when it hits 0, tear the popup down (sub_8eedh).
 sub_8f5ch:
 	ld a,(0c5e5h)
 	inc a
-	ret nz
+	ret nz                 ; not 0xFF -> no popup active
 	ld a,(0c003h)
 	and 03fh
 	ret z
@@ -2935,7 +2985,7 @@ l91f9h:
 	call sub_9228h
 	res 7,(hl)
 	inc (hl)
-	call sub_92c2h
+	call vendor_pick_outcome
 l9213h:
 	ld (ix+00ah),020h
 	ld (ix+000h),003h
@@ -2968,7 +3018,7 @@ l923fh:
 	ld a,(0c70bh)
 	call sub_9265h
 	ld (ix+000h),082h
-	jp l92aeh
+	jp vendor_outcome_dispatch
 l9253h:
 	push de
 	ld hl,0e580h
@@ -3035,7 +3085,19 @@ l92a6h:
 	ld l,a
 	djnz l9299h
 	ret
-l92aeh:
+; --- vendor_outcome_dispatch (0x92AE) -----------------------------------------
+; Execute the vendor's reaction to a whip hit, selected by state byte 0xC70C.
+; DISPATCH_A jumps through the inlined word table that follows, indexed by 0xC70C:
+;   0 -> 0x932E  register the hit (0xC40C=0xFF, latch vendor id -> 0xC703)
+;   1 -> 0x933A  bump vendor "mood" 0xD012 up   (cap 3)
+;   2 -> 0x9343  bump vendor "mood" 0xD012 down (floor 0)
+;   3 -> 0x934B  GIVE +5 hearts   (add_hearts, sfx 0x0F)
+;   4 -> 0x9355  TAKE -5 hearts   (spend_hearts, sfx 0x1D)
+;   5 -> 0x934A  do NOTHING       (points at a bare `ret`)
+;   6 -> 0x935F  LEAVE / vanish   (sfx 0x10, then awards +5000 via jp 044f3h)
+; This is why whipping the vendor sometimes gives hearts, sometimes takes them,
+; sometimes does nothing, and eventually makes him leave.
+vendor_outcome_dispatch:
 	ld a,(0c70ch)
 	call DISPATCH_A
 	ld l,093h
@@ -3049,8 +3111,16 @@ l92aeh:
 	sub e
 	ld e,a
 	sub e
-sub_92c2h:
-	ld de,l9307h
+; --- vendor_pick_outcome (0x92C2) ---------------------------------------------
+; Advance the vendor state machine to the next outcome after a whip hit.
+; vendor_transition_tbl is a table of 8-byte rows; the row is chosen by ix+005 (vendor variant/
+; phase), then indexed by the previous action (clamped to 0..7) to read the next
+; state -> 0xC70C.  For "random" states >= 7 the low nibble of the R (refresh)
+; register is used as a coin-flip to pick between two candidate states, which is
+; the source of the run-to-run variation the player observes.  Finally the state
+; is mapped through vendor_state_action_tbl (0x9327) into the reaction id 0xC70B.
+vendor_pick_outcome:
+	ld de,vendor_transition_tbl            ; vendor_transition_tbl (8-byte rows per ix+5)
 	ld a,(ix+005h)
 	add a,a
 	add a,a
@@ -3066,7 +3136,8 @@ l92d6h:
 	ld a,(de)
 	ld (0c70ch),a
 	sub 007h
-	jr c,l92f9h
+	jr c,l92f9h            ; states 0..6: use directly
+	; states 7/8/9: coin-flip between two candidates via R register (RNG)
 	ld hl,00305h
 	jr z,l92efh
 	dec a
@@ -3083,12 +3154,13 @@ l92f6h:
 	ld (0c70ch),a
 l92f9h:
 	ld a,(0c70ch)
-	ld hl,09327h
+	ld hl,09327h           ; vendor_state_action_tbl[state] -> reaction id 0xC70B
 	call ADD_HL_A
 	ld a,(hl)
 	ld (0c70bh),a
 	ret
-l9307h:
+; vendor_transition_tbl: 8-byte rows, values 0..9 (>=7 are RNG coin-flips above)
+vendor_transition_tbl:
 	nop
 	rlca
 	rlca
@@ -3122,31 +3194,39 @@ l9307h:
 	nop
 	inc bc
 	inc bc
+; vendor outcome 0 (0x932E): register that the vendor was hit this frame
 	ld a,0ffh
 	ld (0c40ch),a
 	ld a,(ix+009h)
-	ld (0c703h),a
+	ld (0c703h),a          ; latch vendor object id
 	ret
+; vendor outcome 1 (0x933A): raise vendor "mood" 0xD012 (cap 3)
 	ld hl,0d012h
 	ld a,(hl)
 	cp 003h
 	ret z
 	inc (hl)
 	ret
+; vendor outcome 2 (0x9343): lower vendor "mood" 0xD012 (floor 0)
 	ld hl,0d012h
 	ld a,(hl)
 	or a
 	ret z
 	dec (hl)
 	ret
+; vendor outcome 3 (0x934B): GIVE Simon +5 hearts (sfx 0x0F)
 	ld a,00fh
 	call 050a6h
 	ld b,005h
 	jp add_hearts
+; vendor outcome 4 (0x9355): TAKE 5 hearts from Simon (sfx 0x1D)
 	ld a,01dh
 	call 050a6h
 	ld b,005h
 	jp spend_hearts
+; (vendor outcome 5 = the bare `ret` two lines above = do nothing)
+; vendor outcome 6 (0x935F): vendor LEAVES - erase sprite, sfx 0x10, then
+; award +5000 points (DE=0x5000 -> add_score via 0x44F3).
 	ld (ix+000h),000h
 	call sub_937fh
 	ld hl,0e580h
@@ -3157,16 +3237,21 @@ l9307h:
 	ld a,010h
 	call 050a6h
 	ld de,05000h
-	jp 044f3h
+	jp 044f3h              ; add_score += 5000 (departure bonus)
 sub_937fh:
 	ld e,(ix+001h)
 	ld d,(ix+002h)
 	ld c,(ix+009h)
 	ld hl,0e580h
 	jp l8868h
-	call sub_9406h
+; --- vendor_make_offer (0x938E) -----------------------------------------------
+; Arm a sale: pick the item + price (vendor_set_offer_item -> 0xC708 item, 0xC707 price),
+; start the 0xC706 offer countdown (0x14 = 20 ticks), play the "offer" jingle
+; (sfx 0x19) and draw the price/item bubble (l939eh).  Reached from the vendor
+; spawn/reveal path via the object's stored handler pointer.
+	call vendor_set_offer_item
 	ld a,014h
-	ld (0c706h),a
+	ld (0c706h),a          ; offer timer = 0x14; decremented in vendor_purchase_tick
 	ld a,019h
 	call 050a6h
 	jp l939eh
@@ -3224,25 +3309,31 @@ l93e3h:
 	dec a
 	call sub_8cc8h
 	ret
-sub_9406h:
+; --- vendor_set_offer_item (0x9406) -------------------------------------------
+; Choose the item to sell (-> 0xC708) then look up its price in the price table.
+vendor_set_offer_item:
 	call sub_9453h
 	ld a,(hl)
-	ld (0c708h),a
+	ld (0c708h),a          ; offered item = bonus id (e.g. 0x1B = knife)
 	inc hl
 	set 7,(hl)
-	ld hl,l942fh
+	ld hl,vendor_price_tbl            ; vendor_price_tbl (9 rows of 4: id,normal,half,double)
 	ld b,009h
 l9415h:
 	cp (hl)
 	inc hl
-	jr z,l941fh
+	jr z,vendor_select_price
 	inc hl
 	inc hl
 	inc hl
 	djnz l9415h
 	ret
-l941fh:
-	ld a,(0c702h)
+; vendor_select_price: high bits of 0xC702 (bible flags) pick the price variant.
+;   no bible  -> +1 normal price     (knife = 0x50 = 50 hearts, BCD)
+;   bit7 set  -> +2 halved  (white bible)   (knife = 0x30 = 30)
+;   bit6 set  -> +3 doubled (black bible)    (knife = 0x90 = 90)
+vendor_select_price:
+	ld a,(0c702h)          ; bible price-modifier flags
 	add a,a
 	jr c,l9429h
 	add a,a
@@ -3252,9 +3343,10 @@ l9429h:
 	inc hl
 l942ah:
 	ld a,(hl)
-	ld (0c707h),a
+	ld (0c707h),a          ; price in hearts (BCD)
 	ret
-l942fh:
+; vendor_price_tbl: 9 x { item id, normal, halved(white bible), doubled(black bible) }
+vendor_price_tbl:
 	ld c,020h
 	dec d
 	ld h,b
@@ -3368,44 +3460,51 @@ sub_94b6h:
 	add a,c
 	ld e,a
 	ret
+; --- vendor_purchase_tick (0x94BE) --------------------------------------------
+; Runs while an offer is on screen.  Every 0x20 frames tick down the 0xC706 offer
+; timer; when it hits 0 the offer is withdrawn (vendor_offer_withdraw).  Otherwise poll the
+; buy/refuse buttons: nothing pressed -> keep waiting (ret 0xFF, vendor_offer_pending); SHIFT/
+; refuse -> withdraw (vendor_offer_withdraw, sfx 0x02); SPACE/confirm -> buy only if Simon has
+; enough hearts (0xC417 >= price 0xC707): deduct price (spend_hearts) and grant
+; the item (collect_bonus / sub_8d37h), sfx 0x12.
 	ld a,(0c003h)
 	and 01fh
 	jr nz,l94ceh
-	ld hl,0c706h
+	ld hl,0c706h           ; offer countdown
 	dec (hl)
-	jr z,l9503h
+	jr z,vendor_offer_withdraw            ; expired -> withdraw offer
 l94ceh:
-	call sub_9526h
-	jr z,l950ah
+	call vendor_read_buttons         ; read confirm/refuse buttons (edge-detected)
+	jr z,vendor_offer_pending            ; nothing pressed -> keep offer open
 	rra
-	jr nc,l9503h
+	jr nc,vendor_offer_withdraw           ; refuse (SHIFT / no confirm bit) -> withdraw
 	ld a,(0c707h)
 	ld b,a
-	ld a,(0c417h)
+	ld a,(0c417h)          ; Simon's hearts
 	cp b
-	jr c,l9503h
+	jr c,vendor_offer_withdraw            ; can't afford -> withdraw
 	ld a,(0c704h)
 	cp 020h
 	push af
 	call c,sub_9514h
-	call spend_hearts
+	call spend_hearts      ; pay the price in hearts
 	ld a,(0c708h)
-	call sub_8d37h
+	call sub_8d37h         ; collect_bonus(item) -> give the purchased item
 	pop af
 	call c,l939eh
 	ld a,012h
-	call 050a6h
+	call 050a6h            ; purchase-confirmed jingle
 	call sub_9453h
 	inc hl
 	res 7,(hl)
 	xor a
 	ret
-l9503h:
+vendor_offer_withdraw:                        ; offer declined / expired / unaffordable
 	ld a,002h
 	call 050a6h
 	xor a
 	ret
-l950ah:
+vendor_offer_pending:                        ; no button this frame -> leave offer pending
 	ld a,0ffh
 	or a
 	ret
@@ -3420,36 +3519,42 @@ sub_9514h:
 	call 0494dh
 	pop bc
 	ret
-sub_9526h:
+; --- vendor_read_buttons (0x9526) ---------------------------------------------
+; Build a "newly pressed" bitmask of the confirm/refuse controls and return it.
+; Reads the two joystick triggers (PSG reg 0x0E bits 0x30) plus keyboard SPACE
+; (row 8) and SHIFT (row 6) via SNSMAT.  0xC709 holds last frame's state so the
+; final `xor c / and (hl)` yields only the freshly-pressed edges.  In
+; vendor_purchase_tick bit0 (SPACE/trigger) = confirm/buy, the others = refuse.
+vendor_read_buttons:
 	ld e,08fh
 	ld a,00fh
 	call WRTPSG
 	ld a,00eh
 	di
-	call RDPSG
+	call RDPSG              ; PSG port B = joystick
 	ei
 	cpl
-	and 030h
+	and 030h               ; two fire buttons
 	rrca
 	rrca
 	rrca
 	rrca
 	ld d,a
 	ld a,006h
-	call sub_9552h
+	call read_kbd_matrix_bit          ; keyboard row 6 -> SHIFT (refuse)
 	add a,a
 	or d
 	ld d,a
 	ld a,008h
-	call sub_9552h
+	call read_kbd_matrix_bit          ; keyboard row 8 -> SPACE (confirm)
 	or d
-	ld hl,0c709h
+	ld hl,0c709h            ; previous button state (for edge detection)
 	ld c,(hl)
 	ld (hl),a
 	xor c
 	and (hl)
 	ret
-sub_9552h:
+read_kbd_matrix_bit:                     ; read one keyboard-matrix bit (row in A) -> 0/1
 	call SNSMAT
 	cpl
 	and 001h
@@ -4081,9 +4186,9 @@ l98b3h:
 	ld bc,06543h
 	ld bc,0103ah
 	ret nc
-	and a
-	call z,05ebfh
-	ld ix,0c800h
+	and a                  ; (real intent: ld a,(0d010h)/and a - 0==normal play)
+	call z,room_spawner    ; per-frame enemy spawner (seg0 0x5EBF), skipped mid-transition
+	ld ix,0c800h           ; then tick all 7 actor slots
 	ld b,007h
 l98f9h:
 	ld a,(ix+000h)

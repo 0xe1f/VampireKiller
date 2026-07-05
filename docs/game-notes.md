@@ -51,13 +51,21 @@ The world is a hierarchy: **hub → stage → room**.
 
 - **Large white key** — one per stage, needed to open the stage-exit **door**. Keys
   are deliberately **hidden / awkward to reach**: behind walls, or requiring a tricky
-  jump.
+  jump. *Runtime:* held as **0xC701 bit 0**. Entering a white-key door runs the
+  handler at **seg0 0x438B**, which spends the key (`and 0FEh` → clears bit 0) and
+  falls into **advance_stage** (0x434E): stage id **0xD000 ++**, room id **0xD001 =
+  0** (confirmed stage1/room7 → stage2/room0).
 - **Destructible walls** — some walls can be destroyed; a destroyed wall **sometimes
   reveals a bonus**, including keys.
 - **Small yellow key** — unlocks a **chest** (chests hold bonuses; a chest can't be
-  opened without one). Simon can carry **only 1** yellow key at a time.
+  opened without one). Simon can carry **only 1** yellow key at a time. *Runtime:*
+  the yellow key is **bonus id 0x17 (23)**; picking it up (from the 0xC500 pickup
+  list) sets **0xC701 bit 1** (white key = bit 0) and **0xC700 = 1** (the key/staff
+  charge count). Opening a chest consumes it: **0xC701 bit 1 cleared, 0xC700 -> 0**;
+  the chest's reward latches as its own bonus id (observed **0x13 / 19** once) and
+  spawns into the object (0xC490) + pickup (0xC500) lists.
 - **Staff** — an alternative to the yellow key: a staff opens **3 chests** before it
-  disappears.
+  disappears (expected to seed **0xC700 = 3** instead of 1 — unconfirmed).
 
 *Reversing hooks:* expect per-stage state for **key held (white / yellow / staff
 charges)**, **door locked/unlocked**, **chest opened** flags, and a **room/stage/hub
@@ -82,7 +90,92 @@ geometry is separate per-room RLE bitmap data, and room-to-room connectivity
 
 ## Player (Simon)
 
-Default weapon: **leather whip**. Can be replaced by pickups:
+### Movement / action states (RAM 0xC420, runtime-confirmed)
+
+`0xC420` is Simon's action state; `simon_action_tick` (seg1 0x6B40) dispatches an
+8-entry handler table by it. Confirmed values:
+
+| 0xC420 | handler | meaning |
+| --- | --- | --- |
+| 0 | 0x6B59 | grounded (walk / idle). Whipping does **not** change this byte. |
+| 1 | 0x6CC7 | **jump / airborne** (Y arc 0xC0→0xA0→0xC0; X free for directional jumps) |
+| 2 | 0x6DB0 | **crouch** (DOWN held; Simon X is locked — cannot move) |
+| 3 | 0x6DE4 | **on stairs / climbing** (diagonal travel; can whip while climbing) |
+| 4 | 0x6F44 | **falling / dropping** off a ledge |
+| 5 | 0x6F8C | hurt / knockback (shallow airborne launch — not a jump) |
+| 6 | 0x709A | dying / respawn (enemy spawner is suppressed while ==6) |
+| 7 | 0x7102 | unconfirmed |
+
+`0xC423` tracks the air sub-phase during jumps/falls (e.g. 2→1 rising→falling).
+
+### Score (RAM 0xC405–0xC407)
+
+Score is a **3-byte packed BCD** counter, little-endian: `0xC405` = low pair,
+`0xC406` = mid pair (hundreds/thousands — the main visible byte), `0xC407` = high
+pair. The on-screen number strips leading zeros (e.g. `00 82 00` → "8200"). Awards
+are always multiples of 100. Written by `add_score` (seg0 0x44F5), which takes the
+amount in `C:D:E` (hi:mid:lo BCD pairs) and adds it with `daa`; enemy kills go
+through `award_kill_score` (seg2 0x81B2, per-type value table). Observed values:
+**chest = +5400**, whipping a candle/destructible = **+100**, heart pickup = **+0**.
+When investigating any pickup/attack, diff `0xC405–0xC407` to see its point value.
+
+### Damage (taken and dealt)
+
+HP bars are `0xC415` = **Simon health** (full `0x20` = 32) and `0xC418` = the
+on-screen **ENEMY/BOSS energy** (full `0x80`, used by HP-bar enemies, types ≥ 0x11).
+
+**Simon takes damage** (both floor at 0 via `damage_health`, seg0 0x4632):
+- **Enemy contact** — `hurt_simon_contact` (seg2 0x8173). Damage = `2 ×` the *odd*
+  byte of the enemy type's `l81d5h` entry. Confirmed: zombie = **2**, dog = **6**.
+  A raised shield (`0xC701` bit 4) halves it and spends a shield charge (`0xC441`);
+  when charges run out the shield drops.
+- **Hazard / enemy projectile** — `hurt_simon_projectile` (seg2 0x85AD). Fixed
+  **8**, or **16** if the slot's flag bit is set. Also forces the hurt state
+  (`0xC420 = 5`). Ignored during i-frame/freeze timers (`0xC42D`, `0xC43A`).
+
+**Simon deals damage** to HP-bar enemies via `weapon_hit_damage` (seg1 0x7E33) →
+`damage_enemy` (seg0 0x4643, `0xC418 -= B`). B comes from a per-weapon table indexed
+by `(enemy type − 0x11)`:
+- leather whip / knife → base `04 08 08 04 04 04 10` (types 0x11..0x17)
+- chain / cross / axe → strong `06 0C 0C 06 06 06 18` (≈1.5×)
+- vs type 0x17 with weapon ≥ 2 the hit is quartered.
+
+Lesser enemies (type < 0x11) have no HP bar and die on the first successful hit.
+
+### Equippable weapons (strength tiers, per design)
+
+- **lowest**: leather whip, thrown knife
+- **normal**: chain whip, boomerang cross
+- **strong**: boomerang axe
+
+Weapon behaviour specifics:
+- **Whips** (leather, chain) stay with Simon - not thrown.
+- **Boomerang cross** flies across the whole room damaging enemies it passes, then
+  returns to Simon. If Simon is not in its return path it is LOST and the leather
+  whip is re-equipped.
+- **Boomerang axe** reaches ~half the room, same catch-or-lose rule as the cross.
+- **Thrown knife** has unlimited ammo.
+
+### Weapon state (RAM - runtime + static confirmed)
+
+- **0xC416 = equipped weapon id.** Confirmed: **0 = leather whip, 1 = chain whip**
+  (runtime: picking up the chain whip flipped 0xC416 0 -> 1). Weapons 0 and 1 take
+  the **whip attack path** (seg1 ~0x7D80: `ld a,(0c416h) / cp 002h / jr nc` -> whip
+  if <2), weapons **>= 2 take the projectile path** (thrown knife / cross / axe).
+  Exact ids for knife/cross/axe still to confirm by recording each (hypothesis:
+  2 = knife, 3 = cross, 4 = axe).
+- **Weapon pickups arrive via collect_bonus (seg2 0x8D33) with bonus id >= 0x1A**:
+  the fallthrough `l8d77h` does `sub 0x19` and stores the result in 0xC416, so
+  weapon id = bonus id - 0x19 (chain whip = bonus 0x1A -> weapon 1, confirmed).
+- **Damage table split** (seg1 `sub_7e33h` 0x7E33): weapon 0 (leather) and weapon 2
+  use the base damage table `l7e60h`; other weapons use the stronger table at
+  0x7E67 - consistent with the strength tiers. Damage is indexed by enemy type
+  (type-0x11); enemy type 0x17 halves projectile damage twice. (Full table values
+  TBD.)
+- On death / per-life reset (seg1 sub_70e3h) and room entry, 0xC416 is cleared to 0
+  (back to the leather whip).
+
+Other pickups replace the weapon:
 
 - Chain whip (upgraded whip)
 - Throwable axe
@@ -94,11 +187,102 @@ Sub-items / consumables:
 - **Hourglass** — pauses/freezes the game.
 - **Holy water** — thrown, high damage.
 - **Shields** — two types: one absorbs damage, one reflects it.
+- **Rosaries** — a **temporary "no new enemies" power-up** (two types). NOT a
+  weapon and NOT a persistent inventory item. Runtime (frame 493): collected as a
+  normal 0xC500 pickup (its 0x84 slot cleared), bonus id **0x06** latched to 0xC419.
+  Static trace of the effect (confirmed, immediate, not next-room):
+    - Handler `collect_bonus[6]` (seg2 **0x8D83**) arms a countdown timer at
+      **0xC440** to **0xF0** (240 frames ≈ 4 s) or **0x96** (150 frames ≈ 2.5 s),
+      selected by 0xC431 bit 2 (likely the two-rosary difference). It does NOT touch
+      0xC700-0xC70F inventory or the 0xC416 weapon (hence "temporary"). The weapon
+      pickup path (`l8d77h`, bonus >= 0x1A) falls straight through into this same
+      code, so grabbing a whip upgrade also arms a short no-spawn window.
+    - 0xC440 is a per-frame countdown: `sub_75c7h` (seg1) decrements it each frame in
+      the timer bank (`sub_7682h/75c7/75e9/...`).
+    - The enemy spawner (seg0 **room_spawner @0x5EBF**) is called every frame from the
+      actor-update loop (seg2 0x98F0) whenever 0xD010==0 (normal play). Its first act
+      is `ld a,(0c440h) / and a / ret nz` -> while the rosary timer is nonzero it
+      spawns nothing. When 0==C440, it reads the per-(stage 0xD000, room 0xD001)
+      descriptor via seg14 table 0x85A6 and calls spawn generators (0x9CED, 0x9D52,
+      ...) that place actors via spawn_actor into the 0xC800 slots.
+    - **Effect is immediate and current-room** (the gate is checked per frame in
+      whatever room you're in), not deferred to the next room. It only suppresses
+      *new* spawns; enemies already in the 0xC800 slots are untouched.
+  - NOTE: 0xC5E5/0xC5E6 (00->FF/20 at pickup) is the generic pickup-popup message +
+    timer set by 0x8F2A for *every* pickup, NOT a rosary-specific state.
+  - Still TODO: confirm which of the two rosary types this is and the second's bonus id.
 - **Hearts** — currency for vendors; also power the hourglass / holy water
   activation *(the heart↔sub-weapon coupling is unconfirmed)*.
 - **Life refills** — small orbs during play, or **vials** bought from vendors.
 
-Vendors sell items in exchange for **hearts**.
+### Vendors (runtime-confirmed, seg2 @ 0x92AE–0x9552)
+
+A vendor is a hidden "cloaked sitting person" revealed by whipping a wall. He is
+**not** a normal 0xC800 actor — he lives in the special-object list at 0xC5B5
+(2 slots of 0x10 bytes) and keeps his transaction state in the 0xC700 block:
+
+| Addr   | Meaning |
+|--------|---------|
+| 0xC702 | bible price-modifier flags: bit6 = **black bible** (id 0x10, doubles price), bit7 = **white bible** (id 0x11, halves). Mutually exclusive — each bible clears the other's bit. Set by the collect_bonus handlers at 0x8E24 / 0x8E2D; cleared on reset. |
+| 0xC703 | latched vendor object id |
+| 0xC704/5 | vendor on-screen position |
+| 0xC706 | **offer countdown timer** (armed to 0x14 = 20; ticks every 0x20 frames) |
+| 0xC707 | **price in hearts** (packed BCD, e.g. 0x50 = 50) |
+| 0xC708 | **offered item** = bonus id (0x1B = knife) |
+| 0xC709 | previous button state (edge detection for buy/refuse) |
+| 0xC70B | reaction/animation id (from state via table 0x9327) |
+| 0xC70C | **whip-outcome state** (0..6) driving the dispatch |
+| 0xD012 | persistent vendor "mood" tier (0..3), raised/lowered by whips |
+
+**Whipping the vendor** runs a small state machine. Each hit calls
+`vendor_pick_outcome` (0x92C2): it walks a transition table (0x9307, 8-byte rows
+selected by the vendor variant), and for the "random" states (≥7) flips a coin
+using the Z80 **R refresh register** as an RNG — this is why the same actions
+produce different results run to run. The resulting state 0xC70C is executed by
+`vendor_outcome_dispatch` (0x92AE):
+
+| 0xC70C | Outcome |
+|--------|---------|
+| 0 | register the hit (set 0xC40C, latch vendor id) |
+| 1 | raise mood 0xD012 (cap 3) |
+| 2 | lower mood 0xD012 (floor 0) |
+| 3 | **give Simon +5 hearts** (sfx 0x0F) |
+| 4 | **take 5 hearts from Simon** (sfx 0x1D) |
+| 5 | **nothing** (points at a bare `ret`) |
+| 6 | **vendor leaves** (sfx 0x10, then **awards +5000 points**) |
+
+So the full spectrum a player sees while whipping: hearts added, hearts removed,
+nothing, an offer appears, or he leaves. Score only changes on **departure**
+(+5000 via `ld de,0x5000 / jp 0x44F3` → `add_score`); individual whips do not add
+score (a whip that "does nothing" is outcome 5).
+
+**Making / taking an offer** (`vendor_make_offer` 0x938E, reached from the reveal
+path): picks the item (`vendor_set_offer_item` 0x9406 → 0xC708) and its price, and
+starts the 0xC706 timer. Price comes from `vendor_price_tbl` (0x942F), 9 rows of
+`{item id, normal, halved, doubled}`; `vendor_select_price` (0x941F) picks the
+column from the 0xC702 bible flags:
+
+| Item (bonus id) | normal | white bible (½) | black bible (×2) |
+|-----------------|--------|-----------------|------------------|
+| 0x1B (knife)    | 50     | 30              | 90               |
+| 0x0E            | 20     | 15              | 60               |
+| 0x12            | 30     | 20              | 60               |
+| 0x03            | 20     | 10              | 60               |
+| 0x04            | 20     | 10              | 80               |
+| 0x0A            | 40     | 20              | 80               |
+| 0x16            | 40     | 15              | 80               |
+| 0x1E            | 30     | 10              | 50               |
+| 0x1D            | 20     | 10              | 80               |
+
+While an offer is on screen, `vendor_purchase_tick` (0x94BE) counts the 0xC706
+timer down and polls the controls via `vendor_read_buttons` (0x9526, joystick
+triggers + keyboard **SPACE row 8 = confirm**, **SHIFT row 6 = refuse**,
+edge-detected through 0xC709):
+
+- **SPACE / trigger** and hearts ≥ price → deduct the price (`spend_hearts`) and
+  grant the item (`collect_bonus`), sfx 0x12.
+- **SHIFT / refuse**, can't afford, or timer expires → offer withdrawn, sfx 0x02.
+- nothing pressed → offer stays open.
 
 ## Text encoding (CRACKED + converted to ASCII)
 
@@ -150,7 +334,7 @@ Data region is `l4c07h` .. 0x4D4D (right before `sub_4d4eh`, the title builder).
 
 TODO (next session): add an sjasmplus macro to author these as readable ASCII
 (emit char-0x10) and convert the region to a data block byte-exactly; mark
-`l4c07h..0x4D4D` in tools/seg00.blocks as data.
+`l4c07h..0x4D4D` in segments/seg00.blocks as data.
 
 ## Code layout & where the "main loop" is
 

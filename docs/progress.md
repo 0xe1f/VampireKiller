@@ -53,7 +53,7 @@ dumps.
   execution with `env: python3\r`).
 - Segment 1 (banked code @ 0x6000) brought into the build as disassembled source
   (byte-exact), shared BIOS names moved to `segments/bios.inc`. Leading data map
-  in `tools/seg01.blocks` (tables at 0x6000-0x602f, 0x605f-0x615a incl. a word
+  in `segments/seg01.blocks` (tables at 0x6000-0x602f, 0x605f-0x615a incl. a word
   table at 0x608d). Annotated so far:
   - `konami_logo_draw`/`konami_logo_step` (0x6209/0x6253): logo screen + the
     top-to-bottom wipe (confirmed by the author); `sub_6276h` tile-string interp.
@@ -183,9 +183,12 @@ dumps.
       observed orb->heart two-phase animation: 0xC801 = anim state (advanced by
       02:9C41), 0xC80C = 0x14-frame transition timer (20->0, then state flips).
       Small heart used a different seg2 animator (0x9B6B/0x9B8B, sprite 0x85/0x86).
-    * STILL TBD: the heart/score/lives counters live below 0xC420 (~0xC40x), which
-      the movement watch window did not cover, so pickup *values* (1 vs 5) weren't
-      captured.  A 0xC400-0xC41F watch pass would pin them.
+    * RESOLVED (later): counters below 0xC420 - **score = 3-byte packed BCD at
+      0xC405/0xC406/0xC407** (little-endian; 0xC406 = the hundreds/thousands pair =
+      main visible byte; on-screen value strips leading zeros, e.g. 00 82 00 = 8200).
+      Written by **add_score (seg0 0x44F5)** which adds C:D:E (hi:mid:lo BCD pairs)
+      with daa; enemy kills route through seg2 award_kill_score (0x81B2, per-type
+      value table l81d5h). Heart counter = 0xC417 (BCD, separate).
   - Sixth session (whip destructible wall -> grab white key -> whip candle -> grab
     small heart), via F8 snapshot timeline (baseline frame 357).  Pins the inventory
     that sat below 0xC420, plus the destructible-wall / pickup-actor mechanism:
@@ -296,6 +299,151 @@ dumps.
     * 0xC41B = candidate hit/knockback or transition-pending flag (0x03 during the
       knockback, cleared to 0 at the room transition, f682) - confirm next session.
 
+- Tenth session (pick up chain whip; was leather). Pins the weapon system:
+    * **0xC416 = equipped weapon id**: 0 = leather whip, 1 = chain whip (0xC416 flipped
+      0 -> 1 on pickup, frame 78; 0xC419 latched bonus id 0x1A).
+    * Weapon pickups: collect_bonus fallthrough l8d77h does `sub 0x19` -> 0xC416, so
+      weapon id = bonus id - 0x19 (chain whip = bonus 0x1A).
+    * Attack path split (seg1 ~0x7D80): weapon < 2 = whip (stays with Simon), >= 2 =
+      projectile (knife/cross/axe). Damage tables (seg1 sub_7e33h): weapon 0 + 2 use
+      base l7e60h, others use stronger 0x7E67. Full weapon-id map + damage values +
+      the boomerang catch/lose logic still TBD. See game-notes "Equippable weapons".
+
+- Eleventh session (stairs: climb up, whip a candle while on the stairway, climb
+  back down and grab the heart). F8 recording, 1415 frames; only the LAST room is
+  relevant - **stage 0xD000=1, room 0xD001=4, hub 0xD002=0** (idx 998..end). Pins
+  Simon's action-state byte and the stair state:
+    * **0xC420 = Simon action state** (dispatch `simon_action_tick` seg1 0x6B40, 8
+      entries): now runtime-confirmed **3 = on stairs/climbing** (held ~159 frames
+      idx 1110..1269 with diagonal Y 0x80<->0x4C), **4 = falling/drop off a ledge**
+      (idx 1286, Y 0xB0->0xC2, no jump). Corrects the earlier guess "3=whip":
+      whipping does NOT change 0xC420 - Simon whipped the candle at idx 1177 while
+      still in state 3 (the destruction flame 0x1E appeared then). (NOTE: jump = state
+      1, NOT 5 - see Twelfth session; the state-5 blip at idx 1074 was a hurt/other,
+      not the plain jump.)
+    * **Whip-on-stairs -> heart** seen in actor slot 0xC800: **0x1E** destruction
+      flame at the whip (+0x0C counts 0x10->0, idx 1177..1189), then a **0x26**
+      reward-spawn actor with **+0x0E = 0x02** (= the bonus id that later collected),
+      which settles into the pickup list as an **0x84** entry. (Slot type 0x04 cycles
+      through this slot too but its role here is unconfirmed.) Collected at idx 1295
+      from **0xC530** (pickup entries are stride 0x10): 0xC417 hearts **0x25 -> 0x30
+      (BCD, +5 = large heart)**, 0xC419 latched bonus id **0x02**, and the generic
+      pickup popup fired (0xC5E5/0xC5E6 00 -> FF/0x1E) - consistent with the rosary
+      session that 0xC5E5/6 is the per-pickup popup, not item-specific.
+    * room_spawner's `0xC420 cp 006h` early-out now reads clearly: no enemy spawns
+      while Simon is in state 6 (hurt / dying-respawn).
+
+- Twelfth session (4 F8 recordings appended, one continuous stream to idx 2018;
+  savestate reloads between them cause room/X discontinuities, so read each event
+  locally): **yellow key pickup**, **chest open**, **crouch**, **jumps**.
+    * **Yellow key** = bonus id **0x17 (23)**. Picked up from the 0xC500 pickup list
+      (an 0x84 entry -> 0x00); sets inventory **0xC701 bit 1** (0xC701 0x01 -> 0x03,
+      bit 0 was the earlier white key) and **0xC700 0x00 -> 0x01** (likely the yellow
+      key / staff *charge count* - Simon carries 1 key, a staff would be 3). Confirmed
+      at idx 1478 and 1587.
+    * **Chest open** (use key) at idx ~1662: consumes the key - **0xC701 0x03 -> 0x01**
+      (bit 1 cleared) and **0xC700 0x01 -> 0x00**. The chest's reward latched earlier
+      as bonus id **0x13 (19)** (idx 1625) and populated a destructible/object slot
+      (0xC490 block) + a 0xC500 pickup entry. Exact chest-object handler still TBD.
+    * **Crouch** (DOWN) = action state **0xC420 = 2** (handler 0x6DB0). Held the whole
+      time DOWN was pressed; **Simon X (0xC427) stayed locked at 0xCE** - confirms "can
+      not move while crouching".
+    * **Jump** = action state **0xC420 = 1** (handler 0x6CC7), NOT 5. Three jumps: up
+      (X fixed at 0xCE, Y arc 0xC0->0xA0->0xC0 over ~15 frames), right (Xlo 0xCE->0xF6
+      during the arc), left (Xlo 0xF4->0xCE). This corrects the Eleventh-session note.
+      0xC423 tracks the air sub-phase during the arc.
+
+- Thirteenth session (**stage 1, room 7**, idx 2019..2190): whip candle -> large
+  heart; whip another candle -> nothing; dog approaches, Simon jumps over it, dog
+  flees left off-screen.
+    * **Score (0xC405-0xC407) unchanged the whole take (00 82 00)** - confirms large
+      heart = **+0 points**, empty candle = 0, and the fled dog = 0 (not killed).
+    * **Large heart** = bonus id **0x02**, **0xC417 hearts 0x15 -> 0x20 (BCD, +5)** at
+      idx 2069; spawned via the 0x26 reward actor in slot 0xC880 (idx 2035..2052).
+    * **Dog** = actor slot 0xC800 type **0x05** (`enemy_dog_tick`). Timeline: Simon
+      approaches from the left (X 0x51->0x83); dog runs toward him (dogX +0x05
+      0xC0->0x74), oscillates, then after Simon's jump (state 1, idx ~2126..2141) it
+      reverses and runs left off-screen (dogX 0x84->0x30, slot freed idx 2158). No
+      score (never killed) - consistent with the flee-right/left AI keyed on Simon's
+      relative X.
+    * Decoded the per-type score table **l81d5h** (seg2) and annotated it inline:
+      zombie(t01)=100, dog(t05)=100, candle/destructible(t04)=100, up to bosses
+      (t0e=1000, t12-14=2000, t11=+30000, t17=+50000).
+
+- Damage model annotated (byte-exact) - Simon HP = 0xC415 (max 0x20), enemy/boss
+  energy = 0xC418 (max 0x80):
+    * **Simon takes damage** via damage_health (0x4632): `hurt_simon_contact`
+      (seg2 0x8173) = 2x the *odd* byte of l81d5h[type] (zombie 2, dog 6; shield
+      0xC701 bit4 halves + spends 0xC441 charge); `hurt_simon_projectile` (seg2
+      0x85AD) = fixed 8 or 16 from a 0xC580 hazard slot, and sets hurt state
+      0xC420=5.  l81d5h's odd byte is the per-type contact-damage field (its even
+      byte is the kill score).
+    * **Simon deals damage** via `weapon_hit_damage` (seg1 0x7E33) -> `damage_enemy`
+      (0x4643, 0xC418 -= B).  Per-weapon table by (type-0x11): leather/knife =
+      04 08 08 04 04 04 10; chain/cross/axe = 06 0C 0C 06 06 06 18; type 0x17 with
+      weapon>=2 is quartered.  Lesser enemies (type<0x11) die on the first hit.
+    * Names in segments/msx.sym: damage_enemy, hurt_simon_contact,
+      hurt_simon_projectile, weapon_hit_damage.
+
+- Fourteenth session (2 recordings appended to idx 2762): (1) dog hits Simon,
+  (2) reveal a wall vendor, whip him repeatedly, refuse a 50-heart knife offer,
+  keep whipping until he gives two +5 hearts and leaves.
+    * **Dog contact damage = 6 confirmed**: 0xC415 0x20 -> 0x1A at idx 2200
+      (matches l81d5h dog odd-byte 3 x2 = 6).
+    * **Vendor fully mapped (seg2 0x92AE-0x9552).** Not a 0xC800 actor - lives in
+      the special-object list at 0xC5B5; transaction state in the 0xC700 block:
+      0xC706 offer timer, 0xC707 price (BCD), 0xC708 offered item (0x1B = knife),
+      0xC702 bible flags, 0xC70C whip-outcome state, 0xD012 mood tier (0..3).
+    * **Whip-outcome state machine**: each hit runs `vendor_pick_outcome` (0x92C2)
+      - a transition table (0x9307, rows per vendor variant) plus the **R refresh
+      register as RNG** for the branchy states (>=7); result 0xC70C executed by
+      `vendor_outcome_dispatch` (0x92AE). Outcomes 0..6 = register-hit / mood++ /
+      mood-- / **+5 hearts** (sfx 0x0F) / **-5 hearts** (sfx 0x1D) / **nothing**
+      (bare ret) / **leave**. This is the full spectrum the player observes; the
+      RNG is why timing/results vary run to run.
+    * **Score**: only the **leave** path adds score - **+5000** via
+      `ld de,0x5000 / jp 0x44F3` (add_score). Confirmed by 0xC405-07 00 00 00 ->
+      00 50 00 at idx 2722, right after the vendor left (0xC70C=6 at idx 2697).
+      Individual whips add 0 (a "did nothing" whip = outcome 5).
+    * **Offer** armed by `vendor_make_offer` (0x938E): sets item/price and the
+      0xC706 timer (=0x14). Reached from the reveal path via the object's stored
+      handler pointer (the 0x938E address isn't referenced statically anywhere -
+      the one open plumbing detail). Empirically the first offer fired at reveal
+      (idx 2331: 0xC706=0x14, 0xC707=0x50, 0xC708=0x1B).
+    * **Price** = `vendor_price_tbl` (0x942F), 9 rows of {id, normal, half, double};
+      `vendor_select_price` (0x941F) uses 0xC702 bit7 (white bible = halve) / bit6
+      (black bible = double). Knife = 50 / 30 / 90 -> the "50 hearts" offer is the
+      normal price (neither bible active, as the player noted).
+    * **Buy/refuse**: `vendor_purchase_tick` (0x94BE) ticks 0xC706 and polls
+      `vendor_read_buttons` (0x9526): joystick triggers + **SPACE (kbd row 8) =
+      confirm**, **SHIFT (row 6) = refuse**, edge-detected via 0xC709. Confirm +
+      hearts>=price -> spend_hearts + collect_bonus(item), sfx 0x12; refuse /
+      unaffordable / timer-expiry -> withdraw, sfx 0x02.
+    * Names in segments/msx.sym: vendor_outcome_dispatch, vendor_pick_outcome,
+      vendor_make_offer, vendor_set_offer_item, vendor_select_price,
+      vendor_price_tbl, vendor_purchase_tick, vendor_read_buttons.
+
+- Fifteenth session (1 recording, idx 2846): pick up the **black bible**.
+    * **Black bible = bonus id 0x10** (0xC419=0x10). Sets **0xC702 bit6** (0x00 ->
+      0x40) -> vendor prices doubled. Confirms the price-modifier analysis.
+    * collect_bonus dispatches `dec a` then DISPATCH_A, so id N uses table[N-1]
+      (table base 0x8D45 = id 0x01). Black-bible handler = 0x8E24 (res bit7, set
+      bit6); **white bible = id 0x11**, handler 0x8E2D (res bit6, set bit7 -> half
+      price). The two bits are mutually exclusive (each handler clears the other).
+      Both end at 0x8E34 -> popup message id 0x12.
+
+- Sixteenth session (1 recording, idx 2890..3167): whip candle + grab heart, whip
+  dog, open a white-key door -> **enter STAGE 2**.
+    * **White-key door** (seg0 0x438B): clears **0xC701 bit0** (`and 0feh`) to spend
+      the white key, then `jp advance_stage`. Confirmed: 0xC701 0x03 -> 0x02 at idx
+      3072 (bit0 dropped), stage 0xD000 01 -> 02 at idx 3137.
+    * **advance_stage** (seg0 0x434E, renamed from l434eh): 0xD000 (stage) ++,
+      0xD001 (room) = 0, bump BCD counters 0xC410/0xC411, transition type 4.
+    * Pickups this take reconfirm earlier IDs: **yellow key** = bonus 0x17 (0xC419
+      0x17 @ idx 2971, sets 0xC701 bit1 + 0xC700=1); **large heart** = bonus 0x02
+      (0xC417 0x35 -> 0x40, +5, @ idx 3023). Score +100 @ idx 2979 (candle
+      destructible; boss energy 0xC418 untouched = one-hit kill, not a boss).
+
 - Segments 2 & 3 imported as disassembled source (byte-exact): both graduated
   from INCBIN to INCLUDE (org 0x8000 / 0xA000, pages 2a / 2b).  Raw disassembly
   folded into `segments/seg02.asm` / `seg03.asm` (equ block + z80dasm header
@@ -310,7 +458,7 @@ dumps.
   - `enemy_dog_tick` (seg3 0xA863, entity type 5): compares dog pos (+0x05) to
     Simon X (0xC427) to choose idle frame 0x43 (far) / 0x3f (near); stores anim
     (+0x0B), alive (+0x06), clears timer (+0x0C).  This is the flee-right dog.
-  Both names added to `tools/msx.sym`; seg0 `entity_tbl[0]`/`[4]` now reference
+  Both names added to `segments/msx.sym`; seg0 `entity_tbl[0]`/`[4]` now reference
   the labels (byte-exact).  NOTE the earlier dog/zombie X-offset puzzle: the code
   uses +0x05 as the AI/compare X for BOTH; runtime showed +0x03 moving for the dog
   - still worth a c800-c80f watch to see how +0x03 vs +0x05 relate during the flee.
@@ -338,7 +486,7 @@ dumps.
     velocity plus a progress speed bias (0xD012 tier * 32, in the travel
     direction) so enemies get faster as the game advances - NOT scrolling (VK is
     room-based and does not scroll).
-  All names in `tools/msx.sym`; cross-segment `call 0aXXXh` sites in seg0/1/2 now use
+  All names in `segments/msx.sym`; cross-segment `call 0aXXXh` sites in seg0/1/2 now use
   the labels.  (Audit correction: the "0xB473 sprite-shape table" note was wrong -
   0xB473 is code, a `jr` target inside an actor routine, not data.)
   Tooling: fixed CRLF line endings in `tools/split-rom.sh` (it wouldn't run, which is
@@ -382,7 +530,20 @@ Output is "addr: old -> new" per changed byte, which reads directly against the
 live RAM map below.  This is the fastest way to find *where* a counter/flag lives
 (snap, do the thing once, snap) before committing a WATCH range to it - and it
 catches the persistent inventory bytes below 0xC420 that the movement watches
-kept missing.  (Impl: F9 is caught in CMKeyboardManager's IOHID callback under
+kept missing.
+
+**Habit: always diff the score on every recording.**  Score is 3-byte BCD at
+**0xC405-0xC407** (main byte 0xC406, value x100).  Track it across the whole take
+with `tools/snapdiff.py -t c405-c407` and note the delta for each pickup / kill /
+hit - it's a reliable, quantitative fingerprint of what an action was "worth"
+(e.g. chest = +5400, whipping a candle/object = +100, heart pickup = +0).  Points
+are always multiples of 100, so watch 0xC406.
+
+**Habit: annotate score increments in code whenever found.**  All awards go through
+`add_score` (seg0 0x44F5); enemy/destructible kills come via `award_kill_score`
+(seg2 0x81B2) using the per-type value table `l81d5h` (already decoded inline).
+When a recording shows a score delta, tie it back to the responsible code path and
+add/confirm the point value in the annotation (and here).  (Impl: F9 is caught in CMKeyboardManager's IOHID callback under
 `#ifdef DISASMTRACE` and swallowed; disasmTraceRequestSnapshot() sets a flag that
 R800's fetch loop honours at the next opcode via the CPU's own RAM reader.)
 
@@ -532,14 +693,28 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   listing comments. Regen strips them automatically; `tools/strip-listing.py
   segments/segNN.asm` is still available as a safety net (it drops the byte-listing
   noise but keeps hand-written `; ...` comments and re-aligns them).
-- Data regions go in a `.blocks` file (see `tools/seg00.blocks`, `tools/seg01.blocks`);
+- Data regions go in a `.blocks` file (see `segments/seg00.blocks`, `segments/seg01.blocks`);
   a `.blocks` file only changes code-vs-data rendering, never the emitted bytes.
-  BIOS names live once in `segments/bios.inc`; routine names go in `tools/msx.sym`.
+  BIOS names live once in `segments/bios.inc`; routine names go in `segments/msx.sym`.
+- File placement (STANDING PRACTICE): all hand-authored disassembly metadata lives
+  in `segments/` (`bios.inc`, `msx.sym`, `seg*.blocks`) - anything needed to
+  reassemble or to regenerate the disassembly faithfully. `tools/` is executable
+  tooling only; `generated/` is gitignored derived scratch (never author there).
+  How they're consumed: `bios.inc` is `INCLUDE`d by the build (symbol equates, not
+  emitted); `msx.sym` (z80dasm `-S`) and `seg*.blocks` (z80dasm `-b`) are read only
+  by `regen-seg.sh`. `bios.inc` and `msx.sym` overlap - keep them in sync.
 - Naming (STANDING PRACTICE): as soon as we have enough context to be confident of
   a routine's (or label's) purpose, rename it - proactively, without being asked.
   Do NOT rename speculatively: keep the `z80dasm` name until the purpose is actually
-  established.  Same rule applies to named RAM/data addresses where the role is
-  confirmed.
+  established (don't jump the gun on a guessed purpose).  Same rule applies to named
+  RAM/data addresses where the role is confirmed.
+  - When confident, the rename means renaming the actual in-source label in
+    `segments/*.asm` (definition + every reference) - NOT merely adding the name to
+    `segments/msx.sym` or writing it in a comment.  Adding a `msx.sym` entry / comment
+    while leaving `sub_XXXXh`/`lXXXXh` in the source is the incomplete half; do both.
+  - If the purpose is only partially understood, leave the auto-label and just add a
+    comment describing what is known - a comment is the right home for a hypothesis,
+    a name is a claim of confidence.
 - Casing: `UPPER_SNAKE` is reserved for external/hardware and macro-like helpers
   only - MSX BIOS entry points and the pseudo-instruction helpers that read like
   opcodes (`ADD_HL_A`, `ADD_DE_A`, `DISPATCH_A`).  Everything that is our own game
@@ -551,7 +726,7 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   the `incbin` segments only reference code by embedded address bytes) never changes
   the emitted ROM; `make verify` catches any inconsistency.  Keep the original ROM
   address in the block-header comment (e.g. `(seg0 0x5F24)`) so names still line up
-  with WATCH-log PCs, and add the same name to `tools/msx.sym` so regen emits it.
+  with WATCH-log PCs, and add the same name to `segments/msx.sym` so regen emits it.
   Renamed so far - seg0: draw_hearts_hud/draw_lives_hud/draw_health_bar/
   draw_enemy_meter/restore_health/damage_health/spawn_actor(+_init);
   seg1: simon_action_tick, spend_5_hearts.

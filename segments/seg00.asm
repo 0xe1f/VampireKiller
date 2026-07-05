@@ -3,7 +3,7 @@
 ;  holds the boot/init code, the interrupt handler, the bank-switch helpers
 ;  and the top-level game state machine.
 ;  (Origin is set by PHASE 0x4000 in VampireKiller.asm; regenerate the raw
-;   disassembly with  tools/regen-seg.sh 0 0x4000 tools/seg00.blocks .)
+;   disassembly with  tools/regen-seg.sh 0 0x4000 segments/seg00.blocks .)
 ;
 ;  MSX/MSX2 BIOS entry-point names used below (ENASLT, WRTVDP, ...) are defined
 ;  once in segments/bios.inc, included by VampireKiller.asm before this file.
@@ -541,7 +541,11 @@ sub_4314h:
 	jp l41b5h
 l434bh:
 	call 062dch
-l434eh:
+; advance_stage (0x434E): move to the next stage.  Bumps the two BCD progress
+; counters 0xC410/0xC411, increments the stage id 0xD000, resets the room id
+; 0xD001 to 0, clears 0xC408/0xC409, then runs transition type 4 (jp l41b6h).
+; (Runtime-confirmed: stage1/room7 -> stage2/room0 on entering a door.)
+advance_stage:
 	ld hl,0c410h
 	ld a,(hl)
 	add a,001h
@@ -553,10 +557,10 @@ l434eh:
 	daa
 	ld (hl),a
 	ld hl,0d000h
-	inc (hl)
+	inc (hl)               ; stage id ++
 	inc hl
 	xor a
-	ld (hl),a
+	ld (hl),a              ; room id (0xD001) = 0
 	ld (0c409h),a
 	ld (0c408h),a
 	ld a,004h
@@ -574,11 +578,12 @@ l4377h:
 	call 062fch
 	ld a,005h
 	jp l41b6h
+; white-key door: consume the white key (clear 0xC701 bit0) and advance a stage.
 	ld hl,0c701h
 	ld a,(hl)
-	and 0feh
+	and 0feh               ; clear bit0 = white key spent by the door
 	ld (hl),a
-	jp l434eh
+	jp advance_stage
 ; ===========================================================================
 ;  l4398h - front-end post-handler (runs after the logo/title/attract handler,
 ;  states 0..2).  Reads the start input; on press it moves logo/attract back to
@@ -769,25 +774,34 @@ l44f0h:
 	inc bc
 	nop
 	ld bc,0000eh
+; --- add_score (seg0 0x44F5) - add points to Simon's score ---------------------
+; Score is a 3-byte packed-BCD counter at 0xC405 (low pair) / 0xC406 (mid pair -
+; the hundreds/thousands digits, i.e. the main visible byte) / 0xC407 (high pair).
+; On-screen value = the 6 BCD digits with leading zeros stripped (e.g. 00 82 00 =
+; "8200").  Award amount is passed in C:D:E = high:mid:low BCD pairs (points are
+; always multiples of 100, so callers set E=0 and put the hundreds in D).  Adds
+; with `daa` carry-chained across the 3 bytes; on overflow past 999999 it clamps.
+; Guard: skipped (ret p) unless bit 6 of the 0xC002 frame counter is set.
+add_score:
 	ld a,(0c002h)
 	add a,a
 	ret p
-	ld hl,0c405h
+	ld hl,0c405h           ; HL -> score low byte
 	ld a,(hl)
-	add a,e
+	add a,e                ; += E (low pair)
 	daa
 	ld (hl),a
 	inc l
 	ld a,(hl)
-	adc a,d
+	adc a,d                ; += D (mid pair = hundreds/thousands)
 	daa
 	ld (hl),a
 	inc hl
 	ld a,(hl)
-	adc a,c
+	adc a,c                ; += C (high pair)
 	daa
 	ld (hl),a
-	jr nc,l4538h
+	jr nc,l4538h           ; no overflow -> done
 	ld bc,09999h
 	ld (0c402h),bc
 	ld (0c403h),bc
@@ -980,7 +994,10 @@ l463ah:
 	sub b
 	ld (hl),a
 	jp sub_45c0h
-l4643h:
+; damage_enemy (seg0 0x4643) - subtract B from the on-screen ENEMY/BOSS energy
+; 0xC418 (the enemies/bosses that carry an HP bar, types >= 0x11), floored at 0.
+; This is where Simon's whip/sub-weapon damage lands (see seg1 weapon_hit_damage).
+damage_enemy:
 	ld hl,0c418h
 	ld a,(hl)
 	cp b
@@ -999,7 +1016,7 @@ l464bh:
 	ld b,001h
 	jp restore_health
 	ld b,001h
-	jr l4643h
+	jr damage_enemy
 sub_4661h:
 	call sub_46d5h
 	call sub_4674h
@@ -4749,12 +4766,22 @@ l5ebch:
 	or b
 	cp b
 	ret nz
-	ld a,(0c440h)
+; --- room_spawner (seg0 0x5EBF) - per-frame enemy spawner --------------------
+; Called every frame from the actor-update loop (seg2 0x98F0) while 0xD010==0
+; (normal play, not in a room transition/menu).  Gated by a series of early-outs;
+; when they all pass it pages in seg14, reads the per-(stage 0xD000, room 0xD001)
+; spawn descriptor from the table at 0x85A6, and for each set bit calls a spawn
+; generator (0x9CED/0x9D52/...) that drops an actor into a free 0xC800 slot via
+; spawn_actor.  Existing actors are never touched here.
+;   0xC440 - rosary / weapon-pickup "no-spawn" timer (nonzero -> suppress all new
+;            spawns this frame; armed by collect_bonus, ticked down by seg1 0x75C7).
+room_spawner:
+	ld a,(0c440h)          ; rosary/pickup no-spawn timer active?
 	and a
-	ret nz
-	ld a,(0c420h)
+	ret nz                 ; yes -> spawn nothing this frame (immediate, current room)
+	ld a,(0c420h)          ; Simon action state
 	cp 006h
-	ret z
+	ret z                  ; state 6 (hurt / dying-respawn) -> no spawns
 	ld a,(0c5ach)
 	sub 002h
 	ret z

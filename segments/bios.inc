@@ -3,7 +3,7 @@
 ;  These resolve to fixed addresses in the machine's BIOS ROM and are never
 ;  emitted into the cartridge image - they only make the disassembly readable
 ;  (e.g. `call ENASLT` instead of `call 0x0024`).  Included once by
-;  VampireKiller.asm before the segment blocks.  Keep in sync with tools/msx.sym
+;  VampireKiller.asm before the segment blocks.  Keep in sync with segments/msx.sym
 ;  (the copy z80dasm reads when regenerating a segment).
 ; ===========================================================================
 CHKRAM:  equ 0x0000

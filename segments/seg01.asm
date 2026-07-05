@@ -3,8 +3,8 @@
 ;  Reached from segment 0's state machine (see the call sites in seg00.asm);
 ;  holds main gameplay-loop routines.  BIOS names come from segments/bios.inc
 ;  and the seg0 helper labels (ADD_HL_A, DISPATCH_A, ...) resolve from seg00.asm.
-;  Disassembly in progress: code/data split is described in tools/seg01.blocks.
-;  (Regenerate raw disasm with  tools/regen-seg.sh 1 0x6000 tools/seg01.blocks .)
+;  Disassembly in progress: code/data split is described in segments/seg01.blocks.
+;  (Regenerate raw disasm with  tools/regen-seg.sh 1 0x6000 segments/seg01.blocks .)
 ; ===========================================================================
 ; ---- MSX main-ROM BIOS jump table ----------------------------------------
 
@@ -1873,12 +1873,26 @@ l6b2bh:
 	call sub_75dbh
 	call sub_760bh
 	jp l761fh
-; simon_action_tick (seg1 0x6B40) - Simon's per-frame action-state machine.  0xC420 is the action
-; state (runtime-confirmed: 0=normal, 3=whip, 5=hurt/knockback, 6=dead among
-; others); DISPATCH_A jumps through the inline word table below by that index.
+; simon_action_tick (seg1 0x6B40) - Simon's per-frame action-state machine.
+; 0xC420 = action state; DISPATCH_A jumps through the inline 8-entry word table
+; below (states 0..7).  Handler addresses and runtime-confirmed meanings:
+;   0 -> 0x6B59  grounded (walk / idle / whip-on-ground; whipping does NOT change
+;                0xC420, it is tracked separately)
+;   1 -> 0x6CC7  JUMP / airborne (confirmed: 3 jumps, Y arc 0xC0->0xA0->0xC0;
+;                jump-up keeps X fixed, jump-left/right slews X; 0xC423 = air phase)
+;   2 -> 0x6DB0  CROUCH (confirmed: held while DOWN pressed; Simon X is locked -
+;                cannot walk while crouching)
+;   3 -> 0x6DE4  ON STAIRS / climbing (confirmed: held ~159 frames of diagonal
+;                Y travel 0x80<->0x4C; Simon can whip while in this state)
+;   4 -> 0x6F44  falling / dropping off a ledge (confirmed: Y ramps down, no jump)
+;   5 -> 0x6F8C  hurt / knockback (prior death recording; a shallow airborne launch -
+;                NOT the normal jump, which is state 1)
+;   6 -> 0x709A  dying / respawn (prior death recording; room_spawner skips spawns
+;                while 0xC420==6)
+;   7 -> 0x7102  (unconfirmed)
 simon_action_tick:
 	call 0852bh
-	ld a,(0c420h)          ; Simon action state
+	ld a,(0c420h)          ; Simon action state (see table above)
 	call DISPATCH_A
 	ld e,c
 	ld l,e
@@ -3313,12 +3327,17 @@ l75beh:
 	inc de
 	djnz l75beh
 	ret
+; Per-frame countdown bank: decrement each of these timers toward 0 (clamped).
+;   0xC440 - enemy-spawn suppression (rosary / weapon-pickup grace); while nonzero
+;            room_spawner (seg0 0x5EBF) spawns nothing.
+;   0xC434 / 0xC42D - other short-lived per-frame timers.
 sub_75c7h:
 	ld hl,0c440h
 	call sub_75d6h
 	ld hl,0c434h
 	call sub_75d6h
 	ld hl,0c42dh
+; sub_75d6h: dec (hl) unless already 0.
 sub_75d6h:
 	ld a,(hl)
 	and a
@@ -4714,30 +4733,39 @@ l7e1eh:
 	ld a,001h
 	ld (0ce15h),a
 	jp sub_780dh
+; weapon_hit_damage (seg1 0x7E33) - Simon DISPENSES damage to the struck enemy in
+; IX.  Picks a damage byte B from a per-weapon table indexed by (enemy type-0x11),
+; then jp damage_enemy (0xC418 -= B).  Only the HP-bar enemies (types 0x11..0x17)
+; take metered damage here; lesser enemies die outright on the hit test.
+;   weapon 0xC416 = 0 (leather whip) or 2 (knife)  -> base table l7e60h
+;   weapon = 1 (chain) / 3 (cross) / 4 (axe)        -> strong table 0x7E67 (1.5x)
+;   Base   (types 0x11..0x17): 04 08 08 04 04 04 10
+;   Strong (types 0x11..0x17): 06 0C 0C 06 06 06 18
+; Special: vs type 0x17 with weapon >= 2 (knife/cross/axe) the damage is >>2 (/4).
 sub_7e33h:
 	ld hl,l7e60h
-	ld a,(0c416h)
+	ld a,(0c416h)          ; equipped weapon id
 	and a
-	jr z,l7e43h
+	jr z,l7e43h            ; leather whip -> base table
 	cp 002h
-	jr z,l7e43h
-	ld hl,07e67h
+	jr z,l7e43h            ; knife -> base table
+	ld hl,07e67h           ; chain/cross/axe -> strong table
 l7e43h:
-	ld a,(ix+000h)
+	ld a,(ix+000h)         ; struck enemy type
 	ld c,a
-	sub 011h
+	sub 011h               ; index = type - 0x11
 	call ADD_HL_A
-	ld b,(hl)
+	ld b,(hl)              ; B = damage for this weapon vs this enemy
 	ld a,c
 	cp 017h
 	jr nz,l7e5dh
 	ld a,(0c416h)
 	cp 002h
 	jr c,l7e5dh
-	srl b
+	srl b                  ; type 0x17 + weapon>=2: quarter the damage
 	srl b
 l7e5dh:
-	jp 04643h
+	jp damage_enemy        ; 0xC418 -= B
 l7e60h:
 	inc b
 	ex af,af'

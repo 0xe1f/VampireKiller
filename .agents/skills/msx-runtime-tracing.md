@@ -34,6 +34,10 @@ segment currently paged in (`X 06:be44` = seg 6, PC 0xBE44).
 - **Then** use a *targeted* WATCH (just the few addresses of interest) in a follow-
   up run to get writer PCs. Avoid broad EXEC traces — they explode the log.
 - Always keep `DEDUP=1`. Keep WATCH ranges tight.
+- **Never kill a running emulator** (`kill`, `pkill`, closing CocoaMSX, etc.)
+  unless the user specifically asks. The user is usually mid-recording and killing
+  it destroys in-progress state. If a relaunch *seems* needed (e.g. to change WATCH
+  ranges) but you weren't asked, **ask first**.
 
 ## Workflow
 

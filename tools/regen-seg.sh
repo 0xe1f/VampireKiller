@@ -3,7 +3,7 @@
 #
 #   tools/regen-seg.sh <segment-number> <origin-hex> [blockfile]
 #
-# Example:  tools/regen-seg.sh 0 0x4000 tools/seg00.blocks
+# Example:  tools/regen-seg.sh 0 0x4000 segments/seg00.blocks
 #
 # Produces two scratch files in generated/ (the whole dir is gitignored):
 #   generated/segNN.raw.asm        raw z80dasm listing WITH the address + opcode
@@ -28,7 +28,7 @@ rom="references/VampireKiller.rom"      # gitignored reference ROM
 tmpbin="$(mktemp)"
 dd if="$rom" of="$tmpbin" bs=8192 skip="$seg" count=1 status=none
 
-args=(-a -t -l -g "$org" -S tools/msx.sym)
+args=(-a -t -l -g "$org" -S segments/msx.sym)
 [ -n "$blocks" ] && args+=(-b "$blocks")
 
 mkdir -p generated

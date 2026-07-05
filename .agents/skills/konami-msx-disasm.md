@@ -32,11 +32,13 @@ Paths below are relative to this repo root.
 - Root: `<Game>.asm` (stitches segments via `PHASE`/`INCBIN`), `Makefile`,
   `README.md`, `.gitignore` (ignore `generated/`, built ROM, segment bins).
 - `segments/` — per-segment `.asm` (disassembled) + `.bin` (not-yet-reversed);
-  `bios.inc` (MSX BIOS entry names).
+  all hand-authored disassembly metadata lives here: `bios.inc` (MSX BIOS entry
+  names), `msx.sym` (routine/label names for z80dasm regen), `seg*.blocks`
+  (code/data split maps). Anything needed to reassemble or regenerate belongs here.
 - `docs/` — `progress.md` (checklist + RAM map + working notes), `game-notes.md`
   (detailed findings).
-- `tools/` — `regen-seg.sh`, `split-rom.sh`, `strip-listing.py`, `msx.sym`,
-  `seg*.blocks`, gfx pipeline, and the tracing tools (see `msx-runtime-tracing`).
+- `tools/` — `regen-seg.sh`, `split-rom.sh`, `strip-listing.py`, gfx pipeline, and
+  the tracing tools (see `msx-runtime-tracing`). Executable tooling only.
 - `gfx/` — editable graphics assets (PNG + txt); original compressed bytes stay
   authoritative.
 
@@ -68,7 +70,7 @@ of `<Game>.asm`.
 - **Naming**: rename a `z80dasm` label (`sub_XXXXh`/`lXXXXh`) to a descriptive name
   as soon as its purpose is confirmed — proactively, never speculatively. Keep the
   original ROM address in the block-header comment (e.g. `(seg0 0x5F24)`) so names
-  still match trace PCs, and add the name to `tools/msx.sym` so regen emits it.
+  still match trace PCs, and add the name to `segments/msx.sym` so regen emits it.
   Update the definition + every reference in the `.asm` files (`INCBIN` segments
   reference code only by embedded address bytes, so nothing to change there);
   `make verify` catches inconsistencies. Casing: `UPPER_SNAKE` only for MSX BIOS

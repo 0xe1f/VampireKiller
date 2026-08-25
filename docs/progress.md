@@ -313,9 +313,9 @@ opaque `db` dumps.
       weapon id = bonus id - 0x19 (chain whip = bonus 0x1A), except bonus 0x1E
       (index 5) which is holy water (`C701` bit 3) and does not write 0xC416.
     * Attack path split (seg1 ~0x7D80): weapon < 2 = whip (stays with Simon), >= 2 =
-      projectile (knife/cross/axe). Damage tables (seg1 sub_7e33h): weapon 0 + 2 use
-      base l7e60h, others use stronger 0x7E67. Full weapon-id map + damage values +
-      the boomerang catch/lose logic still TBD. See game-notes "Equippable weapons".
+      projectile (2=knife, 3=axe, 4=cross). Damage tables (seg1 weapon_hit_damage):
+      weapon 0 + 2 use l7e60h, others use l7e67h. Catch-or-lose is lose_weapon
+      0x8E9A. See game-notes "Equippable weapons".
 
 - Eleventh session (stairs: climb up, whip a candle while on the stairway, climb
   back down and grab the heart). F8 recording, 1415 frames; only the LAST room is
@@ -388,7 +388,7 @@ opaque `db` dumps.
       byte is the kill score).
     * **Simon deals damage** via `weapon_hit_damage` (seg1 0x7E33) -> `damage_enemy`
       (0x4643, 0xC418 -= B).  Per-weapon table by (type-0x11): leather/knife =
-      04 08 08 04 04 04 10; chain/cross/axe = 06 0C 0C 06 06 06 18; type 0x17 with
+      04 08 08 04 04 04 10; chain/axe/cross = 06 0C 0C 06 06 06 18; type 0x17 with
       weapon>=2 is quartered.  Lesser enemies (type<0x11) die on the first hit.
     * Names in segments/msx.sym: damage_enemy, hurt_simon_contact,
       hurt_simon_projectile, weapon_hit_damage.
@@ -1181,11 +1181,12 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   advance_stage, room_map_build, zombie_generator, door_blit_tiles,
   read_buttons, input_edge, play_sound;
   seg1: simon_action_tick, simon_walk_left/right, simon_jump_tick, simon_mirror_frames,
-  whip_tick, tile_layout_draw, holy_water_use, holy_water_tick, map_cell_at, tile_is_solid,
+  whip_tick, projectile_tick, knife_tick, cross_tick, axe_tick, tile_layout_draw, holy_water_use, holy_water_tick, map_cell_at, tile_is_solid,
   row_solid_thresh, set_stage_boundary, door_interact, simon_portal_wait,
   hourglass_use;
   seg2: door_proximity, door_anim_tick, door_begin_open, spot_proximity,
-  collect_bonus_tbl, bonus_holy_water, yellow_shield_tick;
+  collect_bonus_tbl, bonus_holy_water, yellow_shield_tick, projectile_hit_actors,
+  lose_weapon;
   seg13: conn_lookup, conn_load_permits, conn_room_record, conn_ptr, door_load,
   door_load_coords, door_tbl, spot_load_coords, spot_tbl, simon_cell0_ptr,
   simon_cell1_ptr;

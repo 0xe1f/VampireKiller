@@ -2662,11 +2662,12 @@ simon_portal_wait:             ; 7 (0x7102) pad crouch+UP: wait, then warp
 	ld a,0ffh
 	ld (0c41bh),a          ; conn_from_spot: D001 = C5B4
 	ret
-; simon_attack_tick (0x7114): try start a whip (SPACE), tick the phase, emit sprites.
+; simon_attack_tick (0x7114): SPACE starts whip or C416>=2 throw; then whip
+; phase + projectile_tick (C450/C460). Jump+dir is holy water / hourglass.
 simon_attack_tick:
 	call sub_711dh
 	call whip_tick
-	jp l72b9h
+	jp projectile_tick
 sub_711dh:
 	ld a,(0c006h)
 	and 010h               ; SPACE/trig new-press
@@ -2679,7 +2680,7 @@ sub_711dh:
 	ld (0c436h),a
 	cp 002h
 	jr c,l713ah
-	call sub_71c5h
+	call projectile_alloc
 	ld a,b
 	and a
 	ret z
@@ -2762,7 +2763,7 @@ holy_water_throw_right:        ; (0x71A8) C468=0, then throw
 	xor a
 	ld (0c468h),a
 holy_water_throw:              ; (0x71B1) arm C460 slot as type 5, spend 5 hearts
-	call 099a6h
+	call actors_rearm_hittable
 	ld a,005h
 	ld (0c461h),a          ; projectile type 5 (one in flight)
 	ld a,(0c417h)
@@ -2770,7 +2771,9 @@ holy_water_throw:              ; (0x71B1) arm C460 slot as type 5, spend 5 heart
 	daa
 	ld (0c417h),a
 	jp 0456dh
-sub_71c5h:
+; projectile_alloc (0x71C5): find a free C450/C460 slot (+1==0), set +0=1.
+; Knife (C436==2) may occupy both slots; axe/cross take one.
+projectile_alloc:
 	ld a,(0c436h)
 	cp 002h
 	ld b,002h
@@ -2856,7 +2859,7 @@ l7257h:
 	ld a,(0c436h)
 	cp 002h
 	jr nc,l7247h
-	call 099a6h
+	call actors_rearm_hittable
 	ld hl,0c42fh
 	inc (hl)
 	ld a,004h
@@ -2864,7 +2867,7 @@ l7257h:
 l7269h:
 	ld a,(0c436h)
 	cp 002h
-	jr nc,l728dh
+	jr nc,projectile_arm
 	ld hl,0c429h
 	dec (hl)
 	ret nz
@@ -2880,8 +2883,8 @@ sub_7275h:
 l7287h:
 	ld (0c42fh),a
 	jp simon_mirror_frames
-l728dh:
-	call 099a6h
+projectile_arm:                ; (0x728D) whip-phase 4: copy C436 into a waiting slot
+	call actors_rearm_hittable
 	call sub_7275h
 	ld ix,0c450h
 	ld b,002h
@@ -2901,28 +2904,30 @@ l72b1h:
 	add ix,de
 	djnz l7299h
 	ret
-l72b9h:                        ; (0x72B9) copy both whip slots 0xC450/0xC460 to SAT
+; C450 / C460 projectile slots (stride 0x10): +0 state, +1 type (C416 or 5),
+; +2 velY, +3 velX, +4 Y, +5 X, +6 pattern, +7 phase, +8 facing.
+projectile_tick:               ; (0x72B9) both slots: motion, integrate, clip, SAT
 	ld ix,0c450h
-	call sub_72c4h
+	call projectile_tick_slot
 	ld ix,0c460h
-sub_72c4h:
+projectile_tick_slot:
 	ld a,(ix+001h)
 	and a
 	ret z
-	call sub_72d5h
-	call sub_74c2h
-	call sub_74d5h
+	call projectile_motion
+	call projectile_integrate
+	call projectile_clip
 	jp l753ch
-sub_72d5h:
+projectile_motion:
 	ld a,(ix+001h)
 	dec a
-	dec a                    ; index = type-2: 2=knife 3=cross 4=axe 5=holy
+	dec a                    ; type-2: 2=knife 3=axe 4=cross 5=holy
 	call DISPATCH_A
-	defw l743dh            ; type 2
-	defw l747ah            ; type 3
-	defw l72e5h            ; type 4
+	defw knife_tick
+	defw axe_tick
+	defw cross_tick
 	defw holy_water_tick   ; type 5 (C461; not a C416 weapon)
-l72e5h:
+cross_tick:                    ; (0x72E5) C416=4, bonus 0x1D; vel ±5, SAT 0x0F/0x0E
 	ld a,(0c003h)
 	ld c,a
 	rra
@@ -2942,11 +2947,11 @@ l72ffh:
 	ld a,(ix+000h)
 	dec a
 	call DISPATCH_A
-	defw l730eh
-	defw l7344h
-	defw l737ah
-	defw l73a4h
-l730eh:
+	defw boomerang_throw
+	defw boomerang_out
+	defw boomerang_back
+	defw boomerang_catch
+boomerang_throw:               ; (0x730E) copy Simon pos; velX ±3 (axe) / ±5 (cross)
 	ld a,(0c420h)
 	cp 002h
 	ld a,(0c425h)
@@ -2974,7 +2979,7 @@ l7338h:
 	ld a,(0c427h)
 	ld (ix+005h),a
 	jp l7356h
-l7344h:
+boomerang_out:                 ; (0x7344) 24 frames or screen-edge, then turn
 	ld a,(ix+005h)
 	sub 00ah
 	cp 0ech
@@ -2986,7 +2991,7 @@ l7344h:
 l7356h:
 	inc (ix+000h)
 	ld (ix+007h),000h
-	jp 099a6h
+	jp actors_rearm_hittable
 l7360h:
 	inc (ix+000h)
 l7363h:
@@ -2999,10 +3004,10 @@ l7363h:
 l7370h:
 	ld (ix+003h),a
 	ld (ix+007h),000h
-	jp 099a6h
-l737ah:
-	call 08247h
-	jp c,l74f0h
+	jp actors_rearm_hittable
+boomerang_back:                ; (0x737A) decelerate, reverse; overlap Simon = catch
+	call proj_overlap_simon
+	jp c,projectile_clear
 	ld a,(ix+005h)
 	sub 00ah
 	cp 0ech
@@ -3021,10 +3026,10 @@ l737ah:
 l73a0h:
 	inc (ix+003h)
 	ret
-l73a4h:
-	call 08247h
+boomerang_catch:               ; (0x73A4) overlap Simon -> despawn (keep C416)
+	call proj_overlap_simon
 	ret nc
-	jp l74f0h
+	jp projectile_clear
 ; holy_water_tick (seg1 0x73AB): C460 slot type 5.  State 0/1 spawn at Simon
 ; (Y=C425+offset, X=C427, velX=±2 from C468, velY=0).  State 2 = arc
 ; (Y += 2*l7084h[phase], land via sub_7b9fh tile_is_solid).  State 3 = pool
@@ -3089,7 +3094,7 @@ holy_water_pool:               ; (0x7420) 0x18 frames on the floor, then despawn
 	and 004h
 	ld a,0f4h
 	jr z,l742eh
-	call 099a6h
+	call actors_rearm_hittable
 	ld a,0f8h
 l742eh:
 	ld (ix+006h),a
@@ -3097,8 +3102,8 @@ l742eh:
 	ld a,(ix+007h)
 	cp 018h
 	ret c
-	jp l74f0h
-l743dh:
+	jp projectile_clear
+knife_tick:                    ; (0x743D) C416=2, bonus 0x1B; straight ±5, 1 or 2 slots
 	ld a,(ix+000h)
 	dec a
 	ret nz
@@ -3128,7 +3133,7 @@ l7466h:
 	inc (ix+000h)
 	ld a,004h
 	jp play_sound
-l747ah:
+axe_tick:                      ; (0x747A) C416=3, bonus 0x1C; vel ±3, smaller throw
 	ld a,(0c003h)
 	ld c,a
 	rra
@@ -3152,21 +3157,21 @@ l7493h:
 	ld a,(ix+000h)
 	dec a
 	call DISPATCH_A
-	defw l730eh
-	defw l7344h
-	defw l737ah
-	defw l73a4h
+	defw boomerang_throw
+	defw boomerang_out
+	defw boomerang_back
+	defw boomerang_catch
 l74ach:
-	ld (hl),000h
+	ld (hl),000h           ; C433 in {2,3}: drop bonus 0x1C (this weapon) and unequip
 	ld b,01ch
 	ld d,(ix+005h)
 	ld a,(ix+004h)
 	sub 010h
 	ld e,a
 	call 08999h
-	call l74f0h
-	jp 08e9ah
-sub_74c2h:
+	call projectile_clear
+	jp lose_weapon
+projectile_integrate:
 	ld a,(ix+004h)
 	add a,(ix+002h)
 	ld (ix+004h),a
@@ -3174,11 +3179,11 @@ sub_74c2h:
 	add a,(ix+003h)
 	ld (ix+005h),a
 	ret
-sub_74d5h:
+projectile_clip:
 	ld a,(ix+004h)
 	sub 0d8h
 	cp 010h
-	jr c,l74f0h
+	jr c,projectile_clear
 	ld a,(ix+005h)
 	sub 0fbh
 	cp 00ah
@@ -3186,11 +3191,11 @@ sub_74d5h:
 	ld a,(0c416h)
 	sub 003h
 	cp 002h
-	call c,08e9ah
-l74f0h:
+	call c,lose_weapon     ; cross/axe leaving the X wrap zone: lose the weapon
+projectile_clear:
 	push ix
 	pop hl
-sub_74f3h:
+projectile_clear_hl:
 	push hl
 	ld (hl),000h
 	ld d,h
@@ -3277,7 +3282,7 @@ l754fh:
 l7585h:
 	ld a,(ix+001h)
 	cp 004h
-	jr nz,l759ch
+	jr nz,l759ch           ; type 4 (cross): SAT colours 0x0F / 0x0E
 	ld a,00fh
 	ld b,010h
 	call sub_7597h
@@ -4682,7 +4687,7 @@ l7d6dh:
 l7d92h:
 	call sub_7da7h
 l7d95h:
-	call 08025h
+	call projectile_hit_actors
 	call sub_7f80h
 	call 080adh
 	call 080e3h
@@ -4752,7 +4757,7 @@ l7e06h:
 	and a
 	jr z,l7dedh
 l7e13h:
-	call sub_7e33h
+	call weapon_hit_damage
 	ld a,(0c418h)
 	and a
 	jr z,l7e1eh
@@ -4772,18 +4777,18 @@ l7e1eh:
 ; then jp damage_enemy (0xC418 -= B).  Only the HP-bar enemies (types 0x11..0x17)
 ; take metered damage here; lesser enemies die outright on the hit test.
 ;   weapon 0xC416 = 0 (leather whip) or 2 (knife)  -> base table l7e60h
-;   weapon = 1 (chain) / 3 (cross) / 4 (axe)        -> strong table 0x7E67 (1.5x)
+;   weapon = 1 (chain) / 3 (axe) / 4 (cross)        -> strong table l7e67h (1.5x)
 ;   Base   (types 0x11..0x17): 04 08 08 04 04 04 10
 ;   Strong (types 0x11..0x17): 06 0C 0C 06 06 06 18
-; Special: vs type 0x17 with weapon >= 2 (knife/cross/axe) the damage is >>2 (/4).
-sub_7e33h:
+; Special: vs type 0x17 with weapon >= 2 (knife/axe/cross) the damage is >>2 (/4).
+weapon_hit_damage:
 	ld hl,l7e60h
 	ld a,(0c416h)          ; equipped weapon id
 	and a
 	jr z,l7e43h            ; leather whip -> base table
 	cp 002h
 	jr z,l7e43h            ; knife -> base table
-	ld hl,07e67h           ; chain/cross/axe -> strong table
+	ld hl,l7e67h           ; chain/axe/cross -> strong table
 l7e43h:
 	ld a,(ix+000h)         ; struck enemy type
 	ld c,a
@@ -4801,17 +4806,9 @@ l7e43h:
 l7e5dh:
 	jp damage_enemy        ; 0xC418 -= B
 l7e60h:
-	inc b
-	ex af,af'
-	ex af,af'
-	inc b
-	inc b
-	inc b
-	djnz sub_7e6eh
-	inc c
-	inc c
-	ld b,006h
-	ld b,018h
+	defb 004h,008h,008h,004h,004h,004h,010h
+l7e67h:
+	defb 006h,00ch,00ch,006h,006h,006h,018h
 sub_7e6eh:
 	ld a,(0c434h)
 	and a
@@ -4981,7 +4978,7 @@ l7f8fh:
 	cp 002h
 	push iy
 	pop hl
-	call z,sub_74f3h
+	call z,projectile_clear_hl
 	call 08231h
 	jp 09a21h
 l7fb6h:

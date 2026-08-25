@@ -184,6 +184,22 @@ holy_water_throw: equ 0x71B1	; C461=5, spend 5 hearts
 holy_water_tick: equ 0x73AB	; C460 type 5: spawn, arc (l7084h), pool
 holy_water_arc: equ 0x73E5
 holy_water_pool: equ 0x7420	; 24 frames on floor, SAT colour 8
+projectile_alloc: equ 0x71C5	; free C450/C460 slot; knife may take two
+projectile_arm: equ 0x728D	; whip phase 4: C436 -> slot type
+projectile_tick: equ 0x72B9	; both slots: motion + integrate + clip + SAT
+knife_tick: equ 0x743D		; C416=2 / bonus 0x1B; straight ±5
+axe_tick: equ 0x747A		; C416=3 / bonus 0x1C; boomerang ±3
+cross_tick: equ 0x72E5		; C416=4 / bonus 0x1D; boomerang ±5, SAT 0x0F/0x0E
+boomerang_throw: equ 0x730E
+boomerang_out: equ 0x7344
+boomerang_back: equ 0x737A
+boomerang_catch: equ 0x73A4	; overlap Simon -> despawn, keep C416
+projectile_integrate: equ 0x74C2
+projectile_clip: equ 0x74D5	; offscreen; cross/axe X-wrap -> lose_weapon
+projectile_clear: equ 0x74F0
+projectile_clear_hl: equ 0x74F3
+l7e60h: equ 0x7E60		; HP-bar dmg leather/knife (types 0x11..0x17)
+l7e67h: equ 0x7E67		; HP-bar dmg chain/axe/cross
 tile_is_solid: equ 0x7c65	; carry=solid iff (tile-1) < row_solid_thresh[0xD000]
 row_solid_thresh: equ 0x7c7f	; per-world-row solidity threshold byte table
 map_cell_at: equ 0x7d36	; A = room tile id under pixel (D=X,E=Y) from the 0xD100 map
@@ -222,6 +238,10 @@ bonus_yellow_key: equ 0x8E57	; id 23: C701 bit1, C700=1
 bonus_white_key: equ 0x8E67	; id 24: C701 bit0
 bonus_staff: equ 0x8E80		; id 18: C700=3, C701 bit2; drops yellow key
 bonus_potion: equ 0x8E14	; id 22: bottle, +32 HP; vendor 0x16 (not boss orb)
+lose_weapon: equ 0x8E9A		; missed catch: C416=0, refresh HUD
+projectile_hit_actors: equ 0x8025	; C450/C460 vs C800
+proj_overlap_simon: equ 0x8247	; projectile box vs Simon (boomerang catch)
+actors_rearm_hittable: equ 0x99A6	; +0E bit2 -> set bit0 on C800/D700
 yellow_shield_tick: equ 0x8617	; absorb D700 projectiles while C701 bit5
 hourglass_use: equ 0x7166	; jump+DOWN + 5 hearts -> C43B / D010 freeze
 brazier_tick_all: equ 0x8678	; per-frame update of the 8 brazier/candle slots (0xC470)

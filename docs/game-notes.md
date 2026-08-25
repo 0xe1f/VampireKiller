@@ -296,7 +296,7 @@ on-screen **ENEMY/BOSS energy** (full `0x80`, used by HP-bar enemies, types ≥ 
 `damage_enemy` (seg0 0x4643, `0xC418 -= B`). B comes from a per-weapon table indexed
 by `(enemy type − 0x11)`:
 - leather whip / knife → base `04 08 08 04 04 04 10` (types 0x11..0x17)
-- chain / cross / axe → strong `06 0C 0C 06 06 06 18` (≈1.5×)
+- chain / axe / cross → strong `06 0C 0C 06 06 06 18` (≈1.5×)
 - vs type 0x17 with weapon ≥ 2 the hit is quartered.
 
 Lesser enemies (type < 0x11) have no HP bar and die on the first successful hit.
@@ -307,35 +307,46 @@ Lesser enemies (type < 0x11) have no HP bar and die on the first successful hit.
 - **normal**: chain whip, boomerang cross
 - **strong**: boomerang axe
 
-Weapon behaviour specifics:
-- **Whips** (leather, chain) stay with Simon - not thrown.
-- **Boomerang cross** flies across the whole room damaging enemies it passes, then
-  returns to Simon. If Simon is not in its return path it is LOST and the leather
-  whip is re-equipped.
-- **Boomerang axe** reaches ~half the room, same catch-or-lose rule as the cross.
-- **Thrown knife** has unlimited ammo.
+The HP-bar table (`l7e60h` / `l7e67h`) treats **axe and cross both as strong**
+(same 1.5× row as the chain whip). Fodder (`l804fh`) is knife 1 / axe 4 / cross 2
+/ holy 2 per connected hit.
+
+Weapon behaviour (ROM):
+- **Whips** (leather `C416=0`, chain `=1`) stay with Simon — SPACE is the whip.
+- **Knife** (`C416=2`, bonus `0x1B`, vendor 50 hearts). SPACE, unlimited ammo,
+  straight `velX` ±5, no return. `projectile_alloc` may fill **both** C450 and
+  C460. A hit despawns that knife (`projectile_clear_hl`); missing just leaves
+  the screen. Does not spend hearts.
+- **Axe** (`C416=3`, bonus `0x1C`, world drop — not in the vendor table).
+  SPACE, `velX` ±3, 24-frame outbound then the shared boomerang (`boomerang_back`
+  decelerates and reverses). Overlap Simon (`proj_overlap_simon`) = catch (keep
+  `C416`). Flying into the X wrap zone = `lose_weapon` (back to leather).
+  `l74ach` can also spawn bonus `0x1C` at the projectile and unequip when `C433`
+  is 2 or 3 that frame.
+- **Cross** (`C416=4`, bonus `0x1D`, vendor 20 hearts). Same boomerang as the
+  axe but `velX` ±5, so the 24-frame outbound covers more of the screen
+  (~120 px from a centred throw vs ~72 px). Same catch-or-lose. SAT colours
+  `0x0F`/`0x0E` (type 4 only).
+- **Holy water** is not `C416`; jump+LEFT/RIGHT, see below.
 
 ### Weapon state (RAM - runtime + static confirmed)
 
-- **0xC416 = equipped weapon id.** Confirmed: **0 = leather whip, 1 = chain whip**
-  (runtime: picking up the chain whip flipped 0xC416 0 -> 1). Weapons 0 and 1 take
-  the **whip attack path** (seg1 ~0x7D80: `ld a,(0c416h) / cp 002h / jr nc` -> whip
-  if <2), weapons **>= 2 take the projectile path** (thrown knife / cross / axe)
-  on **SPACE**. Exact ids for knife/cross/axe still to confirm by recording each
-  (hypothesis: 2 = knife, 3 = cross, 4 = axe). **Holy water is not a C416
-  weapon** — it is `C701` bit 3 and is thrown with jump+LEFT/RIGHT (see below).
-- **Weapon pickups arrive via collect_bonus (seg2 0x8D33) with bonus id >= 0x1A**:
-  the fallthrough `l8d77h` does `sub 0x19` and stores the result in 0xC416, so
-  weapon id = bonus id - 0x19 (chain whip = bonus 0x1A -> weapon 1, confirmed),
-  except **bonus `0x1E` (index 5) = holy water** which sets `C701` bit 3 and
-  leaves `C416` alone.
-- **Damage table split** (seg1 `sub_7e33h` 0x7E33): weapon 0 (leather) and weapon 2
-  use the base damage table `l7e60h`; other weapons use the stronger table at
-  0x7E67 - consistent with the strength tiers. Damage is indexed by enemy type
-  (type-0x11); enemy type 0x17 halves projectile damage twice. (Full table values
-  TBD.)
-- On death / per-life reset (seg1 sub_70e3h) and room entry, 0xC416 is cleared to 0
-  (back to the leather whip).
+- **0xC416 = equipped weapon id:** **0 leather, 1 chain, 2 knife, 3 axe, 4
+  cross.** Weapons 0 and 1 take the whip path (`cp 002h / jr nc`); **>= 2** take
+  the projectile path on **SPACE**. Holy water is `C701` bit 3.
+- **Weapon pickups** via `l8d77h`: `C416 = bonus id - 0x19`, except **`0x1E`**
+  (holy water). Chain `0x1A` → 1 was runtime-confirmed; knife `0x1B` → 2 is the
+  vendor dagger (despawn-on-hit, two slots). Axe vs cross is **3 = axe
+  (`0x1C`), 4 = cross (`0x1D`)** from throw speed + vendor stock (the cross is
+  the one for sale; type 4 is the faster ±5 boomerang). Type 3's lose path
+  hardcodes a `0x1C` world drop — that is this weapon's own bonus id, not a
+  second item.
+- **Damage table split** (`weapon_hit_damage` 0x7E33): leather and knife use
+  `l7e60h` (`04 08 08 04 04 04 10`); chain/axe/cross use `l7e67h`
+  (`06 0C 0C 06 06 06 18`). Index = enemy type − 0x11. Type 0x17 with weapon
+  ≥ 2 quarters the hit.
+- On death (`sub_70e3h`) `C416` is cleared to 0. Missing a cross/axe catch also
+  returns to leather (`lose_weapon` 0x8E9A) without waiting for death.
 
 Other pickups replace the weapon:
 
@@ -378,13 +389,13 @@ writes throw dir to `C468` (1=left, 0=right), sets projectile slot `C460` type
 **Arc and pool.** `holy_water_tick` (0x73AB) on the **C460** slot (type at
 `C461`). Spawn copies Simon (`C425`/`C427`) with `velX` ±2 and `velY` 0. In flight
 (state 2) each frame does `Y += 2*l7084h[phase]` — `l7084h` is the signed dY
-table also used by hurt knockback — and `X += velX` (`sub_74c2h`). It lands when
+table also used by hurt knockback — and `X += velX` (`projectile_integrate`). It lands when
 `sub_7b9fh` sees a solid tile, plays sfx `0x18`, and goes to state 3: a **24-frame
 pool** on the floor. SAT path `l759ch` paints that state **colour 8** (red).
 
 **Damage.** Unlike the knife (type 2), a hit does **not** despawn the vial
 (`l807fh`). Fodder uses `l804fh` byte 3 = **2** HP per connected hit
-(knife/cross/axe/holy = 1/4/2/2). The pool can connect more than once: a hit
+(knife/axe/cross/holy = 1/4/2/2). The pool can connect more than once: a hit
 clears enemy `+0x0E` bit 0, and `0x99A6` (called from the pool flicker) restores
 it on actors that still have bit 2. HP-bar types `0x11–0x17` go through
 `weapon_hit_damage` / `C416` (the equipped whip), not that 2.
@@ -563,15 +574,15 @@ column from the 0xC702 bible flags:
 
 | Item (bonus id) | normal | white bible (½) | black bible (×2) |
 |-----------------|--------|-----------------|------------------|
-| 0x1B (knife)    | 50     | 30              | 90               |
-| 0x0E            | 20     | 15              | 60               |
-| 0x12            | 30     | 20              | 60               |
-| 0x03            | 20     | 10              | 60               |
-| 0x04            | 20     | 10              | 80               |
-| 0x0A            | 40     | 20              | 80               |
+| 0x0E (candle)   | 20     | 15              | 60               |
+| 0x12 (staff)    | 30     | 20              | 60               |
+| 0x03 (red shield)| 20    | 10              | 60               |
+| 0x04 (yellow shield)| 20 | 10              | 80               |
+| 0x0A (hourglass)| 40     | 20              | 80               |
 | 0x16 (potion)   | 40     | 15              | 80               |
 | 0x1E (holy water)| 30    | 10              | 50               |
-| 0x1D            | 20     | 10              | 80               |
+| 0x1D (cross)    | 20     | 10              | 80               |
+| 0x1B (knife)    | 50     | 30              | 90               |
 
 While an offer is on screen, `vendor_purchase_tick` (0x94BE) counts the 0xC706
 timer down and polls the controls via `vendor_read_buttons` (0x9526, joystick

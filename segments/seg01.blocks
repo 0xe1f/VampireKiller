@@ -49,9 +49,11 @@ simon_hurt_tbl: start 0x6f92 end 0x6f9a type worddata
 whip_phase_tbl: start 0x71f9 end 0x7201 type worddata
 ; Hurt/holy-water signed dY (22 bytes).  l7090h is also a VRAM dest in HUD blits.
 hurt_y_delta: start 0x7084 end 0x709a type bytedata
-; Projectile type DISPATCH_A (ix+1)-2: knife/cross/axe/holy water.
+; Projectile type DISPATCH_A (ix+1)-2: knife/axe/cross/holy water.
 proj_type_tbl: start 0x72dd end 0x72e5 type worddata
-; Axe (and cross) state DISPATCH_A (ix+0)-1.
-axe_state_tbl: start 0x7306 end 0x730e type worddata
-; Cross path's copy of the same 4 state pointers.
-cross_state_tbl: start 0x74a4 end 0x74ac type worddata
+; Cross state DISPATCH_A (ix+0)-1.
+cross_state_tbl: start 0x7306 end 0x730e type worddata
+; Axe path's copy of the same 4 state pointers.
+axe_state_tbl: start 0x74a4 end 0x74ac type worddata
+; HP-bar damage vs types 0x11..0x17: leather/knife then chain/axe/cross.
+weapon_dmg_tbl: start 0x7e60 end 0x7e6e type bytedata

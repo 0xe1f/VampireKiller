@@ -32,6 +32,7 @@ l801ch:
 	ld l,a
 	djnz $-47
 	ret
+projectile_hit_actors:         ; (0x8025) C450/C460 vs C800 if +0E bit0
 	ld a,(0c450h)
 	ld b,a
 	ld a,(0c460h)
@@ -56,7 +57,7 @@ l8047h:
 	djnz l8034h
 	ret
 l804fh:
-	defb 001h,004h,002h,002h  ; fodder dmg: knife/cross/axe/holy (iy+1)-2
+	defb 001h,004h,002h,002h  ; fodder dmg: knife/axe/cross/holy (iy+1)-2
 l8053h:
 	ld a,00ch
 	call play_sound
@@ -84,7 +85,7 @@ l807fh:
 	cp 002h
 	push iy
 	pop hl
-	jp z,074f3h            ; knife (type 2): despawn on hit
+	jp z,projectile_clear_hl  ; knife (type 2): despawn on hit
 	res 0,(ix+00eh)        ; axe/cross/holy: keep projectile, drop hittable
 	ret
 l808fh:
@@ -95,7 +96,7 @@ l808fh:
 	and a
 	jr z,l8061h
 l809ch:
-	call 07e33h
+	call weapon_hit_damage
 	ld a,(0c418h)
 	and a
 	jr z,l80a8h
@@ -123,7 +124,7 @@ l80b3h:
 	jr nz,l80d6h
 	push iy
 	pop hl
-	call z,074f3h
+	call z,projectile_clear_hl
 l80d6h:
 	ld a,00ch
 	jp play_sound
@@ -160,7 +161,7 @@ l8104h:
 	push hl
 	push iy
 	pop hl
-	call 074f3h
+	call projectile_clear_hl
 	pop hl
 l8119h:
 	inc l
@@ -206,7 +207,7 @@ l8151h:
 	push hl
 	push iy
 	pop hl
-	call 074f3h
+	call projectile_clear_hl
 	pop hl
 l8160h:
 	inc l
@@ -381,6 +382,7 @@ l8202h:
 	ld d,a
 	ld hl,01008h
 	jp l8481h
+proj_overlap_simon:            ; (0x8247) projectile DE vs Simon box (catch)
 	ld d,(ix+005h)
 	ld e,(ix+004h)
 	ld hl,01008h
@@ -2235,10 +2237,10 @@ collect_bonus_tbl:             ; (seg2 0x8D45) word[id-1]; id>=0x1A -> l8d77h
 	defw bonus_white_key
 	defw bonus_chest
 ; --- weapon pickup (bonus id >= 0x1A) ---------------------------------------
-; index = id - 0x19; index 5 is holy water (bonus_holy_water / C701 bit3),
-; not a C416 weapon. Otherwise store the new weapon id in 0xC416, run
-; sub_8ea1h, then FALL THROUGH into the rosary code below - so a
-; weapon pickup also arms the 0xC440 no-spawn timer (brief pickup grace window).
+; index = id - 0x19 -> C416: 0x1A chain (1), 0x1B knife (2), 0x1C axe (3),
+; 0x1D cross (4). Index 5 is holy water (bonus_holy_water / C701 bit3), not a
+; C416 weapon. Otherwise store the new weapon id, run sub_8ea1h (HUD), then
+; FALL THROUGH into bonus_rosary (brief C440 no-spawn window).
 l8d77h:
 	sub 019h
 	cp 005h
@@ -2423,6 +2425,7 @@ bonus_staff:                   ; id 18 (0x8E80): C700=3, C701 bit2; drops yellow
 	call sub_8ed0h
 	ld a,00fh
 	ret
+lose_weapon:                   ; (0x8E9A) C416=0 leather; refresh HUD (missed catch)
 	xor a
 	ld (0c416h),a
 	jp sub_8ea1h
@@ -3402,33 +3405,15 @@ l942ah:
 	ret
 ; vendor_price_tbl: 9 x { item id, normal, halved(white bible), doubled(black bible) }
 vendor_price_tbl:
-	ld c,020h
-	dec d
-	ld h,b
-	ld (de),a
-	jr nc,sub_9456h
-	ld h,b
-	inc bc
-	jr nz,$+18
-	ld h,b
-	inc b
-	jr nz,l944eh
-	add a,b
-	ld a,(bc)
-	ld b,b
-	jr nz,$-126
-	ld d,040h
-	dec d
-	add a,b
-	ld e,030h
-	djnz l949bh
-	dec e
-	jr nz,l945eh
-l944eh:
-	add a,b
-	dec de
-	ld d,b
-	jr nc,l93e3h
+	defb 00eh,020h,015h,060h  ; candle
+	defb 012h,030h,020h,060h  ; staff
+	defb 003h,020h,010h,060h  ; red shield
+	defb 004h,020h,010h,080h  ; yellow shield
+	defb 00ah,040h,020h,080h  ; hourglass
+	defb 016h,040h,015h,080h  ; potion
+	defb 01eh,030h,010h,050h  ; holy water
+	defb 01dh,020h,010h,080h  ; cross
+	defb 01bh,050h,030h,090h  ; knife
 sub_9453h:
 	ld a,(0c703h)
 sub_9456h:
@@ -4398,6 +4383,7 @@ sub_9942h:
 	ld (hl),h
 	ld l,b
 	ret
+actors_rearm_hittable:         ; (0x99A6) if actor +0E bit2, set bit0 (C800 then D700)
 	ld de,00080h
 	ld hl,0c80eh
 	ld b,007h

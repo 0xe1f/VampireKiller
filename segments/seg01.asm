@@ -705,9 +705,9 @@ l6376h:
 	sub (hl)
 ; --- sub_6389h - reset the big object/actor state area and its sub-systems ---
 ;  Clears 0xC470..0xC6FF (0x290 bytes) to 0, then calls the per-subsystem reset
-;  helpers (seg1 0x5B22/0x5A47/0x5A3E, seg2 0x9034/0x90A2, sub_751ah), and finally
-;  zeroes two strided tables: 7 entries 0x80 apart from 0xC800, and 8 entries
-;  0x80 apart from 0xD700.
+;  helpers (seg1 0x5B22, door_load_paged, conn_load_permits_paged, seg2
+;  0x9034/0x90A2, whip_slots_clear), then zeroes two strided tables: 7 entries
+;  0x80 apart from 0xC800, and 8 entries 0x80 apart from 0xD700.
 sub_6389h:
 	ld hl,0c470h
 	ld de,0c471h           ; dst = src+1
@@ -715,11 +715,11 @@ sub_6389h:
 	ld bc,0028fh           ; clear 0xC470..0xC6FF (0x290 bytes)
 	ldir
 	call 05b22h
-	call 05a47h
+	call door_load_paged
 	call 09034h
 	call 090a2h
-	call 05a3eh
-	call sub_751ah
+	call conn_load_permits_paged
+	call whip_slots_clear
 	ld hl,0c800h           ; zero 7 entries, 0x80 apart, from 0xC800
 	ld de,00080h
 	ld b,007h
@@ -1864,7 +1864,7 @@ l6b13h:
 	jr z,l6b2bh
 	cp 005h
 	jr z,l6b2bh
-	call sub_7114h
+	call simon_attack_tick
 l6b2bh:
 	call sub_7682h
 	call sub_75c7h
@@ -1874,40 +1874,29 @@ l6b2bh:
 	call sub_760bh
 	jp l761fh
 ; simon_action_tick (seg1 0x6B40) - Simon's per-frame action-state machine.
-; 0xC420 = action state; DISPATCH_A jumps through the inline 8-entry word table
-; below (states 0..7).  Handler addresses and runtime-confirmed meanings:
-;   0 -> 0x6B59  grounded (walk / idle / whip-on-ground; whipping does NOT change
-;                0xC420, it is tracked separately)
-;   1 -> 0x6CC7  JUMP / airborne (confirmed: 3 jumps, Y arc 0xC0->0xA0->0xC0;
-;                jump-up keeps X fixed, jump-left/right slews X; 0xC423 = air phase)
-;   2 -> 0x6DB0  CROUCH (confirmed: held while DOWN pressed; Simon X is locked -
-;                cannot walk while crouching)
-;   3 -> 0x6DE4  ON STAIRS / climbing (confirmed: held ~159 frames of diagonal
-;                Y travel 0x80<->0x4C; Simon can whip while in this state)
-;   4 -> 0x6F44  falling / dropping off a ledge (confirmed: Y ramps down, no jump)
-;   5 -> 0x6F8C  hurt / knockback (prior death recording; a shallow airborne launch -
-;                NOT the normal jump, which is state 1)
-;   6 -> 0x709A  dying / respawn (prior death recording; room_spawner skips spawns
-;                while 0xC420==6)
-;   7 -> 0x7102  (unconfirmed)
+; 0xC420 = action state; DISPATCH_A jumps through simon_action_tbl.
+;   0 simon_grounded   walk / idle (whipping does NOT change 0xC420)
+;   1 simon_jump_tick  airborne (Y arc; C421 picks up/left/right)
+;   2 simon_crouch     DOWN held; X locked
+;   3 simon_stairs     climbing; can whip
+;   4 simon_fall       dropping off a ledge
+;   5 simon_hurt       knockback / i-frames (0xC42D)
+;   6 simon_dying      death / respawn
+;   7 l7102h           crouch-exit wait on 0xC42D (unconfirmed flavour)
 simon_action_tick:
 	call 0852bh
-	ld a,(0c420h)          ; Simon action state (see table above)
+	ld a,(0c420h)          ; Simon action state
 	call DISPATCH_A
-	ld e,c
-	ld l,e
-	rst 0
-	ld l,h
-	or b
-	ld l,l
-	call po,0446dh
-	ld l,a
-	adc a,h
-	ld l,a
-	sbc a,d
-	ld (hl),b
-	ld (bc),a
-	ld (hl),c
+simon_action_tbl:
+	defw simon_grounded
+	defw simon_jump_tick
+	defw simon_crouch
+	defw simon_stairs
+	defw simon_fall
+	defw simon_hurt
+	defw simon_dying
+	defw l7102h
+simon_grounded:                ; 0 (0x6B59)
 	call sub_7b8fh
 	jr c,l6b64h
 	ld a,(0c439h)
@@ -1927,20 +1916,20 @@ l6b6eh:
 	and a
 	ret nz
 	ld de,CHKRAM
-	ld (0c42eh),de
-	call sub_7666h
-	ld a,(0c007h)
+	ld (0c42eh),de         ; walk anim frames (legs, torso)
+	call simon_mirror_frames
+	ld a,(0c007h)          ; direction bits
 	rra
-	jr c,l6be1h
+	jr c,l6be1h            ; UP -> maybe mount stairs
 l6b8ah:
 	rra
 	jp c,l6c17h
 	rra
 	push af
-	call c,sub_6c36h
+	call c,simon_walk_left
 	pop af
 	rra
-	call c,sub_6c5ah
+	call c,simon_walk_right
 	ld a,(0c006h)
 	and 020h
 	ret z
@@ -1985,7 +1974,7 @@ l6bd9h:
 	add a,d
 	ld (0c427h),a
 	ret
-l6be1h:
+l6be1h:                        ; UP while grounded: try stairs
 	ex af,af'
 	call sub_7ce2h
 	ld bc,00001h
@@ -2024,11 +2013,11 @@ l6c17h:
 	ld (0c420h),a
 	ld de,00006h
 	ld (0c42eh),de
-	jp sub_7666h
-sub_6c36h:
+	jp simon_mirror_frames
+simon_walk_left:               ; (0x6C36) face left (0xC42C=1), try -X
 	ld a,001h
-	ld (0c42ch),a
-	ld a,(0c41eh)
+	ld (0c42ch),a          ; facing = left
+	ld a,(0c41eh)          ; left exit permit
 	inc a
 	jr nz,l6c47h
 	ld a,(0c427h)
@@ -2044,10 +2033,10 @@ l6c47h:
 	ld bc,0fd80h
 l6c58h:
 	jr l6c7ah
-sub_6c5ah:
+simon_walk_right:              ; (0x6C5A) face right (0xC42C=0), try +X
 	xor a
-	ld (0c42ch),a
-	ld a,(0c41fh)
+	ld (0c42ch),a          ; facing = right
+	ld a,(0c41fh)          ; right exit permit
 	inc a
 	jr nz,l6c6ah
 	ld a,(0c427h)
@@ -2077,20 +2066,20 @@ l6c7ah:
 	ret c
 	ld a,(0c420h)
 	cp 005h
-	jr z,l6c9bh
+	jr z,simon_add_x
 	dec a
-	call nz,sub_6ca3h
-l6c9bh:
+	call nz,simon_walk_anim
+simon_add_x:                   ; (0x6C9B) 0xC426 += BC (subpixel X)
 	ld hl,(0c426h)
 	add hl,bc
 	ld (0c426h),hl
 	ret
-sub_6ca3h:
+simon_walk_anim:               ; (0x6CA3) skip if L+R; else cycle C42E from frame ctr
 	ld a,(0c007h)
 	and 00ch
 	cp 00ch
 	ret z
-sub_6cabh:
+simon_step_walk_frames:        ; (0x6CAB)
 	ld a,(0c003h)
 	rra
 	rra
@@ -2106,15 +2095,14 @@ l6cbfh:
 	add hl,de
 	ld (0c42eh),hl
 	ret
+simon_jump_tick:               ; 1 (0x6CC7) 0xC421 = 0 aim, 1 up, 2 left, 3 right
 	ld a,(0c421h)
 	call DISPATCH_A
-	push de
-	ld l,h
-	xor 06ch
-	ld l,b
-	ld l,l
-	ld l,(hl)
-	ld l,l
+	defw l6cd5h
+	defw simon_jump_arc
+	defw simon_jump_left
+	defw simon_jump_right
+l6cd5h:
 	ld b,001h
 	ld a,(0c007h)
 	and 00ch
@@ -2131,18 +2119,18 @@ l6ce9h:
 	ld hl,0c421h
 	ld (hl),b
 	ret
-l6ceeh:
+simon_jump_arc:                ; (0x6CEE) advance 0xC428 through jump_y_delta
 	ld a,(0c431h)
 	and 010h
-	ld bc,l6d9bh+1
+	ld bc,jump_y_delta+1
 	ld d,013h
 	jr z,l6cffh
-	ld bc,l6d9bh
+	ld bc,jump_y_delta
 	ld d,015h
 l6cffh:
 	ld hl,0c428h
 	push hl
-	call sub_6d54h
+	call simon_jump_y_step
 	pop hl
 	ld a,(0c422h)
 	and a
@@ -2151,7 +2139,7 @@ l6cffh:
 	ld e,006h
 	ld (0c42eh),de
 	push hl
-	call sub_7666h
+	call simon_mirror_frames
 	pop hl
 l6d1ah:
 	ld a,(hl)
@@ -2188,7 +2176,7 @@ l6d42h:
 	ld (0c421h),a
 	ld (0c428h),a
 	ret
-sub_6d54h:
+simon_jump_y_step:
 	inc (hl)
 	ld a,(hl)
 	cp d
@@ -2203,10 +2191,12 @@ l6d5ah:
 	add a,(hl)
 	ld (0c425h),a
 	ret
-	call sub_6c36h
-	jp l6ceeh
-	call sub_6c5ah
-	jp l6ceeh
+simon_jump_left:               ; (0x6D68)
+	call simon_walk_left
+	jp simon_jump_arc
+simon_jump_right:              ; (0x6D6E)
+	call simon_walk_right
+	jp simon_jump_arc
 sub_6d74h:
 	ld a,001h
 	ld (de),a
@@ -2236,23 +2226,11 @@ l6d93h:
 	add hl,de
 	ld (0c426h),hl
 	ret
-l6d9bh:
-	jp m,0fafah
-	ei
-	ei
-	nop
-	call m,0fefdh
-	rst 38h
-	nop
-	nop
-	ld bc,00302h
-	inc b
-	dec b
-	dec b
-	ld b,006h
-	ld b,0cdh
-	ei
-	add a,l
+jump_y_delta:                  ; (0x6D9B) signed dY per jump phase (21 bytes)
+	defb 0fah,0fah,0fah,0fbh,0fbh,000h,0fch,0fdh,0feh,0ffh
+	defb 000h,000h,001h,002h,003h,004h,005h,005h,006h,006h,006h
+simon_crouch:                  ; 2 (0x6DB0)
+	call 085fbh
 	jr nc,l6dcfh
 	ld a,(0c006h)
 	and 020h
@@ -2277,6 +2255,7 @@ l6dcfh:
 	rra
 	ret c
 	jp l6efch
+simon_stairs:                  ; 3 (0x6DE4)
 	ld a,(0c422h)
 	and a
 	ret nz
@@ -2431,7 +2410,7 @@ l6efch:
 	xor a
 	ld (0c435h),a
 	ld (0c42bh),a
-	call sub_7666h
+	call simon_mirror_frames
 	jp l6d42h
 sub_6f10h:
 	ld a,(0c42bh)
@@ -2464,6 +2443,7 @@ sub_6f2bh:
 	add a,c
 	ld (0c42fh),a
 	ret
+simon_fall:                    ; 4 (0x6F44)
 	ld a,(0c439h)
 	and a
 	jr nz,l6f71h
@@ -2471,7 +2451,7 @@ sub_6f2bh:
 	jr c,l6f71h
 	ld de,CHKRAM
 	ld (0c42eh),de
-	call sub_7666h
+	call simon_mirror_frames
 	ld hl,0c428h
 	ld a,(hl)
 	inc (hl)
@@ -2496,17 +2476,15 @@ l6f71h:
 	ld a,007h
 	jp 050a6h
 l6f88h:
-	ld (bc),a
-	inc b
-	ld b,006h
+	defb 002h,004h,006h,006h   ; fall dY
+simon_hurt:                    ; 5 (0x6F8C)
 	ld a,(0c423h)
 	call DISPATCH_A
-	sbc a,d
-	ld l,a
-	in a,(06fh)
-	ld e,070h
-	inc h
-	ld (hl),b
+	defw l6f9ah
+	defw l6fdbh
+	defw l701eh
+	defw l7024h
+l6f9ah:
 	ld a,(0c002h)
 	and 040h
 	ld a,013h
@@ -2523,7 +2501,7 @@ l6f88h:
 	ld (0c420h),a
 	ld a,002h
 	ld (0c42fh),a
-	jp sub_7666h
+	jp simon_mirror_frames
 l6fc3h:
 	ld a,(0c43ch)
 	ld (0c42ch),a
@@ -2533,14 +2511,15 @@ l6fc3h:
 	ld (0c42ah),a
 	ld de,00307h
 	ld (0c42eh),de
-	jp sub_7666h
-	call sub_6c36h
+	jp simon_mirror_frames
+l6fdbh:
+	call simon_walk_left
 l6fdeh:
 	ld bc,l7084h
 	ld d,015h
 	ld hl,0c42ah
 	push hl
-	call sub_6d54h
+	call simon_jump_y_step
 	pop hl
 	ld a,(hl)
 	cp 00bh
@@ -2568,8 +2547,10 @@ l7010h:
 	inc e
 	ld (0c42eh),de
 	ret
-	call sub_6c5ah
+l701eh:
+	call simon_walk_right
 	jp l6fdeh
+l7024h:
 	ld a,(0c439h)
 	and a
 	call nz,sub_6bb6h
@@ -2613,7 +2594,7 @@ l706ah:
 	ld (0c420h),a
 	ld bc,00509h
 	ld (0c42eh),bc
-	jp sub_7666h
+	jp simon_mirror_frames
 l7084h:
 	defb 0fdh,0fdh,0feh ;illegal sequence	;7084	fd fd fe	. . .
 	cp 0feh
@@ -2631,6 +2612,7 @@ l7090h:
 	ld (bc),a
 	inc bc
 	inc bc
+simon_dying:                   ; 6 (0x709A)
 	ld a,(0c421h)
 	ld hl,0c428h
 l70a0h:
@@ -2680,6 +2662,7 @@ sub_70e3h:
 	ld (0c702h),a
 	ld (0c700h),a
 	ret
+l7102h:                        ; 7 (0x7102) wait 0xC42D then return to grounded
 	ld a,(0c42dh)
 	and a
 	ret nz
@@ -2689,9 +2672,10 @@ sub_70e3h:
 	ld a,0ffh
 	ld (0c41bh),a
 	ret
-sub_7114h:
+; simon_attack_tick (0x7114): try start a whip (SPACE), tick the phase, emit sprites.
+simon_attack_tick:
 	call sub_711dh
-	call sub_71e7h
+	call whip_tick
 	jp l72b9h
 sub_711dh:
 	ld a,(0c006h)
@@ -2810,7 +2794,9 @@ l71dfh:
 	add ix,de
 	djnz l71d3h
 	ret
-sub_71e7h:
+; whip_tick (0x71E7): if 0xC422 (whip phase) is 1..4, dispatch the anim.
+; Phase 0 = idle (ret).  0xC420>=4 (fall/hurt/dying) suppresses whipping.
+whip_tick:
 	ld a,(0c422h)
 	and a
 	ret z
@@ -2820,12 +2806,11 @@ sub_71e7h:
 	ld a,(0c422h)
 	dec a
 	call DISPATCH_A
-	ld bc,04772h
-	ld (hl),d
-	ld d,a
-	ld (hl),d
-	ld l,c
-	ld (hl),d
+	defw l7201h
+	defw l7247h
+	defw l7257h
+	defw l7269h
+l7201h:
 	ld a,(0c420h)
 	cp 003h
 	jr z,l7213h
@@ -2835,7 +2820,7 @@ sub_71e7h:
 	ld a,006h
 l7210h:
 	ld (0c42eh),a
-l7213h:
+l7213h:                        ; set torso frame 0xC42F from weapon 0xC436
 	ld a,(0c436h)
 	cp 002h
 	jr nc,l7231h
@@ -2846,7 +2831,7 @@ l7213h:
 	ld a,009h
 l7224h:
 	ld (0c42fh),a
-	call sub_7666h
+	call simon_mirror_frames
 	ld a,005h
 	call 050a6h
 	jr l7242h
@@ -2854,7 +2839,7 @@ l7231h:
 	call 0559ah
 	ld a,00ch
 	ld (0c42fh),a
-	call sub_7666h
+	call simon_mirror_frames
 	jr l7242h
 	xor a
 l723fh:
@@ -2871,6 +2856,7 @@ l7247h:
 	cp 002h
 	ret c
 	jp 0559ah
+l7257h:
 	ld a,(0c436h)
 	cp 002h
 	jr nc,l7247h
@@ -2879,6 +2865,7 @@ l7247h:
 	inc (hl)
 	ld a,004h
 	jr l723fh
+l7269h:
 	ld a,(0c436h)
 	cp 002h
 	jr nc,l728dh
@@ -2896,7 +2883,7 @@ sub_7275h:
 	ld a,002h
 l7287h:
 	ld (0c42fh),a
-	jp sub_7666h
+	jp simon_mirror_frames
 l728dh:
 	call 099a6h
 	call sub_7275h
@@ -2918,7 +2905,7 @@ l72b1h:
 	add ix,de
 	djnz l7299h
 	ret
-l72b9h:
+l72b9h:                        ; (0x72B9) copy both whip slots 0xC450/0xC460 to SAT
 	ld ix,0c450h
 	call sub_72c4h
 	ld ix,0c460h
@@ -3231,7 +3218,7 @@ l7514h:
 	inc l
 	ld (hl),a
 	ret
-sub_751ah:
+whip_slots_clear:
 	ld hl,0c450h
 	ld (hl),000h
 	ld d,h
@@ -3438,7 +3425,9 @@ l7655h:
 	sub 014h
 	ld (hl),a
 	ret
-sub_7666h:
+; simon_mirror_frames (0x7666): if facing left (0xC42C!=0), add 0x0A/0x0F to
+; the walk/torso frame pair at 0xC42E/0xC42F so the left-facing cells are used.
+simon_mirror_frames:
 	ld a,(0c42ch)
 	and a
 	ret z
@@ -3605,7 +3594,7 @@ l774ah:
 	xor a
 	ld (0c422h),a
 	call sub_780dh
-	call sub_751ah
+	call whip_slots_clear
 	ld hl,0c5ach
 	inc (hl)
 	ld a,(0d000h)
@@ -3643,15 +3632,15 @@ l777eh:
 	ret nz
 	ld bc,CHKRAM
 	ld (0c42eh),bc
-	call sub_7666h
+	call simon_mirror_frames
 	ld a,(0c42ch)
 	and a
 	ld bc,00080h
 	jr z,l77b4h
 	ld bc,0ff80h
 l77b4h:
-	call l6c9bh
-	call sub_6cabh
+	call simon_add_x
+	call simon_step_walk_frames
 	ld a,(0c5ach)
 	cp 005h
 	jr z,l77cbh
@@ -4277,7 +4266,9 @@ l7b26h:
 	ld de,CHKRAM
 	call 0481bh
 	jp l65abh
-l7b39h:
+; tile_layout_draw (0x7B39): blit a title_layout stream.  HL -> stream, DE =
+; start pos.  0xFF=end, 0xFE=next row (next byte added to D, E+=8), else tile id.
+tile_layout_draw:
 	push de
 l7b3ah:
 	ld a,(hl)
@@ -4295,7 +4286,7 @@ l7b3ah:
 	ld a,008h
 	add a,e
 	ld e,a
-	jr l7b39h
+	jr tile_layout_draw
 l7b4eh:
 	ld a,c
 	call 04b24h

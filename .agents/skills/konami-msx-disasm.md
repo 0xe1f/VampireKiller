@@ -57,8 +57,13 @@ of `<Game>.asm`.
    (listing comments already stripped) + `generated/segNN.raw.asm` (raw reference).
 2. Fold the clean disassembly into `segments/segNN.asm` by hand and annotate.
    Switch `<Game>.asm` for that segment from `INCBIN` to `INCLUDE`.
-3. Separate code vs data with a `tools/segNN.blocks` file (only changes
+   `PHASE` the bank to its CPU window.  Two banks that share a window (VK seg3
+   and seg13 both `PHASE 0xA000`) cannot reuse z80dasm `lxxxh`/`sub_xxxh` names —
+   give the second bank unique labels or the assembler will error on duplicates.
+3. Separate code vs data with a `segments/segNN.blocks` file (only changes
    rendering, never bytes). Mark mis-decoded tables and convert them to `db`.
+   Keep unreversed graphics as `INCBIN` slices of the bank `.bin`, not a mass
+   `defb` dump.
 4. `make verify` → must stay byte-identical.
 
 ## Conventions (enforced)

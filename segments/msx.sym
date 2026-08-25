@@ -157,6 +157,22 @@ konami_logo_draw: equ 0x6209	; draw Konami logo + seed the top-to-bottom wipe
 konami_logo_step: equ 0x6253	; reveal one more row of the logo (poll 0xC422)
 lookup_word_tbl: equ 0x6549	; DE = ((word*)DE)[A]  (generic word-table lookup)
 simon_action_tick: equ 0x6b40	; Simon per-frame action-state machine (0xC420)
+simon_grounded: equ 0x6b59	; C420=0 walk/idle
+simon_walk_left: equ 0x6c36	; face left, try -X
+simon_walk_right: equ 0x6c5a	; face right, try +X
+simon_add_x: equ 0x6c9b	; C426 += BC
+simon_jump_tick: equ 0x6cc7	; C420=1 jump; C421 picks direction
+simon_jump_arc: equ 0x6cee	; step C428 through jump_y_delta
+simon_crouch: equ 0x6db0	; C420=2
+simon_stairs: equ 0x6de4	; C420=3
+simon_fall: equ 0x6f44	; C420=4
+simon_hurt: equ 0x6f8c	; C420=5
+simon_dying: equ 0x709a	; C420=6
+simon_attack_tick: equ 0x7114	; try/start whip + tick + emit SAT
+whip_tick: equ 0x71e7	; dispatch 0xC422 whip phase
+whip_slots_clear: equ 0x751a	; zero 0xC450 whip slots + hide SAT
+simon_mirror_frames: equ 0x7666	; facing-left: C42E/C42F += 0x0A/0x0F
+tile_layout_draw: equ 0x7b39	; blit title_layout stream (FF=end, FE=next row)
 spend_5_hearts: equ 0x7154	; deduct 5 from heart total (0xC417, BCD)
 tile_is_solid: equ 0x7c65	; carry=solid iff (tile-1) < row_solid_thresh[0xD000]
 row_solid_thresh: equ 0x7c7f	; per-world-row solidity threshold byte table
@@ -197,9 +213,27 @@ actor_cull_offscreen: equ 0x99ec	; free actor if pixel pos left the play area
 actor_free: equ 0x99fd	; clear actor slot (+0x00/+0x0E) and any linked sub-slot
 
 ; ---- Vampire Killer banked routines (segment 13 @ 0xA000) ----------------
-; seg13 is still INCBIN; these names document the door table for regen later.
+mtile_def_c41a: equ 0xA041	; metatile-def base when 0xC41A != 0
+simon_cell0_ptr: equ 0xA281	; 40 words, index 0xC42E (legs) -> RLE streams
+simon_cell1_ptr: equ 0xA2D1	; 36 words, index 0xC42F (torso/whip) -> RLE streams
+intro_sky: equ 0xB895		; intro cloud/bat sprite stream (VRAM 0xFA00)
+conn_lookup: equ 0xB963		; pending dir 0xC41B -> dest room 0xD001 (0xF = blocked)
+conn_write_room: equ 0xB987	; ld (0xD001),a / scf / ret
+conn_from_spot: equ 0xB98C	; C41B==0xFF: D001 = C5B4 (spot_tbl dest nibble)
+add_hl_a_s13: equ 0xB995	; banked ADD_HL_A copy (resident 0x4000 not visible)
+conn_load_permits: equ 0xB99A	; unpack nibbles -> 0xC41C-0xC41F (0xF becomes 0xFF)
+conn_room_record: equ 0xB9BD	; HL = conn_ptr[D000] + 2*D001
+conn_ptr: equ 0xB9D3		; word[stage 0..18] -> packed up/down/left/right records
+door_load: equ 0xBB31		; door_load_coords then spot_load_coords
 door_load_coords: equ 0xBB37	; if D001 == door_tbl[D000].room, write C5AD=Y,C5AE=X and arm C5AC
 door_tbl: equ 0xBB61		; 19x3: (room | vert<<7), Y->C5AD, X->C5AE. Room = low nibble.
+spot_load_coords: equ 0xBB9A	; scan spot_tbl; arm C5B1, Y/X at C5B2, dest nibble at C5B4
+spot_tbl: equ 0xBBCD		; (stage, dest<<4|room, Y, X) 0xFF-ended; currently stage 12
+
+; ---- Vampire Killer resident paged-call wrappers (segment 0) -------------
+conn_lookup_paged: equ 0x5A35	; page seg13, conn_lookup, restore
+conn_load_permits_paged: equ 0x5A3E	; page seg13, conn_load_permits, restore
+door_load_paged: equ 0x5A47	; page seg13, door_load, restore
 
 ; ---- Vampire Killer banked routines (segment 3 @ 0xA000) -----------------
 enemy_zombie_tick: equ 0xa93b	; entity type 1 (walking zombie) behaviour handler

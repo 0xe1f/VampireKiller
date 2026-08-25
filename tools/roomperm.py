@@ -57,8 +57,10 @@ Output: one minimap per stage, gfx/minimap_s<NN>.png (default permeability view;
 placed SPATIALLY using the GAME'S OWN hand-authored F2-minimap position table
 (layout(), seg2 sub_9681h) - the authoritative in-ROM geography.  (The room
 connectivity graph is navigation-only: it has wrap/portal edges on both axes and is
-used solely for door detection, not for placement.)  Each cell is labelled with its
-room number in a dark-gray band.
+used solely for --compare-doors edge mode, not for placement.)  Each cell is
+labelled with its room number in a dark-gray band.  Stage 18 room 9 (Dracula)
+uses a hand-authored PERM_OVERRIDE: floor + 2x1 jump ledges; tile IDs cannot
+separate those from the decorative columns.
 
 Usage:
   tools/roomperm.py [--rom references/VampireKiller.rom] [--row 1 | --all]
@@ -91,7 +93,29 @@ def is_solid(tid, row, mode):
         return structural or tid >= 0x2c              # + decorative scenery blocks
     return structural                                 # default: walls & floors only
 
-def is_solid_ctx(grid, r, c, row, mode):
+# Per-room permeability override: (stage, room) -> frozenset of solid (row, col).
+# Used when tile IDs cannot tell decoration from geometry.  Stage 18 room 9
+# (Dracula): side columns share 06-0b with the floor, 0c/0d pillars are decor
+# not stairs, and 09-0b speckle next to those 06s is "dotted ledge" artwork.
+# Ground truth: floor + 2x1 jump ledges flanking each column.  Perm mode only;
+# --collision stays the engine test.
+def _dracula_room9_solid():
+    s = {(r, c) for r in (22, 23) for c in range(COLS)}
+    for r, cols in (
+        (8, (0, 1, 30, 31)),     # outer ledges, mid
+        (16, (0, 1, 30, 31)),    # outer ledges, low
+        (4, (4, 5, 26, 27)),     # inner ledges, high
+        (12, (4, 5, 26, 27)),    # inner ledges, mid
+    ):
+        for c in cols:
+            s.add((r, c))
+    return frozenset(s)
+
+PERM_OVERRIDE = {
+    (18, 9): _dracula_room9_solid(),
+}
+
+def is_solid_ctx(grid, r, c, row, mode, room=None):
     """Per-cell solidity WITH neighbour context.  Identical to is_solid for tiles that
     are unambiguous, but the brick-BODY family 0x09-0x0b counts as solid only when it
     is 4-adjacent to a SURFACE tile 0x01-0x08 (the structural surfaces 01-04 AND the
@@ -100,6 +124,9 @@ def is_solid_ctx(grid, r, c, row, mode):
     surface+body, so real ones stay solid, while a STANDALONE body tile - e.g. a
     decorative support beside a staircase (stage 18) - is passable instead of
     rendering as a stray 1x1 block."""
+    ov = PERM_OVERRIDE.get((row, room)) if room is not None and mode == "perm" else None
+    if ov is not None:
+        return (r, c) in ov
     tid = grid[r][c]
     if mode == "collision":
         return (tid - 1) < COLL_THRESH.get(row, 4)
@@ -168,11 +195,14 @@ STAIR_RGB = (240, 170, 40)      # climbable stairs (06/0c)
 DOOR_RGB = (220, 40, 40)        # white-key (stage-exit) door
 DOOR_W = 2                      # rendered door width in tiles (edge wall thickness)
 
-def tile_rgb(grid, r, c, row, mode):
+def tile_rgb(grid, r, c, row, mode, room=None):
+    ov = PERM_OVERRIDE.get((row, room)) if room is not None and mode == "perm" else None
+    if ov is not None:
+        return SOLID_RGB if (r, c) in ov else EMPTY_RGB
     tid = grid[r][c]
     if tid in STAIRS:
         return STAIR_RGB
-    return SOLID_RGB if is_solid_ctx(grid, r, c, row, mode) else EMPTY_RGB
+    return SOLID_RGB if is_solid_ctx(grid, r, c, row, mode, room) else EMPTY_RGB
 
 def door_rects(grid, row, conn_room):
     """Blocked-edge OPENING heuristic (--compare-doors only).  This is the
@@ -262,14 +292,15 @@ def decode_objects(rom, row, col):
 OBJ_DOOR_RGB = (220, 40, 40)    # id-0x1f object = door candidate (mechanism B)
 OBJ_OTHER_RGB = (70, 120, 210)  # any other placed object (dimmed context)
 
-def render(grid, row, scale, mode, top=PLAY_TOP, doors=None, objects=None):
+def render(grid, row, scale, mode, top=PLAY_TOP, doors=None, objects=None,
+           room=None):
     from pngwrite import write_rgb
     rows = ROWS - top
     W, H = COLS * scale, rows * scale
     buf = bytearray(W * H * 3)
     for r in range(rows):
         for c in range(COLS):
-            col = tile_rgb(grid, r + top, c, row, mode)
+            col = tile_rgb(grid, r + top, c, row, mode, room)
             for yy in range(scale):
                 o = ((r * scale + yy) * W + c * scale) * 3
                 for xx in range(scale):
@@ -452,10 +483,13 @@ def contact_sheet(images, pos, gw, gh, gap, bg=(40, 44, 56), lab_scale=2):
             buf[dst:dst + w * 3] = data[src:src + w * 3]
     return W, H, bytes(buf)
 
-def ascii_grid(grid, row, mode, top=PLAY_TOP):
+def ascii_grid(grid, row, mode, top=PLAY_TOP, room=None):
     def ch(r, c):
+        ov = PERM_OVERRIDE.get((row, room)) if room is not None and mode == "perm" else None
+        if ov is not None:
+            return "#" if (r, c) in ov else "."
         if grid[r][c] in STAIRS: return "/"
-        return "#" if is_solid_ctx(grid, r, c, row, mode) else "."
+        return "#" if is_solid_ctx(grid, r, c, row, mode, room) else "."
     return "\n".join("".join(ch(r, c) for c in range(COLS))
                      for r in range(top, ROWS))
 
@@ -477,10 +511,11 @@ def render_stage(rom, row, scale, mode, tag, out_dir, ascii_dump=False,
             objects = decode_objects(rom, row, col)
         else:                                       # default: ROM door_tbl
             doors = door_table_rects(entry, col)
-        images.append(render(grid, row, scale, mode, doors=doors, objects=objects))
+        images.append(render(grid, row, scale, mode, doors=doors, objects=objects,
+                             room=col))
         if ascii_dump:
             print(f"row {row} room {col}:")
-            print(ascii_grid(grid, row, mode)); print()
+            print(ascii_grid(grid, row, mode, room=col)); print()
     if not images:
         return
     pos, gw, gh = layout(rom, row, len(images))

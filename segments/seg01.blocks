@@ -35,3 +35,15 @@ evt_dispatch_66c8: start 0x66c8 end 0x66d0 type worddata
 script_ptr_6795: start 0x6795 end 0x67eb type worddata
 ; Triangle-ramp animation table (19 bytes, indexed by 0xCE39) used by sub_67ebh.
 ramp_tbl_6804: start 0x6804 end 0x6817 type bytedata
+; Simon action-state DISPATCH_A table (0xC420 -> handlers).
+simon_action_tbl: start 0x6b49 end 0x6b59 type worddata
+; Jump sub-state DISPATCH_A table (0xC421 -> aim/up/left/right).
+simon_jump_tbl: start 0x6ccd end 0x6cd5 type worddata
+; Signed dY per jump phase.
+jump_y_delta: start 0x6d9b end 0x6db0 type bytedata
+; Fall dY nibbles.
+fall_y_delta: start 0x6f88 end 0x6f8c type bytedata
+; Hurt sub-state DISPATCH_A table (0xC423).
+simon_hurt_tbl: start 0x6f92 end 0x6f9a type worddata
+; Whip-phase DISPATCH_A table (0xC422-1).
+whip_phase_tbl: start 0x71f9 end 0x7201 type worddata

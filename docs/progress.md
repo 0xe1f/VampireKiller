@@ -13,9 +13,9 @@ state** (like Konamiman's Metal Gear disassembly, which has zero `incbin`). The
 reversed" placeholder: each segment graduates incbin -> annotated disassembly (code)
 or extracted data assets (graphics/tables) as it's understood, always keeping
 `make verify` byte-exact. Postponed for now - we reverse segments incrementally
-(seg0 done, seg1 largely done, seg2/seg3 now imported as disassembly and being
-annotated; seg4-15 still INCBIN) rather than mass-converting bins to opaque `db`
-dumps.
+(seg0 done, seg1 largely done, seg2/seg3/seg13 imported as disassembly and being
+annotated; seg4-12 and seg14-15 still INCBIN) rather than mass-converting bins to
+opaque `db` dumps.
 
 ## Done
 
@@ -281,10 +281,10 @@ dumps.
     * WORKFLOW going forward: at the start of every recording, note (C411, D002 hub,
       D000 stage, D001 room) so each captured action is tagged with its location;
       re-check after any room/stage change before comparing actor/object slots.
-    * NEXT to fully rebuild stages "with room relations": (1) disassemble seg13 (the
-      room-transition brain, writer at 0xB98A - still INCBIN) for room bounds + exits
-      (stairs/drops/key-doors); (2) map per-room background bitmaps for actual
-      geometry; (3) name the object ids (0x0d/0x10 common scenery, 0x05 dog, ...).
+    * NEXT to fully rebuild stages "with room relations": (1) ~~disassemble seg13~~
+      (done: conn_lookup / door_tbl / spot_tbl in `segments/seg13.asm`); (2) map
+      per-room background bitmaps for actual geometry; (3) name the object ids
+      (0x0d/0x10 common scenery, 0x05 dog, ...).
 
 - Ninth session (dog hits Simon -> knocked back across a room boundary), F8 timeline
   (frames ~628-732). Two useful results:
@@ -482,6 +482,32 @@ dumps.
       room_map_build, map_cell_at, tile_is_solid, row_solid_thresh. `make verify`
       still byte-identical.
 
+- Twenty-seventh session (annotate located player + state-machine code):
+    * Converted title_layout 0x4C3F-0x4D0E from fake instructions to `defb`
+      (0xFF=end, 0xFE=next row); named `tile_layout_draw` (0x7B39).
+    * Named Simon's walk/jump/whip/frame-mirror path and the C420 action
+      handlers (grounded/jump/crouch/stairs/fall/hurt/dying).  Jump and whip
+      DISPATCH_A tables + `jump_y_delta` are now `defw`/`defb`.
+    * Labeled main_state_tbl 0-13 from static reads of the play-flag fork
+      (death, game-over, room-trans, stage-exit, vendor, game-start).  States 8
+      and 11 still want a live trace.
+
+- Twenty-seventh session (SEG13 OUT OF INCBIN):
+    * Graduated bank 0x0D from `INCBIN segments/seg13.bin` to `INCLUDE
+      segments/seg13.asm` (`PHASE 0xA000`).  Graphics/RLE stay as `INCBIN` slices
+      of the bin (metatile defs, Simon streams, intro_sky); code + authored tables
+      are source: `conn_lookup` / `conn_ptr` / per-stage nibble records, `door_tbl`
+      (19x3), `spot_tbl` (stage-12 two-way warps into C5B1/C5B2/C5B4).  Labels are
+      unique names so they don't collide with seg03 in the same CPU window.
+    * Paged wrappers named: `conn_lookup_paged` (0x5A35), `conn_load_permits_paged`
+      (0x5A3E), `door_load_paged` (0x5A47).
+
+- Twenty-sixth session (DRACULA ROOM 9 permeability override):
+    * Shipped `PERM_OVERRIDE[(18, 9)]`: floor (rows 22-23) plus four pairs of 2x1
+      jump ledges flanking the decorative columns.  0c/0d pillars no longer paint
+      as stairs; brick-ID side columns and dotted 09-0b speckle are empty.  Perm
+      mode only; `--collision` stays the engine test.  Regenerated `gfx/minimap_s18.png`.
+
 - Twenty-fifth session (WHITE-KEY DOOR TABLE: universal for stages 0-18):
     * **Placement is a per-stage ROM table, not geometry and not 0x1F.** Watch on
       0xC5AC-C5AE during a stage-15 warp showed writer `0d:bb55` = `door_load_coords`
@@ -498,8 +524,8 @@ dumps.
       Stage 18 room 8 left -> room 9 is the Dracula door.
     * **Renames / annotations:** `door_blit_tiles` (0x5403), `door_interact`
       (0x771F), `door_proximity` (0x8587), `door_anim_tick` (0x914E),
-      `door_begin_open` (0x9175); `msx.sym` also names `door_load_coords` /
-      `door_tbl` (seg13 still INCBIN). `roomperm.py` default overlay is the table
+      `door_begin_open` (0x9175); `door_load_coords` / `door_tbl` now live in
+      `segments/seg13.asm`. `roomperm.py` default overlay is the table
       (dropped `DOOR_OVERRIDE`).
     * **Warp artifacts (stage-15 skip-intro ROM, not a door finding):** intro still
       queues BGM `0x8A`; `0xD012` difficulty left at 0 after `reset_run_state`, so
@@ -565,8 +591,9 @@ dumps.
           stage 10 +16.1%, stage 18 +9.9%, stage 0 +4.6%), with no ground truth to
           justify those. `0c/0d` also still render amber ("staircases that aren't
           diagonal") because STAIRS is a global set.
-        - **Path forward (not yet done):** treat room 9 as a hand-authored per-room
-          override (floor-only) rather than chase a global rule.
+        - **Path forward (PARKED):** `PERM_OVERRIDE[(18, 9)]` paints the floor plus
+          2x1 jump ledges and looks right on the sheet, but it is hand-authored.
+          Come back if we find a principled source.
           Also all-edges-blocked -> the door heuristic fires cosmetic false doors there.
 
 - Twenty-second session (MINIMAP LAYOUT TABLE = ground-truth room geography):
@@ -848,13 +875,14 @@ dumps.
    0xA281+A, 0xA2D1+A, ...) to map the remaining streams to Simon / enemies /
    bosses / items / tiles, and add them to `gfx/manifest.tsv`.
 2. Convert the tile-layout block `0x4C3F-0x4D0E` in seg00 from misdisassembled
-   "code" to `db` data (currently marked with a comment; byte-exact).
-3. Annotate the in-game state handlers in `sub_414dh`: 3 (intro), 4 (stage
-   bridge) and 5 (play) are identified from the boot trace; still need 6-13
-   (death / level-clear / boss / game-over) - capture each by triggering it.
-4. Annotate the seg1 player routines the movement trace located: 0x6CA2 (horiz
-   move), 0x6C3B/0x6C5E (facing), 0x6D15-0x6D67 (jump), 0x7213-0x728A (whip),
-   0x7527 (whip multi-sprite emitter), 0x6B81/0x6CC6/0x7681 (anim frames).
+   "code" to `db` data - DONE (`l4c3fh` / `l4c5ah` / `l4ca0h` + `tile_layout_draw`).
+3. Annotate the in-game state handlers in `sub_414dh`: 0-5 named; 6=`state_death`,
+   7=`state_game_over`, 9=`state_room_trans`, 10=`state_stage_exit`, 12=`state_vendor`,
+   13=`state_game_start`.  8 (`state_c409`) and 11 (`state_f1_dismiss`) are labeled
+   from their flags; exact play meaning still wants a trace.
+4. Annotate the seg1 player routines the movement trace located - DONE:
+   `simon_walk_left/right`, `simon_add_x`, `simon_jump_*`, `simon_mirror_frames`,
+   `whip_tick` / `simon_attack_tick`, action-state handlers 0-6 named.
 5. Continue disassembling segments 1-15.
 6. Room-map renderer (`tools/roomperm.py`) per-stage tile-semantics cleanup.
    Tile-name id meaning is PER-STAGE (each stage's tileset reuses ids), so the
@@ -871,6 +899,9 @@ dumps.
        stair tiles (same ids the engine climbs) as decoration; they're just
        inaccessible in the intro. Decision: leave them coloured as stairs (a stair
        tile is a stair tile whether or not it's reachable).
+     * stage 18 room 9 (Dracula) - PARKED. Manual `PERM_OVERRIDE` (floor + 2x1
+       jump ledges) looks right in `gfx/minimap_s18.png` but is not engine-derived;
+       come back if we find a principled source (scripted platforms / collision).
      * stage 6 room 5 - one errant 0c.
      * stage 15 rooms 6-9 - errant 0c/0d AND errant solid tiles.
      * stage 10 rooms 2/3/4/6/7/8 - "solid noise": isolated 01-04/09-0b tiles used
@@ -960,6 +991,9 @@ Known live RAM map (runtime-confirmed this session):
   0xC5AC door sub-state: loader 0xFF (vertical: blit closed graphic) or 0x04
          (courtyard); then 1 = armed, 3 = open.  0xC5AD = door pixel Y, 0xC5AE =
          door pixel X (from door_tbl; confirmed vs Simon Y/X and VDP SAT order).
+  0xC5B1 spot armed (1) / 0xC5B2 = spot Y / 0xC5B3 = spot X / 0xC5B4 = dest room
+         nibble from spot_tbl (conn_from_spot writes it to D001 when C41B==0xFF).
+         Table currently stage 12 only (two-way pairs).
   0xC422 whip phase  0xC429 whip timer  0xC42E/2F anim frames (scratch)
   Damage/knockback (zombie-hit before/after + two during-blink captures):
     0xC42D INVULN/BLINK timer, starts 0x4e=78, -1 per frame (verified against
@@ -1108,9 +1142,13 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   Renamed so far - seg0: draw_hearts_hud/draw_lives_hud/draw_health_bar/
   draw_enemy_meter/restore_health/damage_health/spawn_actor(+_init),
   advance_stage, room_map_build, zombie_generator, door_blit_tiles;
-  seg1: simon_action_tick, spend_5_hearts, map_cell_at, tile_is_solid,
+  seg1: simon_action_tick, simon_walk_left/right, simon_jump_tick, simon_mirror_frames,
+  whip_tick, tile_layout_draw, spend_5_hearts, map_cell_at, tile_is_solid,
   row_solid_thresh, set_stage_boundary, door_interact;
-  seg2: door_proximity, door_anim_tick, door_begin_open.
+  seg2: door_proximity, door_anim_tick, door_begin_open;
+  seg13: conn_lookup, conn_load_permits, conn_room_record, conn_ptr, door_load,
+  door_load_coords, door_tbl, spot_load_coords, spot_tbl, simon_cell0_ptr,
+  simon_cell1_ptr.
 - Every `vk()`-emitting Lua block MUST use `LUA ALLPASS` — plain `LUA` emits only
   on the final pass and drifts all later labels.
 - After any edit, run `make verify` before moving on.

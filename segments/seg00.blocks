@@ -8,6 +8,8 @@ data_4010: start 0x4010 end 0x4028 type bytedata
 ; Main state-machine jump table: DISPATCH_A at 0x415e indexes this by the
 ; primary game state (0xC000).  14 word entries -> state handlers.
 main_state_tbl: start 0x4161 end 0x417d type worddata
+; Title-screen tile-layout streams (0xFF=end, 0xFE=next row).
+title_layout: start 0x4c3f end 0x4d0f type bytedata
 
 ; Entity-behaviour jump table: DISPATCH_A at 0x5fd0 indexes this by object
 ; type (ix+0)-1.  Targets live in the banked 0xA000 ROM, so they can't be

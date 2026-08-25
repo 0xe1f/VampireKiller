@@ -271,29 +271,25 @@ l415eh:
 
 ; main_state_tbl - primary game-state handlers (indexed by 0xC000).
 ; Front-end trio (0..2) = logo -> title -> attract.  Runtime trace of a fresh
-; start walked 1 -> 3 -> 4 -> 5:  state 3 runs the intro cutscene (Simon nears
-; the castle) as a timed animation (0xC004 counter, sub-phases in 0xC001), state
-; 4 is a brief bridge, and state 5 is in-stage play (builds the screen via the
-; seg1 62edh pipeline and runs the 6552h frame refresh).  The state-5 handler
-; also reads the game-event flags (0xC408/09/0A/0B/0C, 0xC413/1B) to pick the
-; next state, so 6..13 are the death / level-clear / boss / game-over phases
-; (exact roles still TBD - not exercised by the boot trace).
+; start walked 1 -> 3 -> 4 -> 5.  State 5 (play) reads the game-event flags to
+; pick 6..13: death, game-over, room/stage transitions, vendor, game-start.
 main_state_tbl:
-	defw 0417dh             ; 0  front-end: Konami logo        (*)
-	defw 041a0h             ; 1  front-end: title screen       (*)
-	defw 041abh             ; 2  front-end: attract / demo     (*)
-	defw 041d1h             ; 3  intro cutscene (Simon -> castle; timed via 0xC004)
-	defw 0422ch             ; 4  bridge: build first stage, advance to play
-	defw 04257h             ; 5  in-stage play (per-frame tick + next-state select)
-	defw 04294h             ; 6  in-game phase
-	defw 042b2h             ; 7  in-game phase
-	defw 04324h             ; 8  in-game phase
-	defw 0437eh             ; 9  in-game phase
-	defw 0438eh             ; 10 in-game phase
-	defw 043e1h             ; 11 in-game phase
-	defw 043f7h             ; 12 in-game phase
-	defw 0441bh             ; 13 in-game phase
+	defw state_logo             ; 0  Konami logo
+	defw state_title            ; 1  title screen
+	defw state_attract          ; 2  attract / demo
+	defw state_intro            ; 3  intro cutscene (timed via 0xC004)
+	defw state_stage_bridge     ; 4  build first/next stage, enter play
+	defw state_play             ; 5  in-stage play + next-state select
+	defw state_death            ; 6  lives left -> respawn (state 4); else game-over
+	defw state_game_over        ; 7  draw GAME OVER (l4d41h)
+	defw state_c409             ; 8  from 0xC409 (not the C408 key-door); bumps 0xD002
+	defw state_room_trans       ; 9  pending exit 0xC41B: sub_5a35h then back to play
+	defw state_stage_exit       ; 10 from 0xC408: spend white key, advance_stage
+	defw state_f1_dismiss       ; 11 from 0xC40A: F1 to dismiss, back to play
+	defw state_vendor           ; 12 from 0xC40C: vendor offer / purchase
+	defw state_game_start       ; 13 from title start (A=0x0D): new game / password
 main_state_tbl_end:
+state_logo:                    ; 0 (0x417D)
 	djnz l418ah
 	call konami_logo_step   ; wipe the Konami logo in one more row (seg1)
 	ld a,(0c422h)           ; 0xC422 set once the reveal has finished
@@ -313,11 +309,13 @@ l4198h:
 	call sub_47c0h
 	call konami_logo_draw   ; draw Konami logo + start the top-to-bottom wipe (seg1)
 	jr l41cch
+state_title:                   ; 1 (0x41A0)
 	ld hl,0c004h
 	dec (hl)
 	ret nz
 	call 07aeeh
 	jp l4249h
+state_attract:                 ; 2 (0x41AB)
 	djnz l41c1h
 	call sub_4e27h
 	ld a,(0c413h)
@@ -340,6 +338,7 @@ l41cch:
 	ld hl,0c001h
 	inc (hl)
 	ret
+state_intro:                   ; 3 (0x41D1)
 	djnz l41e4h
 	ld hl,0c004h
 	dec (hl)
@@ -386,6 +385,7 @@ l4222h:
 	call sub_50a6h
 	ld a,050h
 	jp l41c9h
+state_stage_bridge:            ; 4 (0x422C)
 	ld hl,0c410h
 	ld a,(hl)
 	sub 001h
@@ -409,26 +409,27 @@ l4252h:
 	xor a
 	ld (0c001h),a
 	ret
+state_play:                    ; 5 (0x4257)
 	call sub_5c2ch
 	ld a,(0c40ch)
 	or a
 	ld a,00ch
-	jp nz,l41b6h
+	jp nz,l41b6h           ; 0xC40C -> vendor
 	ld a,(0c40ah)
 	and a
-	jp nz,l428ch
+	jp nz,l428ch           ; 0xC40A -> F1-dismiss
 	ld a,(0c41bh)
 	and a
 	ld a,009h
-	jp nz,l41b6h
+	jp nz,l41b6h           ; pending room exit -> room_trans
 	ld a,(0c408h)
 	or a
 	ld a,00ah
-	jp nz,l41b6h
+	jp nz,l41b6h           ; stage-boundary -> spend key / advance_stage
 	ld a,(0c409h)
 	and a
 	ld a,008h
-	jp nz,l41b6h
+	jp nz,l41b6h           ; 0xC409 -> state 8
 	ld a,(0c413h)
 	or a
 	ret nz
@@ -437,6 +438,7 @@ l428ch:
 	call sub_449ch
 	ld a,00bh
 	jp l41b6h
+state_death:                   ; 6 (0x4294): 0xC410 lives? respawn via state 4 : game-over
 	ld hl,0c410h
 	ld a,(hl)
 	or a
@@ -453,6 +455,7 @@ l42abh:
 	ld a,08bh
 	call sub_50a6h
 	jr l4249h
+state_game_over:               ; 7 (0x42B2)
 	djnz l42e3h
 	ld a,(0e600h)
 	or a
@@ -520,6 +523,7 @@ sub_4314h:
 	xor c
 	and (hl)
 	ret
+state_c409:                    ; 8 (0x4324): from play when 0xC409 set; ticks hub 0xD002
 	djnz l4377h
 	ld hl,0d002h
 	inc (hl)
@@ -572,13 +576,14 @@ l4377h:
 	call sub_47c0h
 	xor a
 	jp l41c9h
+state_room_trans:              ; 9 (0x437E): 0xC41B pending exit
 	call sub_5a35h
 	ld a,006h
-	jp nc,l41b6h
+	jp nc,l41b6h           ; failed transition -> death
 	call 062fch
 	ld a,005h
-	jp l41b6h
-; white-key door: consume the white key (clear 0xC701 bit0) and advance a stage.
+	jp l41b6h              ; back to play
+state_stage_exit:              ; 10 (0x438E): 0xC408, spend white key, next stage
 	ld hl,0c701h
 	ld a,(hl)
 	and 0feh               ; clear bit0 = white key spent by the door
@@ -628,6 +633,7 @@ l43cbh:
 	ld (0e607h),a
 	ld a,00dh               ; A = 0x0D -> next-state selector
 	jp l41b6h               ; enter gameplay via the state setter
+state_f1_dismiss:              ; 11 (0x43E1): 0xC40A, wait F1 (0xC00B bit0)
 	ld a,(0c00bh)
 	rra
 	ret nc
@@ -638,6 +644,7 @@ l43cbh:
 	call sub_50a6h
 	ld a,005h
 	jp l41b6h
+state_vendor:                  ; 12 (0x43F7): 0xC40C whip-hit vendor
 	djnz l4402h
 	call 094c1h             ; vendor_purchase_tick body (seg2): poll buy/refuse
 	ret nz
@@ -659,6 +666,7 @@ l4411h:
 	ld (0c40ch),a          ; clear the whip-hit flag
 	call vendor_make_offer ; arm a sale (seg2 0x938E)
 	jp l41cch
+state_game_start:              ; 13 (0x441B): new-game / password (from title A=0x0D)
 	djnz l4453h
 	ld a,(0c006h)
 	and 033h
@@ -2070,160 +2078,34 @@ l4c07h:
 	  vk({0x6c,0x00,"STAGE",0x30,0xff})           -- "STAGE" + number tile
 	  vk({0x60,0x38,"STAGE",0x00,0x00,0x00,0xff}) -- "STAGE" (alternate position)
 	ENDLUA
-; --- 0x4C3F-0x4D0E: VDP name-table / tile-layout data for the title & HUD
-;     screens (referenced by sub_4d4eh via l4c3fh/l4c5ah/l4ca0h).  This is DATA;
-;     the instructions z80dasm shows below are a misdisassembly of that data and
-;     are never executed.  TODO: convert to `db` (byte-exact) in a later pass.
+; --- title_layout (0x4C3F-0x4D0E): tile-id streams for the title screen -----
+;  Consumed by tile_layout_draw (seg1 0x7B39).  0xFF = end of stream; 0xFE =
+;  next row (following byte is added to D, E += 8); any other byte is a tile
+;  id blitted at the current (D,E).  sub_4d4eh picks a pair by the MSX ID
+;  nibble at 0x002B: 0 = international (l4c3fh + l4c5ah), else JP (l4ca0h +
+;  l4c3fh).
 l4c3fh:
-	ld (bc),a
-	cp 0f8h
-	inc bc
-	inc b
-	cp 0f8h
-	dec b
-	ld b,007h
-	ex af,af'
-	cp 000h
-	add hl,bc
-	ld a,(bc)
-	dec bc
-	inc c
-	dec c
-	cp 0f8h
-	ld c,00fh
-	ld bc,01001h
-	ld de,02fffh
-	cpl
-	cp 0b0h
-	ld d,017h
-	jr $+23
-	ld bc,00101h
-	ld bc,02f28h
-	cpl
-	ld (de),a
-	inc de
-	inc d
-	dec d
-	cp 000h
-	ld h,023h
-	inc h
-	dec h
-	ld bc,00101h
-	ld bc,01a19h
-	dec de
-l4c7ah:
-	ld (02423h),hl
-	dec h
-	cp 000h
-	inc e
-	dec e
-	ld e,01fh
-	ld bc,00101h
-	ld bc,02a29h
-	dec hl
-	inc e
-	dec e
-	ld e,01fh
-	cp 000h
-	jr nz,$+35
-	inc l
-	ld bc,00101h
-	ld bc,02d01h
-	ld l,027h
-	jr nz,l4cbfh
-	inc l
-	rst 38h
+	defb 002h,0feh,0f8h,003h,004h,0feh,0f8h,005h,006h,007h,008h
+	defb 0feh,000h,009h,00ah,00bh,00ch,00dh,0feh,0f8h,00eh,00fh
+	defb 001h,001h,010h,011h,0ffh
+l4c5ah:
+	defb 02fh,02fh,0feh,0b0h,016h,017h,018h,015h,001h,001h,001h,001h
+	defb 028h,02fh,02fh,012h,013h,014h,015h,0feh,000h,026h,023h,024h
+	defb 025h,001h,001h,001h,001h,019h,01ah,01bh,022h,023h,024h,025h
+	defb 0feh,000h,01ch,01dh,01eh,01fh,001h,001h,001h,001h,029h,02ah
+	defb 02bh,01ch,01dh,01eh,01fh,0feh,000h,020h,021h,02ch,001h,001h
+	defb 001h,001h,001h,02dh,02eh,027h,020h,021h,02ch,0ffh
 l4ca0h:
-	ld h,a
-	ld (de),a
-	inc de
-	inc d
-	dec d
-	ld d,017h
-	jr $+27
-	ld a,(de)
-	dec de
-	inc e
-	dec e
-	ld e,01fh
-	jr nz,$+35
-	cp 008h
-	ld (02423h),hl
-	dec h
-	ld h,027h
-	jr z,l4ce4h
-	ld hl,(02c2bh)
-	dec l
-l4cbfh:
-	ld l,02fh
-	jr nc,l4cf4h
-	cp 000h
-	ld (03433h),a
-	dec (hl)
-	ld (hl),037h
-	jr c,l4d06h
-	ld a,(03c3bh)
-	dec a
-	ld a,03fh
-	ld b,b
-	ld b,c
-	cp 000h
-	cp 0f8h
-	ld b,d
-	ld b,e
-	ld b,h
-	ld b,l
-	ld b,(hl)
-	ld b,a
-	ld c,b
-	ld b,a
-	ld c,c
-	ld c,d
-	ld c,e
-l4ce4h:
-	ld c,h
-	ld c,l
-	cp 000h
-	ld d,d
-	ld d,e
-	ld d,h
-	ld d,l
-	ld d,(hl)
-	ld d,a
-	ld h,b
-	ld d,a
-	ld h,b
-	ld h,c
-	ld e,e
-	ld e,h
-l4cf4h:
-	ld e,l
-	nop
-	nop
-	ld h,l
-	ld h,l
-	cp 000h
-	ld c,(hl)
-	ld c,a
-	ld d,b
-	ld d,c
-	ld e,b
-	ld e,c
-	ld e,d
-	ld e,c
-	ld l,b
-	ld l,c
-	ld l,d
-l4d06h:
-	ld e,(hl)
-	ld e,a
-	ld h,d
-	ld h,e
-	ld h,h
-	ld h,e
-	ld h,h
-	ld h,(hl)
-	rst 38h
+	defb 067h,012h,013h,014h,015h,016h,017h,018h,019h,01ah,01bh,01ch
+	defb 01dh,01eh,01fh,020h,021h,0feh,008h,022h,023h,024h,025h,026h
+	defb 027h,028h,029h,02ah,02bh,02ch,02dh,02eh,02fh,030h,031h,0feh
+	defb 000h,032h,033h,034h,035h,036h,037h,038h,039h,03ah,03bh,03ch
+	defb 03dh,03eh,03fh,040h,041h,0feh,000h,0feh,0f8h,042h,043h,044h
+	defb 045h,046h,047h,048h,047h,049h,04ah,04bh,04ch,04dh,0feh,000h
+	defb 052h,053h,054h,055h,056h,057h,060h,057h,060h,061h,05bh,05ch
+	defb 05dh,000h,000h,065h,065h,0feh,000h,04eh,04fh,050h,051h,058h
+	defb 059h,05ah,059h,068h,069h,06ah,05eh,05fh,062h,063h,064h,063h
+	defb 064h,066h,0ffh
 ; --- Title / front-end text (drawn by sub_4d4eh).  ASCII-0x10 via vk(); leading
 ;     numbers are VDP position/attribute prefixes, 0xFE/0xFF are separators.
 l4d0fh:
@@ -2284,19 +2166,19 @@ l4d6dh:
 	jr nz,l4dc3h
 	ld de,0a818h
 	ld hl,l4c3fh
-	call 07b39h
+	call tile_layout_draw
 	ld de,0a038h
-	ld hl,04c5ah
-	call 07b39h
+	ld hl,l4c5ah
+	call tile_layout_draw
 	call 07af6h
 	jr l4dd5h
 l4dc3h:
 	ld de,03828h
 	ld hl,l4ca0h
-	call 07b39h
+	call tile_layout_draw
 	ld de,0b830h
 	ld hl,l4c3fh
-	call 07b39h
+	call tile_layout_draw
 l4dd5h:
 	ld hl,l4d0fh
 	call l4ad2h
@@ -3589,7 +3471,7 @@ load_simon_sprites:
 	call sub_5369h          ; page seg 11/12/13 (sprite gfx) in
 	ld a,(0c42eh)           ; legs frame index
 	add a,a                 ; *2 (word table)
-	ld hl,0a281h            ; seg13 leg-cell pointer table
+	ld hl,simon_cell0_ptr   ; seg13 leg-cell pointer table
 	call ADD_HL_A
 	ld e,(hl)
 	inc hl
@@ -3598,7 +3480,7 @@ load_simon_sprites:
 	call sub_46f8h          ; decompress into VRAM
 	ld a,(0c42fh)           ; torso/whip frame index
 	add a,a
-	ld hl,0a2d1h            ; seg13 torso-cell pointer table
+	ld hl,simon_cell1_ptr   ; seg13 torso-cell pointer table
 	call ADD_HL_A
 	ld e,(hl)
 	inc hl
@@ -4033,25 +3915,23 @@ l5a2ah:
 	call l4a6dh
 l5a32h:
 	jp sub_533dh
-; sub_5a35h (seg0 0x5A35): paged-call wrappers into the seg13 (bank 0x0d @ 0xA000)
-; room-transition code.  sub_5369h pages seg13 in, sub_533dh restores the banks.
-; Three sibling entry points share the pattern:
-;   0x5A35 -> 0xB963  the transition BRAIN: looks up the current room's 2-byte
-;                     connectivity record (4 nibbles up/down/left/right = dest
-;                     room, 0xF = blocked) for pending dir 0xC41B and writes the
-;                     new room to 0xD001 (0xB987).  Called from the frame handler.
-;   0x5A3E -> 0xB99A  loads the 4 exit-permit bytes 0xC41C-0xC41F from those same
-;                     nibbles (0xFF = blocked edge).
-;   0x5A47 -> 0xBB31  (further seg13 helper).
-sub_5a35h:
+; Paged-call wrappers into seg13 (bank 0x0d @ 0xA000).  sub_5369h pages it in,
+; sub_533dh restores the banks.  Three sibling entry points:
+;   0x5A35 conn_lookup_paged      -> conn_lookup
+;   0x5A3E conn_load_permits_paged -> conn_load_permits
+;   0x5A47 door_load_paged        -> door_load (door_tbl + spot_tbl)
+sub_5a35h:                     ; 0x5A35
+conn_lookup_paged:
 	call sub_5369h         ; page in seg13 (bank 0x0d)
-	call 0b963h            ; seg13: connectivity lookup + 0xD001 update
+	call conn_lookup
 	jp sub_533dh           ; restore banks
+conn_load_permits_paged:       ; 0x5A3E
 	call sub_5369h
-	call 0b99ah            ; seg13: load exit permits 0xC41C-0xC41F
+	call conn_load_permits
 	jp sub_533dh
+door_load_paged:               ; 0x5A47
 	call sub_5369h
-	call 0bb31h
+	call door_load
 	jp sub_533dh
 	ld hl,0e000h
 	ld de,0e001h

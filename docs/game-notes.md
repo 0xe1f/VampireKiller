@@ -54,7 +54,7 @@ The world is a hierarchy: **hub → stage → room**.
   jump. *Runtime:* held as **0xC701 bit 0**. Spent by `door_interact` (seg1 0x771F)
   when Simon overlaps the door (`res 0,(0xC701)`; courtyard / stage 0 opens freely).
 - **Every stage 0–18 has exactly one white-key door, from one table.** Seg13
-  **`door_tbl` at 0xBB61**: 19 records of 3 bytes `(room | vert<<7), Y, X`.
+  **`door_tbl` at 0xBB61** (now `segments/seg13.asm`): 19 records of 3 bytes `(room | vert<<7), Y, X`.
   `door_load_coords` (0xBB37) indexes it by stage `0xD000`; if `0xD001` matches
   the room nibble it writes **`0xC5AD = Y`, `0xC5AE = X`** (`ld (0xC5AD),hl` with
   L=Y, H=X — **not** X then Y) and arms **`0xC5AC`** (`0xFF` if bit7 / vertical so
@@ -175,6 +175,9 @@ minimap (`gfx/minimap_s<NN>.png`, each room labelled with its number); `--all`
 renders all **19 stages (0..18)**, driven by the game's minimap room-count table
 (stage 18/Dracula's rowbase delta is a garbage sentinel, so its room count comes
 from that table; its room pointers/geometry still decode normally).
+Stage 18 room 9 (Dracula's arena) is a **per-room override**: tile IDs cannot
+separate the decorative columns from the floor (same `06`–`0b`), so the minimap
+paints only the floor plus the 2×1 jump ledges flanking each column.
 `--collision` shows the strict 01..04-surface view, `--visual` adds the 0x2c+
 scenery. Validated byte-exact against 0xD100 RAM snapshots for all 7 recorded
 stage-1 rooms. Note metatile-definition tables can straddle the seg12/seg13
@@ -182,7 +185,7 @@ stage-1 rooms. Note metatile-definition tables can straddle the seg12/seg13
 flat 0x6000-0xBFFF buffer.
 
 **Room-to-room connectivity (CONFIRMED, byte-exact + runtime-validated).** The
-transition graph is a per-stage table in seg13: `CONN_PTR` word table at **0xB9D3**
+transition graph is a per-stage table in seg13 (`segments/seg13.asm`): `conn_ptr` word table at **0xB9D3**
 (19 entries, one pointer per stage 0xD000 0..18). For a room it points at a 2-byte
 record = **4 nibbles: up, down, left, right** = the DESTINATION room index for
 that exit (`0xF` = blocked). On an edge/stair transition the engine looks this up
@@ -207,6 +210,15 @@ changed by the connectivity path - vertical moves stay within the stage.
   reproduces the true portal/loop stages (8's vertical loop, 12/13 portals, Dracula's
   stage 18). The old BFS reconstruction has been dropped.
 
+**Stage-12 spots (`spot_tbl` at 0xBBCD, in `segments/seg13.asm`).** `door_load`
+(0xBB31, via `door_load_paged`) also runs `spot_load_coords` (0xBB9A): a 0xFF-ended
+list of `(stage, dest<<4|room, Y, X)`. The current ROM has 10 records, all stage
+12, in two-way pairs (0↔3, 1↔4, 2↔11, 5↔8, 7↔10). A match arms **0xC5B1=1**,
+stores Y/X at **0xC5B2/C5B3** (same L=Y H=X as the door), and the dest nibble at
+**0xC5B4**. `conn_lookup` writes C5B4 to 0xD001 when pending dir **0xC41B == 0xFF**
+(written by action-state 7 / `l7102h`). The table decode is byte-exact; the
+gameplay trigger (when C41B becomes 0xFF on those tiles) is not yet play-verified.
+
 ## Player (Simon)
 
 ### Movement / action states (RAM 0xC420, runtime-confirmed)
@@ -216,14 +228,14 @@ changed by the connectivity path - vertical moves stay within the stage.
 
 | 0xC420 | handler | meaning |
 | --- | --- | --- |
-| 0 | 0x6B59 | grounded (walk / idle). Whipping does **not** change this byte. |
-| 1 | 0x6CC7 | **jump / airborne** (Y arc 0xC0→0xA0→0xC0; X free for directional jumps) |
-| 2 | 0x6DB0 | **crouch** (DOWN held; Simon X is locked — cannot move) |
-| 3 | 0x6DE4 | **on stairs / climbing** (diagonal travel; can whip while climbing) |
-| 4 | 0x6F44 | **falling / dropping** off a ledge |
-| 5 | 0x6F8C | hurt / knockback (shallow airborne launch — not a jump) |
-| 6 | 0x709A | dying / respawn (enemy spawner is suppressed while ==6) |
-| 7 | 0x7102 | unconfirmed |
+| 0 | `simon_grounded` 0x6B59 | grounded (walk / idle). Whipping does **not** change this byte. |
+| 1 | `simon_jump_tick` 0x6CC7 | **jump / airborne** (Y arc via `jump_y_delta`; C421 = up/left/right) |
+| 2 | `simon_crouch` 0x6DB0 | **crouch** (DOWN held; Simon X is locked — cannot move) |
+| 3 | `simon_stairs` 0x6DE4 | **on stairs / climbing** (diagonal travel; can whip while climbing) |
+| 4 | `simon_fall` 0x6F44 | **falling / dropping** off a ledge |
+| 5 | `simon_hurt` 0x6F8C | hurt / knockback (shallow airborne launch — not a jump) |
+| 6 | `simon_dying` 0x709A | dying / respawn (enemy spawner is suppressed while ==6) |
+| 7 | `l7102h` 0x7102 | wait out 0xC42D (entered from crouch) then return to grounded |
 
 `0xC423` tracks the air sub-phase during jumps/falls (e.g. 2→1 rising→falling).
 
@@ -450,8 +462,7 @@ authored as readable ASCII and still assembles byte-exact. Usage:
 The HUD set (`l4c07h`) and title/front-end strings (`l4d0fh`,`l4d30h`,`l4d41h`)
 in seg00 are converted. NOTE: every vk-emitting LUA block MUST use `LUA ALLPASS`
 (plain `LUA` emits only on the last pass -> label drift -> wrong bytes).
-Still-as-data-misdisassembled: 0x4C3F-0x4D0E (tile-layout, marked with a comment;
-convert to `db` later).
+Still-as-data-misdisassembled: (none in the title/HUD path; `title_layout` 0x4C3F-0x4D0E is now `defb`).
 
 ## Sprites (format understood; data still in banked ROM)
 

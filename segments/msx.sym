@@ -146,6 +146,11 @@ hurt_simon_projectile: equ 0x85ad	; Simon -= 8/16 from a 0xC580 hazard slot, set
 weapon_hit_damage: equ 0x7e33	; whip/sub-weapon damage to enemy 0xC418 (per weapon+type table)
 advance_stage: equ 0x434e	; next stage: 0xD000++ (stage), 0xD001=0 (room), bump 0xC410/11, transition 4
 room_map_build: equ 0x4fb6	; expand a room's 8x6 metatiles (4x4 tiles ea) into the 0xD100 tile map
+title_build: equ 0x4d4e	; build/redraw the title screen (regional JP vs export logo via 0x002B)
+title_load_tiles: equ 0x5a02	; load title glyphs into VRAM (JP kana vs VAMPIRE KILLER by 0x002B)
+title_castle: equ 0x4c3f	; title_layout: castle emblem (drawn in both regions)
+title_logo_jp: equ 0x4c5a	; title_layout: Japanese title "Akumajo Dracula"
+title_logo_intl: equ 0x4ca0	; title_layout: export title "VAMPIRE KILLER"
 scenery_load: equ 0x5a50	; unpack scenery_list into 0xE000, vendor index into 0xDE00
 scenery_unpack: equ 0x5a63	; expand scenery stream (0xFE/0xFF/0x00) into 0xE000
 scenery_list_lookup: equ 0x5a9f	; HL -> scenery stream for stage 0 or hub 0xD002

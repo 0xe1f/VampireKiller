@@ -302,7 +302,7 @@ l418ah:
 	ld hl,0c004h
 	dec (hl)
 	ret nz
-	call sub_4d4eh
+	call title_build
 	xor a
 	jp l424bh
 l4198h:
@@ -621,7 +621,7 @@ l43c1h:
 	ld (hl),001h            ; primary state = 1 (title)
 	ld a,000h
 	call play_sound          ; request sound/music change
-	jp sub_4d4eh            ; (re)build the title screen
+	jp title_build          ; (re)build the title screen
 ; l43cbh - full game start: seed the run state then enter gameplay.
 l43cbh:
 	xor a
@@ -2089,21 +2089,29 @@ l4c07h:
 ; --- title_layout (0x4C3F-0x4D0E): tile-id streams for the title screen -----
 ;  Consumed by tile_layout_draw (seg1 0x7B39).  0xFF = end of stream; 0xFE =
 ;  next row (following byte is added to D, E += 8); any other byte is a tile
-;  id blitted at the current (D,E).  sub_4d4eh picks a pair by the MSX ID
-;  nibble at 0x002B: 0 = international (l4c3fh + l4c5ah), else JP (l4ca0h +
-;  l4c3fh).
-l4c3fh:
+;  id blitted at the current (D,E).  title_build (0x4D4E) picks which pair to
+;  draw from the MSX region: the low nibble of BIOS ID byte 0x002B is the
+;  character set (0 = Japanese, non-zero = international/other), so the game
+;  shows the Japanese title on a Japanese machine and the export title
+;  elsewhere (the sole regional difference in the ROM):
+;    nibble 0 (Japanese)     : title_castle + title_logo_jp   ("Akumajo Dracula")
+;    nibble != 0 (intl/other): title_logo_intl + title_castle ("VAMPIRE KILLER")
+;  The tile bitmaps for each logo are loaded to VRAM separately by
+;  title_load_tiles (0x5A02), which selects on the same 0x002B nibble.
+;  (Verified by rendering both tilesets from the ROM: 0x11260 spells VAMPIRE
+;  KILLER, 0x10EA0 is the Akumajo Dracula kana.)
+title_castle:                  ; 0x4C3F - castle emblem, drawn in BOTH regions
 	defb 002h,0feh,0f8h,003h,004h,0feh,0f8h,005h,006h,007h,008h
 	defb 0feh,000h,009h,00ah,00bh,00ch,00dh,0feh,0f8h,00eh,00fh
 	defb 001h,001h,010h,011h,0ffh
-l4c5ah:
+title_logo_jp:                 ; 0x4C5A - Japanese title ("Akumajo Dracula" kana)
 	defb 02fh,02fh,0feh,0b0h,016h,017h,018h,015h,001h,001h,001h,001h
 	defb 028h,02fh,02fh,012h,013h,014h,015h,0feh,000h,026h,023h,024h
 	defb 025h,001h,001h,001h,001h,019h,01ah,01bh,022h,023h,024h,025h
 	defb 0feh,000h,01ch,01dh,01eh,01fh,001h,001h,001h,001h,029h,02ah
 	defb 02bh,01ch,01dh,01eh,01fh,0feh,000h,020h,021h,02ch,001h,001h
 	defb 001h,001h,001h,02dh,02eh,027h,020h,021h,02ch,0ffh
-l4ca0h:
+title_logo_intl:               ; 0x4CA0 - export title ("VAMPIRE KILLER")
 	defb 067h,012h,013h,014h,015h,016h,017h,018h,019h,01ah,01bh,01ch
 	defb 01dh,01eh,01fh,020h,021h,0feh,008h,022h,023h,024h,025h,026h
 	defb 027h,028h,029h,02ah,02bh,02ch,02dh,02eh,02fh,030h,031h,0feh
@@ -2114,7 +2122,7 @@ l4ca0h:
 	defb 05dh,000h,000h,065h,065h,0feh,000h,04eh,04fh,050h,051h,058h
 	defb 059h,05ah,059h,068h,069h,06ah,05eh,05fh,062h,063h,064h,063h
 	defb 064h,066h,0ffh
-; --- Title / front-end text (drawn by sub_4d4eh).  ASCII-0x10 via vk(); leading
+; --- Title / front-end text (drawn by title_build).  ASCII-0x10 via vk(); leading
 ;     numbers are VDP position/attribute prefixes, 0xFE/0xFF are separators.
 l4d0fh:
 	LUA ALLPASS
@@ -2129,7 +2137,10 @@ l4d41h:
 	LUA ALLPASS
 	  vk({0x58,0x58,"GAME",0x00,0x00,"OVER",0xff})  -- "GAME OVER"
 	ENDLUA
-sub_4d4eh:
+; title_build (0x4D4E) - build/redraw the title screen.  Regional: reads the
+; MSX character-set nibble (0x002B) to pick the Japanese vs export title logo
+; (see title_layout above); title_load_tiles (0x5A02) loads the matching glyphs.
+title_build:
 	call sub_47dbh
 	call sub_4de2h
 	call l4853h
@@ -2159,7 +2170,7 @@ l4d6dh:
 	call sub_481bh
 	call sub_47f7h
 	call sub_53bdh
-	call sub_5a02h
+	call title_load_tiles  ; load region-specific title glyphs into VRAM
 	ld hl,CHRGTR
 	ld bc,00068h
 	ld a,0ffh
@@ -2169,23 +2180,23 @@ l4d6dh:
 	call 07ad6h
 	ld hl,00569h
 	call 07ad6h
-	ld a,(0002bh)
-	and 00fh
-	jr nz,l4dc3h
-	ld de,0a818h
-	ld hl,l4c3fh
+	ld a,(0002bh)          ; MSX BIOS ID byte 0x002B...
+	and 00fh               ; ...low nibble = character set (0 = Japanese)
+	jr nz,l4dc3h           ; non-zero -> international title (VAMPIRE KILLER)
+	ld de,0a818h           ; Japanese layout: castle...
+	ld hl,title_castle
 	call tile_layout_draw
-	ld de,0a038h
-	ld hl,l4c5ah
+	ld de,0a038h           ; ...+ "Akumajo Dracula" kana
+	ld hl,title_logo_jp
 	call tile_layout_draw
 	call 07af6h
 	jr l4dd5h
-l4dc3h:
-	ld de,03828h
-	ld hl,l4ca0h
+l4dc3h:                        ; international/other machine
+	ld de,03828h           ; "VAMPIRE KILLER" logo...
+	ld hl,title_logo_intl
 	call tile_layout_draw
-	ld de,0b830h
-	ld hl,l4c3fh
+	ld de,0b830h           ; ...+ castle
+	ld hl,title_castle
 	call tile_layout_draw
 l4dd5h:
 	ld hl,l4d0fh
@@ -3912,28 +3923,33 @@ l59e0h:
 	ld hl,0bf6fh
 	call l4845h
 	jp sub_533dh
-sub_5a02h:
-	call sub_5393h
-	ld hl,0ac80h
-	ld de,08004h
+; title_load_tiles (0x5A02) - load the title-screen tile bitmaps into VRAM.
+; The 0x11 shared glyphs (castle) load unconditionally; the region then selects
+; the logo glyphs by the same 0x002B character-set nibble as title_build:
+;   nibble 0 (Japanese)     -> 0x1E "Akumajo Dracula" kana glyphs (seg8 0xAEA0)
+;   nibble != 0 (intl/other)-> 0x59 "VAMPIRE KILLER" glyphs       (seg8 0xB260)
+title_load_tiles:
+	call sub_5393h         ; page in the title graphics banks (seg7/seg8)
+	ld hl,0ac80h           ; 0x11 shared castle glyphs (seg8 0xAC80)...
+	ld de,08004h           ; ...to VRAM 0x8004
 	ld b,011h
 	call l4a6dh
-	ld a,(0002bh)
+	ld a,(0002bh)          ; MSX character set (0 = Japanese)...
 	and 00fh
-	jr nz,l5a2ah
-	ld hl,0aea0h
+	jr nz,l5a2ah           ; non-zero -> international glyphs
+	ld hl,0aea0h           ; Japanese: 0x1E "Akumajo Dracula" kana glyphs
 	ld b,01eh
 	call l4a6dh
 	call sub_5369h
 	ld de,0bbf6h
 	call l46f2h
 	jr l5a32h
-l5a2ah:
-	ld hl,0b260h
+l5a2ah:                        ; international/other machine
+	ld hl,0b260h           ; 0x59 "VAMPIRE KILLER" glyphs (seg8 0xB260)
 	ld b,059h
 	call l4a6dh
 l5a32h:
-	jp sub_533dh
+	jp sub_533dh           ; restore default banks
 ; Paged-call wrappers into seg13 (bank 0x0d @ 0xA000).  sub_5369h pages it in,
 ; sub_533dh restores the banks.  Three sibling entry points:
 ;   0x5A35 conn_lookup_paged      -> conn_lookup

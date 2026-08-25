@@ -7,7 +7,15 @@ not yet confirmed in code is marked *(unconfirmed)*.
 ## Boot / attract flow
 
 1. **Konami logo** on a white background.
-2. **Title screen.**
+2. **Title screen.** Regional: the title logo depends on the machine's MSX BIOS
+   character-set nibble (low nibble of `0x002B`; 0 = Japanese, non-zero =
+   international/other). `title_build` (seg0 0x4D4E) and `title_load_tiles`
+   (0x5A02) both branch on it. A Japanese machine draws the kana
+   **"Akumajo Dracula"** (`title_logo_jp` 0x4C5A + glyphs at seg8 0xAEA0);
+   any other machine draws **"VAMPIRE KILLER"** (`title_logo_intl` 0x4CA0 +
+   glyphs at seg8 0xB260). The castle emblem (`title_castle` 0x4C3F) is shared.
+   This is the ROM's only region difference (confirmed by rendering both
+   tilesets straight from the ROM).
 3. If the player presses **space** (joystick trigger also supported *(unconfirmed)*),
    the game starts. Otherwise a short **attract-mode demo** plays, then loops back
    to the title.

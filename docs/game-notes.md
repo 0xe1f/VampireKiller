@@ -16,15 +16,59 @@ not yet confirmed in code is marked *(unconfirmed)*.
 
 ## Levels / bosses
 
-- Roughly every third level ends in a **boss battle** *(exact cadence unconfirmed)*.
-- Boss order:
-  1. Giant bat
-  2. Medusa
-  3. Mummies
-  4. Frankenstein's monster
-  5. Grim reaper
-  6. Dracula
-- When a boss dies an **orb descends** (C800 actor type **0x22**, not
+- Every third stage ends in a **boss battle** (event table `l6376h`: packed
+  `room<<4 | event`). Hitting types **0x11–0x17** subtracts from the shared
+  meter `0xC418` (`weapon_hit_damage`); type **0x12** is dual-use (bar in a
+  boss room, per-actor HP when `0xCE00==0`).
+
+  | event | stage | room | type(s) | boss |
+  | ---: | ---: | ---: | --- | --- |
+  | 1 | 3 | 5 | 18 | giant bat |
+  | 2 | 6 | 5 | 19 | medusa |
+  | 3 | 9 | 7 | 20, 20 | mummies (two of the same type) |
+  | 4 | 12 | 6 | 21 + 24 | Frankenstein + Igor |
+  | 5 | 15 | 9 | 22 | grim reaper |
+  | 6 | 18 | 9 | (via `sub_65b7h`) | Dracula |
+
+  Frankenstein (type 21) walks with shapes `0x79/0x7A/0x7B` and is on the bar.
+  Igor (type 24, not in the 1–22 sheet) uses the same `0x67` hunchback frames as
+  type 13; the whip path treats him as 1-HP fodder, not metered. Type 18 is
+  also placed as a regular enemy on stage 16.
+
+### Enemy types 1–22 (`gfx/enemy_sheet.png`)
+
+Names from the sheet (play + SAT). Behaviour is the ROM handler, for checking
+that the picture is the right enemy. HP is `0x60E9[type]` (`ix+0D`); unshielded
+contact is **2×** the odd byte of `l81d5h`. Types **17–22** (and type 18 in a
+boss room) use the shared meter `0xC418`; the rest die when `ix+0D` hits 0.
+Leather whip subtracts 1 from fodder HP, other weapons 2.
+
+| # | Name | In-game behaviour |
+| ---: | --- | --- |
+| 1 | Zombie | Walks in from a screen edge toward centre/Simon. 1 HP, 100 pts. Spawn bit 0. |
+| 2 | Green merman | Shared walk/pounce AI with 3 (`enemy_hunchback_tick` — the name is stale). 1 HP, 200 pts. Can morph to type 3 when Simon’s Y overlaps. Spawn bit 1. |
+| 3 | Red merman | Same AI as 2, 2 HP. Spawn bit 2. |
+| 4 | Hanging bat | Hangs (shape `0x1A`) until Simon is close (Y window `0x50`, X `0x40`), then flies toward him. 1 HP, 100 pts. Spawn bit 3. |
+| 5 | Sitting dog | Idles; charges when Simon is within 64 px. 1 HP, 100 pts, 6 contact unshielded. Object list. |
+| 6 | Pikeman | Walking spear knight. Turns at ledges/walls; walks toward Simon when Y overlaps. 4 HP, 200 pts. Stages 4–5 object list. No projectile. |
+| 7 | Flying skull | Homes on Simon X **and** Y from off-screen. 2 HP, 200 pts. Spawn bit 4. |
+| 8 | Ghost head | Flies across, bobbing around spawn Y. 1 HP, 200 pts. Spawn bit 5. |
+| 9 | Red skeleton | Fast walk (`0x0220`), **no** projectile. 2 HP, 200 pts. Stage 13 object list (same skeleton script as 11; SAT `02 45`). |
+| 10 | Skull pile | Stationary; faces Simon and shoots (`0x9F74`, projectile `0x0A`). 8 HP, 300 pts. Object list. |
+| 11 | White skeleton | Same 0x9FB2 skeleton art as 9, SAT `02 4C`. Walks, then throws (`0x9F68`). 4 HP, 200 pts. Stages 7–9, 13, 17. |
+| 12 | Bat | 2-cell flyer (shape `0x89`). 1 HP, 100 pts. Object list, stages 7–8. |
+| 13 | Hunchback | Jumps toward Simon. 1 HP, 200 pts. Object list. Type 24 (Igor) reuses pose `0x67`. |
+| 14 | Bone dragon | 8 SAT cells (custom tick, skips `0x644C`). 12 HP, 1000 pts. Stages 11–12. |
+| 15 | Raven | Perched bird (shapes `0x6D`/`0x6E`). Spawns type `0x23` (the dropped hunchback); hides briefly when Simon is within 56 px. 8 HP, 400 pts. Spawn bit 6. |
+| 16 | Axe knight | Same SAT layout as 9, but stage 14+ VRAM is the knight. Throws (`0x9F68`). 8 HP, 300 pts, slower walk (`0x0140`). |
+| 17 | Dracula | Event 6, stage 18 room 9. 32 HP on the bar, +30000. SAT is head + cape; 32×32 torso blit is **PARKED** (sheet shows the gap). |
+| 18 | Giant bat | Event 1 boss; also a normal enemy on stage 16 when `CE00==0` (per-actor HP). 16 HP, 2000 pts. |
+| 19 | Medusa | Event 2, stage 6 room 5. 16 HP, 2000 pts. |
+| 20 | Mummy | Event 3, two of type 20 in stage 9 room 7. 16 HP, 2000 pts. Walk `0x33–0x38`. |
+| 21 | Frankenstein | Event 4 with Igor. Walk `0x79/0x7A/0x7B`. 32 HP on the bar, 3000 pts. |
+| 22 | Grim reaper | Event 5, stage 15 room 9. 32 HP, 12 cells, 7000 pts. |
+
+When a boss dies an **orb descends** (C800 actor type **0x22**, not
   bonus id 22):
   - Pick it up (`0xCE11=1`) → life drip-fills (+1 HP/frame via `0x4658`)
     until full, then advance to the next level.
@@ -129,12 +173,13 @@ index is a RAM trio:
   groups stages in 3s (so ~3 stages per hub, matching the design).
 - **0xD000 = stage** (0 = courtyard, 1-18 = the 18 stages).
 - **0xD001 = room** within the stage (increments walking right).
-Each hub's data holds 3 stages x up to 16 rooms x up to 4 objects; per object,
-id bit7 = scenery flag, low 7 bits = sprite id, and one attr byte packs the in-room
-cell position (hi nibble X, lo nibble Y, each *16 px). Stage 0 (courtyard) has no
-object-list entries. `tools/roommap.py` decodes and renders all of this
-(`gfx/map_*.png`). NOTE this is the object LAYOUT only - the wall/floor geometry
-is the separate metatile map documented next.
+Each hub's packed stream holds 3 stages × up to 16 room slots × up to 4 objects;
+per object, id bit7 = scenery flag, low 7 bits = sprite id, and one attr byte
+packs the in-room cell (hi nibble X, lo nibble Y, each *16 px). Stage 0
+(courtyard) has no object-list entries. `D000`/`D001` are stage/room **indices**,
+not map coordinates — room positions come from `minimap_room_pos` (see below).
+`tools/roomperm.py` is the map (`gfx/minimap_s<NN>.png`); its `decode_objects`
+reads this list for the `--compare-doors` overlay.
 
 ## Room geometry / tile map (CONFIRMED, static + runtime, byte-exact)
 
@@ -299,7 +344,8 @@ by `(enemy type − 0x11)`:
 - chain / axe / cross → strong `06 0C 0C 06 06 06 18` (≈1.5×)
 - vs type 0x17 with weapon ≥ 2 the hit is quartered.
 
-Lesser enemies (type < 0x11) have no HP bar and die on the first successful hit.
+Lesser enemies (type < 0x11) have no HP bar; they use per-actor HP at `ix+0D`
+(table `0x60E9`). Leather whip subtracts 1 per connected hit, other weapons 2.
 
 ### Equippable weapons (strength tiers, per design)
 
@@ -338,9 +384,11 @@ Weapon behaviour (ROM):
   (holy water). Chain `0x1A` → 1 was runtime-confirmed; knife `0x1B` → 2 is the
   vendor dagger (despawn-on-hit, two slots). Axe vs cross is **3 = axe
   (`0x1C`), 4 = cross (`0x1D`)** from throw speed + vendor stock (the cross is
-  the one for sale; type 4 is the faster ±5 boomerang). Type 3's lose path
-  hardcodes a `0x1C` world drop — that is this weapon's own bonus id, not a
-  second item.
+  the one for sale; type 4 is the faster ±5 boomerang). HUD tiles agree
+  (`gfx/bonus_hud_items.png`, bottom row): axe is a hand-axe, cross is the
+  diagonal four-arm cross with a **blue** fill (palette index 15, same slot as
+  the thrown SAT `0x0F`). Type 3's lose path hardcodes a `0x1C` world drop —
+  that is this weapon's own bonus id, not a second item.
 - **Damage table split** (`weapon_hit_damage` 0x7E33): leather and knife use
   `l7e60h` (`04 08 08 04 04 04 10`); chain/axe/cross use `l7e67h`
   (`06 0C 0C 06 06 06 18`). Index = enemy type − 0x11. Type 0x17 with weapon
@@ -409,7 +457,7 @@ duration"; the ROM is slightly more generous than that.
 **How.** Whip the hourglass **once**. `l8c4bh` (seg2 **0x8C4B**) rewrites the
 pickup type (`ix+4`) from **0x0A → 0x0B**, nudges it up 8 pixels (`sub_8c36h`),
 and the 4bpp blit switches to the sideways graphic (the tile next to the upright
-hourglass in the HUD sheet; `gfx/bonus_hourglass_pair.png`). Collecting that form
+hourglass in `gfx/bonus_hud_sheet.png`). Collecting that form
 runs `bonus_tipped_hourglass` (id **11**, 0x8DFC) which does only
 `set 2,(0xC431)`. Whip it a **second** time and `ix+6` is set to 1, so the
 pickup despawns on the next tick — the item is gone.
@@ -446,8 +494,8 @@ of `0xC431`, so this flag, boots, and wings go together. It survives room and
 stage changes.
 
 - **Life orbs / potion** restore `0xC415` (not heart currency). **7** small orb
-  = +8 (1/4 of the 32-point bar). **22** is a **bottle/potion** (HUD tile at
-  seg9 `0x9A00`, vendor price-tbl id `0x16`) that instant-fills +32. Same full-bar
+  = +8 (1/4 of the 32-point bar). **22** is a **bottle/potion** (first tile of
+  `gfx/bonus_hud_items.png`; vendor price-tbl id `0x16`) that instant-fills +32. Same full-bar
   end state as picking up the boss orb, but a different graphic and collect
   path — the descending boss orb is actor type 0x22, not this bonus id.
 - **Shields** — **3** red (`C701` bit 4): facing the hit takes table damage
@@ -492,32 +540,77 @@ key, **24** white key, **25** treasure chest (container; `l8c1bh` spends key/sta
 and reveals the contents id at `ix+0x0D`). Bonus **`0x1E`** (holy water) is not
 in this 1–25 table; `l8d77h` takes `id - 0x19 == 5` to `bonus_holy_water`.
 
+### HUD bonus tiles (uncompressed 16×16 4bpp)
+
+Pickup popup (`l8eadh`) and the equipped-weapon icon (`sub_8ea1h`) HMMM these
+tiles from VRAM page 1. Loaded at the HUD init copy (seg0 ~0x548C):
+
+| ids | CPU source | ROM file | VRAM dest | dump |
+|-----|------------|----------|-----------|------|
+| 1–20 | seg9 `0x9000` | `0x13000` | Y=`0x50`, then Y=`0x60` X=0..48 | `gfx/bonus_hud_sheet.png` |
+| 21 (slime) | — | — | no dedicated tile | — |
+| 22 (potion) | seg9 `0x9A00` | `0x13A00` | Y=`0x60` X=80 | `gfx/bonus_hud_items.png` (3×3) |
+| 23–30 | seg6 `0xB9C8` (after `sub_53a5h`) | `0xD9C8` | Y=`0x60` X=96..208 | same grid, tiles 1–8 |
+
+`bonus_hud_sheet.png` is ids 1–20 in order (5×4). `bonus_hud_items.png` is a 3×3
+of ids **22–30**: potion, yellow key, white key, chest, chain whip, knife, **axe**,
+**cross**, holy water. Each cell is labelled with its bonus id in a dark band
+(same 3×5 digits as the minimap renderer).
+
+**Palette.** `sub_481bh` writes one MSX2 entry (A=index, D=`0rrr0bbb`, E=`00000ggg`);
+`l4845h` walks an (index, rb, g)+ table ending in `0xFF`. `sub_572eh` loads the
+**8 fixed HUD/sprite colours** from seg10 `0xBF88` (file `0x15F88`):
+
+| idx | 3-bit RGB | role |
+|-----|-----------|------|
+| 0 | 000 | black / background |
+| 1 | 754 | peach (outlines, hourglass frame, yellow key, potion glass) |
+| 2 | 111 | dark grey (linework) |
+| 3 | 623 | magenta (red shield, staff, money-bag tie) |
+| 8 | 701 | red (hearts, sand, whip stripe, flames) |
+| 12 | 555 | grey (axe head, knife guard) |
+| 14 | 777 | white |
+| 15 | 007 | **blue** (cross fill, potion liquid, gems) |
+
+Stage palettes (pointer table seg10 `0xBEA7`) only overlay indices
+**4, 5, 6, 7, 9, 10, 11, 13**. Room entry (`0x5787`) then applies that room's
+table from `9AB0[stage-1][room].palette` — typically 4+6 or 5+7 — so leftover
+BIOS values for 4/6 do not survive into play. HUD bonus tiles never use those
+slots, so they look the same in every stage. Dumps use `gfxdump.vk_play_palette`
+(0xBF6F extras then 0xBF88 fixed). `sub_8ea1h` maps `C416` 1–4 → bonus
+`0x1A`–`0x1D`. Leather (`C416=0`) is a separate tile at VRAM `(80, 0x70)`, not
+in these sheets.
+
 ### Continuous enemy generators (spawn bitmask)  (CONFIRMED, byte-exact)
 - `room_spawner` (seg0 0x5EBF) indexes seg14 word table **0x85A6** by stage
   (0xD000), then indexes the resulting byte table by room (0xD001) to fetch a
-  **spawn bitmask**. Stage 1's byte table is at **0x85CF**. Each set bit fires
-  one rate-gated generator; the generators are in seg2:
+  **spawn bitmask**. Stage 1's byte table is at **0x85CF**. Bits **0–6** each fire
+  one rate-gated generator in seg2 (LSB first). **Bit 7** appears in some mask
+  bytes (`0x80`) but is never dispatched.
 
-  | bit | generator (seg2) | actor type | enemy |
-  |-----|------------------|-----------|-------|
-  | 0 | `zombie_generator` 0x9CED | 0x01 | zombie |
-  | 1 | 0x9D52 | 0x02 | (unconfirmed) |
-  | 2 | 0x9D59 | 0x03 | (unconfirmed) |
-  | 3 | 0x9D9E | 0x04 | bat (undulates vertically, moves one horizontal way) |
-  | 4 | 0x9DCA | ? | (unconfirmed) |
-  | 5 | 0x9DDC | ? | (unconfirmed) |
-  | 6 | 0x9DEE | ? | (unconfirmed) |
+  | bit | generator (seg2) | actor type | handler (seg3) | enemy |
+  |-----|------------------|------------|----------------|-------|
+  | 0 | `zombie_generator` 0x9CED | 0x01 | `enemy_zombie_tick` 0xA93B | zombie (100 pts) |
+  | 1 | `hunchback_generator` 0x9D52 | 0x02 | `enemy_hunchback_tick` 0xA2E7 | green merman, 1 HP (200 pts; handler name is stale — type 13 is the hunchback) |
+  | 2 | `hunchback_generator_3` 0x9D59 | 0x03 | same 0xA2E7 | red merman, 2 HP (same AI; type 02 can morph to 03 when Simon's Y overlaps) |
+  | 3 | `bat_generator` 0x9D9E | 0x04 | `enemy_bat_tick` 0xB0D1 | hanging bat (100 pts; hangs, then flies at Simon) |
+  | 4 | `ghost_generator` 0x9DCA | 0x07 | `enemy_ghost_tick` 0xB068 | flying skull (200 pts; homes on Simon X and Y) |
+  | 5 | `medusa_head_generator` 0x9DDC | 0x08 | `enemy_medusa_head_tick` 0xA502 | ghost head (200 pts; flies across, bobs around spawn Y) |
+  | 6 | `skull_cannon_generator` 0x9DEE | 0x0F | `enemy_skull_cannon_tick` 0xB19A | raven (400 pts, 8 HP; drops type 0x23). Manual lists 300. |
 
-  Stage 1 confirmed: rooms 0/1/5/6 spawn zombies (bit0), room 4 spawns bats (bit3).
+  `spawn_actor` takes **D = X** (slot+05), **E = Y** (slot+03). Zombies typically
+  enter at X=0xF0 (right edge) or 0x10 (left), Y=0xC0. Hunchbacks spawn at Y=0xC8
+  with X from table `l9d8eh`. Bats/ghosts/medusa heads share `flyer_spawn`: X at
+  the screen edge, Y = SimonY−8. The cannon is fixed at X=0xE0, Y=0x30 or 0x40,
+  and skips the spawn if Simon X ≥ 0xC0.
 - Each generator is rate-gated by `sub_9ccah` (per-generator 0xCF00+ counter vs a
   threshold table, scaled by the 0xD012 difficulty/mood). The spawn **position is
-  hardcoded per stage/room** in `sub_9d03h` (and the bat's `sub_9e1dh`) - it is
-  **NOT** read from the tile map. E.g. stage-1 room-0 zombies enter at X=0xC0
-  (col 24). This is why the small 08/05 tile pair (see "Room geometry") is *not* a
-  generator: its positions don't line up with spawns, and rooms spawn regardless
-  of whether the pair is present.
-- Other enemies (e.g. the dog, type 0x05) come from the per-room **object list**,
-  not this continuous spawner.
+  hardcoded** — it is **NOT** read from the tile map. This is why the small 08/05
+  tile pair (see "Room geometry") is *not* a generator: its positions don't line
+  up with spawns, and rooms spawn regardless of whether the pair is present.
+  Stage 1: rooms 0/1/5/6 spawn zombies (bit0), room 4 spawns bats (bit3).
+- Other enemies (e.g. the dog, type 0x05, and the leopard) come from the per-room
+  **object list**, not this continuous spawner.
   - NOTE: 0xC5E5/0xC5E6 (00->FF/20 at pickup) is the generic pickup-popup message +
     timer set by 0x8F2A for *every* pickup, NOT a rosary-specific state.
 - **Hearts** — currency for vendors; also power the hourglass (jump+DOWN) and
@@ -687,6 +780,10 @@ bitmap). Set in `sub_4b60h`: `ld a,5 / call CHGMOD (0x005f)`. Consequences:
   catalogue's `planes` column composites planes in the `.png` preview while the
   `.txt`/`.bin` keep each plane separate for editing.
 
+The 16-colour VDP palette is programmed by `sub_481bh` / `l4845h`. Eight indices
+(0, 1, 2, 3, 8, 12, 14, 15) are fixed by `sub_572eh` (seg10 `0xBF88`) and never
+changed by stage palettes — HUD bonus tiles use only those. See *HUD bonus tiles*.
+
 Bank classification (by entropy / zero-fill, `tools/gfxview.py` + a quick scan):
 - **seg 0-3**: code (entropy ~7, top byte 0xCD/0xC4/0xDD opcodes).
 - **seg 4-9, 15**: 4bpp bitmap graphics (low entropy 4.3-5.5, zero-heavy, a
@@ -733,6 +830,7 @@ paged into page 1b / 2a / 2b. Helper routines (each also shadows the value at
 0xF0F1-0xF0F3 for int_handler to restore):
 - `sub_5369h` -> seg 11 @ 0x6000, seg 12 @ 0x8000, seg 13 @ 0xA000  (level/sprite gfx)
 - `sub_5381h` -> seg  9 @ 0x8000, seg 10 @ 0xA000                   (front-end/title gfx)
+- `sub_53a5h` -> seg  4 @ 0x6000, seg  5 @ 0x8000, seg  6 @ 0xA000  (tileset banks; HUD keys/weapons at 0xB9C8)
 - `sub_533dh` -> seg  1 @ 0x6000, seg  2 @ 0x8000, seg  3 @ 0xA000  (default/game banks)
 
 So a page-2b source `0xAxxx` read right after `sub_5369h` maps to file offset
@@ -773,6 +871,26 @@ Catalogued so far (extend `manifest.tsv` as more sets are identified):
   0xC42E). Simon's **lower body** (legs): walk/jump/crouch/climb poses.
 - `simon_cell1` - seg13, 36 frames via pointer table 0xA2D1 (indexed by 0xC42F).
   Simon's **upper body**: torso/head/arm and the **whip** (whip-crack arcs).
+- `enemy_sheet.png` - one labelled frame per `entity_tbl` type 1–22 (`make gfx`).
+  Layout from the seg6 shape table at 0xB473 (`ix+0B`); pixels from the per-room
+  gfx-script RLE into VRAM 0xF800+ (plus the 0x4745 1bpp convert). Two-plane SAT
+  colours with CC (`0x40`) OR the colour indices (2+4→6). Palette is the
+  playfield sequence: HUD-fixed (`sub_572eh`) + `0xBEA7[stage]` + the per-room
+  overlay at `9AB0[stage][room]` (same room that supplied the sprite VRAM).
+  Types 7/10 only use HUD-fixed 2/12/14, so they ignore the overlay. Type **9**
+  is the red skeleton (stage 13; SAT `02 45`; faster walk, no projectile). Type
+  **11** is the white skeleton (`02 4C`, same 0x9FB2 sprite script). Type **16**
+  is the axe knight (stages 14+; same SAT layout as 9, throws via `0x9F68`).
+  Type **14**
+  bypasses `0x644C` (custom SAT in its tick). Type **17** is Dracula: standing
+  shape `0x5B` is SAT head + cape only. The 32×32 middle is a SCREEN 5 blit
+  (`sub_ad87h` / `ladc3h`, dest `(X-16, Y=0x91)`, sources assembled from page-1
+  16×16s at Y=`0xA0`). **PARKED:** compositing that blit from the s18r9
+  playfield (crop 64,88) pulled title-screen kana (Akumajō Dracula), not the
+  cloak; the sheet leaves the SAT gap until the real VRAM source is found.
+  Type **21** is Frankenstein (`0x79`); type 13/24 share the hunchback pose
+  `0x67`. Boss types use the event-room tileset. Not in `manifest.tsv`
+  (derived, like the HUD bonus sheets).
 
 In-game Simon is two stacked, independently-animated 16x16 hardware-sprite cells
 (legs + torso/whip), refreshed each frame by `load_simon_sprites` (seg0 0x56E8):

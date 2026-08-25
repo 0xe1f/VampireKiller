@@ -440,6 +440,9 @@ la2cah:
 	ld (ix+019h),a
 	ld (ix+015h),001h
 	jp la36dh
+; enemy_hunchback_tick (seg3 0xA2E7) - type 02 (1 HP) and 03 (2 HP). Fall/land/
+; walk/pounce; type 02 can morph to 03 when Simon's Y overlaps the actor.
+enemy_hunchback_tick:
 	call 0a4bah
 	xor a
 	ld (ix+018h),a
@@ -680,25 +683,22 @@ sub_a4efh:
 	ld a,c
 	jp play_sound
 la4fah:
-	djnz la51ch
-	jr $+50
+	defb 010h,020h,018h,030h
 la4feh:
-	ex af,af'
-	djnz la50ch
-	ld b,0ddh
-	ld (hl),006h
-	ld bc,07eddh
-	inc bc
-	ld (ix+010h),a
-la50ch:
+	defb 008h,010h,00bh,006h
+; enemy_medusa_head_tick (seg3 0xA502) - type 08. Homes on spawn Y (ix+10);
+; X direction from which edge it entered.
+enemy_medusa_head_tick:
+	ld (ix+006h),001h
+	ld a,(ix+003h)
+	ld (ix+010h),a         ; remember spawn Y
 	ld de,0fc80h
 	call actor_set_yvel
 	ld a,(ix+005h)
 	cp 080h
-	ld de,00280h
+	ld de,00280h           ; +X if spawned on the left
 	jr c,la51fh
-la51ch:
-	ld de,0fd80h
+	ld de,0fd80h           ; -X if spawned on the right
 la51fh:
 	jp actor_set_xvel_speedup
 	ld c,071h
@@ -2137,6 +2137,8 @@ lb029h:
 	ld (ix+00bh),026h
 	ld (ix+001h),a
 	ret
+; enemy_ghost_tick (seg3 0xB068) - type 07. Homes on Simon X and Y.
+enemy_ghost_tick:
 	ld (ix+006h),001h
 	ld (ix+010h),000h
 	ld (ix+00ch),001h
@@ -2185,6 +2187,8 @@ lb0c5h:
 lb0cdh:
 	ld (ix+00bh),a
 	ret
+; enemy_bat_tick (seg3 0xB0D1) - type 04. Undulates vertically, one horizontal way.
+enemy_bat_tick:
 	ld (ix+001h),002h
 	ld de,00180h
 	call actor_set_yvel
@@ -2272,6 +2276,8 @@ lb186h:
 	ld de,0ffe7h
 lb197h:
 	jp actor_add_yvel
+; enemy_skull_cannon_tick (seg3 0xB19A) - type 0x0F. 6 cells, 8 HP; shoots type 0x23.
+enemy_skull_cannon_tick:
 	call sub_b219h
 	ld (ix+011h),000h
 	ld c,023h

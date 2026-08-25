@@ -300,9 +300,9 @@ sub_81b2h:
 ;   score/100 :  1    2    2    1    1    2    2    2    2    3    2    1    2
 ;   contact dmg:  x2 of odd byte -> zombie(t01)=2, dog(t05)=6 (confirmed in play)
 ;   high types 0x0e=1000pts, 0x11 +30000, 0x12-14 2000, 0x17 +50000 [bosses].
-; Confirmed in play: t01 zombie score 100 / dmg 2; t05 dog score 100 / dmg 6;
-; t04 candle/destructible score 100 (matches the +100 candle whip).  Hearts/keys
-; are pickups (collect_bonus), not kills, so they award 0 here.
+; Confirmed: t01 zombie 100/2; t02/t03 hunchback 200/4; t04 bat 100/2;
+; t05 dog 100/6; t07 ghost 200/2; t08 medusa head 200/4; t0F skull cannon 400/4.
+; Hearts/keys are pickups (collect_bonus), not kills, so they award 0 here.
 l81d5h:
 	ld bc,00201h
 	ld (bc),a
@@ -1627,9 +1627,9 @@ l897bh:
 	djnz l897bh
 	ret
 l8980h:
-	ld a,005h
-	ld l,070h
-l8984h:
+	ld a,005h              ; leather whip: source X = 5*16
+	ld l,070h              ; source Y = 0x70
+l8984h:                        ; HMMM 16x16 from VRAM page 1 at (A*16, L)
 	add a,a
 	add a,a
 	add a,a
@@ -2429,19 +2429,19 @@ lose_weapon:                   ; (0x8E9A) C416=0 leather; refresh HUD (missed ca
 	xor a
 	ld (0c416h),a
 	jp sub_8ea1h
-sub_8ea1h:
+sub_8ea1h:                     ; HUD equipped-weapon icon from C416
 	ld a,(0c416h)
 	ld de,l800ch
 	or a
-	jp z,l8980h
-	add a,019h
-l8eadh:
-	dec a
-	ld l,050h
+	jp z,l8980h            ; 0 = leather (not in the bonus sheet)
+	add a,019h             ; C416 1..4 -> bonus ids 0x1A..0x1D
+l8eadh:                        ; A = bonus id -> blit that HUD tile
+	dec a                  ; 0-based index
+	ld l,050h              ; ids 1-16 at Y=0x50
 	cp 010h
 	jr c,l8eb8h
 	sub 010h
-	ld l,060h
+	ld l,060h              ; ids 17+ at Y=0x60
 l8eb8h:
 	jp l8984h
 	call sub_8ed0h
@@ -4873,21 +4873,20 @@ l9ce9h:
 ;  Rate-gated by sub_9ccah (0xCF00 counter, threshold table l9d4ah scaled by the
 ;  0xD012 difficulty/mood).  When it fires, sub_9d03h picks the spawn position
 ;  (hardcoded per stage/room - NOT read from the tile map), then spawns actor
-;  type 01 (zombie).  Stage 1 room 0 spawns at X=0xC0 (col 24).
+;  type 01 (zombie).  Typical: X = 0xF0 (right edge) or 0x10 (left), Y = 0xC0.
 zombie_generator:
 	ld hl,0cf00h
 	ld de,l9d4ah
 	call sub_9ccah         ; time to spawn?
 	ret nz
-	call sub_9d03h         ; DE = spawn position (per stage/room)
+	call sub_9d03h         ; DE = spawn position (D=X, E=Y)
 	call sub_9e1dh
 	ret c                  ; bail if the slot area / cap says no
 	ld c,001h              ; actor type 01 = zombie
 	jp spawn_actor
-; --- sub_9d03h - pick a generator spawn position by stage/room -----------------
-;  Out: DE = spawn position (E=X, D=Y; D flips 0xF0<->0x10 = bottom/top by a
-;  per-actor flag).  Reads stage 0xD000 (L) and room 0xD001 (H) and returns a
-;  HARDCODED X for that cell - the tile map (and the 08/05 pair) is not consulted.
+; --- sub_9d03h - pick a ground-enemy spawn position by stage/room -------------
+;  Out: D = X, E = Y.  D flips 0xF0 <-> 0x10 = right/left edge by a per-actor
+;  flag.  Reads stage 0xD000 (L) and room 0xD001 (H).  Tile map is not consulted.
 sub_9d03h:
 	ld a,(0c425h)          ; Simon Y (used by some stage branches)
 	ld c,a
@@ -4937,33 +4936,28 @@ l9d3fh:
 	jr nc,l9d35h
 	ld de,0f060h
 	ret
-l9d4ah:
-	inc c
-	ld (de),a
-	inc c
-	inc c
-	inc c
-	ld (de),a
-	inc c
-	inc c
+l9d4ah:                        ; zombie spawn-rate thresholds (8 bytes)
+	defb 00ch,012h,00ch,00ch,00ch,012h,00ch,00ch
+hunchback_generator:           ; (0x9D52) bit1, type 02 (1 HP)
 	ld hl,0cf02h
 	ld c,002h
-	jr l9d5eh
+	jr hunchback_spawn
+hunchback_generator_3:         ; (0x9D59) bit2, type 03 (2 HP, same AI)
 	ld hl,0cf02h
 	ld c,003h
-l9d5eh:
+hunchback_spawn:
 	ld de,l9d96h
 	push bc
 	call sub_9ccah
 	pop bc
 	ret nz
-	ld e,0c8h
+	ld e,0c8h              ; Y = 0xC8
 	ld a,(0cf03h)
 	and 007h
-	ld hl,l9d8eh
+	ld hl,l9d8eh           ; X picks
 	call ADD_HL_A
 	ld d,(hl)
-	ld a,(0c427h)
+	ld a,(0c427h)          ; skip if Simon X is within 0x18 of spawn X
 	sub d
 	add a,018h
 	cp 030h
@@ -4977,23 +4971,15 @@ l9d89h:
 	add a,d
 	ld d,a
 	jp spawn_actor
-l9d8eh:
-	ld h,b
-	ret nc
-	jr nc,l9d22h
-	and b
-	ld b,b
-	ld h,b
-	or b
-l9d96h:
-	ld bc,01818h
-	jr $+26
-	jr $+26
-	jr $+35
-	ld b,0cfh
+l9d8eh:                        ; hunchback spawn X candidates
+	defb 060h,0d0h,030h,090h,0a0h,040h,060h,0b0h
+l9d96h:                        ; hunchback spawn-rate thresholds
+	defb 001h,018h,018h,018h,018h,018h,018h,018h
+bat_generator:                 ; (0x9D9E) bit3, type 04
+	ld hl,0cf06h
 	ld de,l9dc2h
 	ld c,004h
-l9da6h:
+flyer_spawn:                   ; bats / ghosts / medusa heads: edge X, Y=SimonY-8
 	push bc
 	call sub_9ccah
 	pop bc
@@ -5001,77 +4987,53 @@ l9da6h:
 	inc hl
 	ld a,(hl)
 	rr a
-	ld d,0f0h
+	ld d,0f0h              ; X = right edge
 	jr c,l9db6h
-	ld d,010h
+	ld d,010h              ; X = left edge
 l9db6h:
 	call sub_9e1dh
 	ld a,(0c425h)
 	sub 008h
-	ld e,a
+	ld e,a                 ; Y = Simon Y - 8
 	jp spawn_actor
-l9dc2h:
-	inc d
-	inc d
-	inc d
-	jr z,l9ddbh
-	inc d
-	inc d
-	jr z,l9dech
-	ex af,af'
-	rst 8
+l9dc2h:                        ; bat spawn-rate thresholds
+	defb 014h,014h,014h,028h,014h,014h,014h,028h
+ghost_generator:               ; (0x9DCA) bit4, type 07
+	ld hl,0cf08h
 	ld de,l9dd4h
 	ld c,007h
-	jr l9da6h
-l9dd4h:
-	inc e
-	inc e
-	inc e
-	ld c,b
-	inc e
-	inc e
-	inc e
-l9ddbh:
-	ld c,b
+	jr flyer_spawn
+l9dd4h:                        ; ghost spawn-rate thresholds
+	defb 01ch,01ch,01ch,048h,01ch,01ch,01ch,048h
+medusa_head_generator:         ; (0x9DDC) bit5, type 08
 	ld hl,0cf0ah
 	ld de,l9de6h
 	ld c,008h
-	jr l9da6h
-l9de6h:
-	inc c
-	inc c
-	inc c
-	jr l9df7h
-	inc c
-l9dech:
-	inc c
-	jr l9e10h
-	inc c
-	rst 8
+	jr flyer_spawn
+l9de6h:                        ; medusa-head spawn-rate thresholds
+	defb 00ch,00ch,00ch,018h,00ch,00ch,00ch,018h
+skull_cannon_generator:        ; (0x9DEE) bit6, type 0x0F
+	ld hl,0cf0ch
 	ld de,l9e15h
 	call sub_9ccah
-l9df7h:
 	ret nz
 	ld a,(0c427h)
 	cp 0c0h
 	jr c,l9e05h
 	ld a,001h
-	ld (0cf0ch),a
+	ld (0cf0ch),a          ; Simon already on the right -> don't spawn
 	ret
 l9e05h:
-	ld de,0e030h
+	ld de,0e030h           ; X=0xE0 Y=0x30
 	ld a,(0cf0dh)
 	rra
 	jr c,l9e10h
-	ld e,040h
+	ld e,040h              ; or Y=0x40
 l9e10h:
 	ld c,00fh
 	jp spawn_actor
-l9e15h:
-	jr l9e2fh
-	jr l9e31h
-	jr l9e33h
-	jr l9e35h
+l9e15h:                        ; skull-cannon spawn-rate thresholds
+	defb 018h,018h,018h,018h,018h,018h,018h,018h
 sub_9e1dh:
 	ld a,(0c427h)
 	cp 0c0h

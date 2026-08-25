@@ -1359,6 +1359,9 @@ l4810h:
 	ld b,a
 	ld c,008h
 	jp WRTVDP
+; --- sub_481bh - write one MSX2 palette entry.  A = index 0-15, D = 0rrr0bbb,
+;     E = 00000ggg (3-bit R/B then G).  Programs R16 then ports 0x9A; also
+;     shadows the pair at VRAM 0xF680+A*2.
 sub_481bh:
 	push bc
 	push hl
@@ -1367,10 +1370,10 @@ sub_481bh:
 	inc a
 	ld c,a
 	di
-	out (c),b
+	out (c),b               ; palette index -> R16
 	ld a,090h
 	out (c),a
-	inc c
+	inc c                   ; C = palette data port 0x9A
 	out (c),d
 	push af
 	pop af
@@ -1389,6 +1392,7 @@ sub_481bh:
 	pop bc
 	ei
 	ret
+; --- l4845h - apply a palette table: records (index, rb, g)+ , 0xFF-terminated.
 l4845h:
 	ld a,(hl)
 	inc hl
@@ -2989,18 +2993,21 @@ sub_5393h:
 	ld (hl),a
 	ei
 	ret
+; --- sub_53a5h - page in the level-tileset banks: seg 4 @ 0x6000 (page 1b),
+;     seg 5 @ 0x8000 (page 2a), seg 6 @ 0xA000 (page 2b).  The HUD weapon/key
+;     tiles at CPU 0xB9C8 are read from segment 6 after this call.
 sub_53a5h:
 	di
 	ld hl,0f0f1h
-	ld a,004h
+	ld a,004h               ; seg 4 -> page 1b (0x6000)
 	ld (entity_tbl_end),a
 	ld (hl),a
 	inc l
-	inc a
+	inc a                   ; seg 5 -> page 2a (0x8000)
 	ld (08000h),a
 	ld (hl),a
 	inc l
-	inc a
+	inc a                   ; seg 6 -> page 2b (0xA000)
 	ld (0a000h),a
 	ld (hl),a
 	ei
@@ -3134,8 +3141,8 @@ l548ch:
 	nop
 	nop
 	call sub_5381h
-	ld hl,09000h
-	ld de,0a800h
+	ld hl,09000h           ; bonus ids 1-20 (16x16 4bpp, file 0x13000)
+	ld de,0a800h           ; VRAM page 1 Y=0x50 (wraps to Y=0x60 after 16)
 	ld b,014h
 	call l4a97h
 	ld hl,09a00h           ; potion bottle (bonus id 22) -> VRAM (X=80,Y=96)
@@ -3162,9 +3169,9 @@ l54c0h:
 	add a,008h
 	ld d,a
 	djnz l54c0h
-	call sub_53a5h
-	ld hl,0b9c8h
-	ld de,0b030h
+	call sub_53a5h         ; seg 6 @ 0xA000 for the next copy
+	ld hl,0b9c8h           ; ids 23-30: keys, chest, chain, knife, axe, cross, holy
+	ld de,0b030h           ; VRAM page 1 Y=0x60 X=96 (file 0xD9C8)
 	ld b,008h
 	call l4a97h
 	ld hl,0bdc8h
@@ -3510,6 +3517,8 @@ load_simon_sprites:
 	ex de,hl
 	call l4845h
 	jp sub_533dh
+; --- sub_572eh - load the 8 fixed HUD/sprite colours (0,1,2,3,8,12,14,15)
+;     from seg10 0xBF88.  Stage palettes (0xBEA7 ptrs) never overwrite these.
 sub_572eh:
 	call sub_5381h
 	ld hl,0bf88h
@@ -4704,9 +4713,10 @@ l5ebch:
 ; Called every frame from the actor-update loop (seg2 0x98F0) while 0xD010==0
 ; (normal play, not in a room transition/menu).  Gated by a series of early-outs;
 ; when they all pass it pages in seg14, reads the per-(stage 0xD000, room 0xD001)
-; spawn descriptor from the table at 0x85A6, and for each set bit calls a spawn
-; generator (0x9CED/0x9D52/...) that drops an actor into a free 0xC800 slot via
-; spawn_actor.  Existing actors are never touched here.
+; spawn descriptor from the table at 0x85A6, and for each set bit 0-6 calls a
+; spawn generator that drops an actor into a free 0xC800 slot via spawn_actor.
+; Bit 7 shows up in some mask bytes but is never dispatched.  Existing actors
+; are never touched here.
 ;   0xC440 - rosary / weapon-pickup "no-spawn" timer (nonzero -> suppress all new
 ;            spawns this frame; armed by collect_bonus, ticked down by seg1 0x75C7).
 room_spawner:
@@ -4740,42 +4750,43 @@ room_spawner:
 	ld (08000h),a
 	ld (0f0f2h),a
 	ei
-	; dispatch one generator per set bit (LSB first).  Each is rate-gated and
-	; spawns a fixed actor type at a hardcoded per-room position:
+	; dispatch one generator per set bit (LSB first, bits 0-6).  Bit 7 is
+	; present in some mask bytes but never dispatched.  Each generator is
+	; rate-gated and spawns a fixed actor type at a hardcoded position:
 	pop af
 	rra
 	push af
-	call c,zombie_generator ; bit0 -> spawn actor type 01 (zombie)
+	call c,zombie_generator ; bit0 -> type 01 zombie
 	pop af
 	rra
 	push af
-	call c,09d52h          ; bit1 -> actor type 02
+	call c,hunchback_generator ; bit1 -> type 02 hunchback (1 HP)
 	pop af
 	rra
 	push af
-	call c,09d59h          ; bit2 -> actor type 03
+	call c,hunchback_generator_3 ; bit2 -> type 03 hunchback (2 HP)
 	pop af
 	rra
 	push af
-	call c,09d9eh          ; bit3 -> actor type 04 (bat: vertical undulation, one way)
+	call c,bat_generator   ; bit3 -> type 04 bat
 	pop af
 	rra
 	push af
-	call c,09dcah          ; bit4 -> generator (type unconfirmed)
+	call c,ghost_generator ; bit4 -> type 07 ghost
 	pop af
 	rra
 	push af
-	call c,09ddch          ; bit5 -> generator (type unconfirmed)
+	call c,medusa_head_generator ; bit5 -> type 08 medusa head
 	pop af
 	rra
-	jp c,09deeh            ; bit6 -> generator (type unconfirmed)
+	jp c,skull_cannon_generator ; bit6 -> type 0x0F dragon skull cannon
 	ret
 ; --- spawn_actor (seg0 0x5F24) - spawn an actor into a free slot ----------------
-; Entry: C = actor type id (>0), DE = spawn position word.  Actors live in 7
-; slots at 0xC800 with stride 0x80 (0xC800,0xC880,...,0xCB80); slot+0 holds the
-; type (0 = free).  Runtime-confirmed types: 1 = walking zombie, 0x1E = the
-; death-effect actor a killed enemy is converted into (plays a dissolve anim in
-; the same slot, +0C counting 0x10->0, then the slot frees back to 0).
+; Entry: C = actor type id (>0), DE = spawn position (D = X, E = Y -> slot+05/+03).
+; Actors live in 7 slots at 0xC800 with stride 0x80 (0xC800,0xC880,...,0xCB80);
+; slot+0 holds the type (0 = free).  Runtime-confirmed types: 1 = walking zombie,
+; 0x1E = the death-effect actor a killed enemy is converted into (plays a dissolve
+; anim in the same slot, +0C counting 0x10->0, then the slot frees back to 0).
 ; Returns with the new slot initialised and its per-type handler dispatched.
 spawn_actor:
 	xor a
@@ -4843,11 +4854,11 @@ spawn_actor_init:
 	inc l
 	ld (hl),000h           ; slot+02 = 0
 	inc l
-	ld (hl),e              ; slot+03 = position lo
+	ld (hl),e              ; slot+03 = Y
 	inc l
 	ld (hl),000h           ; slot+04 = 0 (becomes X sub-pixel accumulator at runtime)
 	inc l
-	ld (hl),d              ; slot+05 = position hi (runtime-confirmed screen X)
+	ld (hl),d              ; slot+05 = X (runtime-confirmed screen X)
 	inc l
 	ld (hl),000h           ; slot+06 = 0
 	ld a,(0cffah)
@@ -4874,27 +4885,27 @@ spawn_actor_init:
 ; paged into page 2b - so these are addresses in banked ROM, not local labels.
 ; (22 entries; the trailing 0x5FFF byte is padding to the segment boundary.)
 entity_tbl:
-	defw enemy_zombie_tick  ; entity type 1 - walking zombie (seg3 0xA93B)
-	defw 0a2e7h             ; type 2
-	defw 0a2e7h             ; type 3
-	defw 0b0d1h             ; type 4
-	defw enemy_dog_tick     ; type 5 - "sitting dog" (seg3 0xA863)
-	defw 0a57ah             ; type 6
-	defw 0b068h
-	defw 0a502h
-	defw 0af51h
-	defw 0a229h
-	defw 0b34bh
-	defw 0a677h
-	defw 0b219h
-	defw 0aad4h
-	defw 0b19ah
-	defw 0ade5h
-	defw 0ab29h
-	defw 0be57h
-	defw 0bd2dh
-	defw 0b883h
-	defw 0ba56h
-	defw 0bc5bh
+	defw enemy_zombie_tick  ; 1 walking zombie (seg3 0xA93B)
+	defw enemy_hunchback_tick ; 2 hunchback (1 HP)
+	defw enemy_hunchback_tick ; 3 hunchback (2 HP, same AI)
+	defw enemy_bat_tick     ; 4 bat
+	defw enemy_dog_tick     ; 5 sitting dog (seg3 0xA863)
+	defw 0a57ah             ; 6
+	defw enemy_ghost_tick   ; 7 ghost
+	defw enemy_medusa_head_tick ; 8 medusa head
+	defw 0af51h             ; 9
+	defw 0a229h             ; 10
+	defw 0b34bh             ; 11
+	defw 0a677h             ; 12
+	defw 0b219h             ; 13
+	defw 0aad4h             ; 14
+	defw enemy_skull_cannon_tick ; 15 dragon skull cannon
+	defw 0ade5h             ; 16
+	defw 0ab29h             ; 17
+	defw 0be57h             ; 18
+	defw 0bd2dh             ; 19
+	defw 0b883h             ; 20
+	defw 0ba56h             ; 21
+	defw 0bc5bh             ; 22
 	defb 047h
 entity_tbl_end:

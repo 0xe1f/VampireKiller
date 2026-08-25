@@ -263,10 +263,12 @@ def door_rects(grid, row, conn_room):
 
 def decode_objects(rom, row, col):
     """Per-room placed-object list from seg14 (--compare-doors object overlay).
-    These are NOT white-key doors (display-type 0x1F is vendor/reveal).
+    List-id = actor type (l61c2h -> spawn_actor). NOT white-key doors (those
+    are door_tbl). List-id 0x1F is a placed hanging bat, not vendor/reveal
+    (display-type 0x1F on a brazier is that path).
     row->dataset/stream: ds=(row-1)//3, stream=(row-1)%3.
-    Returns [(sid, scenery, x_tile, y_tile), ...]; object cell (X,Y) is *16px = *2
-    tiles."""
+    Returns [(sid, bit7, x_tile, y_tile), ...]; object cell (X,Y) is *16px = *2
+    tiles. bit7 is stored then stripped at spawn (dogs only; role unknown)."""
     seg14 = rom.rom[0x1C000:0x1E000]
     if row < 1:
         return []
@@ -299,7 +301,7 @@ def decode_objects(rom, row, col):
         out.append((sid, bool(oid & 0x80), x, y))
     return out
 
-OBJ_DOOR_RGB = (220, 40, 40)    # id-0x1f object = door candidate (mechanism B)
+OBJ_BAT_RGB = (220, 40, 40)     # id-0x1f = placed hanging bat (was door-candidate overlay)
 OBJ_OTHER_RGB = (70, 120, 210)  # any other placed object (dimmed context)
 
 def blit_rects(buf, W, rows, scale, top, rects, rgb):
@@ -345,11 +347,11 @@ def render(grid, row, scale, mode, top=PLAY_TOP, doors=None, objects=None,
             x0 = dx * scale - tw - dscale
         if 0 <= y0 < H and x0 + tw > 0:
             draw_text(buf, W, max(0, x0), y0, text, dscale, SPOT_RGB)
-    # Mechanism-B overlay: outline each placed object at its cell; a door (0x1f)
-    # is filled red, everything else is a dim blue outline for context.
-    for (sid, scenery, ox, oy) in objects or []:
-        is_door = (sid == 0x1f)
-        col = OBJ_DOOR_RGB if is_door else OBJ_OTHER_RGB
+    # Object overlay: outline each placed actor at its cell. 0x1F (placed
+    # hanging bat) is filled red so the old --compare-doors sheets stay readable.
+    for (sid, bit7, ox, oy) in objects or []:
+        is_bat = (sid == 0x1f)
+        col = OBJ_BAT_RGB if is_bat else OBJ_OTHER_RGB
         x0, y0 = ox * scale, (oy - top) * scale
         w, h = 2 * scale, 2 * scale        # object footprint ~16px = 2 tiles
         for yy in range(h):
@@ -360,7 +362,7 @@ def render(grid, row, scale, mode, top=PLAY_TOP, doors=None, objects=None,
                 px = x0 + xx
                 if not 0 <= px < W:
                     continue
-                edge = is_door or xx < 1 or xx >= w - 1 or yy < 1 or yy >= h - 1
+                edge = is_bat or xx < 1 or xx >= w - 1 or yy < 1 or yy >= h - 1
                 if edge:
                     o = (py * W + px) * 3
                     buf[o:o + 3] = bytes(col)

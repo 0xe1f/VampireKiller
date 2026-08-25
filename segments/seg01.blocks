@@ -2,7 +2,8 @@
 ; Entry points are called from segment 0's state machine and from within the
 ; segment; the leading region is a set of data tables, not code.
 
-; Leading data table (48 bytes) before the first routine at 0x6030.
+; Spawn-init overflow of entity_tbl (odd-aligned from 0x5FFF; keep as bytes).
+; 48 bytes before the first routine at 0x6030.
 data_6000: start 0x6000 end 0x6030 type bytedata
 
 ; 0x6030-0x605e: two small routines (entry points 0x6030 and 0x604f), left as code.

@@ -47,20 +47,20 @@ Leather whip subtracts 1 from fodder HP, other weapons 2.
 | ---: | --- | --- |
 | 1 | Zombie | Walks in from a screen edge toward centre/Simon. 1 HP, 100 pts. Spawn bit 0. |
 | 2 | Green merman | Walk/pounce. Closed-mouth frames `0x0B`/`0x08`. 1 HP, 200 pts. Spawn bit 1. Shared handler with 3 (`enemy_merman_tick`). When `ix+1B` is set and Simon’s Y is within ±8 it writes type 3 and pose `0x12` (open mouth), then the type-3 spit path runs. |
-| 3 | Red merman | Open-mouth spit. Frames `0x12`/`0x0F`. Same walk/pounce, then state 2 hides and fires `0x9F74` kind 2 from Y−0x14 (the mouth). 2 HP. Spawn bit 2. Bit 0 of the type id is what selects the spit countdown, so a spawned 3 does not need the morph. |
-| 4 | Hanging bat | Hangs (shape `0x1A`) until Simon is close (Y window `0x50`, X `0x40`), then flies toward him. 1 HP, 100 pts. Spawn bit 3. |
+| 3 | Red merman | Open-mouth spit. Frames `0x12`/`0x0F`. Same walk/pounce, then state 2 hides and fires `0x9F74` kind 2 from Y−0x14 (the mouth). 2 HP. Bit 0 of the type id selects the spit countdown. Spawn bit 2 jumps out of the water (splash pair). Object-list id **0x21** is the same spit enemy already standing on the platform — stage 10 rooms 6–8, play-confirmed, no water exit. |
+| 4 | Hanging bat | Hangs (shape `0x1A`) until Simon is close (Y window `0x50`, X `0x40`), then flies at him. 1 HP, 100 pts. Spawn bit 3 flies in already moving. Object-list id **0x1F** is the same enemy already hanging — s3r2, s4r1, s4r3, play-confirmed. |
 | 5 | Sitting dog | Idles; charges when Simon is within 64 px. 1 HP, 100 pts, 6 contact unshielded. Object list. |
 | 6 | Pikeman | Walking spear knight. Turns at ledges/walls; walks toward Simon when Y overlaps. 4 HP, 200 pts. Stages 4–5 object list. No projectile. |
 | 7 | Flying skull | Homes on Simon X **and** Y from off-screen. 2 HP, 200 pts. Spawn bit 4. |
 | 8 | Ghost head | Flies across, bobbing around spawn Y. 1 HP, 200 pts. Spawn bit 5. |
 | 9 | Red skeleton | Fast walk (`0x0220`), **no** projectile. 2 HP, 200 pts. Stage 13 object list (same skeleton script as 11; SAT `02 45`). |
-| 10 | Skull pile | Stationary; faces Simon and shoots (`0x9F74`, projectile `0x0A`). 8 HP, 300 pts. Object list. |
-| 11 | White skeleton | Same 0x9FB2 skeleton art as 9, SAT `02 4C`. Walks, then throws (`0x9F68`). 4 HP, 200 pts. Stages 7–9, 13, 17. |
+| 10 | Skull pile | Stationary; faces Simon and shoots (`d700_spawn` 0x9F74, kind `0x0A`). 8 HP, 300 pts. Object list. |
+| 11 | White skeleton | Same 0x9FB2 skeleton art as 9, SAT `02 4C`. Kites Simon (walk toward if far, away if close); hops a gap (`Yvel 0xFB8F`) when the floor probe ahead is empty; throws a spinning bone (`d700_throw` 0x9F68, D700 type 4, shapes `0x4B–0x4E`). 4 HP, 200 pts. Stages 7–9, 13, 17. |
 | 12 | Raven | Flies, then stalls (Yvel→0) and hovers mid-flight; strafes when Simon’s Y is close. Not the type-8 sine bob. 1 HP, 100 pts. Object list, stages 7–8. |
 | 13 | Hunchback | Jumps toward Simon. 1 HP, 200 pts. Object list. Type 24 (Igor) reuses pose `0x67`. |
 | 14 | Bone dragon | 8 SAT cells (custom tick, skips `0x644C`). 12 HP, 1000 pts. Stages 11–12. |
 | 15 | Roc | Large 6-cell flyer (phoenix-like). Flies across, pauses to drop a type `0x23` hunchback, then continues off. 8 HP, 400 pts. Spawn bit 6. Not the small raven (12). |
-| 16 | Axe knight | Same SAT layout as 9, but stage 14+ VRAM is the knight. Throws (`0x9F68`). 8 HP, 300 pts, slower walk (`0x0140`). |
+| 16 | Axe knight | Same SAT layout as 9, but stage 14+ VRAM is the knight. Throws (`d700_throw` 0x9F68). 8 HP, 300 pts, slower walk (`0x0140`). |
 | 17 | Dracula | Event 6, stage 18 room 9. 32 HP on the bar, +30000. SAT is head + cape; 32×32 torso blit is **PARKED** (sheet shows the gap). |
 | 18 | Giant bat | Event 1 boss; also a normal enemy on stage 16 when `CE00==0` (per-actor HP). 16 HP, 2000 pts. |
 | 19 | Medusa | Event 2, stage 6 room 5. 16 HP, 2000 pts. |
@@ -123,7 +123,8 @@ The world is a hierarchy: **hub → stage → room**.
   scan that "ruled out" placed-object doors was right to reject 0x1F as the
   *white-key door*, but it never found `door_tbl` either. `tools/roomperm.py`
   overlays the table by default (red bar); `--compare-doors` still emits the old
-  edge-heuristic / object sheets.
+  edge-heuristic / object sheets. List-id `0x1F` on those object sheets is a
+  placed hanging bat (s3r2, s4r1, s4r3), not this vendor path.
 
   `door_tbl` (room, vert, Y, X; post-open = CONN nibble on that edge):
 
@@ -168,18 +169,58 @@ chest contents are likely table-driven per room. Instant-death-on-drop implies a
 
 *CONFIRMED (runtime + static, see progress.md "Eighth session"):* the hub/stage/room
 index is a RAM trio:
-- **0xD002 = hub** (6 hubs, 0-5) - selects the packed object dataset in seg14
-  (pointer table @ 0x8668); chosen from the stage via the seg0 0x5E71 table which
+- **0xD002 = hub** (6 hubs, 0-5) - selects the packed datasets in seg14
+  (`scenery_list_ptr` @ 0x8000, `object_list_ptr` @ 0x8668); chosen from the stage via the seg0 0x5E71 table which
   groups stages in 3s (so ~3 stages per hub, matching the design).
 - **0xD000 = stage** (0 = courtyard, 1-18 = the 18 stages).
 - **0xD001 = room** within the stage (increments walking right).
-Each hub's packed stream holds 3 stages × up to 16 room slots × up to 4 objects;
-per object, id bit7 = scenery flag, low 7 bits = sprite id, and one attr byte
-packs the in-room cell (hi nibble X, lo nibble Y, each *16 px). Stage 0
-(courtyard) has no object-list entries. `D000`/`D001` are stage/room **indices**,
+Each hub's packed stream holds 3 stages × up to 16 room slots × up to 4 objects.
+Per object: **list-id = actor type** (`l61c2h` → `spawn_actor+2` with `C = id&0x7F`).
+Bit7 is stored then stripped; only dogs (0x05) ever set it (3 of 6; role unknown —
+not facing in the actor slot). Attr packs the in-room cell (hi nibble X, lo
+nibble Y, each ×16 px). Stage 0 (courtyard) has no object-list entries — `l61c2h`
+does `dec a; ret m`. `D000`/`D001` are stage/room **indices**,
 not map coordinates — room positions come from `minimap_room_pos` (see below).
 `tools/roomperm.py` is the map (`gfx/minimap_s<NN>.png`); its `decode_objects`
 reads this list for the `--compare-doors` overlay.
+
+**Scenery list** (seg14 **`scenery_list_ptr` @ 0x8000**, sibling of the enemy
+list): candles, breakable blocks, floor pickups, chests, and vendors. Same 6
+hubs; stage 0 is **`scenery_list_s00` @ 0x800C** (the courtyard is not in the
+hub table — `scenery_list_lookup` 0x5A9F returns it when `D000==0`). Grammar is
+**not** the enemy list's: `0xFE` next room, `0xFF` next stage, `0x00` end hub.
+`scenery_unpack` (0x5A63) expands into **0xE000** (3×16×24 bytes); 0x5B22
+instantiates the current room into **0xC470** (8 candle/block slots), **0xC500**
+(floor items/chests), and **0xC5B5**/**0xC5C5** (vendors). Record: pos (hi
+nibble Y, lo nibble X, ×16 px), attr; attr `0x7F` adds a third reveal byte
+(whipped block → chest or vendor). bits7-6 `00` = candle (bits7-5 `011` =
+breakable block, drawn on the F2 map) or floor pickup (bits7-5 `000`); `10` =
+chest; `11` = vendor. bits4-0 = bonus id. Stage 18 room 9 (Dracula) is omitted
+and stays empty. ~620 records.
+
+Spawn-bit types (1, 2, 3, 4, 7, 8, 15) and bosses (17, 19–22) are **not** in this
+list; they come from `room_spawner` or the event table. Two extra list-ids reuse
+those handlers with a different spawn-init (overflow of `entity_tbl` into seg1
+`data_6000`):
+
+| list-id | n | name | vs generator type |
+| ---: | ---: | --- | --- |
+| 0x05 | 6 | sitting dog | — |
+| 0x06 | 11 | pikeman | — |
+| 0x09 | 13 | red skeleton | — |
+| 0x0A | 6 | skull pile | — |
+| 0x0B | 23 | white skeleton | — |
+| 0x0C | 4 | raven | — |
+| 0x0D | 36 | hunchback | not scenery |
+| 0x0E | 8 | bone dragon | — |
+| 0x10 | 28 | axe knight | not scenery |
+| 0x12 | 6 | giant bat | regular enemy on stage 16; boss s3r5 is event-spawned |
+| 0x1F | 3 | hanging bat | Play-confirmed: hangs, then flies at Simon on approach. `enemy_placed_bat_init` 0xB0D5 skips type 4's fly-in state so it starts hanging. s3r2, s4r1, s4r3 |
+| 0x21 | 5 | placed red merman | Play-confirmed: already on the platform, does not jump out of water. `enemy_placed_merman_init` 0xA2CE skips the type-0x20 splash pair and jumps into the walk. Stage 10 rooms 6–8 |
+
+**Not** white-key doors and **not** the vendor: display-type `0x1F` on a brazier
+(`l87f6h`) is a different field. An earlier overlay treated list-id `0x1F` as a
+door candidate because those 3 rooms matched a scan — they are the placed bats.
 
 ## Room geometry / tile map (CONFIRMED, static + runtime, byte-exact)
 
@@ -582,7 +623,7 @@ slots, so they look the same in every stage. Dumps use `gfxdump.vk_play_palette`
 in these sheets.
 
 ### Continuous enemy generators (spawn bitmask)  (CONFIRMED, byte-exact)
-- `room_spawner` (seg0 0x5EBF) indexes seg14 word table **0x85A6** by stage
+- `room_spawner` (seg0 0x5EBF) indexes seg14 **`spawn_bitmask_ptr`** (0x85A6) by stage
   (0xD000), then indexes the resulting byte table by room (0xD001) to fetch a
   **spawn bitmask**. Stage 1's byte table is at **0x85CF**. Bits **0–6** each fire
   one rate-gated generator in seg2 (LSB first). **Bit 7** appears in some mask
@@ -593,7 +634,7 @@ in these sheets.
   | 0 | `zombie_generator` 0x9CED | 0x01 | `enemy_zombie_tick` 0xA93B | zombie (100 pts) |
   | 1 | `merman_generator` 0x9D52 | 0x02 | `enemy_merman_tick` 0xA2E7 | green merman, 1 HP (200 pts) |
   | 2 | `merman_generator_3` 0x9D59 | 0x03 | same 0xA2E7 | red merman, 2 HP (open-mouth spit) |
-  | 3 | `hanging_bat_generator` 0x9D9E | 0x04 | `enemy_hanging_bat_tick` 0xB0D1 | hanging bat (100 pts; hangs, then flies at Simon) |
+  | 3 | `hanging_bat_generator` 0x9D9E | 0x04 | `enemy_hanging_bat_tick` 0xB0D1 | hanging bat (100 pts; generator fly-in. Placed bats that hang first are list-id 0x1F) |
   | 4 | `flying_skull_generator` 0x9DCA | 0x07 | `enemy_flying_skull_tick` 0xB068 | flying skull (200 pts; homes on Simon X and Y) |
   | 5 | `ghost_head_generator` 0x9DDC | 0x08 | `enemy_ghost_head_tick` 0xA502 | ghost head (200 pts; flies across, bobs around spawn Y) |
   | 6 | `roc_generator` 0x9DEE | 0x0F | `enemy_roc_tick` 0xB19A | roc (400 pts, 8 HP; flies, pauses, drops type 0x23). Manual lists 300. The small hovering raven is type 12. |
@@ -609,8 +650,11 @@ in these sheets.
   tile pair (see "Room geometry") is *not* a generator: its positions don't line
   up with spawns, and rooms spawn regardless of whether the pair is present.
   Stage 1: rooms 0/1/5/6 spawn zombies (bit0), room 4 spawns bats (bit3).
-- Other enemies (e.g. the dog, type 0x05, and the leopard) come from the per-room
-  **object list**, not this continuous spawner.
+- Other enemies come from the per-room **object list** (list-id = actor type;
+  see "World structure" for the full catalogue). Dogs, pikemen, skeletons,
+  ravens, hunchbacks, bone dragons, axe knights, and stage-16 giant bats are
+  placed. Spawn-bit types 1/2/3/4/7/8/15 are not in the list; placed bats and
+  mermen use ids **0x1F** and **0x21** instead (different spawn-init).
   - NOTE: 0xC5E5/0xC5E6 (00->FF/20 at pickup) is the generic pickup-popup message +
     timer set by 0x8F2A for *every* pickup, NOT a rosary-specific state.
 - **Hearts** — currency for vendors; also power the hourglass (jump+DOWN) and
@@ -756,7 +800,7 @@ During normal play the default banks (set by `sub_533dh`) are seg 1 @ 0x6000,
 seg 2 @ 0x8000, seg 3 @ 0xA000. So the substantive gameplay (movement, AI,
 collision, item logic) lives in **code segments 1/2/3** (`INCLUDE`'d, still being
 annotated).  Map tables are banks 11-12; remaining `INCBIN` banks are 4-10 and
-14-15 (graphics / object lists).
+14-15 (scenery / object lists / sound).
 
 ## Graphics format (sprite/tile hunt)
 
@@ -879,9 +923,10 @@ Catalogued so far (extend `manifest.tsv` as more sets are identified):
   overlay at `9AB0[stage][room]` (same room that supplied the sprite VRAM).
   Types 7/10 only use HUD-fixed 2/12/14, so they ignore the overlay. Type **9**
   is the red skeleton (stage 13; SAT `02 45`; faster walk, no projectile). Type
-  **11** is the white skeleton (`02 4C`, same 0x9FB2 sprite script). Type **16**
-  is the axe knight (stages 14+; same SAT layout as 9, throws via `0x9F68`).
-  Type **14**
+  **11** is the white skeleton (`02 4C`, same 0x9FB2 sprite script): kites Simon,
+  hops gaps, throws a spinning bone (D700 type 4, shapes `0x4B–0x4E`). Type **16**
+  is the axe knight (stages 14+; same SAT layout as 9, throws via `d700_throw`
+  0x9F68). Type **14**
   bypasses `0x644C` (custom SAT in its tick). Type **17** is Dracula: standing
   shape `0x5B` is SAT head + cape only. The 32×32 middle is a SCREEN 5 blit
   (`sub_ad87h` / `ladc3h`, dest `(X-16, Y=0x91)`, sources assembled from page-1

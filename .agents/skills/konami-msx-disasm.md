@@ -62,8 +62,10 @@ of `<Game>.asm`.
    give the second bank unique labels or the assembler will error on duplicates.
 3. Separate code vs data with a `segments/segNN.blocks` file (only changes
    rendering, never bytes). Mark mis-decoded tables and convert them to `db`.
-   Keep unreversed graphics as `INCBIN` slices of the bank `.bin`, not a mass
-   `defb` dump.
+  Keep unreversed graphics as `INCBIN` slices of the bank `.bin`, not a mass
+  `defb` dump. Mixed banks (named tables + `INCBIN` slices). VK seg14 is scenery
+  lists + spawn masks + enemy lists + sound: emit the cracked tables as commented
+  `defw`/`defb` once ids are named; leave the rest sliced.
 4. `make verify` → must stay byte-identical.
 
 ## Conventions (enforced)
@@ -101,6 +103,32 @@ of `<Game>.asm`.
   id N uses `table[N-1]`. Always check for it — decoding the table from the wrong
   base shifts every entry. (VK's `collect_bonus` does `dec a`; black bible id 0x10
   → `table[0x0f]`.)
+- **A jump table at the end of a bank can continue into the next page.** Extra
+  indices are not automatically invalid. Mapper switch addresses (e.g. 0x6000) are
+  typically **write-only**; a *read* returns the ROM currently paged there. Konami
+  will put more handler words in that bank's head. Alignment follows the table, not
+  the page: an odd table start plus a padding byte means type N's word begins at
+  0x6001, so do not `defw` from 0x6000. Confirm overflow by matching words to
+  known handlers (VK: spawn `entity_tbl` types 1–22 in seg0; type 0x1E reads
+  `flame_init` at 0x9B67 exactly). Types that look "past the table" (flame, pickup,
+  boss add-on, placed enemy) often live here.
+- **Spawn-init table ≠ per-frame tick table.** `spawn_actor` `DISPATCH_A` is often
+  first-time setup only; a second word table in another bank ticks every frame.
+  Extra type ids reuse a tick and enter at a *later instruction* of the same init
+  (skip "already flying", skip a water-splash spawn). One enemy on the sheet can
+  have two type ids: generator vs authored placement.
+- **Packed room object lists are usually actor type ids.** The emit path is
+  `C = id&0x7F` into `spawn_actor`, not a separate sprite catalogue. Types that
+  come from a continuous bitmask spawner are often **absent** from the list; the
+  placed copy of the same enemy is a different id. A high bit on the stored byte
+  may be stripped at spawn (not "scenery"). Name ids from that spawn call. The
+  same numeric value in another table (display-type, drop-gate) is a different
+  field — scan the field the code actually tests.
+- **A second packed list in the same bank often uses a different grammar.** VK's
+  enemy `object_list` is `0x00` next-room / `0xFF` end-stage; the candle/scenery
+  list is `0xFE` / `0xFF` / `0x00`-end-hub plus a 3-byte `0x7F` reveal record.
+  Don't reuse the first decoder. Stage 0 may bypass the hub pointer table and
+  point at a stream that sits *between* the words and hub 0.
 - **RNG via `ld a,r`** (the refresh register) — a cheap pseudo-random source. If a
   mechanic behaves differently run-to-run for the same input, grep for `ld a,r`
   near its state machine; the branch after it is the coin-flip.
@@ -190,16 +218,17 @@ game and give per-stage/per-room feedback; fix the classification, re-render.
   commit to a static-analysis hypothesis before validating it. In VK I traced a
   slick object path (display-type 0x1F → seg2 `l881bh`/`l9180h`) and was ready to
   call doors "placed objects." A/B renders (`roomperm.py --compare-doors`) correctly
-  **rejected 0x1F** (vendor/reveal, 3 rooms game-wide) but the remaining gap was
+  **rejected 0x1F** (those 3 rooms are placed hanging bats, list-id 0x1F; the
+  vendor/reveal path is display-type 0x1F on a brazier) but the remaining gap was
   not "geometry is universal except one stage" — it was a per-stage 3-byte
   coordinate table (`door_tbl` 0xBB61) that the blocked-edge heuristic only
   partially overlapped (stage-exit doors, not intra-stage ones). Cheap comparison
   settles a wrong theory; WATCH the leftover RAM to find the right one.
-- **A real signal from code can still be the WRONG feature.** The 0x1F object path
-  was genuine engine code — just for the *vendor / a rare special object*, not the
-  white-key door. Finding a mechanism that *could* explain something isn't proof it
-  *does*; confirm coverage (does it appear everywhere the feature does?) before
-  trusting it.
+- **A real signal from code can still be the WRONG feature.** The display-type
+  0x1F brazier path was genuine engine code — vendor / reveal, not the white-key
+  door. List-id `0x1F` in the same 3 rooms is a placed hanging bat (`l61c2h`
+  list-id = actor type). Finding a mechanism that *could* explain something
+  isn't proof it *does*; confirm coverage before trusting it.
 - **Engine door placement can be a per-stage record, not room geometry.** VK's
   white-key door is 19×3 bytes: one room + pixel (Y,X) per stage. After it opens,
   connectivity says where walking that edge goes (blocked → next stage, else

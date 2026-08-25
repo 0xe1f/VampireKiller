@@ -4293,6 +4293,9 @@ sub_9936h:
 	ret z
 	scf
 	ret
+; sub_9942h (seg2 0x9942) - per-frame C800 actor tick. DISPATCH_A on type-1
+; into the inline word table (separate from spawn-time entity_tbl). List-id
+; 0x1F shares type 4's tick (0xB0FF); 0x21 shares types 2/3 (0xA317).
 sub_9942h:
 	ld a,(ix+000h)
 	dec a
@@ -4478,7 +4481,7 @@ sub_9a21h:
 	ld d,h
 	ld a,0ffh
 	push ix
-	call sub_9f74h
+	call d700_spawn
 	ld (ix+01fh),000h
 	ld (ix+07eh),000h
 	pop ix
@@ -5078,31 +5081,25 @@ l9e57h:
 	add ix,de
 	djnz l9e3eh
 	ret
-sub_9e5fh:
+sub_9e5fh:                     ; (seg2 0x9E5F) D700 per-type tick (type-1)
 	ld a,(ix+000h)
 	dec a
 	call DISPATCH_A
-	ld a,(hl)
-	sbc a,(hl)
-	ld a,(hl)
-	sbc a,(hl)
-	ld a,(hl)
-	sbc a,(hl)
-	ld c,09fh
-	ld a,(hl)
-	sbc a,(hl)
-	ld a,a
-	sbc a,(hl)
-	sub a
-	sbc a,(hl)
-	add hl,hl
-	sbc a,a
-	call z,07e9eh
-	sbc a,(hl)
-	res 3,(hl)
-	ld a,b
-	sbc a,e
+	defw l9e7eh            ; 1
+	defw l9e7eh            ; 2
+	defw l9e7eh            ; 3
+	defw d700_bone_tick    ; 4  white-skeleton bone (kind 11)
+	defw l9e7eh            ; 5
+	defw l9e7fh            ; 6
+	defw l9e97h            ; 7
+	defw l9f29h            ; 8
+	defw l9ecch            ; 9
+	defw l9e7eh            ; 10
+	defw l9ecbh            ; 11
+	defw flame_tick        ; 12 kind 0xFF (death flame from sub_9a21h)
+l9e7eh:
 	ret
+l9e7fh:
 	inc (ix+00ch)
 	bit 1,(ix+00ch)
 	ld a,027h
@@ -5115,6 +5112,7 @@ l9e8bh:
 l9e93h:
 	ld (ix+00bh),a
 	ret
+l9e97h:
 	ld e,(ix+012h)
 	ld d,(ix+013h)
 	ld l,(ix+010h)
@@ -5137,7 +5135,9 @@ l9eb7h:
 	ld de,0ffd0h
 l9ec8h:
 	jp actor_add_yvel
+l9ecbh:
 	ret
+l9ecch:
 	inc (ix+00ch)
 	ld a,(ix+00ch)
 	rra
@@ -5171,9 +5171,13 @@ l9ef4h:
 	cp 020h
 	ret nc
 	jp actor_free
+; d700_bone_tick (seg2 0x9F0E) - D700 type 4, the white skeleton's bone.
+; 4-frame spin (shapes 0x4B-0x4E, packed after the skeleton walk 0x47-0x4A)
+; plus gravity 0x50/frame. Spawned by d700_throw with kind 11.
+d700_bone_tick:
 	ld a,(ix+00ch)
 	inc a
-	cp 00ch
+	cp 00ch                ; 12-step timer -> 4 poses x 3 frames
 	jr c,l9f17h
 	xor a
 l9f17h:
@@ -5181,10 +5185,11 @@ l9f17h:
 	rra
 	rra
 	and 003h
-	add a,04bh
+	add a,04bh             ; pose 0x4B / 4C / 4D / 4E
 	ld (ix+00bh),a
-	ld de,SETRD
+	ld de,SETRD            ; +0x50/frame (SETRD equ 0x50, not the BIOS entry)
 	jp actor_add_yvel
+l9f29h:
 	ld a,(ix+00ch)
 	rra
 	rra
@@ -5213,26 +5218,32 @@ l9f53h:
 	ld (ix+00ch),03ch
 	ld (ix+001h),e
 	ret
+; d700_throw (seg2 0x9F68) - spawn a D700 projectile from the current actor.
+; Kind = ix+0 (via 0xA095 -> D700 type). Pos = (X, Y-16). Yvel in HL, Xvel in DE.
+; White skeleton (type 11) -> D700 type 4 (d700_bone_tick).
+d700_throw:
 	ld a,(ix+003h)
-	sub 010h
+	sub 010h               ; spawn 16 px above the actor
 	ld c,a
-	ld b,(ix+005h)
-	ld a,(ix+000h)
-sub_9f74h:
-	ld (0cff9h),a
-	ld (0cff1h),bc
-	ld (0cff5h),hl
-	ld (0cff7h),de
+	ld b,(ix+005h)         ; B = actor X
+	ld a,(ix+000h)         ; A = actor type as kind
+; d700_spawn (seg2 0x9F74) - A=kind, BC=pos, HL=yvel, DE=xvel. Allocates a
+; D700 slot. Kind 0xFF is type 12 (flame); else type = 0xA095[kind].
+d700_spawn:
+	ld (0cff9h),a          ; kind
+	ld (0cff1h),bc         ; pixel pos
+	ld (0cff5h),hl         ; Y velocity
+	ld (0cff7h),de         ; X velocity
 	push ix
-	call sub_9f8ah
+	call d700_alloc
 	pop ix
 	ret
-sub_9f8ah:
+d700_alloc:                    ; (seg2 0x9F8A) find a free D700 slot and arm it
 	ld a,(0cff9h)
 	cp 0ffh
-	ld c,00ch
+	ld c,00ch              ; kind 0xFF -> D700 type 12 (flame_tick)
 	jr z,l9f9ah
-	ld hl,0a095h
+	ld hl,0a095h           ; kind -> D700 type; [11]=4 bone, [16]=9 axe
 	call ADD_HL_A
 	ld c,(hl)
 l9f9ah:

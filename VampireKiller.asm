@@ -24,7 +24,7 @@
 ;  --- File layout --------------------------------------------------------
 ;  The .rom is the 16 segments concatenated (segment N at file offset N*0x2000).
 ;  This source is being converted segment-by-segment from raw `incbin` into
-;  commented disassembly.  Segments 0-3 and 11-13 are INCLUDE'd; the rest are
+;  commented disassembly.  Segments 0-3 and 11-14 are INCLUDE'd; the rest are
 ;  still INCBIN so the rebuilt ROM stays byte-for-byte identical at every step.
 ;  `PHASE` sets each block's runtime address while the output stays contiguous.
 ; ===========================================================================
@@ -101,5 +101,9 @@
     INCLUDE "segments/seg13.asm"
     DEPHASE
 
-    INCBIN "segments/seg14.bin"
+; --- segment 14 : bank 0x0E @ 0x8000 (object lists + spawn masks + sound) ---
+    PHASE 0x8000
+    INCLUDE "segments/seg14.asm"
+    DEPHASE
+
     INCBIN "segments/seg15.bin"

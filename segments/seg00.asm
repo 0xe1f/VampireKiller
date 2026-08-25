@@ -3952,40 +3952,44 @@ door_load_paged:               ; 0x5A47
 	call sub_5369h
 	call door_load
 	jp sub_533dh
+; scenery_load (seg0 0x5A50) - on screen build, page seg14, unpack the current
+; hub's scenery_list stream into 0xE000 (3 stages x 16 rooms x 24 bytes =
+; 0x480), then compact vendor ids into 0xDE00 (l5ab6h).
+scenery_load:                  ; 0x5A50
 	ld hl,0e000h
 	ld de,0e001h
 	ld (hl),000h
-	ld bc,0047fh
+	ld bc,0047fh           ; clear 0xE000..0xE47F
 	ldir
-	call sub_5a63h
+	call scenery_unpack
 	jp l5ab6h
-sub_5a63h:
-	call sub_5357h
-	call sub_5a9fh
-	ld de,0e000h
+scenery_unpack:                ; 0x5A63
+	call sub_5357h         ; page seg14/15
+	call scenery_list_lookup
+	ld de,0e000h           ; dest: 16 room slots of 0x18 bytes per stage
 l5a6ch:
-	push de
+	push de                ; save stage base
 l5a6dh:
-	push de
+	push de                ; save room base
 l5a6eh:
 	ld a,(hl)
 	or a
-	jr z,l5a9ah
+	jr z,l5a9ah            ; 0x00 = end hub
 	inc a
-	jr z,l5a8eh
+	jr z,l5a8eh            ; 0xFF = next stage
 	inc a
-	jr z,l5a85h
-	ldi
+	jr z,l5a85h            ; 0xFE = next room
+	ldi                    ; copy pos
 	ld a,(hl)
-	ldi
+	ldi                    ; copy attr
 	cp 07fh
 	jr nz,l5a83h
-	ldi
+	ldi                    ; attr 0x7F: copy reveal byte
 l5a83h:
 	jr l5a6eh
 l5a85h:
 	pop de
-	ld a,018h
+	ld a,018h              ; next 24-byte room slot
 	call ADD_DE_A
 	inc hl
 	jr l5a6dh
@@ -3993,7 +3997,7 @@ l5a8eh:
 	pop de
 	pop de
 	push hl
-	ld hl,00180h
+	ld hl,00180h           ; next stage: 16 rooms * 0x18
 	add hl,de
 	ex de,hl
 	pop hl
@@ -4002,30 +4006,30 @@ l5a8eh:
 l5a9ah:
 	pop de
 	pop de
-	jp sub_533dh
-sub_5a9fh:
+	jp sub_533dh           ; restore banks
+scenery_list_lookup:           ; 0x5A9F
 	ld a,(0d000h)
 	or a
-	ld hl,0800ch
+	ld hl,scenery_list_s00 ; stage 0 courtyard stream
 	ret z
-	ld a,(0d002h)
-	ld hl,08000h
+	ld a,(0d002h)          ; hub
+	ld hl,scenery_list_ptr
 	add a,a
 	call ADD_HL_A
 	ld e,(hl)
 	inc hl
 	ld d,(hl)
-	ex de,hl
+	ex de,hl               ; HL = scenery_list_hN
 	ret
 l5ab6h:
-	ld hl,0de00h
+	ld hl,0de00h           ; compact vendor-item index (48 rooms x 4 bytes)
 	ld de,0de01h
 	ld (hl),000h
 	ld bc,000bfh
 	push hl
 	ldir
 	pop de
-	ld hl,0e000h
+	ld hl,0e000h           ; walk unpacked scenery, one 0x18-byte room per iter
 	ld b,030h
 l5acah:
 	push bc
@@ -4713,7 +4717,7 @@ l5ebch:
 ; Called every frame from the actor-update loop (seg2 0x98F0) while 0xD010==0
 ; (normal play, not in a room transition/menu).  Gated by a series of early-outs;
 ; when they all pass it pages in seg14, reads the per-(stage 0xD000, room 0xD001)
-; spawn descriptor from the table at 0x85A6, and for each set bit 0-6 calls a
+; spawn descriptor from spawn_bitmask_ptr, and for each set bit 0-6 calls a
 ; spawn generator that drops an actor into a free 0xC800 slot via spawn_actor.
 ; Bit 7 shows up in some mask bytes but is never dispatched.  Existing actors
 ; are never touched here.
@@ -4739,8 +4743,8 @@ room_spawner:
 	ld (0f0f2h),a
 	ei
 	ld a,(0d000h)          ; stage row
-	ld de,085a6h           ; seg14 word table: per-stage spawn-bitmask pointer
-	call 06549h            ; DE = word[stage]  (stage 1 -> 0x85cf)
+	ld de,spawn_bitmask_ptr ; seg14 word table: per-stage spawn-bitmask pointer
+	call 06549h            ; DE = spawn_bitmask_ptr[stage]  (stage 1 -> spawn_mask_s01)
 	ld a,(0d001h)          ; room (column)
 	call ADD_DE_A
 	ld a,(de)              ; A = this room's spawn bitmask (bit N = generator N on)
@@ -4880,10 +4884,14 @@ spawn_actor_init:
 	dec a                   ; ...-1 -> 0-based index
 	call DISPATCH_A         ; jump to entity_tbl[type-1]
 
-; entity_tbl - per-object behaviour handlers, indexed by entity type-1.
+; entity_tbl - per-object spawn-init handlers, indexed by entity type-1.
 ; Targets are all in 0xA000-0xBFFF, i.e. code in whichever segment is currently
 ; paged into page 2b - so these are addresses in banked ROM, not local labels.
-; (22 entries; the trailing 0x5FFF byte is padding to the segment boundary.)
+; 22 entries for types 1-22; the trailing 0x5FFF byte is padding. Types 23+
+; overflow into page 1b (seg1 `data_6000`, odd-aligned from 0x6001) — confirmed
+; 0x1E=flame_init, 0x1F=enemy_placed_bat_init, 0x21=enemy_placed_merman_init,
+; 0x22=orb, 0x23=enemy_hunchback_tick, 0x24=heart, 0x18=Igor. Per-frame tick
+; is a separate table (`sub_9942h` in seg2).
 entity_tbl:
 	defw enemy_zombie_tick  ; 1 walking zombie
 	defw enemy_merman_tick  ; 2 green merman (1 HP, closed mouth)
@@ -4895,7 +4903,7 @@ entity_tbl:
 	defw enemy_ghost_head_tick ; 8 ghost head
 	defw enemy_red_skeleton_tick ; 9 red skeleton (fast, no throw)
 	defw enemy_skull_pile_tick ; 10 skull pile (shoots)
-	defw enemy_white_skeleton_tick ; 11 white skeleton (throws)
+	defw enemy_white_skeleton_tick ; 11 white skeleton (ledge hop + bone)
 	defw enemy_raven_tick   ; 12 raven (hover-flight)
 	defw enemy_hunchback_tick ; 13 hunchback (also Igor type 24 pose)
 	defw enemy_bone_dragon_tick ; 14 bone dragon (custom SAT)

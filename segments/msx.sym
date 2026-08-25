@@ -146,11 +146,14 @@ hurt_simon_projectile: equ 0x85ad	; Simon -= 8/16 from a 0xC580 hazard slot, set
 weapon_hit_damage: equ 0x7e33	; whip/sub-weapon damage to enemy 0xC418 (per weapon+type table)
 advance_stage: equ 0x434e	; next stage: 0xD000++ (stage), 0xD001=0 (room), bump 0xC410/11, transition 4
 room_map_build: equ 0x4fb6	; expand a room's 8x6 metatiles (4x4 tiles ea) into the 0xD100 tile map
+scenery_load: equ 0x5a50	; unpack scenery_list into 0xE000, vendor index into 0xDE00
+scenery_unpack: equ 0x5a63	; expand scenery stream (0xFE/0xFF/0x00) into 0xE000
+scenery_list_lookup: equ 0x5a9f	; HL -> scenery stream for stage 0 or hub 0xD002
 read_buttons: equ 0x4bc2	; joystick|kbd row 8 -> A; play latches C007 held / C006 new-press
 input_edge: equ 0x4bbb	; A=sample, (HL)=held, (HL-1)=rising-edge bits
 read_fkeys: equ 0x4bfb	; sample kbd row 6 -> bit0=F1,bit1=F2,bit2=F3 (edge-detected into 0xC00B)
 play_sound: equ 0x50a6	; A=id: 0=stop, 1-7F sfx, 80-FA music, FB-FF special
-room_spawner: equ 0x5ebf	; per-frame enemy spawner; per-room bitmask (seg14 0x85a6[stage]) dispatches generators; bails while 0xC440 != 0
+room_spawner: equ 0x5ebf	; per-frame enemy spawner; spawn_bitmask_ptr[stage][room]
 zombie_generator: equ 0x9ced	; room_spawner bit0: rate-gated zombie (actor type 01) spawner
 merman_generator: equ 0x9d52	; room_spawner bit1: green merman type 02 (1 HP)
 merman_generator_3: equ 0x9d59	; room_spawner bit2: red merman type 03 (spit, 2 HP)
@@ -276,6 +279,10 @@ flame_tick: equ 0x9b78	; flame flicker 0x85/0x86; on expiry spawn 0x24 pickup
 actor_integrate: equ 0x99c0	; add velocity (+0x07/08 Y, +0x09/0A X) to position
 actor_cull_offscreen: equ 0x99ec	; free actor if pixel pos left the play area
 actor_free: equ 0x99fd	; clear actor slot (+0x00/+0x0E) and any linked sub-slot
+d700_bone_tick: equ 0x9f0e	; D700 type 4: spinning bone (shapes 0x4B-0x4E) + gravity
+d700_throw: equ 0x9f68	; spawn D700 from current actor (kind=type, pos X/Y-16, vel HL/DE)
+d700_spawn: equ 0x9f74	; spawn D700: A=kind, BC=pos, HL=yvel, DE=xvel
+d700_alloc: equ 0x9f8a	; find a free D700 slot and arm it (kind 0xFF -> type 12 flame)
 
 ; ---- Vampire Killer banked routines (segment 13 @ 0xA000) ----------------
 mtile_def_c41a: equ 0xA041	; metatile-def base when 0xC41A != 0
@@ -318,6 +325,7 @@ mtile_defs_s18: equ 0x9AC1	; stage 18 (tail in seg13 0xA000-0xA040)
 
 ; ---- Vampire Killer banked routines (segment 3 @ 0xA000) -----------------
 enemy_skull_pile_tick: equ 0xa229	; entity type 10 (skull pile, shoots)
+enemy_placed_merman_init: equ 0xa2ce	; object-list id 0x21 (placed red merman)
 enemy_merman_tick: equ 0xa2e7	; entity types 2/3 (green/red merman)
 merman_pick_frame: equ 0xa4ba	; merman stand pose from facing + type bit0
 enemy_ghost_head_tick: equ 0xa502	; entity type 8 (ghost head)
@@ -330,10 +338,15 @@ enemy_dracula_tick: equ 0xab29	; entity type 17 (Dracula)
 enemy_axe_knight_tick: equ 0xade5	; entity type 16 (axe knight)
 enemy_red_skeleton_tick: equ 0xaf51	; entity type 9 (red skeleton, no throw)
 enemy_flying_skull_tick: equ 0xb068	; entity type 7 (flying skull)
-enemy_hanging_bat_tick: equ 0xb0d1	; entity type 4 (hanging bat)
+enemy_hanging_bat_tick: equ 0xb0d1	; entity type 4 (hanging bat; generator fly-in)
+enemy_placed_bat_init: equ 0xb0d5	; object-list id 0x1F (placed hanging bat)
 enemy_roc_tick: equ 0xb19a	; entity type 15 (roc; drops type 0x23)
 enemy_hunchback_tick: equ 0xb219	; entity type 13 (hunchback; roc shares init)
-enemy_white_skeleton_tick: equ 0xb34b	; entity type 11 (white skeleton, throws)
+enemy_white_skeleton_tick: equ 0xb34b	; entity type 11 (white skeleton: kite, ledge hop, bone)
+white_skel_set_pose: equ 0xb36b	; walk poses 0x47-0x4A from Simon X + anim counter
+white_skel_walk: equ 0xb394	; kite Simon, throw trigger, hop if no floor ahead
+white_skel_air: equ 0xb458	; gravity 0x68 until floor, then back to walk
+white_skel_throw: equ 0xb4b0	; 16-frame windup then d700_throw (kind 11 bone)
 enemy_mummy_tick: equ 0xb883	; entity type 20 (mummy)
 enemy_frankenstein_tick: equ 0xba56	; entity type 21 (Frankenstein)
 enemy_grim_reaper_tick: equ 0xbc5b	; entity type 22 (grim reaper)
@@ -344,3 +357,9 @@ actor_set_yvel: equ 0xa564	; store DE -> Y velocity (+0x07/+0x08)
 actor_add_xvel: equ 0xa56b	; Xvel += DE (+0x09/+0x0A)
 actor_set_xvel: equ 0xa573	; store DE -> X velocity (+0x09/+0x0A)
 actor_set_xvel_speedup: equ 0xa65a	; set X velocity + progress speed bias (0xD012 tier * 32)
+
+; ---- Vampire Killer data (segment 14 @ 0x8000) ----------------------------
+scenery_list_ptr: equ 0x8000	; word[hub] -> packed scenery streams
+scenery_list_s00: equ 0x800c	; stage 0 courtyard scenery stream
+spawn_bitmask_ptr: equ 0x85a6	; word[stage] -> per-room spawn bitmask
+object_list_ptr: equ 0x8668	; word[hub] -> packed object streams

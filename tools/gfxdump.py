@@ -285,7 +285,8 @@ def main():
 
 # First *recognisable* pose (ix+0B) for entity_tbl types 1-22.
 # Type 9's spawn state uses 0x26 (2-cell wait, legs only); the walk frame is 0x21.
-# Type 9 is the red skeleton (fast, no throw). Type 16 shares that SAT layout
+# Type 9 is the red skeleton (fast, no throw). Type 11 is the white skeleton
+# (kite + ledge hop + spinning bone). Type 16 shares that SAT layout
 # but stage 14+ VRAM is the axe knight (throws). Colour 0x45 = overlay index 5.
 # Type 12 is the small hovering raven (shape 0x89), not a bat.
 # Type 14 is skipped by the SAT builder (0x644C); its tick writes SAT itself.

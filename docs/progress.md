@@ -14,8 +14,10 @@ reversed" placeholder: each segment graduates incbin -> annotated disassembly (c
 or extracted data assets (graphics/tables) as it's understood, always keeping
 `make verify` byte-exact. Postponed for now - we reverse segments incrementally
 (seg0 done, seg1 largely done, seg2/seg3/seg13 imported as disassembly and being
-annotated; seg11/12 graduated as map-data source; seg4-10 and seg14-15 still
-INCBIN) rather than mass-converting bins to
+annotated; seg11/12 graduated as map-data source; seg14 graduated as scenery /
+object-list / spawn-mask source, sound still INCBIN; seg4-10 and seg15 still
+INCBIN) rather
+than mass-converting bins to
 opaque `db` dumps.
 
 ## Done
@@ -61,14 +63,15 @@ opaque `db` dumps.
   - Object-list loader cluster 0x615b-0x6208: `sub_615bh` unpacks the current
     cell's object list from seg 14 into the 4-byte-slot tables at 0xDB00/DC00/DD00
     (`sub_6188h` unpacker, `sub_61a5h` per-level pointer, `sub_61b0h` clear,
-    `l61c2h` emits hardware sprites via seg0 0x5F26). RAM: 0xD000 = stage (0=court-
-    yard, 1-18), 0xD001 = room within stage, 0xD002 = hub / seg14 object-dataset
-    (6 hubs of 3 stages; row->hub table at seg0 0x5E71). See "Eighth session".
+    (`l61c2h` spawns actors via seg0 0x5F26). RAM: 0xD000 = stage (0=court-
+    yard, 1-18), 0xD001 = room within stage, 0xD002 = hub / seg14 scenery+object
+    datasets (6 hubs of 3 stages; row->hub table at seg0 0x5E71). See "Eighth session".
   - `lookup_word_tbl` (0x6549): generic word-table lookup (DE=table, A=index).
   - Screen/level build cluster (annotated):
     - 0x62d7: arms mode bytes 0xC415=0x20/0xC418=0x80, then jp seg0 0x53BD.
     - 0x62ed: full screen builder - clears state, paints tiles (seg2 helpers),
-      sets cell event, loads object list (sub_615bh) + emits sprites (l61c2h).
+      sets cell event, unpacks scenery (scenery_load), loads object list
+      (sub_615bh) + spawns actors (l61c2h).
     - 0x63da: centre view (0xC425/0xC427 = 0x80), hide sprites, redraw chain.
     - `sub_633ah` (0x633a): set current cell event 0xCE00 from l6376h[row]
       (byte = column<<4 | event; event 6 has an immediate handler).
@@ -257,10 +260,11 @@ opaque `db` dumps.
   hub/stage/room hierarchy so recordings can be tagged by location and we never
   conflate enemy/object positions between rooms. **KEY CORRECTION vs first pass:**
   the trio is a hub/stage/room hierarchy, NOT a raw pixel row/column:
-    * **0xD002 = HUB** (object-data set), 6 hubs (0-5). Chosen from the stage via the
+    * **0xD002 = HUB** (scenery + object-data set), 6 hubs (0-5). Chosen from the stage via the
       seg0 row->dataset table at 0x5E71 = `0 0 0 0 |1 1 1|2 2 2|3 3 3|4 4 4|5 5 5`
       for stages 0..18 - i.e. stages are grouped in 3s per hub (matches "a hub has
-      ~3 stages"). Each hub's packed object data is in seg14 (pointer table @ 0x8668).
+      ~3 stages"). Each hub's packed scenery is in seg14 @ 0x8000; packed enemy
+      objects @ 0x8668. Stage 0 scenery is `scenery_list_s00` (not in the hub table).
     * **0xD000 = STAGE** number: 0 = courtyard, 1..18 = the 18 stages (3 per hub).
       Changed once during the walk (0->1) exactly at the courtyard->castle boundary
       (frame 585). Stage 0 (courtyard) carries NO object-list entries: the sprite
@@ -273,8 +277,9 @@ opaque `db` dumps.
       separate counter, not identical to the stage number - exact relation TBD.
     * Data path (static): seg1 `sub_615bh` unpacks hub D002's data into 0xDB00/DC00/
       DD00 (3 streams = the hub's 3 stages); `sub_6188h` grammar = (id,attr) pairs,
-      0x00 = next room cell (0x10 apart), 0xFF = end. Per object: id bit7 = scenery,
-      low7 = sprite id; attr hi nibble = X cell, lo nibble = Y cell (x/y * 16 px).
+      0x00 = next room cell (0x10 apart), 0xFF = end. Per object: list-id =
+      actor type (`and 0x7F` at spawn); bit7 stripped (dogs only; unknown).
+      Attr hi nibble = X cell, lo nibble = Y cell (x/y * 16 px).
       Reader `l61c2h`: stageStream = (D000-1) - D002*3; room = D001.
     * **Room/object map extracted for ALL 18 stages** -> `tools/roommap.py` (decodes
       seg14 + the row table, renders `gfx/map_*.png` + a per-room object breakdown).
@@ -290,8 +295,8 @@ opaque `db` dumps.
       (done: conn_lookup / door_tbl / spot_tbl in `segments/seg13.asm`); (2) ~~map
       per-room background bitmaps for actual geometry~~ (done: `roomperm.py` +
       `mtile_*` tables in seg11/12); (3) name the object ids
-      (`collect_bonus_tbl` annotated; seg14 list-ids 0x0d/0x10 scenery, 0x05 dog
-      still want a sprite catalogue).
+      (`collect_bonus_tbl` annotated; seg14 list-ids named — 0x0d/0x10 are
+      hunchback/axe knight, not scenery).
 
 - Ninth session (dog hits Simon -> knocked back across a room boundary), F8 timeline
   (frames ~628-732). Two useful results:
@@ -505,8 +510,9 @@ opaque `db` dumps.
       Dracula room 9 still `PERM_OVERRIDE`.
     * `collect_bonus_tbl` (seg2 0x8D45) converted from fake instructions to
       `defw`; confirmed ids annotated (hearts, rosary, map, bibles, staff, keys,
-      score bags, health pots).  Seg14 list-ids (0x0d/0x10 scenery, 0x05 dog)
-      still want a sprite-id catalogue.
+      score bags, health pots).  Seg14 list-ids named (see game-notes
+      "World structure"): 0x0d hunchback, 0x10 axe knight, 0x1F placed bat,
+      0x21 placed merman; 0x05 dog confirmed.
 
 - Twenty-seventh session (annotate located player + state-machine code):
     * Converted title_layout 0x4C3F-0x4D0E from fake instructions to `defb`
@@ -579,7 +585,9 @@ opaque `db` dumps.
       session A/B test scanned the raw object **list-id** `== 0x1f` (`decode_objects`
       `sid = oid & 0x7F`) and found "only 3 rooms (stages 3/4)". But door-ness is
       **display-type `0x1f`**, a property of the object DEFINITION, not the list id -
-      the scan measured the wrong field. Fixed the overclaim in game-notes.md.
+      the scan measured the wrong field. **Later:** those 3 rooms' list-id `0x1F`
+      is a placed hanging bat (`enemy_placed_bat_init`), not vendor/reveal either
+      — display-type `0x1F` on a brazier remains the vendor path.
     * **OPEN (linchpin, RESOLVED in twenty-fifth):** decode the object-id -> display-type definition table to
       enumerate display-type-`0x1F` rooms and confirm stage 15 room 8. It sits in a
       data region ~seg2 `0x8799`-`0x87c0` that z80dasm currently shows as instructions
@@ -944,9 +952,10 @@ opaque `db` dumps.
      * stage 0 room 2 gate - 09/0b specks next to decoration also cleared;
        inaccessible 0c/0d in the gate stay amber (real stair ids).
    - Tile-class errata for the permeability sheets are settled (01-04 body
-     adjacency + 0c/0d stairs).  Remaining: name seg14 list-ids (sprite id in
-     the per-room object list; 0x0d/0x10 scenery, 0x05 dog confirmed).
-     `collect_bonus_tbl` ids are annotated in seg02.
+     adjacency + 0c/0d stairs).  Seg14 list-ids named and the spawn-mask /
+     object-list tables graduated from INCBIN (`scenery_list_ptr`,
+     `spawn_bitmask_ptr`, `object_list_ptr` in `segments/seg14.asm`). Sound/VDP
+     at 0x8824 still INCBIN.  `collect_bonus_tbl` ids are annotated in seg02.
 
 ## Next tracing session (resume plan)
 
@@ -1192,19 +1201,24 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   hourglass_use;
   seg2: door_proximity, door_anim_tick, door_begin_open, spot_proximity,
   collect_bonus_tbl, bonus_holy_water, yellow_shield_tick, projectile_hit_actors,
-  lose_weapon;
+  lose_weapon, d700_throw, d700_spawn, d700_alloc, d700_bone_tick;
   seg3: enemy_zombie_tick, enemy_dog_tick, enemy_merman_tick,
   enemy_hanging_bat_tick, enemy_flying_skull_tick, enemy_ghost_head_tick,
   enemy_roc_tick, enemy_pikeman_tick, enemy_raven_tick, enemy_skull_pile_tick,
   enemy_hunchback_tick, enemy_bone_dragon_tick, enemy_red_skeleton_tick,
-  enemy_white_skeleton_tick, enemy_axe_knight_tick, enemy_dracula_tick,
+  enemy_white_skeleton_tick, white_skel_set_pose, white_skel_walk,
+  white_skel_air, white_skel_throw, enemy_axe_knight_tick, enemy_dracula_tick,
   enemy_giant_bat_tick, enemy_medusa_tick, enemy_mummy_tick,
-  enemy_frankenstein_tick, enemy_grim_reaper_tick;
+  enemy_frankenstein_tick, enemy_grim_reaper_tick, enemy_placed_merman_init,
+  enemy_placed_bat_init;
   seg13: conn_lookup, conn_load_permits, conn_room_record, conn_ptr, door_load,
   door_load_coords, door_tbl, spot_load_coords, spot_tbl, simon_cell0_ptr,
   simon_cell1_ptr;
   seg11/12: mtile_rowbase, mtile_roomptr, mtile_stream_c41a, mtile_streams,
   mtile_defbase, mtile_defs_s00..s18, mtile_def_c41a.
+  seg14: scenery_list_ptr, scenery_list_s00, scenery_list_h0..h5,
+  spawn_bitmask_ptr, spawn_mask_s00..s18, object_list_ptr,
+  object_list_h0..h5.
 - Every `vk()`-emitting Lua block MUST use `LUA ALLPASS` — plain `LUA` emits only
   on the final pass and drifts all later labels.
 - After any edit, run `make verify` before moving on.

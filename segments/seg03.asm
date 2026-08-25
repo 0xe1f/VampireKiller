@@ -356,7 +356,7 @@ la1feh:
 	rst 38h
 	rst 38h
 ; enemy_skull_pile_tick (seg3 0xA229) - type 10. Stationary; faces Simon
-; (sub_a2afh) and shoots 0x9F74 kind 0x0A. 8 HP, 300 pts.
+; (sub_a2afh) and shoots d700_spawn (0x9F74) kind 0x0A. 8 HP, 300 pts.
 enemy_skull_pile_tick:
 	call sub_a2afh          ; pick facing frame from Simon X
 	ld (ix+010h),008h
@@ -402,8 +402,8 @@ la281h:
 	sub 014h
 	ld c,a
 	ld b,(ix+005h)
-	ld a,00ah               ; 0x9F74 kind 0x0A -> D700 projectile
-	call 09f74h
+	ld a,00ah               ; d700_spawn kind 0x0A -> D700 projectile
+	call d700_spawn
 	ld a,04ch
 sub_a291h:
 	ld (ix+025h),002h
@@ -435,6 +435,13 @@ la2c1h:
 la2cah:
 	ld (ix+00bh),b
 	ret
+; enemy_placed_merman_init (seg3 0xA2CE) - object-list id 0x21 (stage 10).
+; Play-confirmed: red mermen already standing on the platform; they do not
+; jump out of the water. Skips the type-0x20 splash pair that generator
+; mermen spawn, arms ix+1B, jumps into the walk at la36dh. Same per-frame
+; tick as types 2/3 (`sub_9942h` -> 0xA317). Type bit0 set so it spits like
+; type 3; HP/SAT match type 3 (2 HP, 0x612F).
+enemy_placed_merman_init:
 	ld (ix+01bh),001h
 	xor a
 	ld (ix+01ch),a
@@ -445,7 +452,7 @@ la2cah:
 	jp la36dh
 ; enemy_merman_tick (seg3 0xA2E7) - types 02 (green, 1 HP, closed mouth) and
 ; 03 (red, 2 HP, open-mouth spit). Shared walk/pounce; type 3 (bit 0 of the
-; type id) counts down ix+10 then enters state 2 and fires 0x9F74 kind 2
+; type id) counts down ix+10 then enters state 2 and fires d700_spawn kind 2
 ; from Y-0x14. Type 2 can write type=3 + pose 0x12 when ix+1B is set and
 ; Simon's Y is within ±8.
 enemy_merman_tick:
@@ -646,8 +653,8 @@ la4a8h:
 	sub 014h                ; from the mouth (Y-0x14)
 	ld c,a
 	ld b,(ix+005h)
-	ld a,002h               ; 0x9F74 kind 2 -> D700 projectile
-	jp 09f74h
+	ld a,002h               ; d700_spawn kind 2 -> D700 projectile
+	jp d700_spawn
 la4b6h:
 	defb 00fh,012h,011h,014h ; spit anim frames
 merman_pick_frame:              ; (0xA4BA)
@@ -1393,7 +1400,7 @@ la9ceh:
 	ld c,a
 	ld b,(ix+023h)
 	ld a,00eh
-	jp 09f74h
+	jp d700_spawn
 laa65h:
 	ld (ix+00ch),01eh
 	ld (ix+001h),001h
@@ -1644,7 +1651,7 @@ lac1ah:
 	ld c,a
 	ld b,(ix+005h)
 	ld a,011h
-	jp 09f74h
+	jp d700_spawn
 	dec (ix+00ch)
 	ret nz
 	call sub_ad62h
@@ -1868,8 +1875,8 @@ sub_add9h:
 	ld (0ce0eh),a
 	ret
 ; enemy_axe_knight_tick (seg3 0xADE5) - type 16. Same SAT layout as type 9,
-; stage 14+ VRAM is the knight. Throws (0x9F68). 8 HP, 300 pts, walk 0x0140.
-; Shape 0x5F.
+; stage 14+ VRAM is the knight. Throws via d700_throw (0x9F68). 8 HP, 300
+; pts, walk 0x0140. Shape 0x5F.
 enemy_axe_knight_tick:
 	ld (ix+006h),001h
 	ld de,CHKRAM
@@ -1974,7 +1981,7 @@ laec8h:
 	jr nc,laee3h
 	ld de,0fc00h
 laee3h:
-	jp 09f68h
+	jp d700_throw
 laee6h:
 	cp 060h
 	ret c
@@ -2208,10 +2215,14 @@ lb0c5h:
 lb0cdh:
 	ld (ix+00bh),a
 	ret
-; enemy_hanging_bat_tick (seg3 0xB0D1) - type 04. Hangs (shape 0x1A) until
-; Simon is close (Y window 0x50, X 0x40), then flies at him. 1 HP, 100 pts.
+; enemy_hanging_bat_tick (seg3 0xB0D1) - type 04 (generator) and list-id 0x1F.
+; Play-confirmed for 0x1F: hangs (pose 0x1A) until Simon is close (Y window
+; 0x50, X 0x40), then flies at him. Type 4 sets state 2 (already flying in).
+; Object-list 0x1F enters at enemy_placed_bat_init so ix+1 stays 0 (hang first).
+; Shared tick 0xB0FF. 1 HP, 100 pts.
 enemy_hanging_bat_tick:
-	ld (ix+001h),002h
+	ld (ix+001h),002h      ; type 4: start in fly-in state
+enemy_placed_bat_init:         ; type 0x1F (s3r2, s4r1, s4r3): hang first
 	ld de,00180h
 	call actor_set_yvel
 	ld de,00300h
@@ -2502,56 +2513,58 @@ lb341h:
 lb345h:
 	ld de,000a0h
 	jp actor_add_yvel
-; enemy_white_skeleton_tick (seg3 0xB34B) - type 11. Walks, then throws
-; (0x9F68). 4 HP, 200 pts. SAT 02 4C. Same 0x9FB2 skeleton art as type 9.
+; enemy_white_skeleton_tick (seg3 0xB34B) - type 11. Kites Simon (walk
+; toward if far, away if close), hops a gap when the floor probe ahead is
+; empty (Yvel 0xFB8F), then throws a spinning bone via d700_throw (kind 11
+; -> D700 type 4, shapes 0x4B-0x4E). 4 HP, 200 pts. SAT 02 4C. Walk poses
+; 0x47-0x4A; same skeleton art as type 9. Stages 7-9, 13, 17.
+; ix+01 states: 0 walk, 1 air, 2 throw windup.
 enemy_white_skeleton_tick:
-	ld a,(0c427h)
-	ld b,(ix+005h)
+	ld a,(0c427h)          ; Simon X
+	ld b,(ix+005h)         ; skeleton X
 	cp b
-	ld de,00240h
+	ld de,00240h           ; walk right if Simon is to the right
 	jr nc,lb35ah
-	ld de,0fdc0h
+	ld de,0fdc0h           ; else left
 lb35ah:
 	call actor_set_xvel_speedup
-	ld de,CHKRAM
+	ld de,CHKRAM           ; Yvel = 0
 	call actor_set_yvel
-	ld (ix+006h),001h
+	ld (ix+006h),001h      ; alive / visible
 	ld (ix+011h),000h
-sub_b36bh:
+white_skel_set_pose:           ; (0xB36B) walk frames 0x47/48 (left) or 0x49/4A
 	ld a,(0c427h)
 	cp (ix+005h)
-	ld c,047h
+	ld c,047h              ; facing left pair
 	jr c,lb377h
-	ld c,049h
+	ld c,049h              ; facing right pair
 lb377h:
-	inc (ix+012h)
+	inc (ix+012h)          ; walk-anim counter
 	bit 3,(ix+012h)
 	jr nz,lb381h
-	inc c
+	inc c                  ; alternate the pair every 8 frames
 lb381h:
-	ld (ix+00bh),c
+	ld (ix+00bh),c         ; pose
 	ret
-	call sub_b36bh
-	ld a,(ix+001h)
+	call white_skel_set_pose
+	ld a,(ix+001h)         ; per-frame: dispatch on walk / air / throw
 	call DISPATCH_A
-	sub h
-	or e
-	ld e,b
-	or h
-	or b
-	or h
-	ld a,(0c427h)
+	defw white_skel_walk   ; 0  kite, throw trigger, ledge hop
+	defw white_skel_air    ; 1  gravity until floor
+	defw white_skel_throw  ; 2  16-frame windup, then d700_throw
+white_skel_walk:               ; (0xB394)
+	ld a,(0c427h)          ; Simon X
 	ld b,a
 	ld a,(ix+005h)
 	add a,030h
 	sub b
-	cp 060h
+	cp 060h                ; |skelX+0x30 - SimonX| < 0x60 -> close: walk away
 	jr nc,lb3b0h
 	ld a,(ix+005h)
 	cp b
-	ld de,0fdc0h
+	ld de,0fdc0h           ; Simon is to the right -> walk left
 	jr c,lb3cah
-	ld de,00240h
+	ld de,00240h           ; else walk right
 	jr lb3cah
 lb3b0h:
 	ld a,(0c427h)
@@ -2559,64 +2572,64 @@ lb3b0h:
 	ld a,(ix+005h)
 	add a,050h
 	sub b
-	cp 0a0h
+	cp 0a0h                ; mid range: skip the walk-toward, go to collision
 	jr c,lb3e2h
 	ld a,(ix+005h)
 	cp b
-	ld de,00240h
+	ld de,00240h           ; far: walk toward Simon
 	jr c,lb3cah
 	ld de,0fdc0h
 lb3cah:
 	call actor_set_xvel_speedup
 	ld a,(ix+012h)
-	and 006h
+	and 006h               ; every 8 counts, 2 frames of the cycle
 	jr nz,lb3e2h
-	ld (ix+010h),010h
-	ld (ix+001h),002h
+	ld (ix+010h),010h      ; throw windup = 16 frames
+	ld (ix+001h),002h      ; -> state 2
 	ld (ix+006h),000h
 	jr lb43eh
 lb3e2h:
-	ld e,(ix+003h)
+	ld e,(ix+003h)         ; wall probe at (X, Y)
 	ld d,(ix+005h)
 	ld bc,0080ch
 	ld a,(ix+00ah)
 	and 080h
 	jr nz,lb3ffh
-	call 07bc5h
+	call 07bc5h            ; wall to the right?
 	jr nc,lb40ah
-	ld de,0fdc0h
+	ld de,0fdc0h           ; bounce left
 	call actor_set_xvel_speedup
 	jr lb40ah
 lb3ffh:
-	call 07c21h
+	call 07c21h            ; wall to the left?
 	jr nc,lb40ah
-	ld de,00240h
+	ld de,00240h           ; bounce right
 	call actor_set_xvel
 lb40ah:
-	ld e,(ix+003h)
+	ld e,(ix+003h)         ; floor probe a few px ahead of travel
 	ld a,(ix+00ah)
 	or a
-	ld b,004h
+	ld b,004h              ; xvel 0: +4
 	jr z,lb41ch
-	ld b,009h
+	ld b,009h              ; walking right: +9
 	jp p,lb41ch
-	ld b,0fch
+	ld b,0fch              ; walking left: -4
 lb41ch:
 	ld a,(ix+005h)
 	add a,b
 	ld d,a
-	call 07b9fh
-	jr c,lb43eh
+	call 07b9fh            ; carry = solid floor at (D, E)
+	jr c,lb43eh            ; floor there: stay grounded
 	ld de,00240h
 	bit 7,(ix+00ah)
-	call nz,sub_a183h
+	call nz,sub_a183h      ; keep travel direction
 	call actor_set_xvel
-	ld de,0fb8fh
+	ld de,0fb8fh           ; hop: Yvel ~ -4.5 px/frame
 	call actor_set_yvel
-	ld (ix+001h),001h
+	ld (ix+001h),001h      ; -> state 1 (air)
 	ret
 lb43eh:
-	ld a,(ix+005h)
+	ld a,(ix+005h)         ; screen-edge clamp, else keep current xvel
 	cp 010h
 	ld de,00240h
 	jr c,lb455h
@@ -2627,12 +2640,13 @@ lb43eh:
 	ld d,(ix+00ah)
 lb455h:
 	jp actor_set_xvel_speedup
+white_skel_air:                ; (0xB458)
 	ld bc,0080ch
 	ld e,(ix+003h)
 	ld d,(ix+005h)
 	bit 7,(ix+00ah)
 	jr z,lb46eh
-	call 07c21h
+	call 07c21h            ; still facing a wall? stop xvel
 	jr nc,lb479h
 	jr lb473h
 lb46eh:
@@ -2642,14 +2656,14 @@ lb473h:
 	ld de,CHKRAM
 	call actor_set_xvel
 lb479h:
-	ld de,00068h
+	ld de,00068h           ; gravity
 	call actor_add_yvel
 	bit 7,(ix+008h)
-	ret nz
+	ret nz                 ; still going up
 	ld e,(ix+003h)
 	ld a,(ix+00ah)
 	bit 7,a
-	ld b,008h
+	ld b,008h              ; landing probe X offset from facing
 	jr nz,lb497h
 	ld b,0fdh
 	and a
@@ -2660,29 +2674,30 @@ lb497h:
 	add a,b
 	ld d,a
 	call 07b9fh
-	ret nc
+	ret nc                 ; no floor yet
 	xor a
-	ld (ix+001h),a
+	ld (ix+001h),a         ; landed -> walk
 	ld (ix+002h),a
-	call sub_a9a9h
+	call sub_a9a9h         ; snap Y to 8 px
 	ld de,CHKRAM
 	jp actor_set_yvel
+white_skel_throw:              ; (0xB4B0)
 	dec (ix+010h)
-	ret nz
+	ret nz                 ; windup
 	ld a,r
-	rra
-	ld hl,0fb00h
+	rra                    ; coin-flip throw height
+	ld hl,0fb00h           ; bone Yvel -5 px/frame
 	jr nc,lb4bfh
-	ld hl,0f800h
+	ld hl,0f800h           ; or -8 (higher arc)
 lb4bfh:
 	ld a,(0c427h)
 	cp (ix+005h)
-	ld de,00180h
+	ld de,00180h           ; bone Xvel toward Simon
 	jr nc,lb4cdh
 	ld de,0fe80h
 lb4cdh:
-	call 09f68h
-	ld (ix+001h),000h
+	call d700_throw        ; kind 11 -> D700 type 4 (d700_bone_tick)
+	ld (ix+001h),000h      ; back to walk
 	ld (ix+006h),001h
 	ret
 	call sub_b618h
@@ -3308,7 +3323,7 @@ lb98ch:
 	ld c,a
 	ld b,(ix+005h)
 	ld a,014h
-	call 09f74h
+	call d700_spawn
 	ld a,00ah
 	call sub_a4efh
 	dec (ix+001h)
@@ -3579,7 +3594,7 @@ sub_bbdbh:
 	ret nz
 	call sub_bbe8h
 	call sub_a0ech
-	jp 09f68h
+	jp d700_throw
 sub_bbe8h:
 	ld (ix+012h),030h
 	ret
@@ -3630,7 +3645,7 @@ sub_bc30h:
 	ld h,e
 	ld l,e
 	ld a,016h
-	jp 09f74h
+	jp d700_spawn
 lbc4bh:
 	jr nc,lbc7dh
 	add a,b
@@ -3859,7 +3874,7 @@ sub_be14h:
 	ld b,(ix+005h)
 	push ix
 	ld a,013h
-	call 09f74h
+	call d700_spawn
 	pop ix
 	ret
 	ld a,(0ce01h)
@@ -4006,7 +4021,7 @@ lbf30h:
 	ret
 sub_bf4bh:
 	call sub_a0ech
-	jp 09f68h
+	jp d700_throw
 	ld a,(ix+010h)
 	cp 018h
 	call z,sub_bf4bh

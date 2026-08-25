@@ -22,7 +22,7 @@ gfx/                readable graphics catalogue (manifest committed; dumps regen
 Makefile            build / verify
 ```
 
-No copyrighted game data is committed. The original ROM and the per-segment
+The original ROM and the per-segment
 binaries are excluded via `.gitignore`; you supply your own ROM to build.
 
 ## Building
@@ -33,7 +33,7 @@ You need two things that are not in the repo:
    ([z00m128/sjasmplus](https://github.com/z00m128/sjasmplus)) and place the
    binary at `tools/sjasmplus`.
 2. **An original `VampireKiller.rom`** (128 KiB) placed at
-   `references/VampireKiller.rom`. It is gitignored (copyrighted) and is used both
+   `references/VampireKiller.rom`. It is gitignored and is used both
    to create the segment binaries and to verify the build.
 
 Then:

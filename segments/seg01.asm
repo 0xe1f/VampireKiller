@@ -10,6 +10,11 @@
 
 
 ; BLOCK 'data_6000' (start 0x6000 end 0x6030)
+; Spawn-init overflow of entity_tbl (seg0 0x5FD3). The table is odd-aligned:
+; type 23 reads 0x5FFF (047h) + 0x6000, type 24 starts at 0x6001. Confirmed
+; when page 1b is seg1: 0x18 Igor 0xBAE4, 0x1E flame_init 0x9B67, 0x1F
+; enemy_placed_bat_init 0xB0D5, 0x21 enemy_placed_merman_init 0xA2CE,
+; 0x23 hunchback 0xB219, 0x24 heart 0x9BA2. Do not word-align this block.
 data_6000_start:
 	defb 06ah
 	defb 0e4h
@@ -342,8 +347,9 @@ sub_615bh:
 
 ; --- sub_6188h - unpack one object stream into a 4-byte-per-entry table -------
 ;  Source HL, destination DE.  Each source pair (id,attr) expands to a 4-byte
-;  slot [id, attr, _, _].  0x00 = end of row (jump DE to the next 0x10 boundary),
-;  0xFF = end of stream.
+;  slot [id, attr, _, _].  id low 7 bits = actor type (same ids as entity_tbl);
+;  bit7 is stored but stripped at spawn (only dogs ever set it; role unknown).
+;  0x00 = end of row (jump DE to the next 0x10 boundary), 0xFF = end of stream.
 sub_6188h:
 	ld (0cff0h),de         ; remember the row's base address
 l618ch:
@@ -368,7 +374,7 @@ l619bh:
 ; --- sub_61a5h - find this level's packed object data in seg14 ---------------
 sub_61a5h:
 	ld a,(0d002h)          ; A = current cell/level index
-	ld de,08668h           ; DE = word-pointer table (in seg14)
+	ld de,object_list_ptr  ; DE = hub -> packed object streams (seg14)
 	call lookup_word_tbl         ; DE = table[A]
 	ex de,hl               ; HL = pointer to the packed object data
 	ret
@@ -388,9 +394,10 @@ l61b7h:
 	inc hl
 	djnz l61b7h
 	ret
-; --- l61c2h - emit hardware sprites for the visible objects ------------------
-;  Walks 4 slots of the 0xDB00 list at the current scroll position and, for each
-;  live slot, unpacks its byte-packed X/Y and calls the seg0 sprite composer.
+; --- l61c2h - spawn actors from the visible room's object list ---------------
+;  Walks 4 slots of the 0xDB00 list at the current room and, for each live
+;  slot, unpacks its byte-packed X/Y and calls spawn_actor+2 (0x5F26) with
+;  C = id&0x7F (the actor type). Stage 0 returns immediately (dec a; ret m).
 l61c2h:
 	ld a,(0d002h)          ; A = level index
 	ld c,a
@@ -419,7 +426,7 @@ l61e2h:
 	and a
 	jr z,l6200h
 	ld b,000h
-	and 07fh               ; low 7 bits = sprite id
+	and 07fh               ; low 7 bits = actor type
 	ld c,a
 	inc hl
 	ld a,(hl)              ; slot+1 = packed position
@@ -435,7 +442,7 @@ l61e2h:
 	inc hl
 	inc hl
 	ld a,(hl)              ; slot+3 = attribute/index
-	call 05f26h            ; seg0: compose the hardware sprite (BC id, DE pos)
+	call 05f26h            ; spawn_actor+2: C = type, DE = pixel pos
 l6200h:
 	pop hl
 	pop bc
@@ -615,13 +622,14 @@ l62eah:
 ; --- 0x62ED - build a gameplay screen ---------------------------------------
 ;  Full screen/level construction, called from seg0 when entering a cell:
 ;  clears per-screen state, paints tiles (seg2 helpers), sets the cell event,
-;  loads the packed object list and emits its sprites.  Many steps are helpers
-;  in seg1/seg2 not yet mapped; the annotated ones below are the known pieces.
+;  unpacks scenery (candles/blocks/chests/vendors), loads the packed object
+;  list and spawns its actors (`l61c2h`).  Many steps are helpers in seg1/seg2
+;  not yet mapped; the annotated ones below are the known pieces.
 	call 05653h
 	call 05714h
 	call sub_63beh         ; clear 0xC420..0xC46F per-screen state
 	call sub_6409h
-	call 05a50h
+	call scenery_load      ; unpack scenery_list into 0xE000 / 0xDE00
 	call sub_63cch         ; hide all hardware sprites
 	call sub_6389h         ; reset the object/actor state area
 	call 05787h
@@ -640,7 +648,7 @@ l62eah:
 	call 047ceh
 	call 09cb0h
 	call sub_615bh         ; load the packed object list into 0xDB00/DC00/DD00
-	jp l61c2h              ; emit the visible objects as hardware sprites
+	jp l61c2h              ; spawn actors from the room object list
 sub_6334h:
 	call sub_691bh
 	jp l69a7h
@@ -705,9 +713,10 @@ l6376h:
 	sub (hl)
 ; --- sub_6389h - reset the big object/actor state area and its sub-systems ---
 ;  Clears 0xC470..0xC6FF (0x290 bytes) to 0, then calls the per-subsystem reset
-;  helpers (seg1 0x5B22, door_load_paged, conn_load_permits_paged, seg2
-;  0x9034/0x90A2, whip_slots_clear), then zeroes two strided tables: 7 entries
-;  0x80 apart from 0xC800, and 8 entries 0x80 apart from 0xD700.
+;  helpers (seg0 0x5B22 instantiate current-room scenery into C470, door_load_paged,
+;  conn_load_permits_paged, seg2 0x9034/0x90A2, whip_slots_clear), then zeroes two
+;  strided tables: 7 entries 0x80 apart from 0xC800, and 8 entries 0x80 apart
+;  from 0xD700.
 sub_6389h:
 	ld hl,0c470h
 	ld de,0c471h           ; dst = src+1

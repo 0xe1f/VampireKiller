@@ -987,17 +987,23 @@ Known live RAM map (runtime-confirmed this session):
          sub 5/daa).  Confirmed +1 small heart, +5 large heart.
   0xC410 LIVES, packed BCD (drawn by seg0 sub_4575h -> VRAM 0xE400); held at
          0x02 for the whole courtyard run (no death/1-up)
+  0xC006 newly-pressed buttons (rising edge of 0xC007 via input_edge).  Bit 4 =
+         SPACE/trig (whip), bit 5 = UP (jump and portal).
+  0xC007 held buttons: bit0=UP bit1=DOWN bit2=LEFT bit3=RIGHT (read_buttons).
+  0xC41B pending room-exit: 1=up 2=down 3=left 4=right, or 0xFF = spot warp.
   0xC425 Simon Y  0xC426/27 Simon X  0xC42C facing(0=R/1=L)  0xC428 jump phase
   0xC5AC door sub-state: loader 0xFF (vertical: blit closed graphic) or 0x04
          (courtyard); then 1 = armed, 3 = open.  0xC5AD = door pixel Y, 0xC5AE =
          door pixel X (from door_tbl; confirmed vs Simon Y/X and VDP SAT order).
   0xC5B1 spot armed (1) / 0xC5B2 = spot Y / 0xC5B3 = spot X / 0xC5B4 = dest room
-         nibble from spot_tbl (conn_from_spot writes it to D001 when C41B==0xFF).
+         nibble from spot_tbl.  Play-verified: crouch on pad + UP -> state 7
+         (`simon_portal_wait`) -> C41B=0xFF -> conn_from_spot writes C5B4 to D001.
          Table currently stage 12 only (two-way pairs).
   0xC422 whip phase  0xC429 whip timer  0xC42E/2F anim frames (scratch)
   Damage/knockback (zombie-hit before/after + two during-blink captures):
     0xC42D INVULN/BLINK timer, starts 0x4e=78, -1 per frame (verified against
-      0xC003: 35 frames elapsed = 35 counts); blink ends at 0.
+      0xC003: 35 frames elapsed = 35 counts); blink ends at 0.  Reused as the
+      portal wind-up (simon_crouch sets 0x40, simon_portal_wait waits it out).
     0xC420 action state ->5 (hurt), 0xC423 ->1 hurt/invuln flag, 0xC42C facing,
       0xC42E/2F hurt-anim frames - all cleared to 0 on recovery.
     0xC42A knockback velocity/impulse (0->0b->0d->0, NOT the timer).
@@ -1140,12 +1146,13 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   address in the block-header comment (e.g. `(seg0 0x5F24)`) so names still line up
   with WATCH-log PCs, and add the same name to `segments/msx.sym` so regen emits it.
   Renamed so far - seg0: draw_hearts_hud/draw_lives_hud/draw_health_bar/
-  draw_enemy_meter/restore_health/damage_health/spawn_actor(+_init),
-  advance_stage, room_map_build, zombie_generator, door_blit_tiles;
+  draw_enemy_meter, restore_health/damage_health/spawn_actor(+_init),
+  advance_stage, room_map_build, zombie_generator, door_blit_tiles,
+  read_buttons, input_edge, play_sound;
   seg1: simon_action_tick, simon_walk_left/right, simon_jump_tick, simon_mirror_frames,
   whip_tick, tile_layout_draw, spend_5_hearts, map_cell_at, tile_is_solid,
-  row_solid_thresh, set_stage_boundary, door_interact;
-  seg2: door_proximity, door_anim_tick, door_begin_open;
+  row_solid_thresh, set_stage_boundary, door_interact, simon_portal_wait;
+  seg2: door_proximity, door_anim_tick, door_begin_open, spot_proximity;
   seg13: conn_lookup, conn_load_permits, conn_room_record, conn_ptr, door_load,
   door_load_coords, door_tbl, spot_load_coords, spot_tbl, simon_cell0_ptr,
   simon_cell1_ptr.

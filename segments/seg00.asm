@@ -382,7 +382,7 @@ l4220h:
 	jr l4249h
 l4222h:
 	ld a,08ah
-	call sub_50a6h
+	call play_sound
 	ld a,050h
 	jp l41c9h
 state_stage_bridge:            ; 4 (0x422C)
@@ -421,7 +421,7 @@ state_play:                    ; 5 (0x4257)
 	ld a,(0c41bh)
 	and a
 	ld a,009h
-	jp nz,l41b6h           ; pending room exit -> room_trans
+	jp nz,l41b6h           ; pending room exit (1-4 or 0xFF spot) -> room_trans
 	ld a,(0c408h)
 	or a
 	ld a,00ah
@@ -453,7 +453,7 @@ l429bh:
 	jp l41b6h
 l42abh:
 	ld a,08bh
-	call sub_50a6h
+	call play_sound
 	jr l4249h
 state_game_over:               ; 7 (0x42B2)
 	djnz l42e3h
@@ -595,9 +595,9 @@ state_stage_exit:              ; 10 (0x438E): 0xC408, spend white key, next stag
 ;  the title, or (from the title) begins the game.
 ; ===========================================================================
 l4398h:
-	call sub_4bc2h          ; front-end per-frame update (anim/timer)
-	ld hl,0c401h            ; 0xC401 = start/trigger input state
-	call sub_4bbbh          ; A = newly-pressed buttons this frame
+	call read_buttons       ; A = joystick|keyboard mask
+	ld hl,0c401h            ; 0xC401 = start/trigger held; 0xC400 = new-press
+	call input_edge         ; A = newly-pressed buttons this frame
 	or a
 	ret z                   ; nothing pressed -> stay in this state
 	ld hl,0c004h            ; reset the sub-state timer...
@@ -620,7 +620,7 @@ l4398h:
 l43c1h:
 	ld (hl),001h            ; primary state = 1 (title)
 	ld a,000h
-	call sub_50a6h          ; request sound/music change
+	call play_sound          ; request sound/music change
 	jp sub_4d4eh            ; (re)build the title screen
 ; l43cbh - full game start: seed the run state then enter gameplay.
 l43cbh:
@@ -641,7 +641,7 @@ state_f1_dismiss:              ; 11 (0x43E1): 0xC40A, wait F1 (0xC00B bit0)
 	ld (0c40ah),a
 	call sub_44bfh
 	ld a,0feh
-	call sub_50a6h
+	call play_sound
 	ld a,005h
 	jp l41b6h
 state_vendor:                  ; 12 (0x43F7): 0xC40C whip-hit vendor
@@ -1997,21 +1997,25 @@ l4b9ch:
 	ret nz
 	and 040h
 	jp z,l4e35h
-	call sub_4bfbh
+	call read_fkeys
 	ld hl,0c00ch
-	call sub_4bbbh
-	call sub_4bc2h
+	call input_edge
+	call read_buttons
 l4bb8h:
-	ld hl,0c007h
-sub_4bbbh:
+	ld hl,0c007h           ; play: held at C007, rising edge at C006
+input_edge:                    ; (seg0 0x4BBB) A=sample, (HL)=held, (HL-1)=new-press
 	ld c,(hl)
-	ld (hl),a
+	ld (hl),a              ; held = this frame
 	xor c
-	and (hl)
+	and (hl)               ; bits newly set
 	dec hl
-	ld (hl),a
+	ld (hl),a              ; rising-edge byte
 	ret
-sub_4bc2h:
+; read_buttons (seg0 0x4BC2): joystick (PSG port A, bits 0-5) OR keyboard row 8
+; (arrows + SPACE).  Result in A.  Play latches held into 0xC007 and the rising
+; edge into 0xC006 via input_edge.  Consumer bits: 0=UP 1=DOWN 2=LEFT 3=RIGHT
+; 4=SPACE/trig (whip) 5=UP (jump / portal new-press).
+read_buttons:
 	ld e,08fh
 	ld a,00fh
 	call WRTPSG
@@ -2052,7 +2056,7 @@ sub_4bc2h:
 	or b
 	ret
 ; read_fkeys (0x4BFB) - sample keyboard matrix row 6 (F1=bit5, F2=bit6, F3=bit7),
-; return them right-justified: bit0=F1, bit1=F2, bit2=F3.  The caller edge-detects
+; return them right-justified: bit0=F1, bit1=F2, bit2=F3.  The caller input_edge's
 ; into 0xC00B (newly-pressed).  F2 drives the world-map feature (seg2 minimap_driver
 ; 0x955A); F1 is handled in seg0 (0x43E1 / 0x5C48).
 read_fkeys:
@@ -2589,7 +2593,13 @@ sub_508ch:
 	ld (0c016h),hl
 l50a5h:
 	ret
-sub_50a6h:
+; play_sound (seg0 0x50A6): queue a sound.  A = id.
+;   0         stop
+;   1..0x7F   sfx (word table at 0x8D8D; portal flash = 0x15)
+;   0x80..FA  music (6-byte records at 0x8DC9)
+;   0xFB..FF  special (F1 uses 0xFE; script-end uses 0xFF)
+; Pages banks 0x0E/0x0F into 0x8000/0xA000, then restores 1/2/3.
+play_sound:
 	push hl
 	push de
 	push bc
@@ -4295,7 +4305,7 @@ l5c44h:
 	ld (0c40ah),a
 	call load_simon_sprites
 	ld a,0fdh
-	jp sub_50a6h
+	jp play_sound
 l5c63h:
 	call load_simon_sprites
 	call 06b06h

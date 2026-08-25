@@ -60,7 +60,7 @@ l804fh:
 	ld (bc),a
 l8053h:
 	ld a,00ch
-	call 050a6h
+	call play_sound
 	ld a,(ix+000h)
 	sub 011h
 	cp 007h
@@ -127,7 +127,7 @@ l80b3h:
 	call z,074f3h
 l80d6h:
 	ld a,00ch
-	jp 050a6h
+	jp play_sound
 l80dbh:
 	ld de,CHRGTR
 	add ix,de
@@ -169,7 +169,7 @@ l8119h:
 	inc l
 	inc (hl)
 	ld a,00ch
-	jp 050a6h
+	jp play_sound
 	ld hl,0c500h
 	ld b,008h
 l8127h:
@@ -215,7 +215,7 @@ l8160h:
 	inc l
 	ld (hl),002h
 	ld a,00ch
-	call 050a6h
+	call play_sound
 l816ah:
 	pop hl
 	pop bc
@@ -986,25 +986,29 @@ sub_85e5h:
 	sub d
 	cp 020h
 	ret
+; spot_proximity (seg2 0x85FB): carry if Simon overlaps the armed spot
+; (C5B1!=0, C5B2=Y, C5B3=X).  Box is 0x10 tall (vs Y-4) and 0x10 wide.
+; simon_crouch: on-pad + UP -> portal wind-up (state 7).
+spot_proximity:
 	ld hl,0c5b1h
-	ld a,(hl)
+	ld a,(hl)              ; C5B1 armed?
 	and a
-	ret z
+	ret z                  ; NC: no pad in this room
 	inc hl
-	ld a,(hl)
+	ld a,(hl)              ; C5B2 pad Y
 	ld d,a
-	ld a,(0c425h)
+	ld a,(0c425h)          ; Simon Y
 	sub 004h
 	sub d
 	cp 010h
-	ret nc
+	ret nc                 ; Y miss
 	inc hl
-	ld a,(hl)
+	ld a,(hl)              ; C5B3 pad X
 	ld d,a
-	ld a,(0c427h)
+	ld a,(0c427h)          ; Simon X
 	sub d
 	cp 010h
-	ret
+	ret                    ; CY if X in 0x10 box
 	ld a,(0c701h)
 	and 020h
 	ret z
@@ -1021,7 +1025,7 @@ l8623h:
 	jr nc,l8649h
 	call sub_9a21h
 	ld a,00bh
-	call 050a6h
+	call play_sound
 	ld hl,0c441h
 	dec (hl)
 	jr nz,l8649h
@@ -1328,7 +1332,7 @@ l87d9h:
 	push bc
 	ld c,a
 	ld a,00eh
-	call 050a6h
+	call play_sound
 	ld a,c
 	pop bc
 	cp 002h
@@ -2178,7 +2182,7 @@ sub_8d30h:
 	ld a,(ix+004h)
 ; ---------------------------------------------------------------------------
 ;  collect_bonus (seg2 0x8D33) - apply a picked-up bonus whose id is in A.
-;  Entry sub_8d33h pushes the common tail 0x50A6; sub_8d37h is the bare entry
+;  Entry sub_8d33h pushes the common tail play_sound; sub_8d37h is the bare entry
 ;  (caller supplies its own continuation).  Latches the bonus id into 0xC419
 ;  (last-pickup latch, drives the pickup HUD/message) then dispatches through the
 ;  25-entry word table at 0x8D45 (index = A-1; A>=0x1A falls through to l8d77h):
@@ -2188,7 +2192,7 @@ sub_8d30h:
 ;  sub_9a72h) and the settled 0xC500 pickup list.
 ; ---------------------------------------------------------------------------
 collect_bonus:
-	ld hl,050a6h
+	ld hl,play_sound
 	push hl
 sub_8d37h:
 	ld (0c419h),a          ; latch last-collected bonus id
@@ -2541,7 +2545,7 @@ sub_8f6fh:
 l8f81h:
 	dec (hl)
 	ld a,011h
-	call 050a6h
+	call play_sound
 l8f87h:
 	xor a
 	pop hl
@@ -3246,12 +3250,12 @@ vendor_transition_tbl:
 	ret
 ; vendor outcome 3 (0x934B): GIVE Simon +5 hearts (sfx 0x0F)
 	ld a,00fh
-	call 050a6h
+	call play_sound
 	ld b,005h
 	jp add_hearts
 ; vendor outcome 4 (0x9355): TAKE 5 hearts from Simon (sfx 0x1D)
 	ld a,01dh
-	call 050a6h
+	call play_sound
 	ld b,005h
 	jp spend_hearts
 ; (vendor outcome 5 = the bare `ret` two lines above = do nothing)
@@ -3265,7 +3269,7 @@ vendor_transition_tbl:
 	ld l,(ix+008h)
 	ld (hl),000h
 	ld a,010h
-	call 050a6h
+	call play_sound
 	ld de,05000h
 	jp 044f3h              ; add_score += 5000 (departure bonus)
 sub_937fh:
@@ -3284,7 +3288,7 @@ vendor_make_offer:
 	ld a,014h
 	ld (0c706h),a          ; offer timer = 0x14; decremented in vendor_purchase_tick
 	ld a,019h
-	call 050a6h
+	call play_sound
 	jp l939eh
 l939eh:
 	ld a,(0c703h)
@@ -3524,7 +3528,7 @@ l94ceh:
 	pop af
 	call c,l939eh
 	ld a,012h
-	call 050a6h            ; purchase-confirmed jingle
+	call play_sound            ; purchase-confirmed jingle
 	call sub_9453h
 	inc hl
 	res 7,(hl)
@@ -3532,7 +3536,7 @@ l94ceh:
 	ret
 vendor_offer_withdraw:                        ; offer declined / expired / unaffordable
 	ld a,002h
-	call 050a6h
+	call play_sound
 	xor a
 	ret
 vendor_offer_pending:                        ; no button this frame -> leave offer pending
@@ -3635,7 +3639,7 @@ l9589h:
 	ld d,000h
 	call 04911h
 	ld a,019h
-	call 050a6h
+	call play_sound
 l95aah:
 	ld hl,0cf38h           ; advance map-screen state (0->1->2)
 	inc (hl)

@@ -1122,11 +1122,11 @@ sub_65b7h:
 	defw 065d3h            ; 0  init: seed the 0xC0D0 block (0x11 entries, 0x5F24)
 	defw 065e5h            ; 1  wait on 0xCE16, then re-run 0xAD9A
 	defw 065fah            ; 2  sub_6856h; arm frame timer 0xCE02 = 0x78
-	defw 06609h            ; 3  count 0xCE02 down; when 0 and 0xC800==0 -> 0x50A6(0)
-	defw 06620h            ; 4  0x50A6(0x88); 0xC418=0x80; falls into l662dh
+	defw 06609h            ; 3  count 0xCE02 down; when 0 and 0xC800==0 -> play_sound(0)
+	defw 06620h            ; 4  play_sound(0x88); 0xC418=0x80; falls into l662dh
 	defw 06645h            ; 5  sub_68cbh; when 0xCE36==2, arm 0xCE37 = 0xC0
 	defw 0665ch            ; 6  branch on 0xCE15 (two sub-flows)
-	defw 0667eh            ; 7  sub_68afh; when 0xCE36==0, 0x50A6(0x8D), timer 0xB4
+	defw 0667eh            ; 7  sub_68afh; when 0xCE36==0, play_sound(0x8D), timer 0xB4
 	defw 06693h            ; 8  count 0xCE02 down; then 0x6A03
 	defw 0669eh            ; 9  sub_6a15h; then 0x47B8/0x4805, timer = 8
 	defw 066b0h            ; 10 count down; then 0xCE00 = 0, 0xCE40 = 1 (done)
@@ -1168,11 +1168,11 @@ l6611h:
 	and a
 	ret nz                 ; first actor slot still busy -> stay
 	ld a,000h
-	call 050a6h            ; trigger action 0
+	call play_sound            ; trigger action 0
 	jp 0be44h
 ; --- CE01=4: (then fall through to l662dh) ---------------------------------
 	ld a,088h
-	call 050a6h            ; trigger action 0x88
+	call play_sound            ; trigger action 0x88
 	ld a,080h
 	ld (0c418h),a
 	call 045ech
@@ -1217,7 +1217,7 @@ l666eh:
 	and a
 	ret nz                 ; not done yet -> stay
 	ld a,08dh
-	call 050a6h            ; trigger action 0x8D
+	call play_sound            ; trigger action 0x8D
 	ld a,0b4h
 	ld (0ce02h),a          ; frame timer = 0xB4
 	jp 0be44h
@@ -1260,7 +1260,7 @@ sub_66c1h:
 	defw 066f8h            ; 3 (0xCE40=4) dwell, then end + bump level 0xD012
 ; --- CE40=1: kick off the script player ------------------------------------
 	ld a,08eh
-	call 050a6h            ; trigger action 0x8E
+	call play_sound            ; trigger action 0x8E
 	call sub_6719h         ; reset script-player state
 l66d8h:
 	ld hl,0ce40h
@@ -1331,7 +1331,7 @@ sub_673fh:
 ;  then looks up the current script (0xCE31) in script_ptr_6795.  Each script
 ;  is a list of {tick, action} keyframes; if the head keyframe's tick matches
 ;  0xCE33 it fires: action 0xFF ends the script (raise done flag 0xCE32, call
-;  0x50A6(0xFF)); otherwise it blits the payload row for this tick to 0xD8xx and
+;  play_sound(0xFF)); otherwise it blits the payload row for this tick to 0xD8xx and
 ;  steps to the next script (0xCE31++).  0x533D restores the original banks.
 sub_674ah:
 	di
@@ -1369,7 +1369,7 @@ l6788h:
 	ld a,001h
 	ld (0ce32h),a          ; raise "script finished" flag
 	ld a,0ffh
-	call 050a6h            ; trigger the end-of-script action
+	call play_sound            ; trigger the end-of-script action
 	jp 0533dh              ; restore banks and return
 l6795h:
 	jr nz,$-63
@@ -1882,7 +1882,7 @@ l6b2bh:
 ;   4 simon_fall       dropping off a ledge
 ;   5 simon_hurt       knockback / i-frames (0xC42D)
 ;   6 simon_dying      death / respawn
-;   7 l7102h           crouch-exit wait on 0xC42D (unconfirmed flavour)
+;   7 simon_portal_wait  on-pad crouch+UP: wait 0xC42D, then C41B=0xFF warp
 simon_action_tick:
 	call 0852bh
 	ld a,(0c420h)          ; Simon action state
@@ -1895,7 +1895,7 @@ simon_action_tbl:
 	defw simon_fall
 	defw simon_hurt
 	defw simon_dying
-	defw l7102h
+	defw simon_portal_wait
 simon_grounded:                ; 0 (0x6B59)
 	call sub_7b8fh
 	jr c,l6b64h
@@ -1918,12 +1918,12 @@ l6b6eh:
 	ld de,CHKRAM
 	ld (0c42eh),de         ; walk anim frames (legs, torso)
 	call simon_mirror_frames
-	ld a,(0c007h)          ; direction bits
+	ld a,(0c007h)          ; held: 0=UP 1=DOWN 2=LEFT 3=RIGHT
 	rra
 	jr c,l6be1h            ; UP -> maybe mount stairs
 l6b8ah:
 	rra
-	jp c,l6c17h
+	jp c,l6c17h            ; DOWN held -> crouch (or down-stairs)
 	rra
 	push af
 	call c,simon_walk_left
@@ -1931,7 +1931,7 @@ l6b8ah:
 	rra
 	call c,simon_walk_right
 	ld a,(0c006h)
-	and 020h
+	and 020h               ; UP new-press (jump; same bit as portal)
 	ret z
 	call sub_7b7fh
 	ret c
@@ -2165,7 +2165,7 @@ l6d37h:
 	and a
 	jr z,l6d42h
 	ld a,007h
-	call 050a6h
+	call play_sound
 l6d42h:
 	ld hl,0c425h
 	ld a,(hl)
@@ -2230,19 +2230,19 @@ jump_y_delta:                  ; (0x6D9B) signed dY per jump phase (21 bytes)
 	defb 0fah,0fah,0fah,0fbh,0fbh,000h,0fch,0fdh,0feh,0ffh
 	defb 000h,000h,001h,002h,003h,004h,005h,005h,006h,006h,006h
 simon_crouch:                  ; 2 (0x6DB0)
-	call 085fbh
-	jr nc,l6dcfh
+	call spot_proximity    ; carry = overlapping armed spot pad
+	jr nc,l6dcfh           ; off-pad -> normal crouch
 	ld a,(0c006h)
-	and 020h
-	jr z,l6dcfh
+	and 020h               ; UP new-press (same bit as jump)
+	jr z,l6dcfh            ; still holding DOWN only
 	ld a,007h
-	ld (0c420h),a
+	ld (0c420h),a          ; portal wind-up
 	xor a
 	ld (0c421h),a
 	ld a,040h
-	ld (0c42dh),a
+	ld (0c42dh),a          ; flash/wait timer
 	ld a,015h
-	jp 050a6h
+	jp play_sound          ; sfx 0x15 (flash)
 l6dcfh:
 	ld a,(0c439h)
 	and a
@@ -2253,7 +2253,7 @@ l6dcfh:
 	ld a,(0c007h)
 	rra
 	rra
-	ret c
+	ret c                  ; DOWN still held -> stay crouched
 	jp l6efch
 simon_stairs:                  ; 3 (0x6DE4)
 	ld a,(0c422h)
@@ -2474,7 +2474,7 @@ l6f71h:
 	ld (0c420h),a
 	ld (0c421h),a
 	ld a,007h
-	jp 050a6h
+	jp play_sound
 l6f88h:
 	defb 002h,004h,006h,006h   ; fall dY
 simon_hurt:                    ; 5 (0x6F8C)
@@ -2488,7 +2488,7 @@ l6f9ah:
 	ld a,(0c002h)
 	and 040h
 	ld a,013h
-	call nz,050a6h
+	call nz,play_sound
 	ld a,05ah
 	ld (0c42dh),a          ; arm state timer (0xC42D); in hurt = i-frame/blink
 	ld a,(0c42bh)
@@ -2624,9 +2624,9 @@ l70a0h:
 	ld a,001h
 	ld (0c421h),a
 	ld a,000h
-	call 050a6h
+	call play_sound
 	ld a,089h
-	jp 050a6h
+	jp play_sound
 l70b6h:
 	ld hl,0c428h
 	dec (hl)
@@ -2662,15 +2662,15 @@ sub_70e3h:
 	ld (0c702h),a
 	ld (0c700h),a
 	ret
-l7102h:                        ; 7 (0x7102) wait 0xC42D then return to grounded
+simon_portal_wait:             ; 7 (0x7102) pad crouch+UP: wait, then warp
 	ld a,(0c42dh)
 	and a
 	ret nz
 	xor a
-	ld (0c420h),a
+	ld (0c420h),a          ; back to grounded
 	ld (0c43dh),a
 	ld a,0ffh
-	ld (0c41bh),a
+	ld (0c41bh),a          ; conn_from_spot: D001 = C5B4
 	ret
 ; simon_attack_tick (0x7114): try start a whip (SPACE), tick the phase, emit sprites.
 simon_attack_tick:
@@ -2679,7 +2679,7 @@ simon_attack_tick:
 	jp l72b9h
 sub_711dh:
 	ld a,(0c006h)
-	and 010h
+	and 010h               ; SPACE/trig new-press
 	jr z,l713dh
 	ld hl,0c422h
 	ld a,(hl)
@@ -2751,7 +2751,7 @@ l718eh:
 	ld hl,0d010h
 	set 0,(hl)
 	ld a,0fbh
-	jp 050a6h
+	jp play_sound
 l719bh:
 	ld a,(0c461h)
 	and a
@@ -2833,7 +2833,7 @@ l7224h:
 	ld (0c42fh),a
 	call simon_mirror_frames
 	ld a,005h
-	call 050a6h
+	call play_sound
 	jr l7242h
 l7231h:
 	call 0559ah
@@ -2944,7 +2944,7 @@ sub_72d5h:
 	and 007h
 	jr nz,l72ffh
 	ld a,003h
-	call 050a6h
+	call play_sound
 l72ffh:
 	ld a,(ix+000h)
 	dec a
@@ -3084,7 +3084,7 @@ l7404h:
 	ld (ix+003h),a
 	ld (ix+007h),a
 	ld a,018h
-	jp 050a6h
+	jp play_sound
 l7420h:
 	ld a,(0c003h)
 	and 004h
@@ -3127,7 +3127,7 @@ l7466h:
 	ld (ix+005h),a
 	inc (ix+000h)
 	ld a,004h
-	jp 050a6h
+	jp play_sound
 	ld a,(0c003h)
 	ld c,a
 	rra
@@ -3141,7 +3141,7 @@ l7466h:
 	and 007h
 	jr nz,l7493h
 	ld a,006h
-	call 050a6h
+	call play_sound
 l7493h:
 	ld hl,0c433h
 	ld a,(hl)
@@ -3317,7 +3317,7 @@ l75beh:
 ; Per-frame countdown bank: decrement each of these timers toward 0 (clamped).
 ;   0xC440 - enemy-spawn suppression (rosary / weapon-pickup grace); while nonzero
 ;            room_spawner (seg0 0x5EBF) spawns nothing.
-;   0xC434 / 0xC42D - other short-lived per-frame timers.
+;   0xC434 / 0xC42D - per-frame timers (C42D = i-frames, also portal wind-up).
 sub_75c7h:
 	ld hl,0c440h
 	call sub_75d6h
@@ -3351,7 +3351,7 @@ sub_75e9h:
 	cp 010h
 	ret nz
 	ld a,017h
-	jp 050a6h
+	jp play_sound
 sub_75f9h:
 	ld hl,0c43bh
 	ld a,(hl)
@@ -3362,7 +3362,7 @@ sub_75f9h:
 	ld hl,0d010h
 	res 0,(hl)
 	ld a,0fch
-	jp 050a6h
+	jp play_sound
 sub_760bh:
 	ld hl,0c43eh
 	ld a,(hl)
@@ -3516,7 +3516,7 @@ l76c3h:                        ; past the bottom edge
 	ret
 l76eah:
 	ld a,009h
-	jp 050a6h
+	jp play_sound
 l76efh:                        ; room below exists -> down transition
 	ld a,030h
 	ld (de),a              ; wrap Y to top of the new (lower) room
@@ -3604,16 +3604,16 @@ l774ah:
 	and a
 	jr z,l776fh
 	ld a,0ffh
-	call 050a6h
+	call play_sound
 l776fh:
 	ld a,(hl)
 	cp 005h
 	jr z,l7779h
 	ld a,01ah
-	jp 050a6h
+	jp play_sound
 l7779h:
 	ld a,015h
-	jp 050a6h
+	jp play_sound
 l777eh:
 	nop
 	nop
@@ -3691,7 +3691,7 @@ l77f3h:
 	jr nz,l7804h
 	ld a,086h
 l7804h:
-	jp 050a6h              ; queue the room-transition action
+	jp play_sound              ; queue the room-transition action
 ; set_stage_boundary (seg1 0x7807): walking a BLOCKED left/right edge after the
 ; door is open.  0xC408 is later seen by the frame dispatcher (seg0 0x424xh)
 ; which calls 0x438B (clears 0xC701 bit0 if still set) and advance_stage.
@@ -3920,7 +3920,7 @@ l796ch:
 	ld hl,l7979h
 	call ADD_HL_A
 	ld a,(hl)
-	jp 050a6h
+	jp play_sound
 l7979h:
 	add a,b
 	add a,b
@@ -4726,7 +4726,7 @@ l7dd3h:
 	ret
 l7ddbh:
 	ld a,00ch
-	call 050a6h
+	call play_sound
 	res 0,(ix+00eh)
 	ld a,(ix+000h)
 	sub 011h
@@ -4764,7 +4764,7 @@ l7e1eh:
 	ld a,014h
 	ld (0c445h),a
 	ld a,01ch
-	call 050a6h
+	call play_sound
 	call 081b2h
 	ld a,001h
 	ld (0ce15h),a
@@ -4859,7 +4859,7 @@ l7eb7h:
 	call 081b2h
 	call 09a45h
 	ld a,00dh
-	jp 050a6h
+	jp play_sound
 l7ec8h:
 	ld a,005h
 	ld (0c420h),a
@@ -4950,7 +4950,7 @@ l7f5ch:
 	call 08277h
 	jr nc,l7f77h
 	ld a,00ch
-	call 050a6h
+	call play_sound
 	call 08231h
 	call 09a21h
 l7f77h:
@@ -4978,7 +4978,7 @@ l7f8fh:
 	pop bc
 	jr nc,l7fb6h
 	ld a,00ch
-	call 050a6h
+	call play_sound
 	ld a,(iy+001h)
 	cp 002h
 	push iy
@@ -5015,7 +5015,7 @@ l7fc9h:
 	dec l
 	dec l
 	ld a,00ch
-	call 050a6h
+	call play_sound
 l7fe2h:
 	ld a,010h
 	add a,l

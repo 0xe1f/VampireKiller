@@ -52,6 +52,13 @@ advance_stage, else wrap to that room (intra-stage on 3,6,9,12,15,18).  Default
 overlay is that table; door_rects() (blocked-edge heuristic) is only for
 --compare-doors.  Display-type 0x1F objects are vendors, not these doors.
 
+Stage-12 spots (teal 2x2 pad on the floor + dest digit beside it; --no-spots
+to skip): seg13 spot_tbl at 0xBBCD, records (stage, dest<<4|room, Y, X) until
+0xFF.  Current ROM has 10 records, all stage 12, in two-way pairs (0↔3, 1↔4,
+2↔11, 5↔8, 7↔10).  CONN has no up/down on this stage; crouch-on-pad then UP
+warps via C41B=0xFF.  Stored Y is the floor BODY; the overlay snaps up to sit
+on the walkable surface (empty tiles immediately above).  Decoder is generic.
+
 Output: one minimap per stage, gfx/minimap_s<NN>.png (default permeability view;
 --collision/--visual add a _coll/_vis suffix), for all 19 stages 0..18.  Rooms are
 placed SPATIALLY using the GAME'S OWN hand-authored F2-minimap position table
@@ -66,6 +73,7 @@ Usage:
   tools/roomperm.py [--rom references/VampireKiller.rom] [--row 1 | --all]
                     [--scale 6] [--out-dir gfx] [--collision | --visual]
                     [--validate generated/disasmsnap.bin] [--ascii]
+                    [--no-doors] [--no-spots] [--compare-doors]
 """
 import argparse, os
 
@@ -194,6 +202,7 @@ EMPTY_RGB = (12, 12, 16)
 STAIR_RGB = (240, 170, 40)      # climbable stairs (06/0c)
 DOOR_RGB = (220, 40, 40)        # white-key (stage-exit) door
 DOOR_W = 2                      # rendered door width in tiles (edge wall thickness)
+SPOT_RGB = (64, 186, 176)       # teal pad + dest digit (not door red, not stair amber)
 
 def tile_rgb(grid, r, c, row, mode, room=None):
     ov = PERM_OVERRIDE.get((row, room)) if room is not None and mode == "perm" else None
@@ -292,8 +301,23 @@ def decode_objects(rom, row, col):
 OBJ_DOOR_RGB = (220, 40, 40)    # id-0x1f object = door candidate (mechanism B)
 OBJ_OTHER_RGB = (70, 120, 210)  # any other placed object (dimmed context)
 
+def blit_rects(buf, W, rows, scale, top, rects, rgb):
+    """Paint axis-aligned tile rects (dx, dy, dw, dh, ...) in the cropped room."""
+    for item in rects or []:
+        dx, dy, dw, dh = item[:4]
+        for ty in range(dy - top, dy - top + dh):
+            if not 0 <= ty < rows:
+                continue
+            for yy in range(scale):
+                for tx in range(dx, dx + dw):
+                    if not 0 <= tx < COLS:
+                        continue
+                    o = ((ty * scale + yy) * W + tx * scale) * 3
+                    for xx in range(scale):
+                        buf[o:o + 3] = bytes(rgb); o += 3
+
 def render(grid, row, scale, mode, top=PLAY_TOP, doors=None, objects=None,
-           room=None):
+           room=None, spots=None):
     from pngwrite import write_rgb
     rows = ROWS - top
     W, H = COLS * scale, rows * scale
@@ -305,15 +329,21 @@ def render(grid, row, scale, mode, top=PLAY_TOP, doors=None, objects=None,
                 o = ((r * scale + yy) * W + c * scale) * 3
                 for xx in range(scale):
                     buf[o:o + 3] = bytes(col); o += 3
-    for (dx, dy, dw, dh) in doors or []:
-        for ty in range(dy - top, dy - top + dh):
-            if not 0 <= ty < rows:
-                continue
-            for yy in range(scale):
-                for tx in range(dx, dx + dw):
-                    o = ((ty * scale + yy) * W + tx * scale) * 3
-                    for xx in range(scale):
-                        buf[o:o + 3] = bytes(DOOR_RGB); o += 3
+    blit_rects(buf, W, rows, scale, top, doors, DOOR_RGB)
+    blit_rects(buf, W, rows, scale, top, spots, SPOT_RGB)
+    dscale = max(1, scale // 3)
+    for item in spots or []:
+        dx, dy, dw, dh, dest = item
+        text = str(dest)
+        th = 5 * dscale
+        tw = len(text) * 4 * dscale - dscale
+        pad_y = (dy - top) * scale
+        y0 = pad_y + max(0, (dh * scale - th) // 2)
+        x0 = (dx + dw) * scale + dscale
+        if x0 + tw > W:
+            x0 = dx * scale - tw - dscale
+        if 0 <= y0 < H and x0 + tw > 0:
+            draw_text(buf, W, max(0, x0), y0, text, dscale, SPOT_RGB)
     # Mechanism-B overlay: outline each placed object at its cell; a door (0x1f)
     # is filled red, everything else is a dim blue outline for context.
     for (sid, scenery, ox, oy) in objects or []:
@@ -400,6 +430,53 @@ def door_table_rects(entry, room):
     if entry["x"] > 0xD0:
         return [(COLS - DOOR_W, y0, DOOR_W, h)]
     return [(entry["x"] // 8, y0, DOOR_W, h)]
+
+# --- Spot / portal pads (seg13, bank 0x0D @ CPU 0xA000) ----------------------
+# spot_load_coords (0xBB9A): scan until 0xFF for (D000, D001).  On match arms
+# C5B1=1, stores Y,X at C5B2/C5B3, dest nibble at C5B4.  Play-verified: crouch
+# on the pad then UP -> simon_portal_wait -> C41B=0xFF -> conn_from_spot.
+SPOT_TBL = 0xBBCD
+
+def parse_spots(rom):
+    """spot_tbl: (stage, dest<<4|room, Y, X) records until 0xFF."""
+    out = []
+    addr = SPOT_TBL
+    for _ in range(64):
+        stage = rom.read(addr)[0]
+        if stage == 0xFF:
+            break
+        packed, y, x = rom.read(addr + 1, 3)
+        out.append({
+            "stage": stage,
+            "room": packed & 0x0F,
+            "dest": packed >> 4,
+            "y": y,
+            "x": x,
+        })
+        addr += 4
+    return out
+
+def spot_floor_row(grid, stage, room, tx, ty, mode="perm"):
+    """Topmost solid tile at/below the stored pad Y.  spot_tbl Y is the floor
+    BODY; the walkable surface is the 01/02 row immediately above it."""
+    for r in range(max(PLAY_TOP, ty - 4), ROWS):
+        if 0 <= tx < COLS and is_solid_ctx(grid, r, tx, stage, mode, room):
+            return r
+    return ty
+
+def spot_table_rects(spots, stage, room, grid, mode="perm"):
+    """2x2 pad sitting on the floor (empty tiles immediately above the surface)
+    plus dest room.  Snaps up from the stored body Y so the marker is not in
+    the void under the platform."""
+    out = []
+    for s in spots:
+        if s["stage"] != stage or s["room"] != room:
+            continue
+        tx = s["x"] // 8
+        surf = spot_floor_row(grid, stage, room, tx, s["y"] // 8, mode)
+        dy = max(PLAY_TOP, surf - 2)
+        out.append((tx, dy, 2, 2, s["dest"]))
+    return out
 
 # --- Minimap layout table: the GAME'S OWN authored room positions -------------
 # The in-game F2 minimap (seg2 sub_9681h, 0x9681) draws each room at a HAND-
@@ -494,11 +571,12 @@ def ascii_grid(grid, row, mode, top=PLAY_TOP, room=None):
                      for r in range(top, ROWS))
 
 def render_stage(rom, row, scale, mode, tag, out_dir, ascii_dump=False,
-                 show_doors=True, door_model="table"):
+                 show_doors=True, door_model="table", show_spots=True):
     from pngwrite import write_rgb
     n = minimap_room_count(rom, row)
     conn = connectivity(rom, row, n)
     entry = door_table_entry(rom, row)
+    spots = parse_spots(rom) if show_spots else []
     images = []
     for col in range(n):
         grid = decode_room(rom, row, col)
@@ -511,8 +589,9 @@ def render_stage(rom, row, scale, mode, tag, out_dir, ascii_dump=False,
             objects = decode_objects(rom, row, col)
         else:                                       # default: ROM door_tbl
             doors = door_table_rects(entry, col)
+        pad = spot_table_rects(spots, row, col, grid, mode) if show_spots else None
         images.append(render(grid, row, scale, mode, doors=doors, objects=objects,
-                             room=col))
+                             room=col, spots=pad))
         if ascii_dump:
             print(f"row {row} room {col}:")
             print(ascii_grid(grid, row, mode, room=col)); print()
@@ -542,6 +621,8 @@ def main():
     ap.add_argument("--ascii", action="store_true")
     ap.add_argument("--no-doors", action="store_true",
                     help="skip the white-key door overlay")
+    ap.add_argument("--no-spots", action="store_true",
+                    help="skip the stage-12 spot/portal pad overlay")
     ap.add_argument("--compare-doors", action="store_true",
                     help="also emit _doorA (blocked-edge heuristic) and _doorB "
                          "(placed objects, not doors) sheets per stage")
@@ -555,12 +636,12 @@ def main():
     rows = minimap_stages(rom) if a.all else [a.row]
     for row in rows:
         render_stage(rom, row, a.scale, mode, tag, a.out_dir, a.ascii,
-                     not a.no_doors)
+                     not a.no_doors, show_spots=not a.no_spots)
         if a.compare_doors:
             render_stage(rom, row, a.scale, mode, tag, a.out_dir, False,
-                         True, door_model="edge")
+                         True, door_model="edge", show_spots=False)
             render_stage(rom, row, a.scale, mode, tag, a.out_dir, False,
-                         True, door_model="object")
+                         True, door_model="object", show_spots=False)
 
     if a.validate:
         import snapdiff as sd

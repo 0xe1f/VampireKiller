@@ -191,7 +191,7 @@ record = **4 nibbles: up, down, left, right** = the DESTINATION room index for
 that exit (`0xF` = blocked). On an edge/stair transition the engine looks this up
 (seg13 0xB963/0xB9BD) and writes the result to 0xD001 (**seg13 0xB987**); the
 per-frame edge/stair detector `sub_7682h` (seg1 0x7682) sets the pending-exit
-direction in 0xC41B (1=up,2=down,3=left,4=right), and the four RAM permit bytes
+direction in 0xC41B (1=up,2=down,3=left,4=right; **0xFF** = spot/portal warp), and the four RAM permit bytes
 0xC41C-0xC41F are loaded from the same nibbles (seg13 0xB99A). Stage advance
 (0xD000++, 0xD001=0) is separate: `advance_stage` (seg0 0x434E), reached via the
 white-key door (0xC409) or the castle-boundary flag (0xC408). `0xD000` is never
@@ -215,9 +215,15 @@ changed by the connectivity path - vertical moves stay within the stage.
 list of `(stage, dest<<4|room, Y, X)`. The current ROM has 10 records, all stage
 12, in two-way pairs (0↔3, 1↔4, 2↔11, 5↔8, 7↔10). A match arms **0xC5B1=1**,
 stores Y/X at **0xC5B2/C5B3** (same L=Y H=X as the door), and the dest nibble at
-**0xC5B4**. `conn_lookup` writes C5B4 to 0xD001 when pending dir **0xC41B == 0xFF**
-(written by action-state 7 / `l7102h`). The table decode is byte-exact; the
-gameplay trigger (when C41B becomes 0xFF on those tiles) is not yet play-verified.
+**0xC5B4**. Play-verified: crouch **on the pad** (DOWN), then UP (0xC006 bit 5,
+same bit as jump). `simon_crouch` (0x6DB0) calls `spot_proximity` (seg2 0x85FB);
+on carry + UP it enters action state 7 (`simon_portal_wait` 0x7102), queues
+effect 0x15 via `play_sound` (the flash), waits **0xC42D = 0x40**, then writes
+**0xC41B = 0xFF**. `conn_lookup` / `conn_from_spot` then set 0xD001 from C5B4.
+Trace (room 0 pad Y/X = A8/58): crouch → state 7 → C41B=FF → D001=3; room 3
+re-arms the return pad with dest 0. Off-pad crouch never takes this path.
+`tools/roomperm.py` overlays each pad as a teal 2×2 sitting on the floor, with
+the dest-room digit in the same colour beside it (`--no-spots` to skip).
 
 ## Player (Simon)
 
@@ -235,9 +241,17 @@ gameplay trigger (when C41B becomes 0xFF on those tiles) is not yet play-verifie
 | 4 | `simon_fall` 0x6F44 | **falling / dropping** off a ledge |
 | 5 | `simon_hurt` 0x6F8C | hurt / knockback (shallow airborne launch — not a jump) |
 | 6 | `simon_dying` 0x709A | dying / respawn (enemy spawner is suppressed while ==6) |
-| 7 | `l7102h` 0x7102 | wait out 0xC42D (entered from crouch) then return to grounded |
+| 7 | `simon_portal_wait` 0x7102 | pad crouch+UP wind-up: wait 0xC42D, then C41B=0xFF warp |
 
 `0xC423` tracks the air sub-phase during jumps/falls (e.g. 2→1 rising→falling).
+
+### Input (RAM 0xC006 / 0xC007)
+
+`read_buttons` (seg0 0x4BC2) samples the joystick (PSG port A) and keyboard row 8
+(arrows + SPACE). `input_edge` (0x4BBB) latches the held mask at **0xC007** and
+the rising edge at **0xC006**. Bits: 0=UP, 1=DOWN, 2=LEFT, 3=RIGHT, 4=SPACE/trig
+(whip), 5=UP (jump and portal new-press). Crouch is DOWN *held* (C007 bit 1);
+jump/portal is UP *new-press* (C006 bit 5).
 
 ### Score (RAM 0xC405–0xC407)
 
@@ -658,8 +672,9 @@ record used by the entity dispatch at 0x5FD0 / `entity_tbl`).
 
 ## Open questions to resolve in code
 
-- Input read path (keyboard SPACE vs joystick trigger) and where the
-  title→game vs title→attract branch is decided.
+- Input poller is `read_buttons` (0xC007 held / 0xC006 new-press). Remaining:
+  title→game vs title→attract branch, and keyboard SPACE vs joystick trigger at
+  the title (`l4398h` tests bits 4 and 5).
 - State machine for logo → title → attract → intro → play → boss → next level.
 - Weapon/sub-item inventory representation in RAM.
 - Heart counter and vendor transaction logic.

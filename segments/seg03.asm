@@ -678,7 +678,7 @@ sub_a4efh:
 	cp 006h
 	ret z
 	ld a,c
-	jp 050a6h
+	jp play_sound
 la4fah:
 	djnz la51ch
 	jr $+50
@@ -2968,12 +2968,12 @@ lb6efh:
 	ld a,090h
 	ld (0ce02h),a
 	ld a,08ch
-	jp 050a6h
+	jp play_sound
 lb72ch:
 	ld a,000h
-	call 050a6h
+	call play_sound
 	ld a,08ch
-	call 050a6h
+	call play_sound
 	ld a,096h
 	ld (0ce02h),a
 	jr lb6efh
@@ -2984,7 +2984,7 @@ lb72ch:
 	cp 020h
 	jr nc,lb751h
 	ld a,001h
-	call 050a6h
+	call play_sound
 	jp 04658h
 lb751h:
 	ld a,03ch

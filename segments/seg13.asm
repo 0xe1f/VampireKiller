@@ -53,8 +53,9 @@ intro_sky:                     ; (seg13 0xB895) loaded to VRAM 0xFA00
 ;  Pending dir 0xC41B is 1=up 2=down 3=left 4=right (from sub_7682h / l77d8h).
 ;  Looks up conn_ptr[stage][room], picks the matching nibble, writes 0xD001.
 ;  0xF = blocked -> return without carry (state_room_trans treats that as death).
-;  0xC41B == 0xFF (written by action-state 7 / l7102h) skips the nibble and
-;  writes 0xD001 from 0xC5B4 (filled by spot_load_coords).
+;  0xC41B == 0xFF (simon_portal_wait after crouch+UP on a pad) skips the
+;  nibble and writes 0xD001 from 0xC5B4 (filled by spot_load_coords).
+;  state_play treats any nonzero C41B as a pending exit (1-4 or 0xFF).
 ; ---------------------------------------------------------------------------
 conn_lookup:
 	ld a,(0c41bh)
@@ -453,7 +454,7 @@ spot_found:
 	ld l,a
 	ld (0c5b2h),hl         ; C5B2=Y, C5B3=X
 	ld a,001h
-	ld (0c5b1h),a          ; armed (seg2 proximity at 0x85xx tests this)
+	ld (0c5b1h),a          ; armed (spot_proximity tests this)
 	ld a,c
 	rrca
 	rrca

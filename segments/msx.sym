@@ -146,7 +146,10 @@ hurt_simon_projectile: equ 0x85ad	; Simon -= 8/16 from a 0xC580 hazard slot, set
 weapon_hit_damage: equ 0x7e33	; whip/sub-weapon damage to enemy 0xC418 (per weapon+type table)
 advance_stage: equ 0x434e	; next stage: 0xD000++ (stage), 0xD001=0 (room), bump 0xC410/11, transition 4
 room_map_build: equ 0x4fb6	; expand a room's 8x6 metatiles (4x4 tiles ea) into the 0xD100 tile map
+read_buttons: equ 0x4bc2	; joystick|kbd row 8 -> A; play latches C007 held / C006 new-press
+input_edge: equ 0x4bbb	; A=sample, (HL)=held, (HL-1)=rising-edge bits
 read_fkeys: equ 0x4bfb	; sample kbd row 6 -> bit0=F1,bit1=F2,bit2=F3 (edge-detected into 0xC00B)
+play_sound: equ 0x50a6	; A=id: 0=stop, 1-7F sfx, 80-FA music, FB-FF special
 room_spawner: equ 0x5ebf	; per-frame enemy spawner; per-room bitmask (seg14 0x85a6[stage]) dispatches generators; bails while 0xC440 != 0
 zombie_generator: equ 0x9ced	; room_spawner bit0: rate-gated zombie (actor type 01) spawner
 spawn_actor: equ 0x5f24	; alloc a free actor slot (7 @ 0xC800, stride 0x80) + init
@@ -163,11 +166,12 @@ simon_walk_right: equ 0x6c5a	; face right, try +X
 simon_add_x: equ 0x6c9b	; C426 += BC
 simon_jump_tick: equ 0x6cc7	; C420=1 jump; C421 picks direction
 simon_jump_arc: equ 0x6cee	; step C428 through jump_y_delta
-simon_crouch: equ 0x6db0	; C420=2
+simon_crouch: equ 0x6db0	; C420=2; on-pad + UP new-press -> portal wind-up
 simon_stairs: equ 0x6de4	; C420=3
 simon_fall: equ 0x6f44	; C420=4
 simon_hurt: equ 0x6f8c	; C420=5
 simon_dying: equ 0x709a	; C420=6
+simon_portal_wait: equ 0x7102	; C420=7: wait C42D after crouch+UP on pad, then C41B=0xFF
 simon_attack_tick: equ 0x7114	; try/start whip + tick + emit SAT
 whip_tick: equ 0x71e7	; dispatch 0xC422 whip phase
 whip_slots_clear: equ 0x751a	; zero 0xC450 whip slots + hide SAT
@@ -229,6 +233,7 @@ door_load_coords: equ 0xBB37	; if D001 == door_tbl[D000].room, write C5AD=Y,C5AE
 door_tbl: equ 0xBB61		; 19x3: (room | vert<<7), Y->C5AD, X->C5AE. Room = low nibble.
 spot_load_coords: equ 0xBB9A	; scan spot_tbl; arm C5B1, Y/X at C5B2, dest nibble at C5B4
 spot_tbl: equ 0xBBCD		; (stage, dest<<4|room, Y, X) 0xFF-ended; currently stage 12
+spot_proximity: equ 0x85FB	; carry if Simon overlaps armed spot (C5B1/Y/X)
 
 ; ---- Vampire Killer resident paged-call wrappers (segment 0) -------------
 conn_lookup_paged: equ 0x5A35	; page seg13, conn_lookup, restore

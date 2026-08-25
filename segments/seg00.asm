@@ -2438,14 +2438,14 @@ l4fa3h:
 ;  In: HL = dest (0xD100), B = world row (0xD000), C = column (0xD001).
 ;  A room = 8 wide x 6 tall METATILES; each metatile = 4x4 tile ids (16 bytes).
 ;  The build pages the map-data banks into the upper windows (mapper regs at
-;  0x6000/0x8000/0xA000; entity_tbl_end is the 0x6000 register at seg0's end),
+;  0x6000/0x8000/0xA000; entity_tbl_end is the 0x6000 mapper write).
 ;  then for the normal case (0xC41A==0):
-;    stream ptr = word[ 0x6013 + 2*(rowbase[row] + col) ]   (bank 0x0b @ 0x6000)
-;       where rowbase[] is the byte table at 0x6000; stream = 48 metatile ids
-;       (row-major, 8x6).  rooms-in-row = rowbase[row+1]-rowbase[row].
-;    def base  = word[ 0x7ebb + 2*row ]  (per-row metatile defs; row 1 -> 0x80b1
-;       in bank 0x0c @ 0x8000).  def(id) = 16 bytes at defbase + id*16.
-;  (0xC41A!=0 uses a fixed stream at 0x614b and def base 0xA041 in bank 0x0d.)
+;    stream ptr = mtile_roomptr[ mtile_rowbase[row] + col ]  (seg11 @ 0x6000)
+;       stream = 48 metatile ids (row-major, 8x6).
+;       rooms-in-row = rowbase[row+1]-rowbase[row] (stage 18: use minimap count).
+;    def base  = mtile_defbase[row]  (seg11 0x7EBB; row 1 -> mtile_defs_s01
+;       at 0x80B1 in seg12).  def(id) = 16 bytes at defbase + id*16.
+;  (0xC41A!=0 uses mtile_stream_c41a and mtile_def_c41a in seg13.)
 ;  The 16 def bytes are copied as a 4x4 block (4 tiles, +0x20 to next map row).
 ;  Banks are restored (0x6000/0x8000/0xA000 <- 1/2/3) before returning.
 ;  See tools/roomperm.py for a byte-exact reimplementation of this decoder.
@@ -2467,11 +2467,11 @@ room_map_build:
 	ld (hl),a
 	ei
 	ld a,(0c41ah)
-	ld hl,0614bh
+	ld hl,mtile_stream_c41a
 	and a
 	jr nz,l4ff7h
 	ld a,(0c5d8h)
-	ld hl,entity_tbl_end
+	ld hl,mtile_rowbase
 	call ADD_HL_A
 	ld l,(hl)
 	ld a,(0c5d7h)
@@ -2479,7 +2479,7 @@ room_map_build:
 	ld h,000h
 	ld l,a
 	add hl,hl
-	ld de,06013h
+	ld de,mtile_roomptr
 	add hl,de
 	ld e,(hl)
 	inc hl
@@ -2498,11 +2498,11 @@ l5000h:
 	push af
 	ld a,(0c41ah)
 	and a
-	ld bc,0a041h
+	ld bc,mtile_def_c41a
 	jr nz,l501ah
 	ld a,(0c5d8h)
 	add a,a
-	ld hl,07ebbh
+	ld hl,mtile_defbase
 	call ADD_HL_A
 	ld c,(hl)
 	inc hl
@@ -3138,7 +3138,7 @@ l548ch:
 	ld de,0a800h
 	ld b,014h
 	call l4a97h
-	ld hl,09a00h
+	ld hl,09a00h           ; potion bottle (bonus id 22) -> VRAM (X=80,Y=96)
 	ld de,0b028h
 	ld b,001h
 	call l4a97h

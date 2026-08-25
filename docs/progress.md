@@ -14,7 +14,8 @@ reversed" placeholder: each segment graduates incbin -> annotated disassembly (c
 or extracted data assets (graphics/tables) as it's understood, always keeping
 `make verify` byte-exact. Postponed for now - we reverse segments incrementally
 (seg0 done, seg1 largely done, seg2/seg3/seg13 imported as disassembly and being
-annotated; seg4-12 and seg14-15 still INCBIN) rather than mass-converting bins to
+annotated; seg11/12 graduated as map-data source; seg4-10 and seg14-15 still
+INCBIN) rather than mass-converting bins to
 opaque `db` dumps.
 
 ## Done
@@ -194,11 +195,11 @@ opaque `db` dumps.
     that sat below 0xC420, plus the destructible-wall / pickup-actor mechanism:
     * **0xC417 = heart counter** - incremented 0x14 -> 0x15 exactly on the small-heart
       pickup (frame 501).  Confirmed BCD (seg0 0x834 already labelled it "packed BCD";
-      the spend path seg1 sub_7166h/0x7176 does `sub 5 / daa`), so 0x15 = "15" hearts.
+      the spend path seg1 hourglass_use/0x7176 does `sub 5 / daa`), so 0x15 = "15" hearts.
     * **0xC700-0xC70F = inventory / item block** (NOT a single flag).  0xC701 is an
       item *bitfield*: bit 0 = white key (0 -> 1 on the key pickup, frame 414); other
       bits are sub-weapons that cost hearts (seg1 l713dh shifts 0xC701 and does
-      `call c,spend_5_hearts` on bit 3 / `call c,sub_7166h` on bit 6); bit 7 is a
+      `call c,holy_water_use` on bit 3 / `call c,hourglass_use` on bit 6); bit 7 is a
       timed item (seg2 0x95C0-area counts 0xC70F down then `res 7,(0xC701)`).  The
       per-life reset sub_70e3h (seg1 0x70E3) keeps only bit 7 (`and 0x80`), so the
       white key etc. are lost on death but the bit-7 item persists.  Other bytes seen:
@@ -238,14 +239,18 @@ opaque `db` dumps.
       A -> 0xC419, then `DISPATCH_A` through a 25-entry word table at 0x8D45 (index
       A-1). Confirmed entries: **value 1 = small heart (+1)**, **value 2 = large
       heart (+5)** (both `call add_hearts` with B=1/5), health refills via
-      restore_health (+8/+32), keys/sub-weapons OR a bit into 0xC701/0xC702.
+      restore_health (7 small life orb +8 / 22 potion bottle +32; vendor 0x16, not the boss-clear orb), keys/sub-weapons OR a bit into 0xC701/0xC702.
       Reached from BOTH pickup paths: the mid-air 0x24 heart (seg2 sub_9a72h ->
       collect_bonus(1)) and the settled 0xC500 list (collision -> collect).
     * **add_hearts (seg0 0x459B)** / **spend_hearts (0x45A7)** now labelled: BCD add
       (clamp 99) / subtract (floor 0) on 0xC417; heart counter confirmed BCD again
       (small +1 gave 00->01->02, no binary carry weirdness).
-    * NEXT: decode the rest of the collect_bonus table (values 3-25: which are keys,
-      staff, sub-weapons, invincibility) and the 0x24->0x84 landing/convert routine.
+    * NEXT (partially done in twenty-eighth): `collect_bonus_tbl` is `defw`.
+      3-5/8-14 named from domain + code (red/yellow shield, white cross, blue
+      gem, sapphire ring, hourglass, boots, wings, candle).  Id 11 is a
+      **tipped hourglass** (whip the id-10 world pickup once — `l8c4bh`;
+      write-up in `docs/game-notes.md`). C431 bit2 lengthens 6/8/9/10.  Also the
+      0x24->0x84 landing path.
 
 - Eighth session (LOCATION / WORLD STRUCTURE - walk right through courtyard rooms
   0,1,2 then enter the castle), F8 timeline (baseline frame 275). Pins the
@@ -282,9 +287,11 @@ opaque `db` dumps.
       D000 stage, D001 room) so each captured action is tagged with its location;
       re-check after any room/stage change before comparing actor/object slots.
     * NEXT to fully rebuild stages "with room relations": (1) ~~disassemble seg13~~
-      (done: conn_lookup / door_tbl / spot_tbl in `segments/seg13.asm`); (2) map
-      per-room background bitmaps for actual geometry; (3) name the object ids
-      (0x0d/0x10 common scenery, 0x05 dog, ...).
+      (done: conn_lookup / door_tbl / spot_tbl in `segments/seg13.asm`); (2) ~~map
+      per-room background bitmaps for actual geometry~~ (done: `roomperm.py` +
+      `mtile_*` tables in seg11/12); (3) name the object ids
+      (`collect_bonus_tbl` annotated; seg14 list-ids 0x0d/0x10 scenery, 0x05 dog
+      still want a sprite catalogue).
 
 - Ninth session (dog hits Simon -> knocked back across a room boundary), F8 timeline
   (frames ~628-732). Two useful results:
@@ -303,7 +310,8 @@ opaque `db` dumps.
     * **0xC416 = equipped weapon id**: 0 = leather whip, 1 = chain whip (0xC416 flipped
       0 -> 1 on pickup, frame 78; 0xC419 latched bonus id 0x1A).
     * Weapon pickups: collect_bonus fallthrough l8d77h does `sub 0x19` -> 0xC416, so
-      weapon id = bonus id - 0x19 (chain whip = bonus 0x1A).
+      weapon id = bonus id - 0x19 (chain whip = bonus 0x1A), except bonus 0x1E
+      (index 5) which is holy water (`C701` bit 3) and does not write 0xC416.
     * Attack path split (seg1 ~0x7D80): weapon < 2 = whip (stays with Simon), >= 2 =
       projectile (knife/cross/axe). Damage tables (seg1 sub_7e33h): weapon 0 + 2 use
       base l7e60h, others use stronger 0x7E67. Full weapon-id map + damage values +
@@ -481,6 +489,24 @@ opaque `db` dumps.
     * Renamed labels this session (seg0/seg1, all in-source + msx.sym):
       room_map_build, map_cell_at, tile_is_solid, row_solid_thresh. `make verify`
       still byte-identical.
+
+- Twenty-eighth session (SEG11/12 MAP DATA + BODY-TILE ERRATA):
+    * Graduated banks 0x0B/0x0C from `INCBIN` to `INCLUDE segments/seg11.asm` /
+      `seg12.asm` (`PHASE` 0x6000 / 0x8000).  Unique labels (window shared with
+      seg01/seg02): `mtile_rowbase` 0x6000, `mtile_roomptr` 0x6013 (156 rooms),
+      `mtile_stream_c41a` 0x614B, `mtile_streams` 0x617B, `mtile_defbase` 0x7EBB,
+      `mtile_defs_s00`..`s18` (defs still `INCBIN` slices; stage 0/18 straddle
+      into the next bank).  `room_map_build` now references those names.
+    * Minimap solid-noise errata: brick BODY 09-0b is solid only when 4-adjacent
+      to a structural SURFACE 01-04 (was 01-08).  Wallpaper 05-08 next to a lone
+      09 no longer paints as a 1x1 block.  Resolves stage 6 room 5, stage 10
+      "sparkle", stage 15 rooms 6-9 solids, stage 17 leftover 09, and stage 0
+      room 2 gate 09/0b specks.  Stage 15 0c/0d stay amber (real stairs).
+      Dracula room 9 still `PERM_OVERRIDE`.
+    * `collect_bonus_tbl` (seg2 0x8D45) converted from fake instructions to
+      `defw`; confirmed ids annotated (hearts, rosary, map, bibles, staff, keys,
+      score bags, health pots).  Seg14 list-ids (0x0d/0x10 scenery, 0x05 dog)
+      still want a sprite-id catalogue.
 
 - Twenty-seventh session (annotate located player + state-machine code):
     * Converted title_layout 0x4C3F-0x4D0E from fake instructions to `defb`
@@ -902,16 +928,21 @@ opaque `db` dumps.
      * stage 18 room 9 (Dracula) - PARKED. Manual `PERM_OVERRIDE` (floor + 2x1
        jump ledges) looks right in `gfx/minimap_s18.png` but is not engine-derived;
        come back if we find a principled source (scripted platforms / collision).
-     * stage 6 room 5 - one errant 0c.
-     * stage 15 rooms 6-9 - errant 0c/0d AND errant solid tiles.
-     * stage 10 rooms 2/3/4/6/7/8 - "solid noise": isolated 01-04/09-0b tiles used
-       as background render white (same per-stage problem, one layer down in the
-       SOLID classification, not stairs).
-     * stage 17 - RESOLVED by the 0c/0d-only rule: its false stairs were 06/07
-       (10 each), now reclassified as decoration.
-   - Likely next step: derive per-stage tile classes from the actual per-stage
-     tileset/metatile semantics rather than global id ranges (or gate solids by the
-     per-stage row_solid_thresh and stairs by structure+tileset group).
+     * stage 6 room 5 - RESOLVED: leftover white speck was a lone body-09 (the
+       old "errant 0c" was already gone with the 06/07 decoration rule).
+     * stage 15 rooms 6-9 - RESOLVED for solids (lone 09 next to wallpaper);
+       remaining 0c/0d are real climbable stairs, left amber.
+     * stage 10 rooms 2/3/4/6/7/8 - RESOLVED: wallpaper 06/07 next to body 09
+       was counted as a surface, so the 09 sparkled as solid.  01-04-only
+       adjacency clears it.
+     * stage 17 - RESOLVED by the 0c/0d-only rule (false stairs were 06/07);
+       leftover 09 specks in rooms 7/10 cleared by the 01-04 adjacency rule.
+     * stage 0 room 2 gate - 09/0b specks next to decoration also cleared;
+       inaccessible 0c/0d in the gate stay amber (real stair ids).
+   - Tile-class errata for the permeability sheets are settled (01-04 body
+     adjacency + 0c/0d stairs).  Remaining: name seg14 list-ids (sprite id in
+     the per-room object list; 0x0d/0x10 scenery, 0x05 dog confirmed).
+     `collect_bonus_tbl` ids are annotated in seg02.
 
 ## Next tracing session (resume plan)
 
@@ -983,8 +1014,8 @@ Known live RAM map (runtime-confirmed this session):
   0xC416 equipped weapon/whip ID (0=leather, 1=chain, ...; cp 2/4/5 in attack
          code; reset via xor a at seg1 ~0x7148)
   0xC417 HEARTS, packed BCD, cap 0x99 (draw: seg0 sub_456dh -> VRAM 0xC000;
-         add:  seg0 0x4596 add a,b/daa/clamp99;  spend-5: seg1 sub_7154h
-         sub 5/daa).  Confirmed +1 small heart, +5 large heart.
+         add:  seg0 0x4596 add a,b/daa/clamp99;  spend-5: holy_water_use 0x7154
+         and hourglass_use 0x7166, each sub 5/daa).  Confirmed +1 small heart, +5 large heart.
   0xC410 LIVES, packed BCD (drawn by seg0 sub_4575h -> VRAM 0xE400); held at
          0x02 for the whole courtyard run (no death/1-up)
   0xC006 newly-pressed buttons (rising edge of 0xC007 via input_edge).  Bit 4 =
@@ -1150,12 +1181,16 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   advance_stage, room_map_build, zombie_generator, door_blit_tiles,
   read_buttons, input_edge, play_sound;
   seg1: simon_action_tick, simon_walk_left/right, simon_jump_tick, simon_mirror_frames,
-  whip_tick, tile_layout_draw, spend_5_hearts, map_cell_at, tile_is_solid,
-  row_solid_thresh, set_stage_boundary, door_interact, simon_portal_wait;
-  seg2: door_proximity, door_anim_tick, door_begin_open, spot_proximity;
+  whip_tick, tile_layout_draw, holy_water_use, holy_water_tick, map_cell_at, tile_is_solid,
+  row_solid_thresh, set_stage_boundary, door_interact, simon_portal_wait,
+  hourglass_use;
+  seg2: door_proximity, door_anim_tick, door_begin_open, spot_proximity,
+  collect_bonus_tbl, bonus_holy_water, yellow_shield_tick;
   seg13: conn_lookup, conn_load_permits, conn_room_record, conn_ptr, door_load,
   door_load_coords, door_tbl, spot_load_coords, spot_tbl, simon_cell0_ptr,
-  simon_cell1_ptr.
+  simon_cell1_ptr;
+  seg11/12: mtile_rowbase, mtile_roomptr, mtile_stream_c41a, mtile_streams,
+  mtile_defbase, mtile_defs_s00..s18, mtile_def_c41a.
 - Every `vk()`-emitting Lua block MUST use `LUA ALLPASS` — plain `LUA` emits only
   on the final pass and drifts all later labels.
 - After any edit, run `make verify` before moving on.

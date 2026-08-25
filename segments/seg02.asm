@@ -56,8 +56,7 @@ l8047h:
 	djnz l8034h
 	ret
 l804fh:
-	ld bc,00204h
-	ld (bc),a
+	defb 001h,004h,002h,002h  ; fodder dmg: knife/cross/axe/holy (iy+1)-2
 l8053h:
 	ld a,00ch
 	call play_sound
@@ -85,8 +84,8 @@ l807fh:
 	cp 002h
 	push iy
 	pop hl
-	jp z,074f3h
-	res 0,(ix+00eh)
+	jp z,074f3h            ; knife (type 2): despawn on hit
+	res 0,(ix+00eh)        ; axe/cross/holy: keep projectile, drop hittable
 	ret
 l808fh:
 	ld a,(ix+000h)
@@ -227,13 +226,12 @@ l816ah:
 ; --- hurt_simon_contact (seg2 0x8173) - Simon TAKES contact damage from actor IX -
 ; Base damage B = the ODD byte of this actor type's l81d5h entry (the even byte is
 ; the kill score - see l81d5h below).  Then:
-;   * If the shield is up (0xC701 bit 4): compare the hit direction (0xC427 Simon X
-;     vs actor +0x05, and facing 0xC42C).  A blocked hit takes B as-is and spends a
-;     shield charge (0xC441--; when it hits 0 the shield bit is cleared + sub_8eedh
-;     removes its HUD).  An unblocked/backstab hit falls to the doubling path.
-;   * Otherwise (no shield / not blocked): B is DOUBLED, so the real contact damage
-;     = 2 * (l81d5h odd byte).  Runtime-confirmed: zombie(t01) odd 1 -> 2, dog(t05)
-;     odd 3 -> 6 (0x1E->0x18).  Then jp damage_health (0xC415 -= B).
+;   * Red shield (0xC701 bit 4, bonus id 3): if Simon is facing the hit, take B
+;     as-is (not doubled) and spend a charge (0xC441--; at 0, res bit4 +
+;     sub_8eedh drops the HUD).  A backstab still takes the doubled hit.
+;   * Otherwise (no red shield / not facing): B is DOUBLED, so unshielded
+;     contact = 2 * (l81d5h odd byte).  Runtime-confirmed: zombie(t01) odd 1 -> 2,
+;     dog(t05) odd 3 -> 6 (0x1E->0x18).  Then jp damage_health (0xC415 -= B).
 hurt_simon_contact:
 	ld a,(ix+000h)
 	dec a
@@ -243,7 +241,7 @@ hurt_simon_contact:
 	inc hl                 ; -> odd byte = base contact damage for this type
 	ld b,(hl)
 	ld a,(0c701h)
-	bit 4,a                ; shield active?
+	bit 4,a                ; red shield (id 3)?
 	jr z,l819ah            ; no shield -> full (doubled) damage
 	ld a,(0c427h)
 	sub (ix+005h)
@@ -265,7 +263,7 @@ l819fh:
 	dec (hl)
 	jr nz,l81afh
 	ld hl,0c701h
-	res 4,(hl)             ; charges gone -> drop the shield
+	res 4,(hl)             ; charges gone -> drop the red shield
 	push bc
 	call sub_8eedh
 	pop bc
@@ -1009,8 +1007,12 @@ spot_proximity:
 	sub d
 	cp 010h
 	ret                    ; CY if X in 0x10 box
+; yellow_shield_tick (seg2 0x8617): if C701 bit5 (bonus id 4), overlap-test the
+; D700 hazard slots and absorb hits: free the projectile, spend a C441 charge,
+; drop the yellow shield at 0.
+yellow_shield_tick:
 	ld a,(0c701h)
-	and 020h
+	and 020h               ; yellow shield (id 4)
 	ret z
 	ld ix,0d700h
 	ld b,008h
@@ -1030,7 +1032,7 @@ l8623h:
 	dec (hl)
 	jr nz,l8649h
 	ld hl,0c701h
-	res 5,(hl)
+	res 5,(hl)             ; charges gone -> drop yellow shield
 	call sub_8eedh
 l8649h:
 	pop bc
@@ -1180,7 +1182,7 @@ l86eeh:
 	rra
 	ret nc
 sub_8709h:
-	ld c,00eh
+	ld c,00eh              ; white (MSX colour 14) rectangle outline
 	jp 048e3h
 sub_870eh:
 	ld a,(0c702h)
@@ -1735,13 +1737,13 @@ l8a1ah:
 	call sub_8a3eh
 	ret nz
 	push bc
-	ld b,019h
+	ld b,019h              ; chest container (bonus id 25)
 	call sub_89f7h
 	pop bc
 	ld a,l
 	add a,008h
 	ld l,a
-	ld (hl),b
+	ld (hl),b              ; +0x0D = real contents id
 	inc l
 	jr l8a12h
 sub_8a30h:
@@ -1833,7 +1835,7 @@ l8a94h:
 	ld a,(ix+004h)
 	or a
 	jp z,l8b22h
-	cp 015h
+	cp 015h                ; slime fake-item: hatch instead of settling
 	jr z,l8ad7h
 	set 7,(hl)
 	dec a
@@ -1850,14 +1852,14 @@ l8abeh:
 	ld (ix+00ch),020h
 	ret
 l8ad7h:
-	ld a,(0d002h)
+	ld a,(0d002h)          ; hub: 0 = courtyard (just despawn)
 	or a
 	ld b,a
 	jr z,l8af4h
 	ld a,b
 	dec a
 	and 007h
-	ld hl,l8af7h
+	ld hl,l8af7h           ; hub-1 -> actor type 0x1A/0x1B/0x1C
 	call ADD_HL_A
 	ld c,(hl)
 	push ix
@@ -2008,7 +2010,7 @@ l8be6h:
 	call sub_8cedh
 l8bfah:
 	ld a,(ix+004h)
-	cp 019h
+	cp 019h                ; chest: don't collect_bonus(25); reveal contents
 	jr z,l8c1bh
 	ld (ix+005h),0ffh
 	call sub_8d30h
@@ -2023,9 +2025,9 @@ l8c12h:
 	ld (hl),000h
 	ret
 l8c1bh:
-	ld a,(ix+00dh)
+	ld a,(ix+00dh)         ; contents id stashed when the chest spawned
 	ld (ix+004h),a
-	call sub_8c36h
+	call sub_8c36h         ; hop it as a normal pickup
 	ld a,(0c700h)
 	or a
 	jr nz,l8c12h
@@ -2043,16 +2045,18 @@ sub_8c36h:
 	ld (ix+006h),000h
 	ld (ix+005h),002h
 	ret
+; Whip-hit on a world pickup: hourglass (id 10) tips onto its side (id 11);
+; a second hit on the tipped one starts its despawn timer (ix+6=1).
 l8c4bh:
 	ld (ix+003h),000h
 	ld a,(ix+004h)
-	cp 00ah
+	cp 00ah                ; upright hourglass?
 	jr nz,l8c5fh
-	ld (ix+004h),00bh
+	ld (ix+004h),00bh      ; -> tipped (bonus_tipped_hourglass)
 	call sub_8cedh
 	jr sub_8c36h
 l8c5fh:
-	cp 00bh
+	cp 00bh                ; already tipped: another whip deletes it
 	ret nz
 	ld (ix+006h),001h
 	ret
@@ -2185,9 +2189,12 @@ sub_8d30h:
 ;  Entry sub_8d33h pushes the common tail play_sound; sub_8d37h is the bare entry
 ;  (caller supplies its own continuation).  Latches the bonus id into 0xC419
 ;  (last-pickup latch, drives the pickup HUD/message) then dispatches through the
-;  25-entry word table at 0x8D45 (index = A-1; A>=0x1A falls through to l8d77h):
-;    1 = small heart (+1), 2 = large heart (+5), health refills via restore_health
-;    (+8 / +32), keys + sub-weapons OR their bit into 0xC701/0xC702, etc.
+;  25-entry word table collect_bonus_tbl at 0x8D45 (index = A-1; A>=0x1A falls through to l8d77h):
+;    1/2 hearts, 3/4 shields, 5 white cross, 6 rosary, 7 small orb, 8 blue gem,
+;    9 sapphire ring, 10/11 hourglass (upright / tipped), 12/13 boots/wings,
+;    14 candle, 15 map, 16/17 bibles, 18 staff, 19/20 money bags,
+;    21 slime (fake pickup; collect is a no-effect stub), 22 potion, 23/24 keys,
+;    25 chest (container; world collect never reaches this stub).
 ;  Reached from both pickup paths: the mid-air 0xC800 heart (type 0x24, via
 ;  sub_9a72h) and the settled 0xC500 pickup list.
 ; ---------------------------------------------------------------------------
@@ -2201,65 +2208,53 @@ sub_8d37h:
 	jr nc,l8d77h
 	dec a
 	call DISPATCH_A
-	or (hl)
-	adc a,l
-	cp (hl)
-	adc a,l
-	sbc a,a
-	adc a,l
-	xor b
-	adc a,l
-	jp nz,0838dh
-	adc a,l
-	push hl
-	adc a,l
-	call nc,0ec8dh
-	adc a,l
-	sbc a,e
-	adc a,l
-	call m,0038dh
-	adc a,(hl)
-	ld a,(bc)
-	adc a,(hl)
-	dec e
-	adc a,(hl)
-	ld a,(0248eh)
-	adc a,(hl)
-	dec l
-	adc a,(hl)
-	add a,b
-	adc a,(hl)
-	ld c,c
-	adc a,(hl)
-	ld d,d
-	adc a,(hl)
-	dec de
-	adc a,(hl)
-	inc d
-	adc a,(hl)
-	ld d,a
-	adc a,(hl)
-	ld h,a
-	adc a,(hl)
-	dec de
-	adc a,(hl)
+collect_bonus_tbl:             ; (seg2 0x8D45) word[id-1]; id>=0x1A -> l8d77h
+	defw bonus_small_heart
+	defw bonus_large_heart
+	defw bonus_red_shield
+	defw bonus_yellow_shield
+	defw bonus_white_cross
+	defw bonus_rosary
+	defw bonus_small_orb
+	defw bonus_blue_gem
+	defw bonus_sapphire_ring
+	defw bonus_hourglass
+	defw bonus_tipped_hourglass
+	defw bonus_boots
+	defw bonus_wings
+	defw bonus_candle
+	defw bonus_map
+	defw bonus_black_bible
+	defw bonus_white_bible
+	defw bonus_staff
+	defw bonus_white_bag
+	defw bonus_blue_bag
+	defw bonus_slime
+	defw bonus_potion
+	defw bonus_yellow_key
+	defw bonus_white_key
+	defw bonus_chest
 ; --- weapon pickup (bonus id >= 0x1A) ---------------------------------------
-; index = id - 0x19; index 5 is special (l8d94h). Otherwise store the new weapon
-; id in 0xC416, run sub_8ea1h, then FALL THROUGH into the rosary code below - so a
+; index = id - 0x19; index 5 is holy water (bonus_holy_water / C701 bit3),
+; not a C416 weapon. Otherwise store the new weapon id in 0xC416, run
+; sub_8ea1h, then FALL THROUGH into the rosary code below - so a
 ; weapon pickup also arms the 0xC440 no-spawn timer (brief pickup grace window).
 l8d77h:
 	sub 019h
 	cp 005h
-	jr z,l8d94h
+	jr z,bonus_holy_water
 	ld (0c416h),a          ; set equipped weapon id
 	call sub_8ea1h
-; --- collect_bonus[6] = Rosary (temporary "no new enemies" power-up) ---------
+; --- bonus_rosary (id 6, 0x8D83) - temporary "no new enemies" power-up ------
 ; Arms the enemy-spawn suppression timer 0xC440: while nonzero, room_spawner
 ; (seg0 0x5EBF) bails every frame and no new enemies spawn. Duration depends on
-; 0xC431 bit 2: 0xF0 (240 frames ~4s) if set, else 0x96 (150 frames ~2.5s) - the
-; likely difference between the two rosary types. 0xC440 counts down each frame in
+; bonus id 11 (0xC431 bit 2): 0xF0 (240 frames ~4s) if set, else 0x96 (150
+; frames ~2.5s).  Same bit also lengthens the blue gem, sapphire ring, and
+; hourglass.  0xC440 counts down each frame in
 ; seg1 0x75C7. Effect is immediate/current-room; existing 0xC800 actors are kept.
-	ld a,(0c431h)          ; power-up flag bit 2 selects the duration
+; Weapon pickups fall through into this same code (brief no-spawn window).
+bonus_rosary:
+	ld a,(0c431h)          ; id 11 (C431 bit2) selects the duration
 	and 004h
 	ld a,0f0h              ; -> 240-frame timer
 	jr nz,l8d8eh
@@ -2269,52 +2264,61 @@ l8d8eh:
 l8d91h:
 	ld a,012h
 	ret
-l8d94h:
+bonus_holy_water:              ; id 0x1E (0x8D94): C701 bit3; jump+LEFT/RIGHT, 5 hearts
 	ld b,008h
 l8d96h:
 	call sub_8e74h
 	jr l8d91h
+bonus_hourglass:               ; id 10 (0x8D9B): C701 bit6
 	ld b,040h
 	jr l8d96h
+bonus_red_shield:              ; id 3 (0x8D9F): C701 bit4, drop bit5, C441=16
 	ld hl,0c701h
-	res 5,(hl)
-	ld b,010h
+	res 5,(hl)             ; drop yellow (mutually exclusive)
+	ld b,010h              ; bit4 = red shield (face-on contact dmg not 2x)
 	jr l8dafh
+bonus_yellow_shield:           ; id 4 (0x8DA8): C701 bit5, drop bit4, C441=16
 	ld hl,0c701h
-	res 4,(hl)
-	ld b,020h
+	res 4,(hl)             ; drop red
+	ld b,020h              ; bit5 = yellow (absorb D700 projectiles)
 l8dafh:
 	ld a,010h
-	ld (0c441h),a
+	ld (0c441h),a          ; 16 charges
 	jr l8d96h
+bonus_small_heart:             ; id 1 (0x8DB6): +1 heart currency
 	ld b,001h
 l8db8h:
-	call add_hearts         ; value 1 = small heart (+1); value 2 = large heart (+5)
+	call add_hearts         ; B=1 small (+1); B=5 large (+5)
 	ld a,00fh
 	ret
+bonus_large_heart:             ; id 2 (0x8DBE): +5 heart currency
 	ld b,005h
 	jr l8db8h
+bonus_white_cross:             ; id 5 (0x8DC2): despawn on-screen actors
 	push ix
-	call 0780dh
+	call 0780dh            ; kill C800 + D700 actors
 	pop ix
 	call sub_9294h
 	ld a,018h
-	ld (0c43eh),a
+	ld (0c43eh),a          ; backdrop flash
 	ld a,01bh
 	ret
-	ld a,(0c431h)
+bonus_blue_gem:                ; id 8 (0x8DD4): invis; sprite flash white
+	ld a,(0c431h)          ; id 11 -> longer
 	and 004h
-	ld a,0f0h
+	ld a,0f0h              ; 240 frames ~4s
 	jr nz,l8ddfh
-	ld a,096h
+	ld a,096h              ; 150 frames ~2.5s
 l8ddfh:
-	ld (0c43ah),a
+	ld (0c43ah),a          ; skip contact + projectile hits while nonzero
 	ld a,016h
 	ret
+bonus_small_orb:               ; id 7 (0x8DE5): +8 HP (1/4 of 0x20 bar)
 	ld b,008h
 	call restore_health
 	jr l8e11h
-	ld a,(0c431h)
+bonus_sapphire_ring:           ; id 9 (0x8DEC): sprite flash red; touch-kills
+	ld a,(0c431h)          ; id 11 -> longer
 	and 004h
 	ld a,0f0h
 	jr nz,l8df7h
@@ -2322,51 +2326,65 @@ l8ddfh:
 l8df7h:
 	ld (0c434h),a
 	jr l8e11h
-	ld hl,0c431h
+bonus_tipped_hourglass:        ; id 11 (0x8DFC): C431 bit2, 1.5x timed bonuses
+	ld hl,0c431h           ; whip the hourglass pickup once to get this
 	set 2,(hl)
 	jr l8e11h
+bonus_boots:                   ; id 12 (0x8E03): C431 bit3 faster walk
 	ld hl,0c431h
 	set 3,(hl)
 	jr l8e11h
+bonus_wings:                   ; id 13 (0x8E0A): C431 bit4 higher jump
 	ld hl,0c431h
 	set 4,(hl)
 	jr l8e11h
 l8e11h:
 	jp l8d91h
-	ld b,020h
+bonus_potion:                  ; id 22 (0x8E14): bottle, +32 HP = full bar
+	ld b,020h              ; vendor sells this (price tbl 0x16); HUD tile @ 0x9A00
 	call restore_health
 	jr l8e11h
+; Shared stub for slime (id 21) and chest (id 25).  collect_bonus has already
+; latched C419 and shown the popup; this pops the play_sound continuation and
+; returns with no effect.  World chests never get here (l8c1bh opens them).
+bonus_slime:                   ; id 21 (0x8E1B): fake candle drop; hatches if left
+bonus_chest:                   ; id 25: treasure-chest container (see l8a1ah)
 	pop hl
 	ret
-	call sub_8713h
+bonus_candle:                  ; id 14 (0x8E1D): C702 bit0, white C470 outlines
+	call sub_8713h         ; draw 0x0E rectangles on breakable blocks
 	ld b,001h
 	jr l8e34h
-; bonus id 0x10 = BLACK BIBLE: set 0xC702 bit6 -> vendor price doubled
+bonus_black_bible:             ; id 16 (0x8E24): C702 bit6, vendor price doubled
 	ld hl,0c702h
 	res 7,(hl)             ; drop the white-bible bit (mutually exclusive)
-	ld b,040h              ; bit6 = black bible (double price)
+	ld b,040h
 	jr l8e34h
-; bonus id 0x11 = WHITE BIBLE: set 0xC702 bit7 -> vendor price halved
+bonus_white_bible:             ; id 17 (0x8E2D): C702 bit7, vendor price halved
 	ld hl,0c702h
 	res 6,(hl)             ; drop the black-bible bit (mutually exclusive)
-	ld b,080h              ; bit7 = white bible (half price)
+	ld b,080h
 l8e34h:
 	call sub_8e79h         ; 0xC702 |= B
 	ld a,012h              ; pickup popup message id
 	ret
+bonus_map:                     ; id 15 (0x8E3A): C431 bit6, C701 bit7, C70F=3
 	ld hl,0c431h
 	set 6,(hl)
 	ld a,003h
-	ld (0c70fh),a
+	ld (0c70fh),a          ; 3 map uses (F2)
 	ld b,080h
 	jp l8d96h
+bonus_white_bag:               ; id 19 (0x8E49): +5000 score
 	ld de,05000h
 l8e4ch:
-	call 044f3h
+	call 044f3h            ; add_score
 	ld a,010h
 	ret
+bonus_blue_bag:                ; id 20 (0x8E52): +1000 score
 	ld de,01000h
 	jr l8e4ch
+bonus_yellow_key:              ; id 23 (0x8E57): C701 bit1, C700=1 (chests)
 	ld b,002h
 	call sub_8e74h
 	ld hl,0c700h
@@ -2374,6 +2392,7 @@ l8e4ch:
 	call sub_8ed0h
 	ld a,014h
 	ret
+bonus_white_key:               ; id 24 (0x8E67): C701 bit0 (stage-exit door)
 	ld b,001h
 	call sub_8e74h
 	call sub_8ec1h
@@ -2392,10 +2411,11 @@ l8e7ch:
 	or (hl)
 	ld (hl),a
 	ret
+bonus_staff:                   ; id 18 (0x8E80): C700=3, C701 bit2; drops yellow key
 	ld hl,0c431h
 	set 1,(hl)
 	ld hl,0c701h
-	res 1,(hl)
+	res 1,(hl)             ; can't hold yellow key with the staff
 	ld b,004h
 	call sub_8e74h
 	ld a,003h
@@ -2449,7 +2469,7 @@ sub_8eedh:
 	call sub_8f51h
 	ld a,(0c701h)
 	ld c,a
-	ld b,005h
+	ld b,005h              ; bits 7..3: map, hourglass, Y shield, R shield, holy
 	xor a
 l8ef7h:
 	rl c
@@ -2533,7 +2553,7 @@ sub_8f5ch:
 sub_8f6fh:
 	push hl
 	ld a,(ix+004h)
-	cp 019h
+	cp 019h                ; chest: need C700 (yellow key / staff charges)
 	jr nz,l8f8ah
 	ld hl,0c700h
 	ld a,(hl)

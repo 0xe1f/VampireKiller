@@ -2027,7 +2027,7 @@ l6c47h:
 	call sub_7c0ch
 	ret c
 	ld a,(0c431h)
-	and 008h
+	and 008h               ; boots (id 12): faster walk
 	ld bc,0fe00h
 	jr z,l6c58h
 	ld bc,0fd80h
@@ -2046,7 +2046,7 @@ l6c6ah:
 	call sub_7bb0h
 	ret c
 	ld a,(0c431h)
-	and 008h
+	and 008h               ; boots (id 12): faster walk
 	ld bc,00200h
 	jr z,l6c7ah
 	ld c,080h
@@ -2121,7 +2121,7 @@ l6ce9h:
 	ret
 simon_jump_arc:                ; (0x6CEE) advance 0xC428 through jump_y_delta
 	ld a,(0c431h)
-	and 010h
+	and 010h               ; wings (id 13): taller jump table
 	ld bc,jump_y_delta+1
 	ld d,013h
 	jr z,l6cffh
@@ -2595,23 +2595,13 @@ l706ah:
 	ld bc,00509h
 	ld (0c42eh),bc
 	jp simon_mirror_frames
+; Signed dY (22 bytes).  Hurt knockback uses this via simon_jump_y_step;
+; holy_water_tick doubles each entry for the vial's arc.  l7090h is also a
+; VRAM dest (0x7090) in the HUD blits above — keep the label at this address.
 l7084h:
-	defb 0fdh,0fdh,0feh ;illegal sequence	;7084	fd fd fe	. . .
-	cp 0feh
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	nop
-	nop
-	nop
+	defb 0fdh,0fdh,0feh,0feh,0feh,0ffh,0ffh,0ffh,0ffh,000h,000h,000h
 l7090h:
-	nop
-	ld bc,00101h
-	ld bc,00202h
-	ld (bc),a
-	inc bc
-	inc bc
+	defb 000h,001h,001h,001h,001h,002h,002h,002h,003h,003h
 simon_dying:                   ; 6 (0x709A)
 	ld a,(0c421h)
 	ld hl,0c428h
@@ -2651,7 +2641,7 @@ l70c6h:
 	ld (0c413h),a
 sub_70e3h:
 	ld a,(0c701h)
-	and 080h
+	and 080h               ; keep map (bit7); holy water/hourglass/keys go
 	ld (0c701h),a
 	xor a
 	ld (0c416h),a
@@ -2699,33 +2689,39 @@ l713ah:
 l713dh:
 	ld a,(0c420h)
 	dec a
-	ret nz
+	ret nz                 ; hourglass/holy-water only while jumping
 	ld a,(0c701h)
 	push af
 	rra
 	rra
 	rra
-	rra
-	call c,spend_5_hearts
+	rra                    ; C701 bit3 = holy water
+	call c,holy_water_use
 	pop af
 	rla
-	rla
-	call c,sub_7166h
+	rla                    ; C701 bit6 = hourglass
+	call c,hourglass_use
 	ret
-; spend_5_hearts (seg1 0x7154) - deduct 5 from the heart total (0xC417, BCD).
-spend_5_hearts:
+; holy_water_use (seg1 0x7154): C701 bit3 (bonus 0x1E).  Only while jumping
+; (C420==1) and SPACE is not a new-press.  LEFT or RIGHT new-press, 5 hearts,
+; and C461==0 (one vial in flight).  Does not replace C416.
+holy_water_use:
 	ld a,(0c417h)
 	cp 005h
 	ret c
 	ld a,(0c006h)
 	rra
 	rra
-	rra
-	jr c,l719bh
-	rra
-	jr c,l71a8h
+	rra                    ; C006 bit2 = LEFT
+	jr c,holy_water_throw_left
+	rra                    ; C006 bit3 = RIGHT
+	jr c,holy_water_throw_right
 	ret
-sub_7166h:
+; hourglass_use (seg1 0x7166): C701 bit6 (bonus id 10).  Only reached from
+; l713dh while jumping (C420==1) and SPACE is not a new-press.  Needs a DOWN
+; new-press (C006 bit1), 5 hearts, and C43B==0.  Arms C43B (0x5A ~1.5s, or
+; 0x96 ~2.5s with id 11) and D010 bit0, which skips enemy AI/movement.
+hourglass_use:
 	ld a,(0c43bh)
 	and a
 	ret nz
@@ -2752,23 +2748,23 @@ l718eh:
 	set 0,(hl)
 	ld a,0fbh
 	jp play_sound
-l719bh:
+holy_water_throw_left:         ; (0x719B) C468=1, then throw
 	ld a,(0c461h)
 	and a
 	ret nz
 	ld a,001h
 	ld (0c468h),a
-	jp l71b1h
-l71a8h:
+	jp holy_water_throw
+holy_water_throw_right:        ; (0x71A8) C468=0, then throw
 	ld a,(0c461h)
 	and a
 	ret nz
 	xor a
 	ld (0c468h),a
-l71b1h:
+holy_water_throw:              ; (0x71B1) arm C460 slot as type 5, spend 5 hearts
 	call 099a6h
 	ld a,005h
-	ld (0c461h),a
+	ld (0c461h),a          ; projectile type 5 (one in flight)
 	ld a,(0c417h)
 	sub 005h
 	daa
@@ -2920,16 +2916,13 @@ sub_72c4h:
 sub_72d5h:
 	ld a,(ix+001h)
 	dec a
-	dec a
+	dec a                    ; index = type-2: 2=knife 3=cross 4=axe 5=holy
 	call DISPATCH_A
-	dec a
-	ld (hl),h
-	ld a,d
-	ld (hl),h
-	push hl
-	ld (hl),d
-	xor e
-	ld (hl),e
+	defw l743dh            ; type 2
+	defw l747ah            ; type 3
+	defw l72e5h            ; type 4
+	defw holy_water_tick   ; type 5 (C461; not a C416 weapon)
+l72e5h:
 	ld a,(0c003h)
 	ld c,a
 	rra
@@ -2949,13 +2942,11 @@ l72ffh:
 	ld a,(ix+000h)
 	dec a
 	call DISPATCH_A
-	ld c,073h
-	ld b,h
-	ld (hl),e
-	ld a,d
-	ld (hl),e
-	and h
-	ld (hl),e
+	defw l730eh
+	defw l7344h
+	defw l737ah
+	defw l73a4h
+l730eh:
 	ld a,(0c420h)
 	cp 002h
 	ld a,(0c425h)
@@ -2983,6 +2974,7 @@ l7338h:
 	ld a,(0c427h)
 	ld (ix+005h),a
 	jp l7356h
+l7344h:
 	ld a,(ix+005h)
 	sub 00ah
 	cp 0ech
@@ -3008,6 +3000,7 @@ l7370h:
 	ld (ix+003h),a
 	ld (ix+007h),000h
 	jp 099a6h
+l737ah:
 	call 08247h
 	jp c,l74f0h
 	ld a,(ix+005h)
@@ -3028,15 +3021,21 @@ l7370h:
 l73a0h:
 	inc (ix+003h)
 	ret
+l73a4h:
 	call 08247h
 	ret nc
 	jp l74f0h
+; holy_water_tick (seg1 0x73AB): C460 slot type 5.  State 0/1 spawn at Simon
+; (Y=C425+offset, X=C427, velX=±2 from C468, velY=0).  State 2 = arc
+; (Y += 2*l7084h[phase], land via sub_7b9fh tile_is_solid).  State 3 = pool
+; (24 frames, SAT colour 8).
+holy_water_tick:
 	ld a,(ix+000h)
 	dec a
 	dec a
-	jr z,l73e5h
+	jr z,holy_water_arc    ; state 2
 	dec a
-	jr z,l7420h
+	jr z,holy_water_pool   ; state 3
 	ld a,(0c420h)
 	cp 002h
 	ld a,(0c425h)
@@ -3059,7 +3058,7 @@ l73d5h:
 	ld (ix+005h),a
 	ld (ix+006h),038h
 	jp l7356h
-l73e5h:
+holy_water_arc:                ; (0x73E5) Y += 2*l7084h[ix+7]; land -> pool
 	ld a,(ix+007h)
 	ld hl,l7084h
 	call ADD_HL_A
@@ -3085,7 +3084,7 @@ l7404h:
 	ld (ix+007h),a
 	ld a,018h
 	jp play_sound
-l7420h:
+holy_water_pool:               ; (0x7420) 0x18 frames on the floor, then despawn
 	ld a,(0c003h)
 	and 004h
 	ld a,0f4h
@@ -3099,6 +3098,7 @@ l742eh:
 	cp 018h
 	ret c
 	jp l74f0h
+l743dh:
 	ld a,(ix+000h)
 	dec a
 	ret nz
@@ -3128,6 +3128,7 @@ l7466h:
 	inc (ix+000h)
 	ld a,004h
 	jp play_sound
+l747ah:
 	ld a,(0c003h)
 	ld c,a
 	rra
@@ -3151,13 +3152,10 @@ l7493h:
 	ld a,(ix+000h)
 	dec a
 	call DISPATCH_A
-	ld c,073h
-	ld b,h
-	ld (hl),e
-	ld a,d
-	ld (hl),e
-	and h
-	ld (hl),e
+	defw l730eh
+	defw l7344h
+	defw l737ah
+	defw l73a4h
 l74ach:
 	ld (hl),000h
 	ld b,01ch
@@ -3302,7 +3300,7 @@ l759ch:
 	ret nz
 	ld a,(ix+000h)
 	cp 003h
-	ret nz
+	ret nz                 ; type 5 state 3 = holy-water pool: SAT colour 8
 	ld hl,0d480h
 	ld de,0d490h
 	ld b,010h
@@ -3881,7 +3879,7 @@ l792bh:
 	jr z,l7939h
 	ld a,(0c003h)
 	rra
-	ld a,00eh
+	ld a,00eh              ; blue gem (id 8): flash sprite white
 	jr c,l7951h
 l7939h:
 	ld a,(0c434h)
@@ -3889,7 +3887,7 @@ l7939h:
 	jr z,l7947h
 	ld a,(0c003h)
 	rra
-	ld a,008h
+	ld a,008h              ; sapphire ring (id 9): flash sprite red
 	jr c,l7951h
 l7947h:
 	ld a,b
@@ -4689,7 +4687,7 @@ l7d95h:
 	call 080adh
 	call 080e3h
 	call 08122h
-	jp 08617h
+	jp yellow_shield_tick
 sub_7da7h:
 	ld b,064h
 l7da9h:
@@ -4847,10 +4845,10 @@ l7e8ah:
 	jp z,09a45h
 	cp 026h
 	jp z,09a45h
-	cp 022h
+	cp 022h                ; boss-clear orb (sprite 0x8F); not bonus id 22
 	jr nz,l7eb7h
 	ld a,001h
-	ld (0ce11h),a
+	ld (0ce11h),a          ; collected: drip-fill HP then advance stage
 	jp 09a45h
 l7eb7h:
 	ld a,(0c434h)

@@ -23,17 +23,18 @@ PERMEABILITY (default) = the structural floor/wall brick family: solid surfaces
 01..04 and the brick BODY under/behind them 09..0b, laid out as a repeating
 (surface, body) metatile - so a wall column alternates 01/09/01/09..., which is
 why classifying only the surface produced horizontal stripes.  The body ids 09..0b
-are therefore counted solid ONLY when 4-adjacent to a 01..08 surface (see
-is_solid_ctx): real walls/floors stay solid (incl. stage 18's 06-surface/0b-body
-floor), but a standalone body tile - e.g. a decorative support beside a staircase
-(stage 18) - is passable, not a stray 1x1 block.
-Everything else is
-passable: air 0x0e..0x17; the decorative blocks 0x2c+ (background windows,
-columns); and the passable decoration ids 05..08 (05/08 = the inert 2-tile pair;
-06/07 = stage 1's wide-stair edge / background wallpaper elsewhere).  Stairs are
-the CLIMBABLE diagonal tiles 0c (one way) and 0d (mirror) - drawn amber - which is
-exactly what the engine's stair-step code tests; other stages draw 1-tile-wide
-stairs (0c/0d only), while stage 1 pairs each step with a decorative 06/07 half
+are therefore counted solid ONLY when 4-adjacent to a 01..04 surface (see
+is_solid_ctx): real walls/floors stay solid, but a standalone body tile — or a
+09 speck next to 05-08 wallpaper — is passable, not a stray 1x1 block.
+Stage 18 room 9 (Dracula) is PERM_OVERRIDE (06+0b floor); tile IDs cannot
+separate those columns from the floor.
+Everything else is passable: air 0x0e..0x17; the decorative blocks 0x2c+
+(background windows, columns); and the passable decoration ids 05..08
+(05/08 = the inert 2-tile pair; 06/07 = stage 1's wide-stair edge /
+background wallpaper elsewhere).  Stairs are the CLIMBABLE diagonal
+tiles 0c (one way) and 0d (mirror) - drawn amber - which is exactly what
+the engine's stair-step code tests; other stages draw 1-tile-wide stairs
+(0c/0d only), while stage 1 pairs each step with a decorative 06/07 half
 (hence its "fat" 2-wide stairs).
 Colours: walls/floors white, empty black, climbable stairs amber.
 
@@ -126,12 +127,12 @@ PERM_OVERRIDE = {
 def is_solid_ctx(grid, r, c, row, mode, room=None):
     """Per-cell solidity WITH neighbour context.  Identical to is_solid for tiles that
     are unambiguous, but the brick-BODY family 0x09-0x0b counts as solid only when it
-    is 4-adjacent to a SURFACE tile 0x01-0x08 (the structural surfaces 01-04 AND the
-    05-08 pair, which act as floor/wall surfaces in some stages - e.g. Dracula's stage
-    18 floor is a 06 surface over a 0b body).  Walls/floors are built by pairing
-    surface+body, so real ones stay solid, while a STANDALONE body tile - e.g. a
-    decorative support beside a staircase (stage 18) - is passable instead of
-    rendering as a stray 1x1 block."""
+    is 4-adjacent to a structural SURFACE 0x01-0x04.  05-08 are passable
+    decoration (and stage-1 stair trim); treating them as surfaces made 09
+    specks next to wallpaper render as solid noise (stages 6, 10, 15, 17).
+    Dracula's 06+0b floor is PERM_OVERRIDE, not this rule.  Walls/floors are
+    built by pairing 01-04 with 09-0b, so real ones stay solid, while a
+    standalone body tile is passable instead of a stray 1x1 block."""
     ov = PERM_OVERRIDE.get((row, room)) if room is not None and mode == "perm" else None
     if ov is not None:
         return (r, c) in ov
@@ -143,7 +144,7 @@ def is_solid_ctx(grid, r, c, row, mode, room=None):
     if 0x09 <= tid <= 0x0b:
         for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
             nr, nc = r + dr, c + dc
-            if 0 <= nr < ROWS and 0 <= nc < COLS and 0x01 <= grid[nr][nc] <= 0x08:
+            if 0 <= nr < ROWS and 0 <= nc < COLS and 0x01 <= grid[nr][nc] <= 0x04:
                 return True
         return False
     structural = 0x01 <= tid <= 0x0d
@@ -199,7 +200,7 @@ def decode_room(rom, row, col):
 
 SOLID_RGB = (235, 235, 235)
 EMPTY_RGB = (12, 12, 16)
-STAIR_RGB = (240, 170, 40)      # climbable stairs (06/0c)
+STAIR_RGB = (240, 170, 40)      # climbable stairs (0c/0d)
 DOOR_RGB = (220, 40, 40)        # white-key (stage-exit) door
 DOOR_W = 2                      # rendered door width in tiles (edge wall thickness)
 SPOT_RGB = (64, 186, 176)       # teal pad + dest digit (not door red, not stair amber)

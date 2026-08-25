@@ -24,9 +24,11 @@ not yet confirmed in code is marked *(unconfirmed)*.
   4. Frankenstein's monster
   5. Grim reaper
   6. Dracula
-- When a boss dies an **orb descends**:
-  - Pick it up → **life refills** and advance to the next level.
-  - Leave it → still advance, but **life is not refilled**.
+- When a boss dies an **orb descends** (C800 actor type **0x22**, not
+  bonus id 22):
+  - Pick it up (`0xCE11=1`) → life drip-fills (+1 HP/frame via `0x4658`)
+    until full, then advance to the next level.
+  - Leave it → still advance after the timer, but **life is not refilled**.
 
 ## World structure (hubs / stages / rooms)
 
@@ -143,15 +145,18 @@ paints the playfield from 0xD140). `seg0 room_map_build` (0x4fb6) does the
 expansion on room entry; `seg1 map_cell_at` (0x7d36) reads it for collision.
 
 Storage (during the build the mapper pages bank 0x0b->0x6000, 0x0c->0x8000,
-0x0d->0xA000, then restores banks 1/2/3):
-- **rowbase[]** - byte table at bank 0x0b **0x6000**; index = rowbase[row]+col.
-  Rooms in a world row = rowbase[row+1]-rowbase[row] (row 1 / stage 1 = 8 rooms).
-- **room stream ptr** = word at bank 0x0b **0x6013 + 2*index** -> the room's
-  **48-byte metatile-id stream** (row-major 8x6), also in bank 0x0b (e.g. stage 1
+0x0d->0xA000, then restores banks 1/2/3).  Banks 0x0B/0x0C are source in
+`segments/seg11.asm` / `seg12.asm`:
+- **`mtile_rowbase`** - byte table at bank 0x0b **0x6000**; index = rowbase[row]+col.
+  Rooms in a world row = rowbase[row+1]-rowbase[row] (row 1 / stage 1 = 8 rooms;
+  stage 18 uses `minimap_room_count` because the next byte is not a count).
+- **`mtile_roomptr`** = word at bank 0x0b **0x6013 + 2*index** -> the room's
+  **48-byte metatile-id stream** (row-major 8x6) in `mtile_streams` (e.g. stage 1
   streams start at 0x620b, stride 0x30).
-- **metatile defs** = per-row word table at bank 0x0b **0x7ebb + 2*row**; def(id)
-  = 16 bytes at defbase + id*16 (stage 1 defbase 0x80b1 = bank 0x0c). The special
-  path (0xC41A!=0, e.g. intro) uses a fixed stream 0x614b + defs 0xA041 (bank 0x0d).
+- **`mtile_defbase`** = per-row word table at bank 0x0b **0x7EBB**; def(id)
+  = 16 bytes at defbase + id*16 (`mtile_defs_s01` 0x80B1 = bank 0x0c). The special
+  path (0xC41A!=0, e.g. intro) uses `mtile_stream_c41a` 0x614B + `mtile_def_c41a`
+  0xA041 (bank 0x0d).  Stage 0/18 def tables straddle the 0x8000/0xA000 boundaries.
 
 **Tile id classes (stage 1).** Walls and floors are the **structural brick family**
 **01..04** (solid SURFACE) + **09..0b** (brick BODY under/behind the surface),
@@ -161,7 +166,11 @@ decoration); **stairs** - paired tiles **06/0c** (ascending one way) and **07/0d
 (the mirror), climbable; the **08/05** pair (a fixed 2-tile background graphic
 near the pillar tops - NOT wall/floor and NOT an enemy generator, see below;
 exact depiction unconfirmed); and the decorative blocks **0x2c+** (background
-windows, columns). So the permeability map = solid iff id in {01..04, 09..0b}.
+windows, columns). The permeability map treats 01..04 as always solid and 09..0b
+as solid only when 4-adjacent to an 01..04 surface (a lone 09 next to 05-08
+wallpaper is passable).  **Stairs** are climbable 0c/0d only (the engine tests);
+06/07 are decoration (stage 1 stair trim, wallpaper elsewhere).  Stage 18 room 9
+is a per-room override.
 
 **Engine collision** is stricter than the drawn geometry: `seg1 tile_is_solid`
 (0x7c65) blocks Simon only when **(id-1) < row_solid_thresh[0xD000]** (byte table
@@ -182,7 +191,10 @@ paints only the floor plus the 2×1 jump ledges flanking each column.
 scenery. Validated byte-exact against 0xD100 RAM snapshots for all 7 recorded
 stage-1 rooms. Note metatile-definition tables can straddle the seg12/seg13
 (0x8000/0xA000) window boundary, so the decoder treats banks 0x0b/0x0c/0x0d as one
-flat 0x6000-0xBFFF buffer.
+flat 0x6000-0xBFFF buffer.  Body-tile specks that used to read as solid noise
+(stage 6 room 5, stage 10 wallpaper, stage 15 rooms 6-9, stage 17 rooms 7/10,
+stage 0 room 2 gate) were 09 counted solid because 05-08 decoration was treated
+as a surface; the 01-04 adjacency rule clears them.
 
 **Room-to-room connectivity (CONFIRMED, byte-exact + runtime-validated).** The
 transition graph is a per-stage table in seg13 (`segments/seg13.asm`): `conn_ptr` word table at **0xB9D3**
@@ -272,8 +284,10 @@ on-screen **ENEMY/BOSS energy** (full `0x80`, used by HP-bar enemies, types ≥ 
 **Simon takes damage** (both floor at 0 via `damage_health`, seg0 0x4632):
 - **Enemy contact** — `hurt_simon_contact` (seg2 0x8173). Damage = `2 ×` the *odd*
   byte of the enemy type's `l81d5h` entry. Confirmed: zombie = **2**, dog = **6**.
-  A raised shield (`0xC701` bit 4) halves it and spends a shield charge (`0xC441`);
-  when charges run out the shield drops.
+  A raised **red shield** (`0xC701` bit 4, bonus id 3) uses table damage instead
+  of 2× when Simon is facing the hit, and spends a shield charge (`0xC441`);
+  when charges run out the shield drops.  The **yellow shield** (id 4, bit 5)
+  absorbs D700 projectiles instead.
 - **Hazard / enemy projectile** — `hurt_simon_projectile` (seg2 0x85AD). Fixed
   **8**, or **16** if the slot's flag bit is set. Also forces the hurt state
   (`0xC420 = 5`). Ignored during i-frame/freeze timers (`0xC42D`, `0xC43A`).
@@ -306,12 +320,15 @@ Weapon behaviour specifics:
 - **0xC416 = equipped weapon id.** Confirmed: **0 = leather whip, 1 = chain whip**
   (runtime: picking up the chain whip flipped 0xC416 0 -> 1). Weapons 0 and 1 take
   the **whip attack path** (seg1 ~0x7D80: `ld a,(0c416h) / cp 002h / jr nc` -> whip
-  if <2), weapons **>= 2 take the projectile path** (thrown knife / cross / axe).
-  Exact ids for knife/cross/axe still to confirm by recording each (hypothesis:
-  2 = knife, 3 = cross, 4 = axe).
+  if <2), weapons **>= 2 take the projectile path** (thrown knife / cross / axe)
+  on **SPACE**. Exact ids for knife/cross/axe still to confirm by recording each
+  (hypothesis: 2 = knife, 3 = cross, 4 = axe). **Holy water is not a C416
+  weapon** — it is `C701` bit 3 and is thrown with jump+LEFT/RIGHT (see below).
 - **Weapon pickups arrive via collect_bonus (seg2 0x8D33) with bonus id >= 0x1A**:
   the fallthrough `l8d77h` does `sub 0x19` and stores the result in 0xC416, so
-  weapon id = bonus id - 0x19 (chain whip = bonus 0x1A -> weapon 1, confirmed).
+  weapon id = bonus id - 0x19 (chain whip = bonus 0x1A -> weapon 1, confirmed),
+  except **bonus `0x1E` (index 5) = holy water** which sets `C701` bit 3 and
+  leaves `C416` alone.
 - **Damage table split** (seg1 `sub_7e33h` 0x7E33): weapon 0 (leather) and weapon 2
   use the base damage table `l7e60h`; other weapons use the stronger table at
   0x7E67 - consistent with the strength tiers. Damage is indexed by enemy type
@@ -339,16 +356,100 @@ Sub-items / consumables:
   byte = Y). This table is the authoritative room geography for all 19 stages (0–18)
   and is available in `tools/roomperm.py` via `--minimap` (default placement is the
   BFS spatial reconstruction; the two are generated side by side for comparison).
-- **Hourglass** — pauses/freezes the game.
-- **Holy water** — thrown, high damage.
-- **Shields** — two types: one absorbs damage, one reflects it.
-- **Rosaries** — a **temporary "no new enemies" power-up** (two types). NOT a
+- **Hourglass** — bonus id **10** (`C701` bit 6). Use: while **jumping** (C420==1),
+  **DOWN** new-press, spend **5 hearts**. Arms `C43B` (90 frames ~1.5s, or 150
+  ~2.5s with the tipped-hourglass flag below) and `D010` bit0, which skips enemy
+  AI/movement. Not 5 seconds in the ROM; not a grounded UP+DOWN chord.
+
+### Holy water
+
+Holy water is a **sub-weapon bit**, not a whip replacement. Bonus id **`0x1E`**
+(`bonus_holy_water` 0x8D94) ORs **`C701` bit 3**. It never writes `C416`, so
+SPACE is still whatever whip/knife/cross/axe you have. Death (`sub_70e3h`)
+keeps only `C701` bit 7 (map); the vial is lost. Vendor row **`0x1E`** is this
+item (30 / 10 / 50 hearts).
+
+**How to throw.** While **jumping** (`C420==1`) and SPACE is **not** a new-press
+(`l713dh`), **LEFT** or **RIGHT** new-press (`C006` bits 2/3). Costs **5 hearts**
+(BCD) and needs `C461==0` (one vial at a time). `holy_water_use` (seg1 **0x7154**)
+writes throw dir to `C468` (1=left, 0=right), sets projectile slot `C460` type
+**5**, and spends the hearts. Jump+DOWN is the hourglass if you also have bit 6.
+
+**Arc and pool.** `holy_water_tick` (0x73AB) on the **C460** slot (type at
+`C461`). Spawn copies Simon (`C425`/`C427`) with `velX` ±2 and `velY` 0. In flight
+(state 2) each frame does `Y += 2*l7084h[phase]` — `l7084h` is the signed dY
+table also used by hurt knockback — and `X += velX` (`sub_74c2h`). It lands when
+`sub_7b9fh` sees a solid tile, plays sfx `0x18`, and goes to state 3: a **24-frame
+pool** on the floor. SAT path `l759ch` paints that state **colour 8** (red).
+
+**Damage.** Unlike the knife (type 2), a hit does **not** despawn the vial
+(`l807fh`). Fodder uses `l804fh` byte 3 = **2** HP per connected hit
+(knife/cross/axe/holy = 1/4/2/2). The pool can connect more than once: a hit
+clears enemy `+0x0E` bit 0, and `0x99A6` (called from the pool flicker) restores
+it on actors that still have bit 2. HP-bar types `0x11–0x17` go through
+`weapon_hit_damage` / `C416` (the equipped whip), not that 2.
+
+### Tipped hourglass (secret)
+
+The world hourglass pickup can be whipped before you grab it. That is a hidden
+second item, not a glitch. Period guides called the result "1.5× timed-item
+duration"; the ROM is slightly more generous than that.
+
+**How.** Whip the hourglass **once**. `l8c4bh` (seg2 **0x8C4B**) rewrites the
+pickup type (`ix+4`) from **0x0A → 0x0B**, nudges it up 8 pixels (`sub_8c36h`),
+and the 4bpp blit switches to the sideways graphic (the tile next to the upright
+hourglass in the HUD sheet; `gfx/bonus_hourglass_pair.png`). Collecting that form
+runs `bonus_tipped_hourglass` (id **11**, 0x8DFC) which does only
+`set 2,(0xC431)`. Whip it a **second** time and `ix+6` is set to 1, so the
+pickup despawns on the next tick — the item is gone.
+
+This is world-pickups only (the 0xC500 list). Buying the hourglass from a vendor
+calls `collect_bonus(0x0A)` immediately; there is nothing to whip.
+
+**What it does.** `0xC431` bit 2 is a persistent "longer timed bonuses" flag. It
+is **not** a second hourglass. The tipped collect path does **not** set `C701`
+bit 6, so this pickup does not grant freeze — you spent the hourglass on the
+duration buff. An hourglass you already held is left alone (bit 6 is not
+cleared).
+
+The flag is read when a timed effect is **armed**, not while it is ticking.
+Picking up the tipped hourglass does not extend a rosary / gem / ring / freeze
+that is already counting down. Seconds below assume 60 Hz.
+
+| Effect | RAM | Default | With bit 2 | Ratio |
+|--------|-----|---------|------------|-------|
+| Rosary (no new enemy spawns) | `C440` | `0x96` (150 frames ≈ 2.5 s) | `0xF0` (240 frames ≈ 4 s) | 1.6× |
+| Blue gem (invisibility) | `C43A` | `0x96` | `0xF0` | 1.6× |
+| Sapphire ring (touch-kills) | `C434` | `0x96` | `0xF0` | 1.6× |
+| Hourglass freeze | `C43B` | `0x5A` (90 frames ≈ 1.5 s) | `0x96` (150 frames ≈ 2.5 s) | 1.67× |
+
+Weapon pickups fall through into `bonus_rosary`, so grabbing a whip upgrade also
+gets the long 240-frame no-spawn window if the flag is set.
+
+**What it does not lengthen.** Instant pickups (white cross, potion, hearts,
+score bags) and the persistent inventory bits (boots, wings, candle, map, bibles,
+keys, staff, shields).
+
+**How long it lasts.** Until death. The life-lost reset (`sub_70e3h`) zeros all
+of `0xC431`, so this flag, boots, and wings go together. It survives room and
+stage changes.
+
+- **Life orbs / potion** restore `0xC415` (not heart currency). **7** small orb
+  = +8 (1/4 of the 32-point bar). **22** is a **bottle/potion** (HUD tile at
+  seg9 `0x9A00`, vendor price-tbl id `0x16`) that instant-fills +32. Same full-bar
+  end state as picking up the boss orb, but a different graphic and collect
+  path — the descending boss orb is actor type 0x22, not this bonus id.
+- **Shields** — **3** red (`C701` bit 4): facing the hit takes table damage
+  instead of 2×. **4** yellow (`C701` bit 5): absorbs D700 projectiles. Mutually
+  exclusive; 16 charges in `C441`.
+- **Rosaries** — a **temporary "no new enemies" power-up** (id **6**). NOT a
   weapon and NOT a persistent inventory item. Runtime (frame 493): collected as a
   normal 0xC500 pickup (its 0x84 slot cleared), bonus id **0x06** latched to 0xC419.
   Static trace of the effect (confirmed, immediate, not next-room):
     - Handler `collect_bonus[6]` (seg2 **0x8D83**) arms a countdown timer at
       **0xC440** to **0xF0** (240 frames ≈ 4 s) or **0x96** (150 frames ≈ 2.5 s),
-      selected by 0xC431 bit 2 (likely the two-rosary difference). It does NOT touch
+      selected by `0xC431` bit 2 (tipped hourglass; see that section). Same bit
+      lengthens the blue gem, sapphire ring, and hourglass freeze. It does NOT touch
       0xC700-0xC70F inventory or the 0xC416 weapon (hence "temporary"). The weapon
       pickup path (`l8d77h`, bonus >= 0x1A) falls straight through into this same
       code, so grabbing a whip upgrade also arms a short no-spawn window.
@@ -362,6 +463,23 @@ Sub-items / consumables:
     - **Effect is immediate and current-room** (the gate is checked per frame in
       whatever room you're in), not deferred to the next room. It only suppresses
       *new* spawns; enemies already in the 0xC800 slots are untouched.
+
+`collect_bonus_tbl` (seg2 **0x8D45**) is the 25-entry handler table for pickup
+ids 1–25 (index = id−1; id ≥ 0x1A goes through `l8d77h`). Confirmed: **1/2**
+small/large heart, **3** red shield (face-on contact uses table damage, not 2×),
+**4** yellow shield (absorbs D700 projectiles), **5** white cross (kill on-screen
+actors), **6** rosary, **7** small life orb (+8 HP), **8** blue gem (C43A invis, sprite
+flash white), **9** sapphire ring (C434, sprite flash red, touch-kills), **10**
+hourglass (jump+DOWN, 5 hearts → freeze), **11** tipped hourglass (secret:
+whip the id-10 world pickup once; see section above),
+**12** boots, **13** wings, **14** candle (white outlines on breakable blocks),
+**15** map, **16/17** black/white bible, **18** staff (C700=3), **19/20**
+white/blue money bag (+5000/+1000), **21** slime (fake candle drop; collecting
+it is a no-effect stub, leaving it hatches actor 0x1A/0x1B/0x1C by hub), **22**
+potion/bottle (+32 = full bar; vendor 0x16; not the boss orb), **23** yellow
+key, **24** white key, **25** treasure chest (container; `l8c1bh` spends key/staff
+and reveals the contents id at `ix+0x0D`). Bonus **`0x1E`** (holy water) is not
+in this 1–25 table; `l8d77h` takes `id - 0x19 == 5` to `bonus_holy_water`.
 
 ### Continuous enemy generators (spawn bitmask)  (CONFIRMED, byte-exact)
 - `room_spawner` (seg0 0x5EBF) indexes seg14 word table **0x85A6** by stage
@@ -391,9 +509,8 @@ Sub-items / consumables:
   not this continuous spawner.
   - NOTE: 0xC5E5/0xC5E6 (00->FF/20 at pickup) is the generic pickup-popup message +
     timer set by 0x8F2A for *every* pickup, NOT a rosary-specific state.
-  - Still TODO: confirm which of the two rosary types this is and the second's bonus id.
-- **Hearts** — currency for vendors; also power the hourglass / holy water
-  activation *(the heart↔sub-weapon coupling is unconfirmed)*.
+- **Hearts** — currency for vendors; also power the hourglass (jump+DOWN) and
+  holy water (jump+LEFT/RIGHT), 5 each.
 - **Life refills** — small orbs during play, or **vials** bought from vendors.
 
 ### Vendors (runtime-confirmed, seg2 @ 0x92AE–0x9552)
@@ -452,8 +569,8 @@ column from the 0xC702 bible flags:
 | 0x03            | 20     | 10              | 60               |
 | 0x04            | 20     | 10              | 80               |
 | 0x0A            | 40     | 20              | 80               |
-| 0x16            | 40     | 15              | 80               |
-| 0x1E            | 30     | 10              | 50               |
+| 0x16 (potion)   | 40     | 15              | 80               |
+| 0x1E (holy water)| 30    | 10              | 50               |
 | 0x1D            | 20     | 10              | 80               |
 
 While an offer is on screen, `vendor_purchase_tick` (0x94BE) counts the 0xC706
@@ -533,9 +650,9 @@ entity-dispatch shell at 0x5FD0. All 14 `main_state_tbl` handlers live in seg0
 
 During normal play the default banks (set by `sub_533dh`) are seg 1 @ 0x6000,
 seg 2 @ 0x8000, seg 3 @ 0xA000. So the substantive gameplay (movement, AI,
-collision, item logic) lives in **code segments 1/2/3**, still `INCBIN`'d and not
-yet disassembled - that's the next disassembly target, followed from seg0's
-state handlers and `entity_tbl`.
+collision, item logic) lives in **code segments 1/2/3** (`INCLUDE`'d, still being
+annotated).  Map tables are banks 11-12; remaining `INCBIN` banks are 4-10 and
+14-15 (graphics / object lists).
 
 ## Graphics format (sprite/tile hunt)
 

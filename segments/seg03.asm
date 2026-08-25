@@ -2948,7 +2948,7 @@ lb6efh:
 	xor a
 	ld (0ce11h),a
 	ld (0ce14h),a
-	ld c,022h
+	ld c,022h              ; boss-clear orb (descends; touch -> 0xCE11)
 	ld de,07840h
 	call spawn_actor
 	ld a,0b4h

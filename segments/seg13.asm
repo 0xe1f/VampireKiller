@@ -9,7 +9,8 @@
 ; ===========================================================================
 
 ; --- 0xA000-0xB962: metatile defs + sprite RLE (graphics, not yet reversed) -
-;  Landmarks: 0xA041 = def base when 0xC41A != 0 (room_map_build); 0xA281 /
+;  0xA000-0xA040 = tail of stage-18 defs (body at mtile_defs_s18 in seg12).
+;  Landmarks: 0xA041 = mtile_def_c41a (room_map_build when 0xC41A != 0); 0xA281 /
 ;  0xA2D1 = Simon cell pointer tables (below); 0xA319 = RLE streams
 ;  (intro_simon + in-game frames); 0xB895 = intro_sky.
 	INCBIN "seg13.bin", 0, 0x0041

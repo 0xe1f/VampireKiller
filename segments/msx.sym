@@ -177,7 +177,13 @@ whip_tick: equ 0x71e7	; dispatch 0xC422 whip phase
 whip_slots_clear: equ 0x751a	; zero 0xC450 whip slots + hide SAT
 simon_mirror_frames: equ 0x7666	; facing-left: C42E/C42F += 0x0A/0x0F
 tile_layout_draw: equ 0x7b39	; blit title_layout stream (FF=end, FE=next row)
-spend_5_hearts: equ 0x7154	; deduct 5 from heart total (0xC417, BCD)
+holy_water_use: equ 0x7154	; C701 bit3: jump+LEFT/RIGHT, 5 hearts, one vial (C461)
+holy_water_throw_left: equ 0x719B
+holy_water_throw_right: equ 0x71A8
+holy_water_throw: equ 0x71B1	; C461=5, spend 5 hearts
+holy_water_tick: equ 0x73AB	; C460 type 5: spawn, arc (l7084h), pool
+holy_water_arc: equ 0x73E5
+holy_water_pool: equ 0x7420	; 24 frames on floor, SAT colour 8
 tile_is_solid: equ 0x7c65	; carry=solid iff (tile-1) < row_solid_thresh[0xD000]
 row_solid_thresh: equ 0x7c7f	; per-world-row solidity threshold byte table
 map_cell_at: equ 0x7d36	; A = room tile id under pixel (D=X,E=Y) from the 0xD100 map
@@ -189,6 +195,35 @@ door_proximity: equ 0x8587	; carry if Simon (B=Y,C=X) overlaps door at C5AD=Y / 
 door_anim_tick: equ 0x914e	; 0xC5AC door state: 0xFF -> door_blit_tiles; 3 = opening frames
 door_begin_open: equ 0x9175	; if C5AC==1, set 0xFF and jp door_anim_tick (start opening)
 collect_bonus: equ 0x8d33	; apply picked-up bonus id A (latch 0xC419, table @ 0x8D45)
+collect_bonus_tbl: equ 0x8D45	; word[id-1] handlers; id>=0x1A weapon except 0x1E holy water
+bonus_red_shield: equ 0x8D9F	; id 3: C701 bit4, face-on contact uses table dmg
+bonus_yellow_shield: equ 0x8DA8	; id 4: C701 bit5, absorb D700 projectiles
+bonus_white_cross: equ 0x8DC2	; id 5: despawn on-screen actors
+bonus_rosary: equ 0x8D83	; id 6: C440 no-spawn timer
+bonus_small_heart: equ 0x8DB6	; id 1: +1 heart
+bonus_large_heart: equ 0x8DBE	; id 2: +5 hearts
+bonus_small_orb: equ 0x8DE5	; id 7: +8 HP (1/4 of 0x20 bar)
+bonus_blue_gem: equ 0x8DD4	; id 8: C43A invis, sprite flash white
+bonus_sapphire_ring: equ 0x8DEC	; id 9: C434, sprite flash red, touch-kills
+bonus_hourglass: equ 0x8D9B	; id 10: C701 bit6; jump+DOWN spends 5 hearts
+bonus_holy_water: equ 0x8D94	; bonus 0x1E: C701 bit3; jump+LEFT/RIGHT, not C416
+bonus_tipped_hourglass: equ 0x8DFC	; id 11: whip id 10 once; C431 bit2 1.5x timers
+bonus_boots: equ 0x8E03		; id 12: C431 bit3 faster walk
+bonus_wings: equ 0x8E0A		; id 13: C431 bit4 higher jump
+bonus_slime: equ 0x8E1B		; id 21: fake pickup (hatches enemy if left); collect is a stub
+bonus_chest: equ 0x8E1B		; id 25: chest container (same stub; world path opens at l8c1bh)
+bonus_candle: equ 0x8E1D	; id 14: C702 bit0, white outlines on C470 blocks
+bonus_black_bible: equ 0x8E24	; id 16: C702 bit6, vendor price doubled
+bonus_white_bible: equ 0x8E2D	; id 17: C702 bit7, vendor price halved
+bonus_map: equ 0x8E3A		; id 15: C431 bit6, C701 bit7, C70F=3
+bonus_white_bag: equ 0x8E49	; id 19: +5000 score
+bonus_blue_bag: equ 0x8E52	; id 20: +1000 score
+bonus_yellow_key: equ 0x8E57	; id 23: C701 bit1, C700=1
+bonus_white_key: equ 0x8E67	; id 24: C701 bit0
+bonus_staff: equ 0x8E80		; id 18: C700=3, C701 bit2; drops yellow key
+bonus_potion: equ 0x8E14	; id 22: bottle, +32 HP; vendor 0x16 (not boss orb)
+yellow_shield_tick: equ 0x8617	; absorb D700 projectiles while C701 bit5
+hourglass_use: equ 0x7166	; jump+DOWN + 5 hearts -> C43B / D010 freeze
 brazier_tick_all: equ 0x8678	; per-frame update of the 8 brazier/candle slots (0xC470)
 brazier_tick: equ 0x8693	; update one brazier/candle (flame anim + hit test)
 brazier_destroyed: equ 0x87c1	; brazier/candle hit: clear it + run item drop
@@ -239,6 +274,21 @@ spot_proximity: equ 0x85FB	; carry if Simon overlaps armed spot (C5B1/Y/X)
 conn_lookup_paged: equ 0x5A35	; page seg13, conn_lookup, restore
 conn_load_permits_paged: equ 0x5A3E	; page seg13, conn_load_permits, restore
 door_load_paged: equ 0x5A47	; page seg13, door_load, restore
+
+; ---- Vampire Killer map-data banks (segment 11 @ 0x6000, 12 @ 0x8000) ----
+mtile_rowbase: equ 0x6000	; byte[stage]=first room index (seg11; stages 0..18)
+mtile_roomptr: equ 0x6013	; word[index]->48-byte 8x6 stream (156 rooms)
+mtile_stream_c41a: equ 0x614B	; alternate 8x6 stream when 0xC41A != 0
+mtile_streams: equ 0x617B	; 156 packed 8x6 streams (48 bytes each)
+mtile_defbase: equ 0x7EBB	; word[stage]->4x4 metatile-def table (may straddle banks)
+mtile_defs_s00: equ 0x7EE1	; stage 0 defs (seg11; tail in seg12)
+mtile_defs_s01: equ 0x80B1	; stages 1-3 defs (seg12)
+mtile_defs_s04: equ 0x84D1	; stages 4-6
+mtile_defs_s07: equ 0x8791	; stages 7-9
+mtile_defs_s10: equ 0x8D21	; stages 10-12
+mtile_defs_s13: equ 0x9121	; stages 13-15
+mtile_defs_s16: equ 0x9651	; stages 16-17
+mtile_defs_s18: equ 0x9AC1	; stage 18 (tail in seg13 0xA000-0xA040)
 
 ; ---- Vampire Killer banked routines (segment 3 @ 0xA000) -----------------
 enemy_zombie_tick: equ 0xa93b	; entity type 1 (walking zombie) behaviour handler

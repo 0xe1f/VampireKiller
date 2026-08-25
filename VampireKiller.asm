@@ -24,7 +24,7 @@
 ;  --- File layout --------------------------------------------------------
 ;  The .rom is the 16 segments concatenated (segment N at file offset N*0x2000).
 ;  This source is being converted segment-by-segment from raw `incbin` into
-;  commented disassembly.  Segments 0-3 and 13 are INCLUDE'd; the rest are
+;  commented disassembly.  Segments 0-3 and 11-13 are INCLUDE'd; the rest are
 ;  still INCBIN so the rebuilt ROM stays byte-for-byte identical at every step.
 ;  `PHASE` sets each block's runtime address while the output stays contiguous.
 ; ===========================================================================
@@ -73,7 +73,7 @@
     INCLUDE "segments/seg03.asm"
     DEPHASE
 
-; --- segments 4..12, 14..15 : paged in on demand (still INCBIN) -------------
+; --- segments 4..10 : paged in on demand (still INCBIN) ---------------------
 ; Included verbatim and emitted contiguously.  sjasmplus prints one harmless
 ; "RAM limit exceeded 0x10000" warning here because a single 128 KiB image is
 ; larger than the Z80's 64 KiB address space; the output file is still exact
@@ -85,8 +85,16 @@
     INCBIN "segments/seg08.bin"
     INCBIN "segments/seg09.bin"
     INCBIN "segments/seg10.bin"
-    INCBIN "segments/seg11.bin"
-    INCBIN "segments/seg12.bin"
+
+; --- segment 11 : bank 0x0B @ 0x6000 (room-map tables + metatile streams) ---
+    PHASE 0x6000
+    INCLUDE "segments/seg11.asm"
+    DEPHASE
+
+; --- segment 12 : bank 0x0C @ 0x8000 (per-stage metatile defs) --------------
+    PHASE 0x8000
+    INCLUDE "segments/seg12.asm"
+    DEPHASE
 
 ; --- segment 13 : bank 0x0D @ 0xA000 (transition brain + door_tbl) -----------
     PHASE 0xA000

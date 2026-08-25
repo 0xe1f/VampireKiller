@@ -4760,26 +4760,26 @@ room_spawner:
 	pop af
 	rra
 	push af
-	call c,hunchback_generator ; bit1 -> type 02 hunchback (1 HP)
+	call c,merman_generator ; bit1 -> type 02 green merman (1 HP)
 	pop af
 	rra
 	push af
-	call c,hunchback_generator_3 ; bit2 -> type 03 hunchback (2 HP)
+	call c,merman_generator_3 ; bit2 -> type 03 red merman (spit, 2 HP)
 	pop af
 	rra
 	push af
-	call c,bat_generator   ; bit3 -> type 04 bat
+	call c,hanging_bat_generator ; bit3 -> type 04 hanging bat
 	pop af
 	rra
 	push af
-	call c,ghost_generator ; bit4 -> type 07 ghost
+	call c,flying_skull_generator ; bit4 -> type 07 flying skull
 	pop af
 	rra
 	push af
-	call c,medusa_head_generator ; bit5 -> type 08 medusa head
+	call c,ghost_head_generator ; bit5 -> type 08 ghost head
 	pop af
 	rra
-	jp c,skull_cannon_generator ; bit6 -> type 0x0F roc (stale name)
+	jp c,roc_generator     ; bit6 -> type 0x0F roc
 	ret
 ; --- spawn_actor (seg0 0x5F24) - spawn an actor into a free slot ----------------
 ; Entry: C = actor type id (>0), DE = spawn position (D = X, E = Y -> slot+05/+03).
@@ -4885,27 +4885,27 @@ spawn_actor_init:
 ; paged into page 2b - so these are addresses in banked ROM, not local labels.
 ; (22 entries; the trailing 0x5FFF byte is padding to the segment boundary.)
 entity_tbl:
-	defw enemy_zombie_tick  ; 1 walking zombie (seg3 0xA93B)
-	defw enemy_hunchback_tick ; 2 hunchback (1 HP)
-	defw enemy_hunchback_tick ; 3 hunchback (2 HP, same AI)
-	defw enemy_bat_tick     ; 4 bat
-	defw enemy_dog_tick     ; 5 sitting dog (seg3 0xA863)
-	defw 0a57ah             ; 6
-	defw enemy_ghost_tick   ; 7 ghost
-	defw enemy_medusa_head_tick ; 8 medusa head
-	defw 0af51h             ; 9
-	defw 0a229h             ; 10
-	defw 0b34bh             ; 11
-	defw 0a677h             ; 12 raven (hover-flight)
-	defw 0b219h             ; 13
-	defw 0aad4h             ; 14
-	defw enemy_skull_cannon_tick ; 15 roc (drops type 0x23)
-	defw 0ade5h             ; 16
-	defw 0ab29h             ; 17
-	defw 0be57h             ; 18
-	defw 0bd2dh             ; 19
-	defw 0b883h             ; 20
-	defw 0ba56h             ; 21
-	defw 0bc5bh             ; 22
+	defw enemy_zombie_tick  ; 1 walking zombie
+	defw enemy_merman_tick  ; 2 green merman (1 HP, closed mouth)
+	defw enemy_merman_tick  ; 3 red merman (2 HP, open-mouth spit)
+	defw enemy_hanging_bat_tick ; 4 hanging bat
+	defw enemy_dog_tick     ; 5 sitting dog
+	defw enemy_pikeman_tick ; 6 pikeman
+	defw enemy_flying_skull_tick ; 7 flying skull
+	defw enemy_ghost_head_tick ; 8 ghost head
+	defw enemy_red_skeleton_tick ; 9 red skeleton (fast, no throw)
+	defw enemy_skull_pile_tick ; 10 skull pile (shoots)
+	defw enemy_white_skeleton_tick ; 11 white skeleton (throws)
+	defw enemy_raven_tick   ; 12 raven (hover-flight)
+	defw enemy_hunchback_tick ; 13 hunchback (also Igor type 24 pose)
+	defw enemy_bone_dragon_tick ; 14 bone dragon (custom SAT)
+	defw enemy_roc_tick     ; 15 roc (drops type 0x23)
+	defw enemy_axe_knight_tick ; 16 axe knight
+	defw enemy_dracula_tick ; 17 Dracula
+	defw enemy_giant_bat_tick ; 18 giant bat
+	defw enemy_medusa_tick  ; 19 Medusa
+	defw enemy_mummy_tick   ; 20 mummy
+	defw enemy_frankenstein_tick ; 21 Frankenstein
+	defw enemy_grim_reaper_tick ; 22 grim reaper
 	defb 047h
 entity_tbl_end:

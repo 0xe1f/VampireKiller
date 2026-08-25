@@ -46,8 +46,8 @@ Leather whip subtracts 1 from fodder HP, other weapons 2.
 | # | Name | In-game behaviour |
 | ---: | --- | --- |
 | 1 | Zombie | Walks in from a screen edge toward centre/Simon. 1 HP, 100 pts. Spawn bit 0. |
-| 2 | Green merman | Shared walk/pounce AI with 3 (`enemy_hunchback_tick` — the name is stale). 1 HP, 200 pts. Can morph to type 3 when Simon’s Y overlaps. Spawn bit 1. |
-| 3 | Red merman | Same AI as 2, 2 HP. Spawn bit 2. |
+| 2 | Green merman | Walk/pounce. Closed-mouth frames `0x0B`/`0x08`. 1 HP, 200 pts. Spawn bit 1. Shared handler with 3 (`enemy_merman_tick`). When `ix+1B` is set and Simon’s Y is within ±8 it writes type 3 and pose `0x12` (open mouth), then the type-3 spit path runs. |
+| 3 | Red merman | Open-mouth spit. Frames `0x12`/`0x0F`. Same walk/pounce, then state 2 hides and fires `0x9F74` kind 2 from Y−0x14 (the mouth). 2 HP. Spawn bit 2. Bit 0 of the type id is what selects the spit countdown, so a spawned 3 does not need the morph. |
 | 4 | Hanging bat | Hangs (shape `0x1A`) until Simon is close (Y window `0x50`, X `0x40`), then flies toward him. 1 HP, 100 pts. Spawn bit 3. |
 | 5 | Sitting dog | Idles; charges when Simon is within 64 px. 1 HP, 100 pts, 6 contact unshielded. Object list. |
 | 6 | Pikeman | Walking spear knight. Turns at ledges/walls; walks toward Simon when Y overlaps. 4 HP, 200 pts. Stages 4–5 object list. No projectile. |
@@ -591,16 +591,16 @@ in these sheets.
   | bit | generator (seg2) | actor type | handler (seg3) | enemy |
   |-----|------------------|------------|----------------|-------|
   | 0 | `zombie_generator` 0x9CED | 0x01 | `enemy_zombie_tick` 0xA93B | zombie (100 pts) |
-  | 1 | `hunchback_generator` 0x9D52 | 0x02 | `enemy_hunchback_tick` 0xA2E7 | green merman, 1 HP (200 pts; handler name is stale — type 13 is the hunchback) |
-  | 2 | `hunchback_generator_3` 0x9D59 | 0x03 | same 0xA2E7 | red merman, 2 HP (same AI; type 02 can morph to 03 when Simon's Y overlaps) |
-  | 3 | `bat_generator` 0x9D9E | 0x04 | `enemy_bat_tick` 0xB0D1 | hanging bat (100 pts; hangs, then flies at Simon) |
-  | 4 | `ghost_generator` 0x9DCA | 0x07 | `enemy_ghost_tick` 0xB068 | flying skull (200 pts; homes on Simon X and Y) |
-  | 5 | `medusa_head_generator` 0x9DDC | 0x08 | `enemy_medusa_head_tick` 0xA502 | ghost head (200 pts; flies across, bobs around spawn Y) |
-  | 6 | `skull_cannon_generator` 0x9DEE | 0x0F | `enemy_skull_cannon_tick` 0xB19A | roc (400 pts, 8 HP; flies, pauses, drops type 0x23). Manual lists 300. The small hovering raven is type 12. |
+  | 1 | `merman_generator` 0x9D52 | 0x02 | `enemy_merman_tick` 0xA2E7 | green merman, 1 HP (200 pts) |
+  | 2 | `merman_generator_3` 0x9D59 | 0x03 | same 0xA2E7 | red merman, 2 HP (open-mouth spit) |
+  | 3 | `hanging_bat_generator` 0x9D9E | 0x04 | `enemy_hanging_bat_tick` 0xB0D1 | hanging bat (100 pts; hangs, then flies at Simon) |
+  | 4 | `flying_skull_generator` 0x9DCA | 0x07 | `enemy_flying_skull_tick` 0xB068 | flying skull (200 pts; homes on Simon X and Y) |
+  | 5 | `ghost_head_generator` 0x9DDC | 0x08 | `enemy_ghost_head_tick` 0xA502 | ghost head (200 pts; flies across, bobs around spawn Y) |
+  | 6 | `roc_generator` 0x9DEE | 0x0F | `enemy_roc_tick` 0xB19A | roc (400 pts, 8 HP; flies, pauses, drops type 0x23). Manual lists 300. The small hovering raven is type 12. |
 
   `spawn_actor` takes **D = X** (slot+05), **E = Y** (slot+03). Zombies typically
-  enter at X=0xF0 (right edge) or 0x10 (left), Y=0xC0. Hunchbacks spawn at Y=0xC8
-  with X from table `l9d8eh`. Bats/ghosts/medusa heads share `flyer_spawn`: X at
+  enter at X=0xF0 (right edge) or 0x10 (left), Y=0xC0. Mermen spawn at Y=0xC8
+  with X from table `l9d8eh`. Hanging bats / flying skulls / ghost heads share `flyer_spawn`: X at
   the screen edge, Y = SimonY−8. The roc is fixed at X=0xE0, Y=0x30 or 0x40,
   and skips the spawn if Simon X ≥ 0xC0.
 - Each generator is rate-gated by `sub_9ccah` (per-generator 0xCF00+ counter vs a

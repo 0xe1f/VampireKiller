@@ -300,8 +300,8 @@ sub_81b2h:
 ;   score/100 :  1    2    2    1    1    2    2    2    2    3    2    1    2
 ;   contact dmg:  x2 of odd byte -> zombie(t01)=2, dog(t05)=6 (confirmed in play)
 ;   high types 0x0e=1000pts, 0x11 +30000, 0x12-14 2000, 0x17 +50000 [bosses].
-; Confirmed: t01 zombie 100/2; t02/t03 hunchback 200/4; t04 bat 100/2;
-; t05 dog 100/6; t07 ghost 200/2; t08 medusa head 200/4; t0F roc 400/4.
+; Confirmed: t01 zombie 100/2; t02/t03 merman 200/4; t04 hanging bat 100/2;
+; t05 dog 100/6; t07 flying skull 200/2; t08 ghost head 200/4; t0F roc 400/4.
 ; Hearts/keys are pickups (collect_bonus), not kills, so they award 0 here.
 l81d5h:
 	ld bc,00201h
@@ -4938,14 +4938,14 @@ l9d3fh:
 	ret
 l9d4ah:                        ; zombie spawn-rate thresholds (8 bytes)
 	defb 00ch,012h,00ch,00ch,00ch,012h,00ch,00ch
-hunchback_generator:           ; (0x9D52) bit1, type 02 (1 HP)
+merman_generator:           ; (0x9D52) bit1, type 02 green merman (1 HP)
 	ld hl,0cf02h
 	ld c,002h
-	jr hunchback_spawn
-hunchback_generator_3:         ; (0x9D59) bit2, type 03 (2 HP, same AI)
+	jr merman_spawn
+merman_generator_3:         ; (0x9D59) bit2, type 03 red merman (spit, 2 HP)
 	ld hl,0cf02h
 	ld c,003h
-hunchback_spawn:
+merman_spawn:
 	ld de,l9d96h
 	push bc
 	call sub_9ccah
@@ -4971,11 +4971,11 @@ l9d89h:
 	add a,d
 	ld d,a
 	jp spawn_actor
-l9d8eh:                        ; hunchback spawn X candidates
+l9d8eh:                        ; merman spawn X candidates
 	defb 060h,0d0h,030h,090h,0a0h,040h,060h,0b0h
-l9d96h:                        ; hunchback spawn-rate thresholds
+l9d96h:                        ; merman spawn-rate thresholds
 	defb 001h,018h,018h,018h,018h,018h,018h,018h
-bat_generator:                 ; (0x9D9E) bit3, type 04
+hanging_bat_generator:         ; (0x9D9E) bit3, type 04 hanging bat
 	ld hl,0cf06h
 	ld de,l9dc2h
 	ld c,004h
@@ -4998,21 +4998,21 @@ l9db6h:
 	jp spawn_actor
 l9dc2h:                        ; bat spawn-rate thresholds
 	defb 014h,014h,014h,028h,014h,014h,014h,028h
-ghost_generator:               ; (0x9DCA) bit4, type 07
+flying_skull_generator:        ; (0x9DCA) bit4, type 07 flying skull
 	ld hl,0cf08h
 	ld de,l9dd4h
 	ld c,007h
 	jr flyer_spawn
 l9dd4h:                        ; ghost spawn-rate thresholds
 	defb 01ch,01ch,01ch,048h,01ch,01ch,01ch,048h
-medusa_head_generator:         ; (0x9DDC) bit5, type 08
+ghost_head_generator:          ; (0x9DDC) bit5, type 08 ghost head
 	ld hl,0cf0ah
 	ld de,l9de6h
 	ld c,008h
 	jr flyer_spawn
 l9de6h:                        ; medusa-head spawn-rate thresholds
 	defb 00ch,00ch,00ch,018h,00ch,00ch,00ch,018h
-skull_cannon_generator:        ; (0x9DEE) bit6, type 0x0F roc
+roc_generator:                 ; (0x9DEE) bit6, type 0x0F roc
 	ld hl,0cf0ch
 	ld de,l9e15h
 	call sub_9ccah

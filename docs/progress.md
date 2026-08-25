@@ -1182,9 +1182,9 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   with WATCH-log PCs, and add the same name to `segments/msx.sym` so regen emits it.
   Renamed so far - seg0: draw_hearts_hud/draw_lives_hud/draw_health_bar/
   draw_enemy_meter, restore_health/damage_health/spawn_actor(+_init),
-  advance_stage, room_map_build, zombie_generator, hunchback_generator,
-  hunchback_generator_3, bat_generator, ghost_generator, medusa_head_generator,
-  skull_cannon_generator, door_blit_tiles,
+  advance_stage, room_map_build, zombie_generator, merman_generator,
+  merman_generator_3, hanging_bat_generator, flying_skull_generator, ghost_head_generator,
+  roc_generator, door_blit_tiles,
   read_buttons, input_edge, play_sound;
   seg1: simon_action_tick, simon_walk_left/right, simon_jump_tick, simon_mirror_frames,
   whip_tick, projectile_tick, knife_tick, cross_tick, axe_tick, tile_layout_draw, holy_water_use, holy_water_tick, map_cell_at, tile_is_solid,
@@ -1193,9 +1193,13 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   seg2: door_proximity, door_anim_tick, door_begin_open, spot_proximity,
   collect_bonus_tbl, bonus_holy_water, yellow_shield_tick, projectile_hit_actors,
   lose_weapon;
-  seg3: enemy_zombie_tick, enemy_dog_tick, enemy_hunchback_tick,
-  enemy_bat_tick, enemy_ghost_tick, enemy_medusa_head_tick,
-  enemy_skull_cannon_tick;
+  seg3: enemy_zombie_tick, enemy_dog_tick, enemy_merman_tick,
+  enemy_hanging_bat_tick, enemy_flying_skull_tick, enemy_ghost_head_tick,
+  enemy_roc_tick, enemy_pikeman_tick, enemy_raven_tick, enemy_skull_pile_tick,
+  enemy_hunchback_tick, enemy_bone_dragon_tick, enemy_red_skeleton_tick,
+  enemy_white_skeleton_tick, enemy_axe_knight_tick, enemy_dracula_tick,
+  enemy_giant_bat_tick, enemy_medusa_tick, enemy_mummy_tick,
+  enemy_frankenstein_tick, enemy_grim_reaper_tick;
   seg13: conn_lookup, conn_load_permits, conn_room_record, conn_ptr, door_load,
   door_load_coords, door_tbl, spot_load_coords, spot_tbl, simon_cell0_ptr,
   simon_cell1_ptr;

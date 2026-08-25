@@ -355,7 +355,10 @@ la1feh:
 	rst 38h
 	rst 38h
 	rst 38h
-	call sub_a2afh
+; enemy_skull_pile_tick (seg3 0xA229) - type 10. Stationary; faces Simon
+; (sub_a2afh) and shoots 0x9F74 kind 0x0A. 8 HP, 300 pts.
+enemy_skull_pile_tick:
+	call sub_a2afh          ; pick facing frame from Simon X
 	ld (ix+010h),008h
 	ld (ix+011h),020h
 	ret
@@ -399,7 +402,7 @@ la281h:
 	sub 014h
 	ld c,a
 	ld b,(ix+005h)
-	ld a,00ah
+	ld a,00ah               ; 0x9F74 kind 0x0A -> D700 projectile
 	call 09f74h
 	ld a,04ch
 sub_a291h:
@@ -440,10 +443,13 @@ la2cah:
 	ld (ix+019h),a
 	ld (ix+015h),001h
 	jp la36dh
-; enemy_hunchback_tick (seg3 0xA2E7) - type 02 (1 HP) and 03 (2 HP). Fall/land/
-; walk/pounce; type 02 can morph to 03 when Simon's Y overlaps the actor.
-enemy_hunchback_tick:
-	call 0a4bah
+; enemy_merman_tick (seg3 0xA2E7) - types 02 (green, 1 HP, closed mouth) and
+; 03 (red, 2 HP, open-mouth spit). Shared walk/pounce; type 3 (bit 0 of the
+; type id) counts down ix+10 then enters state 2 and fires 0x9F74 kind 2
+; from Y-0x14. Type 2 can write type=3 + pose 0x12 when ix+1B is set and
+; Simon's Y is within ±8.
+enemy_merman_tick:
+	call merman_pick_frame  ; 0x0B/0x08 (type 2) or 0x12/0x0F (type 3)
 	xor a
 	ld (ix+018h),a
 	ld (ix+01bh),a
@@ -470,7 +476,7 @@ enemy_hunchback_tick:
 	jp z,la461h
 	bit 0,(ix+018h)
 	jr nz,la32eh
-	call 0a4bah
+	call merman_pick_frame
 la32eh:
 	ld de,CHKRAM
 	call actor_set_xvel
@@ -522,30 +528,30 @@ la387h:
 	pop de
 	ld c,020h
 	jp spawn_actor
-la3a7h:
+la3a7h:                         ; state 1: walk
 	bit 0,(ix+01bh)
 	jr z,la3d2h
 	bit 0,(ix+01ch)
-	jr nz,la3d2h
-	ld (ix+00bh),012h
-	ld a,(0c425h)
+	jr nz,la3d2h            ; already latched this attack
+	ld (ix+00bh),012h       ; open-mouth pose (type 3)
+	ld a,(0c425h)           ; Simon Y
 	ld b,a
-	ld (ix+000h),003h
+	ld (ix+000h),003h       ; become type 3 (shooting form)
 	ld a,(ix+003h)
 	sub 008h
 	cp b
-	ret nc
+	ret nc                  ; Simon above the ±8 Y window
 	add a,010h
 	cp b
-	ret c
+	ret c                   ; Simon below it
 	ld (ix+006h),001h
-	ld (ix+01ch),001h
+	ld (ix+01ch),001h       ; Y overlapped: arm the spit
 la3d2h:
-	bit 0,(ix+000h)
-	jr z,la3e5h
+	bit 0,(ix+000h)         ; type 3 has bit 0 set; type 2 does not
+	jr z,la3e5h             ; green: just walk
 	dec (ix+010h)
 	jr nz,la3e5h
-	inc (ix+001h)
+	inc (ix+001h)           ; -> state 2 spit
 	ld (ix+011h),018h
 	ret
 la3e5h:
@@ -566,7 +572,7 @@ la40ah:
 	ld hl,la459h
 	bit 0,(ix+012h)
 	jr z,la416h
-	ld hl,0a45dh
+	ld hl,la45dh
 la416h:
 	dec (ix+013h)
 	jr nz,la436h
@@ -574,7 +580,7 @@ la416h:
 	inc (ix+014h)
 	ld a,(ix+014h)
 	and 001h
-	bit 0,(ix+000h)
+	bit 0,(ix+000h)         ; type 3 uses frames +2 (open mouth)
 	jr z,la42fh
 	add a,002h
 la42fh:
@@ -597,20 +603,16 @@ la441h:
 	ld (ix+018h),001h
 	ret
 la459h:
-	ex af,af'
-	add hl,bc
-	rrca
-	djnz $+13
-	inc c
-	ld (de),a
-	inc de
-la461h:
-	ld (ix+006h),000h
+	defb 008h,009h,00fh,010h ; type2/type3 walk, facing 0
+la45dh:
+	defb 00bh,00ch,012h,013h ; facing 1
+la461h:                         ; state 2: open-mouth spit
+	ld (ix+006h),000h       ; hide the body while the shot plays
 	dec (ix+011h)
 	jr z,la48dh
 	ld a,(ix+011h)
 	cp 008h
-	jr z,la499h
+	jr z,la499h             ; mid-timer: fire
 	ld hl,la4b6h
 	cp 010h
 	jr c,la489h
@@ -635,33 +637,32 @@ la48dh:
 	ret
 la499h:
 	ld hl,CHKRAM
-	ld de,00300h
+	ld de,00300h            ; spit X vel right
 	bit 7,(ix+00ah)
 	jr z,la4a8h
-	ld de,0fd00h
+	ld de,0fd00h            ; or left
 la4a8h:
 	ld a,(ix+003h)
-	sub 014h
+	sub 014h                ; from the mouth (Y-0x14)
 	ld c,a
 	ld b,(ix+005h)
-	ld a,002h
+	ld a,002h               ; 0x9F74 kind 2 -> D700 projectile
 	jp 09f74h
 la4b6h:
-	rrca
-	ld (de),a
-	ld de,00614h
-	dec bc
+	defb 00fh,012h,011h,014h ; spit anim frames
+merman_pick_frame:              ; (0xA4BA)
+	ld b,00bh               ; type 2 closed-mouth
 	ld c,008h
 	bit 0,(ix+000h)
 	jr z,la4c8h
-	ld b,012h
+	ld b,012h               ; type 3 open-mouth
 	ld c,00fh
 la4c8h:
 	ld (ix+00bh),b
 	ld a,(0c427h)
 	cp (ix+005h)
-	ret nc
-	ld (ix+00bh),c
+	ret nc                  ; Simon to the right: keep B
+	ld (ix+00bh),c          ; Simon to the left: use C
 	ret
 sub_a4d6h:
 	ld hl,la4fah
@@ -686,9 +687,9 @@ la4fah:
 	defb 010h,020h,018h,030h
 la4feh:
 	defb 008h,010h,00bh,006h
-; enemy_medusa_head_tick (seg3 0xA502) - type 08. Homes on spawn Y (ix+10);
-; X direction from which edge it entered.
-enemy_medusa_head_tick:
+; enemy_ghost_head_tick (seg3 0xA502) - type 08. Flies across, bobs around
+; spawn Y (ix+10). X direction from which edge it entered.
+enemy_ghost_head_tick:
 	ld (ix+006h),001h
 	ld a,(ix+003h)
 	ld (ix+010h),a         ; remember spawn Y
@@ -759,6 +760,10 @@ actor_set_xvel:
 	ld (ix+009h),e          ; +0x09/+0x0A = X velocity
 	ld (ix+00ah),d
 	ret
+; enemy_pikeman_tick (seg3 0xA57A) - type 06 walking spear knight. Turns at
+; ledges/walls; walks toward Simon when Y overlaps (±8 via sub_a63eh). 4 HP,
+; 200 pts. No projectile. Shape 0x50.
+enemy_pikeman_tick:
 	ld (ix+006h),001h
 	ld de,CHKRAM
 	ld (ix+010h),e
@@ -898,8 +903,10 @@ actor_set_xvel_speedup:
 	ex de,hl
 	pop hl
 	jp actor_set_xvel
-; type 12 raven (0xA677): fly, damp Yvel to 0 (hover), then a new arc or a
-; strafe when Simon's Y is within 0x18. Distinct from type 8's sine bob.
+; enemy_raven_tick (seg3 0xA677) - type 12. Flies, damps Yvel to 0 (hover),
+; then a new arc or a strafe when Simon's Y is within 0x18. Distinct from
+; type 8's sine bob. Shape 0x89. 1 HP, 100 pts.
+enemy_raven_tick:
 	ld (ix+010h),018h
 	ld (ix+00bh),089h
 	ld (ix+012h),000h
@@ -1140,11 +1147,9 @@ la859h:
 	ret
 
 ; ---------------------------------------------------------------------------
-;  enemy_dog_tick (seg3 0xA863) - behaviour handler for entity type 5, the
-;  "sitting dog".  Reached via seg0 entity_tbl[type-1] dispatch.  Runtime-
-;  confirmed: the dog idles in place until Simon closes in, then flees right
-;  off-screen.  This path selects the idle animation frame from Simon's
-;  proximity to the dog.
+;  enemy_dog_tick (seg3 0xA863) - type 05 sitting dog. Idles until Simon is
+;  within 64 px (0x40), then charges toward him. 1 HP, 100 pts, 6 contact
+;  unshielded. Object list. This path picks the idle frame from proximity.
 ; ---------------------------------------------------------------------------
 enemy_dog_tick:
 	ld b,(ix+005h)          ; B = dog position byte (+0x05)
@@ -1462,6 +1467,9 @@ laab4h:
 	djnz $+4
 	nop
 	call p,RIGHTC
+; enemy_bone_dragon_tick (seg3 0xAAD4) - type 14. 8 SAT cells; this tick
+; writes SAT itself (skips 0x644C). 12 HP, 1000 pts.
+enemy_bone_dragon_tick:
 	ld (ix+00ch),020h
 	ld a,(ix+003h)
 	ld (ix+01ah),a
@@ -1522,6 +1530,10 @@ lab25h:
 	ret po
 	ret p
 	nop
+; enemy_dracula_tick (seg3 0xAB29) - type 17. Event 6, stage 18 room 9.
+; SAT is head + cape (shape 0x56 intro / 0x5B stand); 32x32 torso blit is
+; parked. 32 HP on the bar.
+enemy_dracula_tick:
 	ld (ix+006h),000h
 	ld de,0fe00h
 	call actor_set_yvel
@@ -1855,6 +1867,10 @@ sub_add9h:
 	ret nc
 	ld (0ce0eh),a
 	ret
+; enemy_axe_knight_tick (seg3 0xADE5) - type 16. Same SAT layout as type 9,
+; stage 14+ VRAM is the knight. Throws (0x9F68). 8 HP, 300 pts, walk 0x0140.
+; Shape 0x5F.
+enemy_axe_knight_tick:
 	ld (ix+006h),001h
 	ld de,CHKRAM
 	call actor_set_yvel
@@ -2016,6 +2032,9 @@ sub_af47h:
 	ret nc
 	neg
 	ret
+; enemy_red_skeleton_tick (seg3 0xAF51) - type 09. Fast walk (0x0220), no
+; projectile. 2 HP, 200 pts. Stage 13 (SAT 02 45). Same skeleton script as 11.
+enemy_red_skeleton_tick:
 	ld de,CHKRAM
 	call actor_set_yvel
 	ld (ix+011h),030h
@@ -2139,8 +2158,8 @@ lb029h:
 	ld (ix+00bh),026h
 	ld (ix+001h),a
 	ret
-; enemy_ghost_tick (seg3 0xB068) - type 07. Homes on Simon X and Y.
-enemy_ghost_tick:
+; enemy_flying_skull_tick (seg3 0xB068) - type 07. Homes on Simon X and Y.
+enemy_flying_skull_tick:
 	ld (ix+006h),001h
 	ld (ix+010h),000h
 	ld (ix+00ch),001h
@@ -2189,8 +2208,9 @@ lb0c5h:
 lb0cdh:
 	ld (ix+00bh),a
 	ret
-; enemy_bat_tick (seg3 0xB0D1) - type 04. Undulates vertically, one horizontal way.
-enemy_bat_tick:
+; enemy_hanging_bat_tick (seg3 0xB0D1) - type 04. Hangs (shape 0x1A) until
+; Simon is close (Y window 0x50, X 0x40), then flies at him. 1 HP, 100 pts.
+enemy_hanging_bat_tick:
 	ld (ix+001h),002h
 	ld de,00180h
 	call actor_set_yvel
@@ -2278,12 +2298,12 @@ lb186h:
 	ld de,0ffe7h
 lb197h:
 	jp actor_add_yvel
-; enemy_skull_cannon_tick (seg3 0xB19A) - type 15 roc (label is stale). 6-cell
-; flyer; init starts leftward flight then spawn_actor type 0x23 (the dropped
-; hunchback). Per-frame 0xB1CA: flap 0x6D/0x6E/0x8D; pause 8 frames when
-; Simon X is within 0x38, then continue.
-enemy_skull_cannon_tick:
-	call sub_b219h
+; enemy_roc_tick (seg3 0xB19A) - type 15. 6-cell flyer; init reuses
+; enemy_hunchback_tick (RNG timer + pose 0x67, skipped type-13 hide), then
+; spawn_actor type 0x23. Per-frame flaps 0x6D/0x6E/0x8D; pauses 8 frames
+; when Simon X is within 0x38, then continues off. 8 HP, 400 pts.
+enemy_roc_tick:
+	call enemy_hunchback_tick
 	ld (ix+011h),000h
 	ld c,023h
 	ld a,(ix+003h)
@@ -2344,7 +2364,11 @@ lb216h:
 	ld l,l
 	ld l,(hl)
 	adc a,l
-sub_b219h:
+; enemy_hunchback_tick (seg3 0xB219) - type 13. Jumps toward Simon (pose
+; 0x67, shared with Igor type 24). Type 15 roc calls this as shared init
+; (RNG timer); the cp 0x0D skip is so the roc does not take the type-13
+; hide/state-4 path. 1 HP, 200 pts.
+enemy_hunchback_tick:
 	ld (ix+006h),001h
 	ld a,r
 	srl a
@@ -2356,7 +2380,7 @@ sub_b219h:
 	ld (ix+00ch),a
 	ld a,(ix+000h)
 	cp 00dh
-	jr nz,lb23bh
+	jr nz,lb23bh            ; not type 13 (roc shares this init): skip hide
 	ld (ix+001h),004h
 	ld (ix+006h),000h
 lb23bh:
@@ -2478,6 +2502,9 @@ lb341h:
 lb345h:
 	ld de,000a0h
 	jp actor_add_yvel
+; enemy_white_skeleton_tick (seg3 0xB34B) - type 11. Walks, then throws
+; (0x9F68). 4 HP, 200 pts. SAT 02 4C. Same 0x9FB2 skeleton art as type 9.
+enemy_white_skeleton_tick:
 	ld a,(0c427h)
 	ld b,(ix+005h)
 	cp b
@@ -3158,6 +3185,9 @@ lb85ah:
 	and a
 	ret z
 	jp lbe4eh
+; enemy_mummy_tick (seg3 0xB883) - type 20. Event 3 (two of them in s9r7).
+; Walk 0x33-0x38. 16 HP, 2000 pts.
+enemy_mummy_tick:
 	ld (ix+00bh),036h
 	ld (ix+010h),020h
 	ld de,CHKRAM
@@ -3361,6 +3391,9 @@ lba2ah:
 	and a
 	ret z
 	jp lbe4eh
+; enemy_frankenstein_tick (seg3 0xBA56) - type 21. Event 4 with Igor.
+; Walk 0x79/0x7A/0x7B. 32 HP on the bar, 3000 pts.
+enemy_frankenstein_tick:
 	ld (ix+011h),000h
 	ld (ix+010h),030h
 	ld (ix+006h),001h
@@ -3611,6 +3644,9 @@ lbc4bh:
 	ld l,b
 	jr nc,$+106
 	ret nz
+; enemy_grim_reaper_tick (seg3 0xBC5B) - type 22. Event 5, stage 15 room 9.
+; 32 HP, 12 cells, 7000 pts. Shape 0x7C.
+enemy_grim_reaper_tick:
 	ld de,0fd80h
 	call actor_set_xvel
 	ld de,0fe00h
@@ -3702,10 +3738,11 @@ sub_bcd9h:
 	call sub_be14h
 	ld a,(ix+001h)
 	call DISPATCH_A
-	ld l,l
-	cp l
-	and b
-	cp l
+	defw 0bd6dh
+	defw 0bda0h
+; enemy_medusa_tick (seg3 0xBD2D) - type 19. Event 2, stage 6 room 5.
+; 16 HP, 2000 pts. Shape 0x2B.
+enemy_medusa_tick:
 	xor a
 	ld (ix+009h),0f8h
 	ld (ix+00ah),a
@@ -3847,6 +3884,9 @@ lbe4eh:
 	inc a
 	ld (0ce0bh),a
 	ret
+; enemy_giant_bat_tick (seg3 0xBE57) - type 18. Event 1 boss; also a normal
+; enemy on stage 16 when CE00==0 (per-actor HP). 16 HP, 2000 pts. Shape 0x4F.
+enemy_giant_bat_tick:
 	ld (ix+00bh),04fh
 	ld (ix+006h),000h
 	ld a,(0d000h)

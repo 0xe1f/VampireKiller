@@ -1855,7 +1855,7 @@ sub_6b00h:
 	ld (0c007h),a
 	ld (0c006h),a
 l6b13h:
-	call sub_771fh
+	call door_interact
 	call simon_action_tick
 	ld a,(0c5ach)
 	cp 002h
@@ -2067,7 +2067,7 @@ l6c7ah:
 	ld b,a
 	ld a,(0c427h)
 	ld c,a
-	call 08587h
+	call door_proximity    ; overlapping the white-key door?
 	pop bc
 	ret c
 	ld a,(0c5ach)
@@ -3562,18 +3562,18 @@ l7714h:                        ; right edge
 	ld (bc),a              ; wrap X to left side of the new room
 	ld (hl),004h           ; pending dir = 4 (right)
 	ret
-; sub_771fh (seg1 0x771f): door interaction, dispatched by the door/special-object
-; sub-state 0xC5AC through an inline word table (the bytes below DISPATCH_A up to
-; "ld de,0c425h" are that dw table, mis-shown as opcodes).  One handler is the
-; WHITE-KEY DOOR CHECK below: it loads Simon's position (0xC425 = Y, 0xC427 = X)
-; and calls 0x8587, a PROXIMITY test against the current SPECIAL OBJECT at
-; 0xC5AD/0xC5AE (the door is a placed special object, part of the 0xC5B5/0xC700
-; vendor/special-object subsystem - NOT a tile-map opening).  On overlap it spends
-; the white key (unless in the courtyard) and plays the open effect.  This is the
-; "where do we check the white key" site: door placement comes from the per-room
-; special-object data, not geometry (see door TODO in progress.md).
-sub_771fh:
-	ld a,(0c5ach)          ; door / special-object sub-state
+; door_interact (seg1 0x771f): white-key door tick, dispatched by 0xC5AC
+; through an inline word table (the bytes below DISPATCH_A up to "ld de,0c425h"
+; are that dw table, mis-shown as opcodes).  Placement is NOT a 0x1F object:
+; seg13 door_load_coords copies door_tbl[stage] into 0xC5AD=Y / 0xC5AE=X when
+; 0xD001 matches the record's room nibble.  This handler proximity-tests Simon
+; (0xC425=Y, 0xC427=X) against those coords via door_proximity; on overlap it
+; spends the white key (0xC701 bit0; courtyard/stage 0 opens freely) and starts
+; the open effect.  After the door is open, walking the edge is a SEPARATE
+; layer (l77d8h): blocked permit -> set_stage_boundary / advance_stage; valid
+; room -> intra-stage wrap (stages 3,6,9,12,15,18).
+door_interact:
+	ld a,(0c5ach)          ; door sub-state (armed=1, open=3, ...)
 	call DISPATCH_A
 	inc c
 	ld a,b
@@ -3590,7 +3590,7 @@ sub_771fh:
 	inc e                  ; de -> 0xC427
 	ld a,(de)
 	ld c,a                 ; C = X
-	call 08587h            ; overlap with special object @ 0xC5AD/0xC5AE? carry=yes
+	call door_proximity    ; overlap door @ 0xC5AD=Y / 0xC5AE=X? carry=yes
 	ret nc                 ; not at the door -> nothing to open
 	ld hl,0c701h           ; inventory byte
 	ld a,(0d000h)
@@ -3661,17 +3661,19 @@ l77b4h:
 	ret c
 	jr l77d8h
 l77cbh:
-	ld a,(0c5aeh)
+	ld a,(0c5aeh)          ; door X
 	add a,008h
 	ld b,a
-	ld a,(0c427h)
+	ld a,(0c427h)          ; Simon X
 	sub b
 	cp 008h
-	ret nc
-; Simon reached a left/right screen edge - decide whether it's a normal room
-; crossing or a stage exit (white-key door).  Picks the matching cached exit
-; permit: 0xC41E = left, 0xC41F = right (loaded from the seg13 connectivity
-; nibbles, see 0xB99A).  Facing/heading is 0xC427 bit7 (rla -> carry: set = right).
+	ret nc                 ; not standing in the open door -> stay
+; Post-open walk: Simon reached a left/right edge (or the open-door X window
+; above).  The connectivity permit decides the DESTINATION, not whether a door
+; exists - the door object already opened.  Picks 0xC41E = left, 0xC41F = right
+; (seg13 CONN nibbles, 0xB99A).  Heading is 0xC427 bit7 (rla: set = right).
+; 0xFF = blocked -> set_stage_boundary / advance_stage; else wrap to that room
+; (the intra-stage key-door cases: 3,6,9,12,15,18).
 l77d8h:
 	ld hl,0c41eh           ; hl -> left exit permit (0xC41E)
 	ld de,0c427h           ; de -> Simon X / heading byte
@@ -3680,14 +3682,14 @@ l77d8h:
 	jr c,l77ebh            ; right edge -> use the right permit
 	ld a,(hl)              ; left permit (0xC41E)
 	inc a
-	jr z,set_stage_boundary ; 0xFF = blocked edge -> STAGE EXIT (white-key door)
+	jr z,set_stage_boundary ; 0xFF = blocked edge -> STAGE EXIT
 	ld bc,003f6h           ; b=3 pending dir "left"; c=0xF6 X-wrap to right side
 	jr l77f3h
 l77ebh:
 	inc hl                 ; hl -> right exit permit (0xC41F)
 	ld a,(hl)
 	inc a
-	jr z,set_stage_boundary ; 0xFF = blocked edge -> STAGE EXIT (white-key door)
+	jr z,set_stage_boundary ; 0xFF = blocked edge -> STAGE EXIT
 	ld bc,0040ah           ; b=4 pending dir "right"; c=0x0A X-wrap to left side
 l77f3h:
 	ld a,b
@@ -3701,12 +3703,13 @@ l77f3h:
 	ld a,086h
 l7804h:
 	jp 050a6h              ; queue the room-transition action
-; set_stage_boundary (seg1 0x7807): a walked-off horizontally BLOCKED edge is a
-; stage boundary.  0xC408 is later seen by the frame dispatcher (seg0 0x424xh),
-; which runs the white-key check and, if spent, advance_stage (seg0 0x438B/0x434E).
+; set_stage_boundary (seg1 0x7807): walking a BLOCKED left/right edge after the
+; door is open.  0xC408 is later seen by the frame dispatcher (seg0 0x424xh)
+; which calls 0x438B (clears 0xC701 bit0 if still set) and advance_stage.
+; The key was already spent by door_interact when the door opened.
 set_stage_boundary:
 	ld a,001h
-	ld (0c408h),a          ; stage-boundary flag = white-key door trigger
+	ld (0c408h),a          ; stage-boundary flag -> advance_stage
 	ret
 sub_780dh:
 	ld ix,0c800h

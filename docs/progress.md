@@ -482,6 +482,58 @@ dumps.
       room_map_build, map_cell_at, tile_is_solid, row_solid_thresh. `make verify`
       still byte-identical.
 
+- Twenty-fifth session (WHITE-KEY DOOR TABLE: universal for stages 0-18):
+    * **Placement is a per-stage ROM table, not geometry and not 0x1F.** Watch on
+      0xC5AC-C5AE during a stage-15 warp showed writer `0d:bb55` = `door_load_coords`
+      (seg13 0xBB37). `HL = 0xBB61 + stage*3`; each record is `(room | vert<<7), Y, X`.
+      If `0xD001` matches the room nibble, `ld (0xC5AD),hl` stores **Y then X**
+      (C5AD=Y, C5AE=X) and arms C5AC (`0xFF` if bit7, else `0x04`). Live stage 15:
+      C5AD=`0x80`, C5AE=`0x0C` = flush-left door at tile row 16. This supersedes
+      "0x1F is the door" and the C5AD=X / C5AE=Y comments.
+    * **Two layers on EVERY stage.** (1) Table object + key (`door_interact` /
+      `door_proximity`). (2) After open, `l77d8h` uses the CONN permit: blocked ->
+      `set_stage_boundary` / `advance_stage`; valid room -> intra-stage wrap.
+      Intra-stage (table edge is not 0xF): stages **3, 6, 9, 12, 15, 18**. Stage 15
+      is not special except that we traced it (room 8 left -> isolated room 9).
+      Stage 18 room 8 left -> room 9 is the Dracula door.
+    * **Renames / annotations:** `door_blit_tiles` (0x5403), `door_interact`
+      (0x771F), `door_proximity` (0x8587), `door_anim_tick` (0x914E),
+      `door_begin_open` (0x9175); `msx.sym` also names `door_load_coords` /
+      `door_tbl` (seg13 still INCBIN). `roomperm.py` default overlay is the table
+      (dropped `DOOR_OVERRIDE`).
+    * **Warp artifacts (stage-15 skip-intro ROM, not a door finding):** intro still
+      queues BGM `0x8A`; `0xD012` difficulty left at 0 after `reset_run_state`, so
+      hits felt weak (enemy speed = `tier*32`). CocoaMSX `saveStateOnExit` can ignore
+      an argv ROM vs last cart.
+
+- Twenty-fourth session (STAGE-15 DOOR reframed: intra-stage mechanism B, prior
+  "ruled out" was a bad scan):
+    * **Stage 15's door is INTRA-STAGE, not a stage exit.** Decoded stage-15
+      connectivity: room 8 `left=9`, and **room 9 is fully isolated** (up/down/left/
+      right all `F`) - a dead-end room reachable only through the room-8 door. The
+      horizontal transition code (`seg1 l77d8h`) fires `set_stage_boundary` (-> 0xC408
+      -> advance_stage) ONLY on a **blocked** left/right permit (0xFF); room 8's left
+      permit is a valid room index, so mechanism A treats it as a FREE crossing and
+      never gates it. Mechanism A (blocked-edge stage exit) therefore structurally
+      cannot be stage 15's door.
+    * **The type-0x1F special object is a brazier/block REVEAL.** `l87f6h` (checks
+      display-type `0x1F` -> promoter `l881bh` -> spawner `l9180h` -> struct at
+      0xC5B5/0xC5C5) lives inside `brazier_destroyed` (seg2 0x87C1). So a whippable
+      object whose DEFINITION display-type is `0x1F` becomes an in-room special object
+      at its spot; its position feeds 0xC5AD/0xC5AE, which `sub_771fh`/`0x8587`
+      proximity-test to open with the white key (0xC701 bit0). This is exactly an
+      intra-stage locked-door shape (open a path to another room, no stage advance).
+    * **Correction: mechanism B was never actually ruled out.** The twenty-first-
+      session A/B test scanned the raw object **list-id** `== 0x1f` (`decode_objects`
+      `sid = oid & 0x7F`) and found "only 3 rooms (stages 3/4)". But door-ness is
+      **display-type `0x1f`**, a property of the object DEFINITION, not the list id -
+      the scan measured the wrong field. Fixed the overclaim in game-notes.md.
+    * **OPEN (linchpin, RESOLVED in twenty-fifth):** decode the object-id -> display-type definition table to
+      enumerate display-type-`0x1F` rooms and confirm stage 15 room 8. It sits in a
+      data region ~seg2 `0x8799`-`0x87c0` that z80dasm currently shows as instructions
+      (needs a db pass). Alternative: empirically confirm in the emulator (walk to the
+      room-8 door on stage 15, watch 0xC5AC/0xC5AD/0xC5AE + 0xC408/0xC41E).
+
 - Twenty-third session (MINIMAP is now the ONLY layout; Dracula-room notes):
     * **Dropped BFS entirely.** After comparing both, the user chose the game's own
       authored geography. `tools/roomperm.py` now has a single `layout()` (the former
@@ -514,7 +566,7 @@ dumps.
           justify those. `0c/0d` also still render amber ("staircases that aren't
           diagonal") because STAIRS is a global set.
         - **Path forward (not yet done):** treat room 9 as a hand-authored per-room
-          override (floor-only, like `DOOR_OVERRIDE`) rather than chase a global rule.
+          override (floor-only) rather than chase a global rule.
           Also all-edges-blocked -> the door heuristic fires cosmetic false doors there.
 
 - Twenty-second session (MINIMAP LAYOUT TABLE = ground-truth room geography):
@@ -905,6 +957,9 @@ Known live RAM map (runtime-confirmed this session):
   0xC410 LIVES, packed BCD (drawn by seg0 sub_4575h -> VRAM 0xE400); held at
          0x02 for the whole courtyard run (no death/1-up)
   0xC425 Simon Y  0xC426/27 Simon X  0xC42C facing(0=R/1=L)  0xC428 jump phase
+  0xC5AC door sub-state: loader 0xFF (vertical: blit closed graphic) or 0x04
+         (courtyard); then 1 = armed, 3 = open.  0xC5AD = door pixel Y, 0xC5AE =
+         door pixel X (from door_tbl; confirmed vs Simon Y/X and VDP SAT order).
   0xC422 whip phase  0xC429 whip timer  0xC42E/2F anim frames (scratch)
   Damage/knockback (zombie-hit before/after + two during-blink captures):
     0xC42D INVULN/BLINK timer, starts 0x4e=78, -1 per frame (verified against
@@ -1052,9 +1107,10 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   with WATCH-log PCs, and add the same name to `segments/msx.sym` so regen emits it.
   Renamed so far - seg0: draw_hearts_hud/draw_lives_hud/draw_health_bar/
   draw_enemy_meter/restore_health/damage_health/spawn_actor(+_init),
-  advance_stage, room_map_build, zombie_generator;
+  advance_stage, room_map_build, zombie_generator, door_blit_tiles;
   seg1: simon_action_tick, spend_5_hearts, map_cell_at, tile_is_solid,
-  row_solid_thresh, set_stage_boundary.
+  row_solid_thresh, set_stage_boundary, door_interact;
+  seg2: door_proximity, door_anim_tick, door_begin_open.
 - Every `vk()`-emitting Lua block MUST use `LUA ALLPASS` — plain `LUA` emits only
   on the final pass and drifts all later labels.
 - After any edit, run `make verify` before moving on.

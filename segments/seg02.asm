@@ -898,6 +898,11 @@ l857fh:
 l8585h:
 	ld e,c
 	ret
+; door_proximity (0x8587): carry set if Simon overlaps the white-key door.
+; Entry: B = Simon Y (0xC425), C = Simon X (0xC427).  0xC5AD is door Y,
+; 0xC5AE is door X (from door_tbl, NOT a 0x1F object).  Y window is 0x38
+; after C5AD-8; X window is 8.  Facing (0xC42C) nudges C by +/-8 first.
+door_proximity:
 	ld a,(0c42ch)
 	and a
 	jr z,l8593h
@@ -912,19 +917,19 @@ l8593h:
 l8597h:
 	dec b
 	dec b
-	ld a,(0c5adh)
+	ld a,(0c5adh)          ; door Y
 	sub 008h
 	ld d,a
 	ld a,b
 	sub d
 	cp 038h
-	ret nc
-	ld a,(0c5aeh)
+	ret nc                 ; Y miss
+	ld a,(0c5aeh)          ; door X
 	ld d,a
 	ld a,c
 	sub d
 	cp 008h
-	ret
+	ret                    ; carry = X overlap
 ; --- hurt_simon_projectile (seg2 0x85AD) - Simon TAKES damage from a hazard ------
 ; Scans the 3 hazard/projectile slots at 0xC580; if Simon overlaps one (sub_85e5h
 ; returns carry) it puts Simon into the hurt/knockback state (0xC420=5) and deals
@@ -1337,7 +1342,7 @@ l87f0h:
 l87f6h:
 	ld a,(ix+005h)         ; A = object display-type
 	cp 01fh
-	jr z,l881bh            ; type 0x1F = SPECIAL OBJECT (door / vendor) -> promote to 0xC5B5
+	jr z,l881bh            ; type 0x1F = vendor / rare special object (NOT the white-key door)
 	cp 018h
 	jr z,l8845h
 	call sub_887bh
@@ -1357,9 +1362,10 @@ l8815h:
 l8818h:
 	jp l88ceh
 ; --- special-object promoter (0x881B) ---------------------------------------
-;  Reached for a type-0x1F object.  ix+009 = the object's attribute byte, whose
-;  top two bits select the flavour:
-;    bits7-6 == 11  -> DOOR / vendor: split attr into subtype (bits5-2) and
+;  Reached for a type-0x1F object.  This is the vendor / brazier-reveal path,
+;  NOT the white-key door (those come from seg13 door_tbl -> 0xC5AD/0xC5AE).
+;  ix+009 = the object's attribute byte, whose top two bits select the flavour:
+;    bits7-6 == 11  -> vendor/special: split attr into subtype (bits5-2) and
 ;                      slot (bits1-0) and spawn a special-object struct via
 ;                      l9180h (into 0xC5B5 or 0xC5C5).
 ;    otherwise      -> ordinary large object drawn via l8a1ah (subtype = bits4-0).
@@ -2163,7 +2169,7 @@ l8d19h:
 	pop de
 	call sub_8854h
 	call sub_9273h
-	call sub_9175h
+	call door_begin_open
 	call sub_870eh
 	pop de
 	pop ix
@@ -2856,25 +2862,26 @@ l9146h:
 	nop
 	call nc,0d010h
 	djnz l9122h
-; --- l914eh - door-open animation driver (0xC5AC state machine) --------------
-;  0xC5AC is the door sub-state: 0xFF while opening, 0x03 once fully open (and
-;  sub_771fh dispatches on it; state 5 = vertical door variant).  Here:
-;   0xC5AC+1 == 0 (was 0xFF) -> jp 0x5403 (kick off the open sequence)
-;   0xC5AC   != 3            -> nothing to do yet
-;  When == 3, 0xC5AD/0xC5AE (+1/+2) give the door position; the byte at +3 is a
-;  frame counter that advances each call, blitting the opening frames via 0x494D
-;  until it reaches 0x2C, then latches the door "open" (state stays 3 at l916fh).
-l914eh:
+; --- door_anim_tick (0x914E) - door-open animation driver (0xC5AC) ----------
+;  0xC5AC is the door sub-state.  door_load_coords arms it to 0xFF (vertical
+;  door: blit the closed graphic via door_blit_tiles) or 0x04 (courtyard).
+;  door_begin_open sets 0xFF again to start the OPEN sequence.  Here:
+;   0xC5AC == 0xFF -> jp door_blit_tiles (C5AC:=1, paint 6 tiles at Y,X)
+;   0xC5AC   != 3  -> nothing to do yet
+;  When == 3, 0xC5AD=Y / 0xC5AE=X give the door position; +3 is a frame
+;  counter that advances each call, blitting opening frames via 0x494D
+;  until it reaches 0x2C, then latches "open" (state stays 3 at l916fh).
+door_anim_tick:
 	ld hl,0c5ach
 	ld a,(hl)
 	inc a
-	jp z,05403h            ; 0xFF -> start opening
+	jp z,door_blit_tiles   ; 0xFF -> blit door graphic, C5AC:=1
 	cp 003h
 	ret nz                 ; only animate in the "open" state
 	inc l
-	ld e,(hl)              ; E = door X (0xC5AD)
+	ld e,(hl)              ; E = door Y (0xC5AD)
 	inc l
-	ld d,(hl)              ; D = door Y (0xC5AE)
+	ld d,(hl)              ; D = door X (0xC5AE)
 	inc l
 	inc (hl)               ; advance the opening-frame counter (+3)
 	ld a,(hl)
@@ -2890,20 +2897,20 @@ l916fh:
 	ld a,003h
 	ld (0c5ach),a          ; hold "open" state
 	ret
-sub_9175h:
+door_begin_open:
 	ld hl,0c5ach
 	ld a,(hl)
 	dec a
 	ret nz                 ; only when 0xC5AC == 1 (door armed)
 	ld (hl),0ffh           ; -> 0xFF: begin opening
-	jp l914eh
-; --- l9180h - spawn a special object (door / vendor) into a 0xC5B5/0xC5C5 slot -
+	jp door_anim_tick
+; --- l9180h - spawn a special object (vendor) into a 0xC5B5/0xC5C5 slot -----
 ;  On entry HL = object map position, B = subtype, C = slot/variant.  sub_91a9h
 ;  classifies the subtype (via table 0x5B12) and returns the target slot in A
 ;  (1 -> 0xC5B5, else -> 0xC5C5), or NZ to reject.  The 16-byte struct is filled:
 ;    +0 = 1 (active)   +1/+2 = E,D (position)   +4 = B (subtype)   +5 = C (slot)
-;    +7/+8 = 0xC70D (the position latched on entry).  The door proximity test
-;  0x8587 later reads this slot's coords from 0xC5AD/0xC5AE.
+;    +7/+8 = 0xC70D (the position latched on entry).
+;  This is NOT the white-key door; door coords live at 0xC5AD/0xC5AE from door_tbl.
 l9180h:
 	ld (0c70dh),hl
 	call sub_91a9h
@@ -3644,7 +3651,7 @@ l95bah:                    ; state 2 (displayed): F2 again closes the map
 	ret z
 	call 04f98h            ; restore the play screen and resume
 	call sub_902eh
-	call sub_9175h
+	call door_begin_open
 	call sub_9273h
 	call sub_870eh
 	call 04810h

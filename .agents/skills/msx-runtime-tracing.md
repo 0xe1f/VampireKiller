@@ -90,6 +90,9 @@ segment currently paged in (`X 06:be44` = seg 6, PC 0xBE44).
   tougher enemies/bosses.
 - Filter per-frame sprite-list churn (composed OAM shadow) from the actual struct
   fields — the sprite list changes every frame and is noise.
+- When a hypothesized path should fill a RAM slot and doesn't, WATCH that slot.
+  The writer PC is the real table/loader (VK: 0xC5AD writers were `door_load_coords`,
+  not the 0x1F object spawner).
 
 ## Reference implementation (paths relative to this repo root)
 

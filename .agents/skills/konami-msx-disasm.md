@@ -173,21 +173,32 @@ game and give per-stage/per-room feedback; fix the classification, re-render.
   measuring the blast radius of the "principled" fix (switching to the engine
   threshold changed stage 10 by 16%, room 9 still wrong) before shipping it, then take
   the cheap correct path: a hand-authored per-room override, not a cleverer global rule.
+- **Watch the RAM the feature is supposed to fill, not the code you hypothesized.**
+  In VK the 0x1F object path *could* have fed 0xC5AD/0xC5AE; a WATCH on those
+  bytes showed the real writer was seg13 `door_load_coords` copying `door_tbl`.
+  Coverage of a candidate (does it appear everywhere the feature does?) still
+  matters; the watch is how you find the writer when the candidate is wrong.
+- **`ld (nn),hl` stores L at nn and H at nn+1.** A table of `(room, Y, X)` loaded
+  with L=Y, H=X looks like "X at C5AD" if you assume (X,Y) struct order. Confirm
+  against a known axis (here: proximity compares C5AD to Simon Y at 0xC425).
 - **When two mechanisms are plausible, render BOTH and let the human pick.** Don't
   commit to a static-analysis hypothesis before validating it. In VK I traced a
-  slick object path (display-type 0x1F → seg2 `l881bh`/`l9180h` spawns a special-
-  object struct; `sub_771fh`→0x8587 proximity-tests it) and was ready to call doors
-  "placed objects." A quick A/B render (`roomperm.py --compare-doors`: one sheet
-  with the geometry heuristic, one overlaying the placed objects) **disproved** it —
-  the object type existed in only 3 rooms game-wide and matched no real door, while
-  the geometry (walk-off a connectivity-blocked edge) matched every stage but one.
-  Cheap comparison renders settle "which theory is right" far faster than deepening
-  a static trace. Keep the comparison flag around for the next ambiguous feature.
+  slick object path (display-type 0x1F → seg2 `l881bh`/`l9180h`) and was ready to
+  call doors "placed objects." A/B renders (`roomperm.py --compare-doors`) correctly
+  **rejected 0x1F** (vendor/reveal, 3 rooms game-wide) but the remaining gap was
+  not "geometry is universal except one stage" — it was a per-stage 3-byte
+  coordinate table (`door_tbl` 0xBB61) that the blocked-edge heuristic only
+  partially overlapped (stage-exit doors, not intra-stage ones). Cheap comparison
+  settles a wrong theory; WATCH the leftover RAM to find the right one.
 - **A real signal from code can still be the WRONG feature.** The 0x1F object path
   was genuine engine code — just for the *vendor / a rare special object*, not the
   white-key door. Finding a mechanism that *could* explain something isn't proof it
   *does*; confirm coverage (does it appear everywhere the feature does?) before
   trusting it.
+- **Engine door placement can be a per-stage record, not room geometry.** VK's
+  white-key door is 19×3 bytes: one room + pixel (Y,X) per stage. After it opens,
+  connectivity says where walking that edge goes (blocked → next stage, else
+  another room). Don't treat "blocked edge with a gap" as the door detector.
 
 ## Rooting out logic (static analysis)
 

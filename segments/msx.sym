@@ -137,6 +137,7 @@ draw_health_bar: equ 0x45d8	; draw HEALTH bar from 0xC415
 draw_enemy_meter: equ 0x45ec	; draw ENEMY/BOSS energy meter from 0xC418
 restore_health: equ 0x460c	; 0xC415 += B, clamp to 0x20
 damage_health: equ 0x4632	; 0xC415 -= B, floor 0
+door_blit_tiles: equ 0x5403	; paint 6 stacked 8x8 door tiles at (C5AD=Y, C5AE=X); C5AC:=1
 load_simon_sprites: equ 0x56e8	; refresh Simon's 2 sprite cells (legs 0xA281/C42E, torso+whip 0xA2D1/C42F)
 add_score: equ 0x44f5	; add C:D:E (BCD hi:mid:lo) to the 3-byte score at 0xC405-0xC407
 damage_enemy: equ 0x4643	; 0xC418 enemy/boss energy -= B (floored at 0)
@@ -160,9 +161,13 @@ spend_5_hearts: equ 0x7154	; deduct 5 from heart total (0xC417, BCD)
 tile_is_solid: equ 0x7c65	; carry=solid iff (tile-1) < row_solid_thresh[0xD000]
 row_solid_thresh: equ 0x7c7f	; per-world-row solidity threshold byte table
 map_cell_at: equ 0x7d36	; A = room tile id under pixel (D=X,E=Y) from the 0xD100 map
-set_stage_boundary: equ 0x7807	; blocked horizontal edge walk-off -> set 0xC408 (white-key door / advance_stage)
+door_interact: equ 0x771f	; white-key door tick: proximity vs C5AD/Y,C5AE/X; spend 0xC701 bit0
+set_stage_boundary: equ 0x7807	; blocked horizontal edge walk-off -> set 0xC408 (advance_stage)
 
 ; ---- Vampire Killer banked routines (segment 2 @ 0x8000) -----------------
+door_proximity: equ 0x8587	; carry if Simon (B=Y,C=X) overlaps door at C5AD=Y / C5AE=X
+door_anim_tick: equ 0x914e	; 0xC5AC door state: 0xFF -> door_blit_tiles; 3 = opening frames
+door_begin_open: equ 0x9175	; if C5AC==1, set 0xFF and jp door_anim_tick (start opening)
 collect_bonus: equ 0x8d33	; apply picked-up bonus id A (latch 0xC419, table @ 0x8D45)
 brazier_tick_all: equ 0x8678	; per-frame update of the 8 brazier/candle slots (0xC470)
 brazier_tick: equ 0x8693	; update one brazier/candle (flame anim + hit test)
@@ -190,6 +195,11 @@ flame_tick: equ 0x9b78	; flame flicker 0x85/0x86; on expiry spawn 0x24 pickup
 actor_integrate: equ 0x99c0	; add velocity (+0x07/08 Y, +0x09/0A X) to position
 actor_cull_offscreen: equ 0x99ec	; free actor if pixel pos left the play area
 actor_free: equ 0x99fd	; clear actor slot (+0x00/+0x0E) and any linked sub-slot
+
+; ---- Vampire Killer banked routines (segment 13 @ 0xA000) ----------------
+; seg13 is still INCBIN; these names document the door table for regen later.
+door_load_coords: equ 0xBB37	; if D001 == door_tbl[D000].room, write C5AD=Y,C5AE=X and arm C5AC
+door_tbl: equ 0xBB61		; 19x3: (room | vert<<7), Y->C5AD, X->C5AE. Room = low nibble.
 
 ; ---- Vampire Killer banked routines (segment 3 @ 0xA000) -----------------
 enemy_zombie_tick: equ 0xa93b	; entity type 1 (walking zombie) behaviour handler

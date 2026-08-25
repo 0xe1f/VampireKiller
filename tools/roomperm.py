@@ -44,17 +44,13 @@ Two other views:
   --visual    : structural family PLUS the 0x2c+ decorative blocks (shows the
                 drawn artwork, but paints background scenery as if solid).
 
-White-key doors (drawn as a red bar; --no-doors to skip): a stage exit fires when
-Simon walks/climbs off a connectivity-blocked edge (nibble 0xF) -> boundary flag
-0xC408 -> white-key check -> advance_stage (seg13 0xB963 brain, direction-
-agnostic).  door_rects() finds these as blocked edges (any of the four) with an
-enclosed passable opening in the boundary wall; height comes from the opening.
-This "mechanism A" is user-verified against the real game for every stage except
-15.  (A/B comparison via --compare-doors ruled out a placed-object door theory:
-id-0x1f objects exist in only 3 rooms game-wide and none is a white-key door.)
-Stage 15's door (room 8, a left gap that is NOT a blocked edge) is the lone
-exception and is pinned in DOOR_OVERRIDE, which replaces the heuristic for that
-stage; its mechanism is still open (to revisit).
+White-key doors (drawn as a red bar; --no-doors to skip): EVERY stage 0-18 has
+exactly one, from seg13 door_tbl at 0xBB61 (3 bytes/stage: room|vert<<7, Y, X).
+door_load_coords (0xBB37) copies Y,X into 0xC5AD,0xC5AE when 0xD001 matches the
+room.  After the door opens, walking that edge uses the CONN permit: 0xF ->
+advance_stage, else wrap to that room (intra-stage on 3,6,9,12,15,18).  Default
+overlay is that table; door_rects() (blocked-edge heuristic) is only for
+--compare-doors.  Display-type 0x1F objects are vendors, not these doors.
 
 Output: one minimap per stage, gfx/minimap_s<NN>.png (default permeability view;
 --collision/--visual add a _coll/_vis suffix), for all 19 stages 0..18.  Rooms are
@@ -179,18 +175,10 @@ def tile_rgb(grid, r, c, row, mode):
     return SOLID_RGB if is_solid_ctx(grid, r, c, row, mode) else EMPTY_RGB
 
 def door_rects(grid, row, conn_room):
-    """Locate white-key doors (MECHANISM A - the confirmed universal one; A/B
-    comparison ruled out placed-object doors, and the user verified A against the
-    real game for every stage except 15).  The engine fires a stage exit / white-key
-    check only when Simon walks or climbs OFF a connectivity-blocked edge (nibble
-    0xF -> boundary flag 0xC408 -> seg13 0xB963 brain -> advance_stage).  A door is
-    therefore a blocked edge with an enclosed passable OPENING in the boundary wall.
-    All four edges are checked: left/right down the edge COLUMN (vertical gap),
-    up/down along the edge ROW (horizontal gap).  Returns (x,y,w,h) tile rects.
-
-    KNOWN EXCEPTION: stage 15's real door (room 8, left-wall gap) is NOT a blocked
-    edge (room 8 left -> room 9), so A misses it; it is pinned in DOOR_OVERRIDE
-    instead (its mechanism is still TBD - to revisit)."""
+    """Blocked-edge OPENING heuristic (--compare-doors only).  This is the
+    POST-OPEN walk, not door placement: a nibble 0xF edge with a passable gap.
+    It matches stage-exit doors and misses intra-stage ones (permit is a real
+    room).  Real placement is door_tbl; see door_table_rects()."""
     if conn_room is None:
         return []
     out = []
@@ -234,10 +222,11 @@ def door_rects(grid, row, conn_room):
     return out
 
 def decode_objects(rom, row, col):
-    """Mechanism B source: the per-room placed-object list from seg14 (same data
-    roommap.py renders).  row->dataset/stream: ds=(row-1)//3, stream=(row-1)%3.
+    """Per-room placed-object list from seg14 (--compare-doors object overlay).
+    These are NOT white-key doors (display-type 0x1F is vendor/reveal).
+    row->dataset/stream: ds=(row-1)//3, stream=(row-1)%3.
     Returns [(sid, scenery, x_tile, y_tile), ...]; object cell (X,Y) is *16px = *2
-    tiles.  A door is display-type 0x1F (raw id 0x1f in the list)."""
+    tiles."""
     seg14 = rom.rom[0x1C000:0x1E000]
     if row < 1:
         return []
@@ -351,9 +340,35 @@ def draw_text(buf, W, x, y, text, scale, color):
 # engine writes to 0xD001 on a transition (seg13 0xB987).  Verified byte-exact
 # against recorded stage-1 transitions.  It is a NAVIGATION graph (exits can WRAP or
 # TELEPORT rather than step to a physical neighbour on either axis), so it is NOT
-# used to place rooms - only for door detection.  Room POSITIONS come from the
-# game's own minimap layout table below.
+# used to place rooms.  Default door overlay uses door_tbl (below); connectivity
+# is kept for --compare-doors edge mode and for classifying post-open destinations.
 CONN_PTR = 0xB9D3
+
+# --- White-key door table (seg13, bank 0x0D @ CPU 0xA000) -------------------
+# door_load_coords (0xBB37): HL = 0xBB61 + stage*3; if (byte0 & 0x0F) == 0xD001,
+# writes Y,X to 0xC5AD,0xC5AE (ld (0xC5AD),hl with L=Y H=X) and arms 0xC5AC
+# (0xFF if byte0 bit7 / vertical, else 0x04).  One record per stage 0-18.
+DOOR_TBL = 0xBB61
+
+def door_table_entry(rom, stage):
+    b0, y, x = rom.read(DOOR_TBL + 3 * stage, 3)
+    return {"room": b0 & 0x0F, "vert": bool(b0 & 0x80), "y": y, "x": x}
+
+def door_table_rects(entry, room):
+    """Tile rect for the per-stage door object.  Only the matching room gets one.
+    Pixel (X,Y)=(byte2,byte1)->(C5AE,C5AD).  Every record sits on a left or right
+    wall (X=0x0C or 0xEC/0xE0); snap to that edge.  Height 6 = the 6-tile blit;
+    Y origin is shifted up 16px so the overlay covers the visible opening
+    (stage 15: Y=0x80 -> rows 14-19)."""
+    if room != entry["room"]:
+        return []
+    y0 = max(PLAY_TOP, (entry["y"] - 0x10) // 8)
+    h = 6
+    if entry["x"] < 0x20:
+        return [(0, y0, 4, h)]
+    if entry["x"] > 0xD0:
+        return [(COLS - DOOR_W, y0, DOOR_W, h)]
+    return [(entry["x"] // 8, y0, DOOR_W, h)]
 
 # --- Minimap layout table: the GAME'S OWN authored room positions -------------
 # The in-game F2 minimap (seg2 sub_9681h, 0x9681) draws each room at a HAND-
@@ -365,22 +380,6 @@ CONN_PTR = 0xB9D3
 MINIMAP_PTR   = 0x969c   # seg2: word[stage] -> room position-code array
 MINIMAP_COORD = 0x975e   # seg2: word[code]  -> packed coord (hi=X, lo=Y)
 MINIMAP_COUNT = 0x95fd   # seg2: byte[stage] = room count
-
-# Curated white-key door table (stage -> {room: [(x,y,w,h) tile rects]}).  The
-# geometric door_rects() heuristic is right for most stages but can't be trusted
-# everywhere (there are two door mechanisms - a blocked-edge walk-off and a placed
-# special-object door - and no universal door tile; see progress.md door TODO).
-# When a stage appears here its curated rects REPLACE the heuristic for that stage
-# (rooms not listed get no door); rects are still sized from the tile opening.
-#   Stage 15: the real door in room 8 is the empty (air) gap flush against the LEFT
-#   wall - cols 0-3 are solid down to row 13, then rows 14-19 open (x0,y14,4x6).
-#   BOTH framed boxes (9c/9d-a1/a2 and 06/07-08/09 centres) are PAINTINGS, a
-#   portrait-gallery motif that recurs in rooms 6,7,8,9 - neither is a door.  The
-#   heuristic separately mis-flagged room 0 (walled recess) and room 9 (isolated
-#   decoy) and missed room 8 entirely.
-DOOR_OVERRIDE = {
-    15: {8: [(0, 14, 4, 6)]},
-}
 
 def connectivity(rom, stage, n):
     base = rom.word(CONN_PTR + 2 * stage)
@@ -461,25 +460,23 @@ def ascii_grid(grid, row, mode, top=PLAY_TOP):
                      for r in range(top, ROWS))
 
 def render_stage(rom, row, scale, mode, tag, out_dir, ascii_dump=False,
-                 show_doors=True, door_model="curated"):
+                 show_doors=True, door_model="table"):
     from pngwrite import write_rgb
     n = minimap_room_count(rom, row)
     conn = connectivity(rom, row, n)
-    override = DOOR_OVERRIDE.get(row)
+    entry = door_table_entry(rom, row)
     images = []
     for col in range(n):
         grid = decode_room(rom, row, col)
         doors, objects = None, None
         if not show_doors:
             pass
-        elif door_model == "edge":                  # mechanism A (geometry)
+        elif door_model == "edge":                  # blocked-edge heuristic
             doors = door_rects(grid, row, conn[col])
-        elif door_model == "object":                # mechanism B (placed objects)
+        elif door_model == "object":                # placed objects (not doors)
             objects = decode_objects(rom, row, col)
-        elif override is not None:                  # default: curated table
-            doors = override.get(col, [])
-        else:
-            doors = door_rects(grid, row, conn[col])
+        else:                                       # default: ROM door_tbl
+            doors = door_table_rects(entry, col)
         images.append(render(grid, row, scale, mode, doors=doors, objects=objects))
         if ascii_dump:
             print(f"row {row} room {col}:")
@@ -511,8 +508,8 @@ def main():
     ap.add_argument("--no-doors", action="store_true",
                     help="skip the white-key door overlay")
     ap.add_argument("--compare-doors", action="store_true",
-                    help="also emit _doorA (edge/geometry) and _doorB (placed "
-                         "objects) sheets per stage for A/B comparison")
+                    help="also emit _doorA (blocked-edge heuristic) and _doorB "
+                         "(placed objects, not doors) sheets per stage")
     ap.add_argument("--validate", metavar="SNAPFILE",
                     help="byte-check ROM decode against RAM snapshots")
     a = ap.parse_args()

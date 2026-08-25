@@ -3138,10 +3138,15 @@ sub_53bdh:
 	ld bc,01a0eh
 	call l4a2eh
 	jp sub_533dh
-	ld (hl),001h
-	ld de,(0c5adh)
+; door_blit_tiles (0x5403): paint the 6-tile door graphic.  HL is 0xC5AC on
+; entry (from door_anim_tick when it was 0xFF).  ld de,(0xC5AD) loads E=Y
+; (0xC5AD) and D=X (0xC5AE); E+=8 walks DOWN the door.  Source of those
+; coords is seg13 door_tbl via door_load_coords, not a placed 0x1F object.
+door_blit_tiles:
+	ld (hl),001h           ; 0xC5AC := 1 (door armed / graphic on screen)
+	ld de,(0c5adh)         ; E = door Y (0xC5AD), D = door X (0xC5AE)
 	ld hl,l5428h
-	ld b,006h
+	ld b,006h              ; 6 stacked 8x8 tiles
 l540eh:
 	push bc
 	push de
@@ -3158,7 +3163,7 @@ l540eh:
 	inc hl
 	pop de
 	ld a,e
-	add a,008h
+	add a,008h             ; next tile 8px down (Y)
 	ld e,a
 	pop bc
 	djnz l540eh
@@ -3468,19 +3473,19 @@ l55eeh:
 	ld hl,0d600h
 	ld bc,00808h
 l5608h:
-	ld de,0c5adh
+	ld de,0c5adh           ; door pixel Y,X (same order as VDP SAT: Y then X)
 	ld a,b
 	cp 005h
-	ld a,(de)
+	ld a,(de)              ; A = door Y (0xC5AD)
 	jr nc,l5613h
 	add a,010h
 l5613h:
 	dec a
-	ld (hl),a
+	ld (hl),a              ; SAT Y
 	inc hl
 	inc de
-	ld a,(de)
-	ld (hl),a
+	ld a,(de)              ; A = door X (0xC5AE)
+	ld (hl),a              ; SAT X
 	inc hl
 	ld a,c
 	and 00bh

@@ -49,26 +49,59 @@ The world is a hierarchy: **hub → stage → room**.
 
 ### Keys, doors, chests, destructibles
 
-- **Large white key** — one per stage, needed to open the stage-exit **door**. Keys
+- **Large white key** — one per stage, needed to open that stage's **door**. Keys
   are deliberately **hidden / awkward to reach**: behind walls, or requiring a tricky
-  jump. *Runtime:* held as **0xC701 bit 0**. Entering a white-key door runs the
-  handler at **seg0 0x438B**, which spends the key (`and 0FEh` → clears bit 0) and
-  falls into **advance_stage** (0x434E): stage id **0xD000 ++**, room id **0xD001 =
-  0** (confirmed stage1/room7 → stage2/room0). **Mechanism (confirmed, universal):**
-  a stage exit fires when Simon walks/climbs off a **connectivity-blocked edge**
-  (nibble 0xF) → boundary flag **0xC408** → white-key check → advance_stage (routed
-  through the seg13 brain 0xB963, so it is **direction-agnostic** — any of the four
-  edges). This is user-verified against the real game for **every stage except 15**.
-  An A/B rendering test **ruled out** a placed-object door theory: the type-0x1F
-  special-object path (seg2 `l881bh`/`l9180h`/`0xC5AC` proximity test `sub_771fh`→
-  0x8587) is real, but id-0x1f objects appear in only **3 rooms** game-wide (stages 3
-  and 4) and none is a white-key door — that path is the **vendor / a rare special
-  object**, not the stage door. `tools/roomperm.py` marks doors on the minimap as a
-  **red bar** via `door_rects()` (any blocked edge with an enclosed passable opening;
-  height from the opening). **Stage 15 is the one exception:** its real door (room 8,
-  a left-wall air gap) is NOT a blocked edge (room 8 left → room 9), so the geometry
-  can't see it; it's pinned in `DOOR_OVERRIDE`. Its exact mechanism is still open (to
-  revisit). (`--compare-doors` re-emits the A/B sheets; `--no-doors` to skip.)
+  jump. *Runtime:* held as **0xC701 bit 0**. Spent by `door_interact` (seg1 0x771F)
+  when Simon overlaps the door (`res 0,(0xC701)`; courtyard / stage 0 opens freely).
+- **Every stage 0–18 has exactly one white-key door, from one table.** Seg13
+  **`door_tbl` at 0xBB61**: 19 records of 3 bytes `(room | vert<<7), Y, X`.
+  `door_load_coords` (0xBB37) indexes it by stage `0xD000`; if `0xD001` matches
+  the room nibble it writes **`0xC5AD = Y`, `0xC5AE = X`** (`ld (0xC5AD),hl` with
+  L=Y, H=X — **not** X then Y) and arms **`0xC5AC`** (`0xFF` if bit7 / vertical so
+  `door_blit_tiles` paints the 6-tile graphic; `0x04` on the courtyard). Proximity
+  (`door_proximity` 0x8587) compares C5AD to Simon Y (`0xC425`) and C5AE to Simon X
+  (`0xC427`). All 19 records sit on a left (`X=0x0C`) or right (`X=0xEC`/`0xE0`)
+  wall. Stage 0's first byte is `0x42` (room 2, bit6 set, bit7 clear); the loader
+  only uses the low nibble and bit7.
+- **Two layers, not two kinds of door.** (1) **Object:** the table places the door;
+  the key opens it. (2) **Post-open walk** (`l77d8h`): the connectivity nibble on
+  that edge is the *destination*. `0xF` → `set_stage_boundary` (`0xC408`) →
+  `advance_stage` (seg0 0x438B then 0x434E: `0xD000++`, `0xD001=0`; 438B also
+  clears bit0 if still set). Valid room → intra-stage wrap. Intra-stage key doors
+  (decoded, not all play-verified): stages **3, 6, 9, 12, 15, 18**. Stage 15 room 8
+  left → isolated room 9; stage 18 room 8 left → room 9 (Dracula). Stage 15 is not
+  a unique mechanism — it is the intra-stage case we traced live (`C5AD=0x80`,
+  `C5AE=0x0C`).
+- **Display-type `0x1F` is not this door.** `l87f6h` → `l881bh` → `l9180h` is the
+  vendor / brazier-reveal special-object path (`0xC5B5`/`0xC5C5`). An earlier A/B
+  scan that "ruled out" placed-object doors was right to reject 0x1F as the
+  *white-key door*, but it never found `door_tbl` either. `tools/roomperm.py`
+  overlays the table by default (red bar); `--compare-doors` still emits the old
+  edge-heuristic / object sheets.
+
+  `door_tbl` (room, vert, Y, X; post-open = CONN nibble on that edge):
+
+  | stage | room | vert | Y | X | post-open |
+  | ---: | ---: | ---: | ---: | ---: | --- |
+  | 0 | 2 | 0 | 90 | E0 | right blocked → stage |
+  | 1 | 7 | 1 | 30 | EC | right blocked → stage |
+  | 2 | 1 | 1 | 30 | EC | right blocked → stage |
+  | 3 | 4 | 1 | 80 | EC | right → room 5 |
+  | 4 | 3 | 1 | 30 | 0C | left blocked → stage |
+  | 5 | 5 | 1 | 50 | 0C | left blocked → stage |
+  | 6 | 4 | 1 | 50 | 0C | left → room 5 |
+  | 7 | 6 | 1 | 60 | EC | right blocked → stage |
+  | 8 | 7 | 1 | 40 | EC | right blocked → stage |
+  | 9 | 8 | 1 | 80 | 0C | left → room 7 |
+  | 10 | 8 | 1 | 80 | EC | right blocked → stage |
+  | 11 | 5 | 1 | 80 | EC | right blocked → stage |
+  | 12 | 5 | 1 | 80 | EC | right → room 6 |
+  | 13 | 8 | 1 | 80 | 0C | left blocked → stage |
+  | 14 | 7 | 1 | 80 | 0C | left blocked → stage |
+  | 15 | 8 | 1 | 80 | 0C | left → room 9 |
+  | 16 | 5 | 1 | 40 | 0C | left blocked → stage |
+  | 17 | 11 | 1 | 40 | 0C | left blocked → stage |
+  | 18 | 8 | 1 | 80 | 0C | left → room 9 (Dracula) |
 - **Destructible walls** — some walls can be destroyed; a destroyed wall **sometimes
   reveals a bonus**, including keys.
 - **Small yellow key** — unlocks a **chest** (chests hold bonuses; a chest can't be
@@ -150,7 +183,7 @@ flat 0x6000-0xBFFF buffer.
 
 **Room-to-room connectivity (CONFIRMED, byte-exact + runtime-validated).** The
 transition graph is a per-stage table in seg13: `CONN_PTR` word table at **0xB9D3**
-(18 entries, one pointer per world row 0xD000). For a room it points at a 2-byte
+(19 entries, one pointer per stage 0xD000 0..18). For a room it points at a 2-byte
 record = **4 nibbles: up, down, left, right** = the DESTINATION room index for
 that exit (`0xF` = blocked). On an edge/stair transition the engine looks this up
 (seg13 0xB963/0xB9BD) and writes the result to 0xD001 (**seg13 0xB987**); the
@@ -167,7 +200,8 @@ changed by the connectivity path - vertical moves stay within the stage.
   point at each other, though 7 sits above 4), and stages 12/13 have portal edges.
   So it **cannot** be trusted to reconstruct 2D geography (an earlier BFS heuristic
   that assumed "horizontal can loop, vertical can't" got a few stages wrong), and
-  `roomperm.py` uses it ONLY for door detection. Room POSITIONS come entirely from
+  `roomperm.py` uses it for post-open destinations and `--compare-doors` edge
+  mode, not for default door overlay (that is `door_tbl`). Room POSITIONS come entirely from
   the game's own hand-authored layout table (`minimap_room_pos` 0x9681 / tables at
   0x969C, 0x975E; see the Map item above) - the authoritative in-ROM geography, which
   reproduces the true portal/loop stages (8's vertical loop, 12/13 portals, Dracula's

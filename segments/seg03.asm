@@ -898,6 +898,8 @@ actor_set_xvel_speedup:
 	ex de,hl
 	pop hl
 	jp actor_set_xvel
+; type 12 raven (0xA677): fly, damp Yvel to 0 (hover), then a new arc or a
+; strafe when Simon's Y is within 0x18. Distinct from type 8's sine bob.
 	ld (ix+010h),018h
 	ld (ix+00bh),089h
 	ld (ix+012h),000h
@@ -2276,7 +2278,10 @@ lb186h:
 	ld de,0ffe7h
 lb197h:
 	jp actor_add_yvel
-; enemy_skull_cannon_tick (seg3 0xB19A) - type 0x0F. 6 cells, 8 HP; shoots type 0x23.
+; enemy_skull_cannon_tick (seg3 0xB19A) - type 15 roc (label is stale). 6-cell
+; flyer; init starts leftward flight then spawn_actor type 0x23 (the dropped
+; hunchback). Per-frame 0xB1CA: flap 0x6D/0x6E/0x8D; pause 8 frames when
+; Simon X is within 0x38, then continue.
 enemy_skull_cannon_tick:
 	call sub_b219h
 	ld (ix+011h),000h

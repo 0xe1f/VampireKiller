@@ -301,7 +301,7 @@ sub_81b2h:
 ;   contact dmg:  x2 of odd byte -> zombie(t01)=2, dog(t05)=6 (confirmed in play)
 ;   high types 0x0e=1000pts, 0x11 +30000, 0x12-14 2000, 0x17 +50000 [bosses].
 ; Confirmed: t01 zombie 100/2; t02/t03 hunchback 200/4; t04 bat 100/2;
-; t05 dog 100/6; t07 ghost 200/2; t08 medusa head 200/4; t0F skull cannon 400/4.
+; t05 dog 100/6; t07 ghost 200/2; t08 medusa head 200/4; t0F roc 400/4.
 ; Hearts/keys are pickups (collect_bonus), not kills, so they award 0 here.
 l81d5h:
 	ld bc,00201h
@@ -5012,7 +5012,7 @@ medusa_head_generator:         ; (0x9DDC) bit5, type 08
 	jr flyer_spawn
 l9de6h:                        ; medusa-head spawn-rate thresholds
 	defb 00ch,00ch,00ch,018h,00ch,00ch,00ch,018h
-skull_cannon_generator:        ; (0x9DEE) bit6, type 0x0F
+skull_cannon_generator:        ; (0x9DEE) bit6, type 0x0F roc
 	ld hl,0cf0ch
 	ld de,l9e15h
 	call sub_9ccah

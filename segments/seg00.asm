@@ -4779,7 +4779,7 @@ room_spawner:
 	call c,medusa_head_generator ; bit5 -> type 08 medusa head
 	pop af
 	rra
-	jp c,skull_cannon_generator ; bit6 -> type 0x0F dragon skull cannon
+	jp c,skull_cannon_generator ; bit6 -> type 0x0F roc (stale name)
 	ret
 ; --- spawn_actor (seg0 0x5F24) - spawn an actor into a free slot ----------------
 ; Entry: C = actor type id (>0), DE = spawn position (D = X, E = Y -> slot+05/+03).
@@ -4896,10 +4896,10 @@ entity_tbl:
 	defw 0af51h             ; 9
 	defw 0a229h             ; 10
 	defw 0b34bh             ; 11
-	defw 0a677h             ; 12
+	defw 0a677h             ; 12 raven (hover-flight)
 	defw 0b219h             ; 13
 	defw 0aad4h             ; 14
-	defw enemy_skull_cannon_tick ; 15 dragon skull cannon
+	defw enemy_skull_cannon_tick ; 15 roc (drops type 0x23)
 	defw 0ade5h             ; 16
 	defw 0ab29h             ; 17
 	defw 0be57h             ; 18

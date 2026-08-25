@@ -157,7 +157,7 @@ hunchback_generator_3: equ 0x9d59	; room_spawner bit2: hunchback type 03 (2 HP, 
 bat_generator: equ 0x9d9e	; room_spawner bit3: bat type 04
 ghost_generator: equ 0x9dca	; room_spawner bit4: ghost type 07
 medusa_head_generator: equ 0x9ddc	; room_spawner bit5: medusa head type 08
-skull_cannon_generator: equ 0x9dee	; room_spawner bit6: dragon skull cannon type 0x0F
+skull_cannon_generator: equ 0x9dee	; room_spawner bit6: roc type 0x0F (drops 0x23)
 spawn_actor: equ 0x5f24	; alloc a free actor slot (7 @ 0xC800, stride 0x80) + init
 spawn_actor_init: equ 0x5f7e	; init tail of spawn_actor
 
@@ -323,7 +323,7 @@ enemy_zombie_tick: equ 0xa93b	; entity type 1 (walking zombie) behaviour handler
 enemy_dog_tick: equ 0xa863	; entity type 5 ("sitting dog") behaviour handler
 enemy_ghost_tick: equ 0xb068	; entity type 7 (ghost) behaviour handler
 enemy_bat_tick: equ 0xb0d1	; entity type 4 (bat) behaviour handler
-enemy_skull_cannon_tick: equ 0xb19a	; entity type 0x0F (dragon skull cannon) behaviour handler
+enemy_skull_cannon_tick: equ 0xb19a	; entity type 15 roc (stale name; drops type 0x23)
 actor_add_yvel: equ 0xa550	; Yvel += DE, clamped to [0,0x7FF] (gravity/terminal)
 actor_set_yvel: equ 0xa564	; store DE -> Y velocity (+0x07/+0x08)
 actor_add_xvel: equ 0xa56b	; Xvel += DE (+0x09/+0x0A)

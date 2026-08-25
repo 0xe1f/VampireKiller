@@ -287,8 +287,9 @@ def main():
 # Type 9's spawn state uses 0x26 (2-cell wait, legs only); the walk frame is 0x21.
 # Type 9 is the red skeleton (fast, no throw). Type 16 shares that SAT layout
 # but stage 14+ VRAM is the axe knight (throws). Colour 0x45 = overlay index 5.
+# Type 12 is the small hovering raven (shape 0x89), not a bat.
 # Type 14 is skipped by the SAT builder (0x644C); its tick writes SAT itself.
-# Type 15's shared init writes 0x67 (type 13's shape); the sitting cannon is 0x6D.
+# Type 15 is the roc: 6-cell flyer (0x6D); init shares type 13's 0x67 then flaps.
 # Type 17 intro is 0x56 (2-cell); standing 0x5B is SAT head+cape, torso is a 32x32 blit.
 # Type 20 walk cycle is 0x33-0x38 (0x82 6-cell); 0x35 is a full stride, not the thin-waist 0x36.
 # Type 21 walk cycle is 0x79/0x7A/0x7B (Frankenstein); 0x67 is type 24 (Igor).

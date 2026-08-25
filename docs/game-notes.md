@@ -56,10 +56,10 @@ Leather whip subtracts 1 from fodder HP, other weapons 2.
 | 9 | Red skeleton | Fast walk (`0x0220`), **no** projectile. 2 HP, 200 pts. Stage 13 object list (same skeleton script as 11; SAT `02 45`). |
 | 10 | Skull pile | Stationary; faces Simon and shoots (`0x9F74`, projectile `0x0A`). 8 HP, 300 pts. Object list. |
 | 11 | White skeleton | Same 0x9FB2 skeleton art as 9, SAT `02 4C`. Walks, then throws (`0x9F68`). 4 HP, 200 pts. Stages 7–9, 13, 17. |
-| 12 | Bat | 2-cell flyer (shape `0x89`). 1 HP, 100 pts. Object list, stages 7–8. |
+| 12 | Raven | Flies, then stalls (Yvel→0) and hovers mid-flight; strafes when Simon’s Y is close. Not the type-8 sine bob. 1 HP, 100 pts. Object list, stages 7–8. |
 | 13 | Hunchback | Jumps toward Simon. 1 HP, 200 pts. Object list. Type 24 (Igor) reuses pose `0x67`. |
 | 14 | Bone dragon | 8 SAT cells (custom tick, skips `0x644C`). 12 HP, 1000 pts. Stages 11–12. |
-| 15 | Raven | Perched bird (shapes `0x6D`/`0x6E`). Spawns type `0x23` (the dropped hunchback); hides briefly when Simon is within 56 px. 8 HP, 400 pts. Spawn bit 6. |
+| 15 | Roc | Large 6-cell flyer (phoenix-like). Flies across, pauses to drop a type `0x23` hunchback, then continues off. 8 HP, 400 pts. Spawn bit 6. Not the small raven (12). |
 | 16 | Axe knight | Same SAT layout as 9, but stage 14+ VRAM is the knight. Throws (`0x9F68`). 8 HP, 300 pts, slower walk (`0x0140`). |
 | 17 | Dracula | Event 6, stage 18 room 9. 32 HP on the bar, +30000. SAT is head + cape; 32×32 torso blit is **PARKED** (sheet shows the gap). |
 | 18 | Giant bat | Event 1 boss; also a normal enemy on stage 16 when `CE00==0` (per-actor HP). 16 HP, 2000 pts. |
@@ -596,12 +596,12 @@ in these sheets.
   | 3 | `bat_generator` 0x9D9E | 0x04 | `enemy_bat_tick` 0xB0D1 | hanging bat (100 pts; hangs, then flies at Simon) |
   | 4 | `ghost_generator` 0x9DCA | 0x07 | `enemy_ghost_tick` 0xB068 | flying skull (200 pts; homes on Simon X and Y) |
   | 5 | `medusa_head_generator` 0x9DDC | 0x08 | `enemy_medusa_head_tick` 0xA502 | ghost head (200 pts; flies across, bobs around spawn Y) |
-  | 6 | `skull_cannon_generator` 0x9DEE | 0x0F | `enemy_skull_cannon_tick` 0xB19A | raven (400 pts, 8 HP; drops type 0x23). Manual lists 300. |
+  | 6 | `skull_cannon_generator` 0x9DEE | 0x0F | `enemy_skull_cannon_tick` 0xB19A | roc (400 pts, 8 HP; flies, pauses, drops type 0x23). Manual lists 300. The small hovering raven is type 12. |
 
   `spawn_actor` takes **D = X** (slot+05), **E = Y** (slot+03). Zombies typically
   enter at X=0xF0 (right edge) or 0x10 (left), Y=0xC0. Hunchbacks spawn at Y=0xC8
   with X from table `l9d8eh`. Bats/ghosts/medusa heads share `flyer_spawn`: X at
-  the screen edge, Y = SimonY−8. The cannon is fixed at X=0xE0, Y=0x30 or 0x40,
+  the screen edge, Y = SimonY−8. The roc is fixed at X=0xE0, Y=0x30 or 0x40,
   and skips the spawn if Simon X ≥ 0xC0.
 - Each generator is rate-gated by `sub_9ccah` (per-generator 0xCF00+ counter vs a
   threshold table, scaled by the 0xD012 difficulty/mood). The spawn **position is

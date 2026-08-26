@@ -1,4 +1,5 @@
-# Copyrighted game data - never committed (regenerate with tools/split-rom.sh)
+# Copyrighted leftover INCBIN banks - never committed (`make segments`).
+# All banks (0-15) are source; no .bin.
 segments/*.bin
 
 # ROM-derived graphics dumps - regenerate with `make gfx` (manifest is committed).

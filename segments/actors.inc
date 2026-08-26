@@ -11,8 +11,8 @@ obj_end_stream:          equ 0xff
 
 ; entity_tbl types 1-22
 actor_zombie:            equ 0x01  ; generator bit0
-actor_merman:            equ 0x02  ; green, 1 HP; generator bit1
-actor_merman_red:        equ 0x03  ; red, 2 HP, spit; generator bit2
+actor_merman_green:      equ 0x02  ; 1 HP, closed mouth; generator bit1
+actor_merman_red:        equ 0x03  ; 2 HP, spit; generator bit2
 actor_hanging_bat:       equ 0x04  ; generator fly-in; bit3
 actor_dog:               equ 0x05
 actor_pikeman:           equ 0x06
@@ -35,10 +35,13 @@ actor_grim_reaper:       equ 0x16
 
 ; Overflow / special (past entity_tbl)
 actor_igor:              equ 0x18  ; Frankenstein add-on (event 4)
+actor_blob_blue:         equ 0x1a  ; candle slime hatch; hub 1 (s4-6); SAT 0F 42
+actor_blob_red:          equ 0x1b  ; same tick; hub 3+ (s10+); SAT 08 42
+actor_blob_white:        equ 0x1c  ; same tick; hub 2 (s7-9); SAT 0E 42
 actor_flame:             equ 0x1e  ; candle flame; then may drop actor_pickup
 actor_placed_bat:        equ 0x1f  ; hangs first (skips type-4 fly-in)
 actor_merman_splash:     equ 0x20  ; water-splash pair from generator mermen
-actor_placed_merman:     equ 0x21  ; already on the platform (stage 10)
+actor_placed_merman:     equ 0x21  ; red spit, already on the platform (stage 10)
 actor_orb:               equ 0x22  ; boss-clear orb
 actor_roc_drop:          equ 0x23  ; roc projectile (hunchback tick)
 actor_pickup:            equ 0x24  ; settled / falling heart pickup

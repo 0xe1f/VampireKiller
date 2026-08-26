@@ -26,8 +26,8 @@ why classifying only the surface produced horizontal stripes.  The body ids 09..
 are therefore counted solid ONLY when 4-adjacent to a 01..04 surface (see
 is_solid_ctx): real walls/floors stay solid, but a standalone body tile — or a
 09 speck next to 05-08 wallpaper — is passable, not a stray 1x1 block.
-Stage 18 room 9 (Dracula) is PERM_OVERRIDE (06+0b floor); tile IDs cannot
-separate those columns from the floor.
+Stage 18 room 9 (Dracula, event 6) uses tile_is_solid's threshold 6
+(ids 1-6 solid) for both perm and --collision; there is no hand overlay.
 Everything else is passable: air 0x0e..0x17; the decorative blocks 0x2c+
 (background windows, columns); and the passable decoration ids 05..08
 (05/08 = the inert 2-tile pair; 06/07 = stage 1's wide-stair edge /
@@ -38,12 +38,20 @@ the engine's stair-step code tests; other stages draw 1-tile-wide stairs
 (hence its "fat" 2-wide stairs).
 Colours: walls/floors white, empty black, climbable stairs amber.
 
-Two other views:
+Three other views:
   --collision : the engine's OWN feet/head test (seg1 tile_is_solid): solid iff
-                (id-1) < row_solid_thresh[0xD000] (stage 1 -> 4).  This is exactly
-                what blocks Simon, but only marks the 01..04 SURFACES (stripes).
+                (id-1) < row_solid_thresh[0xD000] (stage 1 -> 4).  Event 6
+                (stage 18 room 9) forces threshold 6.  This is exactly
+                what blocks Simon, but only marks the 01..04 SURFACES (stripes)
+                on other stages.
   --visual    : structural family PLUS the 0x2c+ decorative blocks (shows the
                 drawn artwork, but paints background scenery as if solid).
+  --pixels    : paint each 8x8 from the stage tileset (load_stage_tileset /
+                tileset_ptr) in the per-room playfield palette. Nametable id 0
+                is blank (blit starts at VRAM 0x8004; id N = ROM tile N-1).
+                HUD rows 0-1 cropped like the other views. Stage 18 room 9
+                overlays dracula_portrait_load (seg15 face + mirrors). No
+                door/spot/object overlay. Default --scale is 2.
 
 White-key doors (drawn as a red bar; --no-doors to skip): EVERY stage 0-18 has
 exactly one, from seg13 door_tbl at 0xBB61 (3 bytes/stage: room|vert<<7, Y, X).
@@ -60,23 +68,26 @@ to skip): seg13 spot_tbl at 0xBBCD, records (stage, dest<<4|room, Y, X) until
 warps via C41B=0xFF.  Stored Y is the floor BODY; the overlay snaps up to sit
 on the walkable surface (empty tiles immediately above).  Decoder is generic.
 
-Output: one minimap per stage, gfx/minimap_s<NN>.png (default permeability view;
---collision/--visual add a _coll/_vis suffix), for all 19 stages 0..18.  Rooms are
+Output: one sheet per stage. Permeability (default) and --collision/--visual
+are schematic maps at gfx/minimap_s<NN>.png (optional _coll/_vis suffix).
+--pixels is the assembled playfield (not a minimap) at gfx/stage_s<NN>.png.
+For all 19 stages 0..18.  Rooms are
 placed SPATIALLY using the GAME'S OWN hand-authored F2-minimap position table
 (layout(), seg2 sub_9681h) - the authoritative in-ROM geography.  (The room
 connectivity graph is navigation-only: it has wrap/portal edges on both axes and is
 used solely for --compare-doors edge mode, not for placement.)  Each cell is
 labelled with its room number in a dark-gray band.  Stage 18 room 9 (Dracula)
-uses a hand-authored PERM_OVERRIDE: floor + 2x1 jump ledges; tile IDs cannot
-separate those from the decorative columns.
+uses the event-6 solidity test (ids 1-6), same as tile_is_solid.
 
 Usage:
   tools/roomperm.py [--rom references/VampireKiller.rom] [--row 1 | --all]
-                    [--scale 6] [--out-dir gfx] [--collision | --visual]
+                    [--scale 6] [--out-dir gfx]
+                    [--collision | --visual | --pixels]
                     [--validate generated/disasmsnap.bin] [--ascii]
                     [--no-doors] [--no-spots] [--compare-doors]
 """
-import argparse, os
+import argparse, os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 COLS, ROWS = 32, 24
 PLAY_TOP = 2                    # rows 0-1 = HUD
@@ -92,9 +103,10 @@ AIR = set(range(0x0e, 0x18)) | {0x00} | STAIRS | DECOR
 COLL_THRESH = {0: 2, 1: 4, 2: 4, 3: 4, 4: 4, 5: 4, 6: 4, 7: 4, 8: 4, 9: 4,
                10: 9, 11: 9, 12: 9, 13: 4, 14: 4, 15: 4, 16: 9, 17: 9, 18: 8}
 
-def is_solid(tid, row, mode):
+def is_solid(tid, row, mode, room=None):
     if mode == "collision":
-        return (tid - 1) < COLL_THRESH.get(row, 4)   # matches seg1 tile_is_solid
+        thresh = 6 if (row, room) == (18, 9) else COLL_THRESH.get(row, 4)
+        return (tid - 1) < thresh   # matches seg1 tile_is_solid
     if tid in STAIRS or tid in DECOR:
         return False
     structural = 0x01 <= tid <= 0x0d                  # floor/wall brick family
@@ -102,41 +114,19 @@ def is_solid(tid, row, mode):
         return structural or tid >= 0x2c              # + decorative scenery blocks
     return structural                                 # default: walls & floors only
 
-# Per-room permeability override: (stage, room) -> frozenset of solid (row, col).
-# Used when tile IDs cannot tell decoration from geometry.  Stage 18 room 9
-# (Dracula): side columns share 06-0b with the floor, 0c/0d pillars are decor
-# not stairs, and 09-0b speckle next to those 06s is "dotted ledge" artwork.
-# Ground truth: floor + 2x1 jump ledges flanking each column.  Perm mode only;
-# --collision stays the engine test.
-def _dracula_room9_solid():
-    s = {(r, c) for r in (22, 23) for c in range(COLS)}
-    for r, cols in (
-        (8, (0, 1, 30, 31)),     # outer ledges, mid
-        (16, (0, 1, 30, 31)),    # outer ledges, low
-        (4, (4, 5, 26, 27)),     # inner ledges, high
-        (12, (4, 5, 26, 27)),    # inner ledges, mid
-    ):
-        for c in cols:
-            s.add((r, c))
-    return frozenset(s)
-
-PERM_OVERRIDE = {
-    (18, 9): _dracula_room9_solid(),
-}
-
 def is_solid_ctx(grid, r, c, row, mode, room=None):
     """Per-cell solidity WITH neighbour context.  Identical to is_solid for tiles that
     are unambiguous, but the brick-BODY family 0x09-0x0b counts as solid only when it
     is 4-adjacent to a structural SURFACE 0x01-0x04.  05-08 are passable
     decoration (and stage-1 stair trim); treating them as surfaces made 09
     specks next to wallpaper render as solid noise (stages 6, 10, 15, 17).
-    Dracula's 06+0b floor is PERM_OVERRIDE, not this rule.  Walls/floors are
-    built by pairing 01-04 with 09-0b, so real ones stay solid, while a
-    standalone body tile is passable instead of a stray 1x1 block."""
-    ov = PERM_OVERRIDE.get((row, room)) if room is not None and mode == "perm" else None
-    if ov is not None:
-        return (r, c) in ov
+    Event 6 (s18r9) uses threshold 6 for perm and collision (tile_is_solid
+    l7c7ah).  Walls/floors are built by pairing 01-04 with 09-0b, so real
+    ones stay solid, while a standalone body tile is passable instead of a
+    stray 1x1 block."""
     tid = grid[r][c]
+    if (row, room) == (18, 9) and mode in ("perm", "collision"):
+        return bool(tid) and (tid - 1) < 6
     if mode == "collision":
         return (tid - 1) < COLL_THRESH.get(row, 4)
     if tid in STAIRS or tid in DECOR:
@@ -206,11 +196,8 @@ DOOR_W = 2                      # rendered door width in tiles (edge wall thickn
 SPOT_RGB = (64, 186, 176)       # teal pad + dest digit (not door red, not stair amber)
 
 def tile_rgb(grid, r, c, row, mode, room=None):
-    ov = PERM_OVERRIDE.get((row, room)) if room is not None and mode == "perm" else None
-    if ov is not None:
-        return SOLID_RGB if (r, c) in ov else EMPTY_RGB
     tid = grid[r][c]
-    if tid in STAIRS:
+    if tid in STAIRS and not ((row, room) == (18, 9) and mode in ("perm", "collision")):
         return STAIR_RGB
     return SOLID_RGB if is_solid_ctx(grid, r, c, row, mode, room) else EMPTY_RGB
 
@@ -368,6 +355,156 @@ def render(grid, row, scale, mode, top=PLAY_TOP, doors=None, objects=None,
                     buf[o:o + 3] = bytes(col)
     return W, H, bytes(buf)
 
+# --- Pixel rooms (stage tileset + playfield palette) -------------------------
+# load_stage_tileset (seg0 0x5653) blits tileset_ptr[D000] — 0xBF uncompressed
+# 8x8 4bpp tiles — into SCREEN 5 page 1 via l4a6dh starting at VRAM 0x8004
+# (X=8,Y=0). sub_4b48h looks up nametable id A as SX=(A&0x1F)*8, SY=(A&0xE0)>>2,
+# so id 0 samples the unloaded column at (0,0) = blank, and id N is ROM tile
+# N-1. Playfield drawer (0x4F98) paints 22 rows from 0xD140 (map rows 2-23).
+# Palette is vk_playfield_palette.
+TILESET_PTR = 0x5749            # seg0 word[stage]; file off = CPU - 0x4000
+_EMPTY_TILE = [[0] * 8 for _ in range(8)]
+
+def tileset_cells(rom, stage):
+    """0xBF uncompressed 8x8 4bpp tiles for this stage (ROM order, id 0 = first)."""
+    cache = getattr(rom, "_tileset_cache", None)
+    if cache is None:
+        rom._tileset_cache = cache = {}
+    if stage in cache:
+        return cache[stage]
+    import gfxdump
+    off = TILESET_PTR - 0x4000
+    cpu = rom.rom[off + stage * 2] | (rom.rom[off + stage * 2 + 1] << 8)
+    fo = gfxdump._tileset_file(stage, cpu)
+    n = min(gfxdump.NTILES, max(0, (len(rom.rom) - fo) // 32))
+    cells = gfxdump.tile_grids(rom.rom[fo:fo + n * 32], "tile8")
+    cache[stage] = cells
+    return cells
+
+def nametable_cell(tiles, tid):
+    """Nametable byte -> 8x8. Id 0 is blank (never loaded at 0x8004)."""
+    if 0 <= tid < len(tiles):
+        return tiles[tid]
+    return _EMPTY_TILE
+
+def _tile8_grid(raw):
+    import gfxdump
+    cells = gfxdump.tile_grids(bytes(raw), "tile8")
+    return cells[0] if cells else _EMPTY_TILE
+
+def _flip_h8(raw):
+    """Horizontal flip of one 8x8 4bpp tile (sub_5919h / sub_5873h)."""
+    out = bytearray(32)
+    for r in range(8):
+        row = raw[r * 4:(r + 1) * 4]
+        out[r * 4:(r + 1) * 4] = bytes(
+            ((b & 0x0F) << 4) | (b >> 4) for b in reversed(row))
+    return bytes(out)
+
+def _vram_tile_id(de):
+    """Page-1 VRAM address -> nametable id (sub_4b48h inverse)."""
+    off = de - 0x8000
+    y, xb = divmod(off, 128)
+    return (y // 8) * 32 + (xb // 4)
+
+def _l4a6d_advance(de):
+    e = (de + 4) & 0xFF
+    d = de >> 8
+    if e == 0x80:
+        return ((d + 4) << 8) & 0xFF00
+    return (d << 8) | e
+
+def _place_rom_tiles(atlas, data, file_off, dest, n, flip_h=False):
+    de = dest
+    for i in range(n):
+        raw = data[file_off + i * 32:file_off + i * 32 + 32]
+        if len(raw) < 32:
+            break
+        if flip_h:
+            raw = _flip_h8(raw)
+        tid = _vram_tile_id(de)
+        if 0 <= tid < len(atlas):
+            atlas[tid] = _tile8_grid(raw)
+        de = _l4a6d_advance(de)
+
+def _place_vflip(atlas, src_de, dest_de, n):
+    s, d = src_de, dest_de
+    for _ in range(n):
+        sid, did = _vram_tile_id(s), _vram_tile_id(d)
+        if 0 <= sid < len(atlas) and 0 <= did < len(atlas):
+            atlas[did] = list(reversed(atlas[sid]))
+        s, d = _l4a6d_advance(s), _l4a6d_advance(d)
+
+def _overlay_dracula_portrait(atlas, data):
+    """dracula_portrait_load (seg0 0x5887): seg15 frame + 108-tile face, then
+    H-mirror (0x1E-0x89 -> 0x8A-0xF5) and V-mirror the frame."""
+    s15 = lambda cpu: 15 * 0x2000 + (cpu - 0xA000)
+    _place_rom_tiles(atlas, data, s15(0xABF8), 0x8018, 8)
+    _place_rom_tiles(atlas, data, s15(0xACF8), 0x8040, 2)
+    _place_rom_tiles(atlas, data, s15(0xAD38), 0x8060, 2)
+    _place_rom_tiles(atlas, data, s15(0xAD78), 0x8070, 1)
+    _place_rom_tiles(atlas, data, s15(0xAD98), 0x8078, 0x6C)
+    _place_rom_tiles(atlas, data, s15(0xAD78), 0x8074, 1, flip_h=True)
+    _place_rom_tiles(atlas, data, s15(0xAD98), 0x9028, 0x6C, flip_h=True)
+    _place_rom_tiles(atlas, data, s15(0xACF8), 0x8048, 2, flip_h=True)
+    _place_vflip(atlas, 0x8048, 0x8058, 2)
+    _place_vflip(atlas, 0x8040, 0x8050, 2)
+    _place_vflip(atlas, 0x8060, 0x8068, 2)
+
+def playfield_atlas(rom, stage, room):
+    """256-slot page-1 tile atlas after load_stage_tileset (+ event-6 overlay)."""
+    cache = getattr(rom, "_atlas_cache", None)
+    if cache is None:
+        rom._atlas_cache = cache = {}
+    key = (stage, room)
+    if key in cache:
+        return cache[key]
+    import gfxdump
+    atlas = [_EMPTY_TILE] * 256
+    de = 0x8004
+    for cell in tileset_cells(rom, stage)[:gfxdump.NTILES]:
+        tid = _vram_tile_id(de)
+        if 0 <= tid < len(atlas):
+            atlas[tid] = cell
+        de = _l4a6d_advance(de)
+    if stage == 18 and room == 9:
+        _overlay_dracula_portrait(atlas, rom.rom)
+    cache[key] = atlas
+    return atlas
+
+def render_pixels(rom, grid, stage, room, scale, top=PLAY_TOP):
+    """Paint the room from 8x8 tileset cells in the per-room playfield palette.
+    Crops HUD rows 0-1 like the other views. No door/spot/object overlay."""
+    import gfxdump
+    pal = gfxdump.vk_playfield_palette(rom.rom, stage, room)
+    if stage == 18 and room == 9:
+        # dracula_portrait_palette (0x59F3): 0xBF88 then 0xBF6F (pink/flesh)
+        gfxdump._apply_palette_overlay(
+            pal, gfxdump.load_palette_table(rom.rom, 0x15F88))
+        gfxdump._apply_palette_overlay(
+            pal, gfxdump.load_palette_table(rom.rom, 0x15F6F))
+    pal_b = [bytes(pal[i]) for i in range(16)]
+    tiles = playfield_atlas(rom, stage, room)
+    rows = ROWS - top
+    tw = 8 * scale
+    W, H = COLS * tw, rows * tw
+    buf = bytearray(W * H * 3)
+    for r in range(rows):
+        for c in range(COLS):
+            cell = nametable_cell(tiles, grid[r + top][c])
+            x0 = c * tw
+            y0 = r * tw
+            for y in range(8):
+                prow = cell[y]
+                for x in range(8):
+                    rgb = pal_b[prow[x] & 15]
+                    for yy in range(scale):
+                        o = ((y0 + y * scale + yy) * W + x0 + x * scale) * 3
+                        for xx in range(scale):
+                            buf[o:o + 3] = rgb
+                            o += 3
+    return W, H, bytes(buf)
+
 # 3x5 bitmap for sheet labels (room numbers, credits-font chars)
 FONT3x5 = {
     "0": ("111", "101", "101", "101", "111"),
@@ -412,19 +549,32 @@ FONT3x5 = {
     "Z": ("111", "001", "010", "100", "111"),
 }
 LABEL_RGB = (200, 200, 205)
+# 3x3 multiply, drawn at half scale and vertically centered in the 5-row
+# cap-height so "16x16" does not read as a capital X.
+TIMES = ("101", "010", "101")
 
 def draw_text(buf, W, x, y, text, scale, color):
+    def blit(glyph, px, py, gs):
+        for gy, row in enumerate(glyph):
+            for gx, bit in enumerate(row):
+                if bit != "1":
+                    continue
+                for yy in range(gs):
+                    base = ((py + gy * gs + yy) * W + px + gx * gs) * 3
+                    for xx in range(gs):
+                        o = base + xx * 3
+                        buf[o:o + 3] = bytes(color)
+
     for chr_ in text:
+        if chr_ == "x":
+            gs = max(1, scale // 2)
+            gh = 3 * gs
+            blit(TIMES, x, y + (5 * scale - gh) // 2, gs)
+            x += 3 * gs + gs          # 3px glyph + 1px gap, at half scale
+            continue
         glyph = FONT3x5.get(chr_)
         if glyph:
-            for gy, row in enumerate(glyph):
-                for gx, px in enumerate(row):
-                    if px == "1":
-                        for yy in range(scale):
-                            base = ((y + gy * scale + yy) * W + x + gx * scale) * 3
-                            for xx in range(scale):
-                                o = base + xx * 3
-                                buf[o:o + 3] = bytes(color)
+            blit(glyph, x, y, scale)
         x += 4 * scale               # 3px glyph + 1px spacing
 
 # --- Room connectivity (doors) -----------------------------------------------
@@ -595,10 +745,8 @@ def contact_sheet(images, pos, gw, gh, gap, bg=(40, 44, 56), lab_scale=2):
 
 def ascii_grid(grid, row, mode, top=PLAY_TOP, room=None):
     def ch(r, c):
-        ov = PERM_OVERRIDE.get((row, room)) if room is not None and mode == "perm" else None
-        if ov is not None:
-            return "#" if (r, c) in ov else "."
-        if grid[r][c] in STAIRS: return "/"
+        if grid[r][c] in STAIRS and not ((row, room) == (18, 9) and mode in ("perm", "collision")):
+            return "/"
         return "#" if is_solid_ctx(grid, r, c, row, mode, room) else "."
     return "\n".join("".join(ch(r, c) for c in range(COLS))
                      for r in range(top, ROWS))
@@ -611,30 +759,38 @@ def render_stage(rom, row, scale, mode, tag, out_dir, ascii_dump=False,
     entry = door_table_entry(rom, row)
     spots = parse_spots(rom) if show_spots else []
     images = []
+    pixels = mode == "pixels"
     for col in range(n):
         grid = decode_room(rom, row, col)
-        doors, objects = None, None
-        if not show_doors:
-            pass
-        elif door_model == "edge":                  # blocked-edge heuristic
-            doors = door_rects(grid, row, conn[col])
-        elif door_model == "object":                # placed objects (not doors)
-            objects = decode_objects(rom, row, col)
-        else:                                       # default: ROM door_tbl
-            doors = door_table_rects(entry, col)
-        pad = spot_table_rects(spots, row, col, grid, mode) if show_spots else None
-        images.append(render(grid, row, scale, mode, doors=doors, objects=objects,
-                             room=col, spots=pad))
+        if pixels:
+            images.append(render_pixels(rom, grid, row, col, scale))
+        else:
+            doors, objects = None, None
+            if not show_doors:
+                pass
+            elif door_model == "edge":              # blocked-edge heuristic
+                doors = door_rects(grid, row, conn[col])
+            elif door_model == "object":            # placed objects (not doors)
+                objects = decode_objects(rom, row, col)
+            else:                                   # default: ROM door_tbl
+                doors = door_table_rects(entry, col)
+            pad = spot_table_rects(spots, row, col, grid, mode) if show_spots else None
+            images.append(render(grid, row, scale, mode, doors=doors, objects=objects,
+                                 room=col, spots=pad))
         if ascii_dump:
+            ascii_mode = "perm" if pixels else mode
             print(f"row {row} room {col}:")
-            print(ascii_grid(grid, row, mode, room=col)); print()
+            print(ascii_grid(grid, row, ascii_mode, room=col)); print()
     if not images:
         return
     pos, gw, gh = layout(rom, row, len(images))
     W, H, buf = contact_sheet(images, pos, gw, gh, gap=8)
-    suffix = "" if tag == "perm" else f"_{tag}"
-    model_suffix = {"edge": "_doorA", "object": "_doorB"}.get(door_model, "")
-    sheet = f"{out_dir}/minimap_s{row:02d}{suffix}{model_suffix}.png"
+    if pixels:
+        sheet = f"{out_dir}/stage_s{row:02d}.png"
+    else:
+        suffix = "" if tag == "perm" else f"_{tag}"
+        model_suffix = {"edge": "_doorA", "object": "_doorB"}.get(door_model, "")
+        sheet = f"{out_dir}/minimap_s{row:02d}{suffix}{model_suffix}.png"
     write_rgb(sheet, W, H, buf)
     print(f"contact sheet -> {sheet} ({W}x{H})")
 
@@ -644,13 +800,18 @@ def main():
     ap.add_argument("--row", type=int, default=1, help="world row (stage 1 = 1)")
     ap.add_argument("--all", action="store_true",
                     help="render a sheet for every stage/world row")
-    ap.add_argument("--scale", type=int, default=6)
+    ap.add_argument("--scale", type=int, default=None,
+                    help="pixels per source pixel (perm/coll/vis default 6; "
+                         "--pixels default 2)")
     ap.add_argument("--out-dir", default="gfx")
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--collision", action="store_true",
                    help="engine feet/head test only (01..04 surfaces; stripes)")
     g.add_argument("--visual", action="store_true",
                    help="structural family PLUS 0x2c+ decorative scenery blocks")
+    g.add_argument("--pixels", action="store_true",
+                   help="paint rooms from the stage tileset (8x8 4bpp, "
+                        "playfield palette)")
     ap.add_argument("--ascii", action="store_true")
     ap.add_argument("--no-doors", action="store_true",
                     help="skip the white-key door overlay")
@@ -662,18 +823,22 @@ def main():
     ap.add_argument("--validate", metavar="SNAPFILE",
                     help="byte-check ROM decode against RAM snapshots")
     a = ap.parse_args()
-    mode = "collision" if a.collision else "visual" if a.visual else "perm"
+    mode = ("pixels" if a.pixels else
+            "collision" if a.collision else
+            "visual" if a.visual else "perm")
+    scale = a.scale if a.scale is not None else (2 if mode == "pixels" else 6)
     rom = Rom(a.rom)
     os.makedirs(a.out_dir, exist_ok=True)
-    tag = {"collision": "coll", "visual": "vis", "perm": "perm"}[mode]
+    tag = {"collision": "coll", "visual": "vis", "perm": "perm",
+           "pixels": "pix"}[mode]
     rows = minimap_stages(rom) if a.all else [a.row]
     for row in rows:
-        render_stage(rom, row, a.scale, mode, tag, a.out_dir, a.ascii,
+        render_stage(rom, row, scale, mode, tag, a.out_dir, a.ascii,
                      not a.no_doors, show_spots=not a.no_spots)
-        if a.compare_doors:
-            render_stage(rom, row, a.scale, mode, tag, a.out_dir, False,
+        if a.compare_doors and mode != "pixels":
+            render_stage(rom, row, scale, mode, tag, a.out_dir, False,
                          True, door_model="edge", show_spots=False)
-            render_stage(rom, row, a.scale, mode, tag, a.out_dir, False,
+            render_stage(rom, row, scale, mode, tag, a.out_dir, False,
                          True, door_model="object", show_spots=False)
 
     if a.validate:

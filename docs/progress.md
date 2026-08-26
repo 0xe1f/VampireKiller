@@ -7,19 +7,17 @@ reverse-engineering findings; this file is the high-level checklist.
 
 The entire ROM should ultimately live in the repo as source: every byte is either
 `.asm` or a data form that builds back into `.asm`/the ROM (e.g. our `gfx/` PNG+txt
--> RLE pipeline, the `vk()` text tables) - **no committed binaries in the final
-state** (like Konamiman's Metal Gear disassembly, which has zero `incbin`). The
-`segments/segNN.bin` + `INCBIN` in `VampireKiller.asm` are an interim "not yet
-reversed" placeholder: each segment graduates incbin -> annotated disassembly (code)
-or extracted data assets (graphics/tables) as it's understood, always keeping
-`make verify` byte-exact. Postponed for now - we reverse segments incrementally
-(seg0 done, seg1 largely done, seg2/seg3/seg13 imported as disassembly and being
-annotated; seg11/12 graduated as map-data source; seg14 graduated as scenery /
-object-list / spawn-mask / credits-font / PSG-driver source (sequence streams still
-sliced INCBIN; tails in seg15); seg4-10 and seg15 still
-INCBIN) rather
-than mass-converting bins to
-opaque `db` dumps.
+-> RLE pipeline, the `vk`/`cr` text macros) - **no committed binaries in the final
+state** (like Konamiman's Metal Gear disassembly, which has zero `incbin`).
+VK has no remaining `INCBIN`: every bank is `INCLUDE`'d source (code banks 0-3
+and 11-14 still being annotated; data banks 4-10 and 15 are labeled dumps).
+Seg14 is scenery / object-list / spawn-mask / credits-font / PSG-driver source
+(packed streams labeled hex); tileset banks 4-8 and metatile streams/defs are
+labeled `.asm` (`tileset_s00`..`s18`, `mtile_stream_sNN_rNN`); Simon/intro sprite
+RLE is labeled packed streams (`intro_simon_0`..`7`, `simon_rle_xxxx`, `intro_sky`).
+Segs 9-10 are labeled gfx-script / palette / enemy+weapon RLE. Seg15 is labeled
+music tails / env tables / Dracula portrait (`psg_seg15.asm`, `dracula_portrait.asm`).
+Fully migrated banks (0-15) have no `.bin`.
 
 ## Done
 
@@ -29,9 +27,10 @@ opaque `db` dumps.
   Annotated: cartridge header, `init`, `int_handler` (H.TIMI), the dispatch
   helpers (`ADD_HL_A`, `ADD_DE_A`, `DISPATCH_A`), the main tick `sub_414dh`
   (two-level state machine + `main_state_tbl`), the front-end transition
-  `l4398h`, and the entity dispatch/`entity_tbl` at `0x5FD0`.
-- Text: encoding cracked (`ASCII - 0x10`). Added the `vk()` helper and converted
-  the HUD and title/front-end strings to readable ASCII (byte-exact).
+  `frontend_input` (0x4398), and the entity dispatch/`entity_tbl` at `0x5FD0`.
+- Text: encoding cracked (`ASCII - 0x10` for HUD/title via the `vk` macro). Ending
+  credits store letters as ASCII but space as `0x00` (`cr` macro); story + staff
+  live in `segments/credits_ending.asm` / `credits_staff.asm`.
 - Reference: Metal Gear disassembly used to confirm the text scheme and the
   Konami actor/OBJ struct (cloned locally to `references/`, not committed).
 - Graphics: identified video mode as **SCREEN 5** (4bpp bitmap) in `sub_4b60h`;
@@ -87,8 +86,8 @@ opaque `db` dumps.
       table 0xB473 by (ix+0x0B), writes sprite attrs at (ix|0x20) offset by
       actor X/Y (ix+3/+5); stream codes 0x80/81/82 pick fixed (dx,dy) offset
       lists; restores seg 3.
-    - `d700_sat_emit` (0x64EC) / `c800_sat_emit` (0x64F3): render every active
-      actor in a list (8 @ 0xD700 / 7 @ 0xC800, stride 0x80) via
+    - `shot_sat_emit` (0x64EC) / `c800_sat_emit` (0x64F3): render every active
+      slot in a list (8 shots @ 0xD700 / 7 actors @ 0xC800, stride 0x80) via
       `actor_sat_emit` (0x6508), which copies Y/X/pattern into the 0xD638
       sprite-attr shadow and fills the pattern from the l6a70h table.
     - `frame_vram_refresh` (0x6552): per-frame VRAM refresh - re-uploads the
@@ -99,7 +98,7 @@ opaque `db` dumps.
     event table 0x6376-0x6388, per-row pos table 0x6426-0x644b, sprite offset
     lists 0x64d4-0x64eb.
   - Event/cutscene machinery (annotated; event-gated, not seen in normal play):
-    - sub_65b7h (0x65b7): event sub-state machine, DISPATCH_A on 0xCE01 (11
+    - event_dracula (0x65b7): event sub-state machine, DISPATCH_A on 0xCE01 (11
       handlers, inline word table now decoded to defw). 0xCE02 = per-step timer;
       the last handler clears 0xCE00 and raises 0xCE40 (done).
     - sub_66c1h (0x66c1): post-event machine, DISPATCH_A on (0xCE40-1) (4
@@ -120,12 +119,12 @@ opaque `db` dumps.
     (0x7956), `title_fill_strips` (0x7AD6), `title_set_color2` (0x7AEE),
     `tile_layout_draw` (0x7B39, already named), `combat_tick` (0x7D6F).
     Play-loop tail in `sub_5c2ch` also named: `room_event_tick` (0xB6B2,
-    CE00; event 6 = sub_65b7h), `actors_tick` (0x98EC), `d700_tick`
+    CE00; event 6 = event_dracula), `actors_tick` (0x98EC), `shot_tick`
     (0x9E38), `vendor_tick` (0x91C5), `pickup_tick` (0x8A51),
     `break_spark_tick` (0x88DF), `hazard_tick` (0x8FD6), `platform_tick`
-    (0x90A2), `c800_sat_build`/`d700_sat_build`, `c800_sat_emit`/`d700_sat_emit`,
-    `frame_vram_refresh`.  Event machinery (0x65b7) still wants a boss/death
-    trace.
+    (0x90A2), `c800_sat_build`/`shot_sat_build`, `c800_sat_emit`/`shot_sat_emit`,
+    `frame_vram_refresh`.  Event 6 (`event_dracula`) is Dracula's CE01 machine;
+    it raises CE40 → `credits_tick` (named; see game-notes Ending / credits).
 
 - Runtime tracer (CocoaMSX) wired up and used for the first time:
   - `tools/CocoaMSX` submodule (branch `disasm-tracing`) builds with the opt-in
@@ -807,7 +806,7 @@ opaque `db` dumps.
       detector `sub_7682h` (seg1 0x7682) sets pending dir in 0xC41B (1=up 2=down
       3=left 4=right); permit bytes 0xC41C-0xC41F come from the same nibbles (seg13
       0xB99A). Stage advance (0xD000++) is separate (`advance_stage` 0x434E via the
-      0xC409 key-door / 0xC408 boundary flag). 0xD000 is never touched by the graph.
+      0xC408 boundary flag / white-key door). 0xD000 is never touched by the graph.
     * Validated byte-exact: decode matches all recorded consecutive stage-1
       transitions + the stage-1 horizontal loop (room3 right->0, room0 left->3).
     * **Spatial minimaps.** `tools/roomperm.py` now places rooms by BFS over the
@@ -843,8 +842,10 @@ opaque `db` dumps.
       the 08/05 cells, and rooms spawn regardless of the pair's presence. Their
       actual picture is still unidentified - tile PATTERNS live in a VRAM page the
       game RLE-decodes from ROM per room (not captured by RAM snapshots), and the
-      background tileset isn't in the gfx catalogue yet (only sprites are). Decoding
-      the per-room tileset loader (seg0 l471bh/l4845h path) is the open next step.
+      background tileset isn't in the gfx catalogue yet (only sprites are).
+      Per-room gfx scripts (`room_gfx_load` / `gfx_script_run`) load enemy
+      **sprite** VRAM (`FA00+`), not the 4bpp playfield; tilesets still come
+      from seg4-6 (`sub_53a5h`).
     * **`roomperm.py` upgrades:** room-number labels drawn in a widened dark-gray
       band per cell (3x5 bitmap font); stopped writing per-room PNGs (one contact
       sheet per stage only); **`--all`** renders every stage - world rows **0..17**
@@ -916,22 +917,58 @@ opaque `db` dumps.
 
 ## In progress / next
 
-1. Sprites/graphics: `weapon_sprite_ptr` (seg0 0x55DE, was l55deh) and
-   Simon's SAT layouts (`simon_sat_cell0/1`) converted from fake instructions.
-   Projectile streams catalogued as `gfx/weapon_knife` / `_axe` / `_cross`.
-   Still to map: per-room gfx-script streams (enemy/tileset VRAM) and remaining
-   actor art in seg13 0xA319+.
+Parked: none (fodder `ix+1` machines named: raven wait/coast/hover/pick/strafe,
+dog idle/run/air, bone dragon form/idle/spit, red skeleton wake/walk/pause,
+hunchback wait/drop/crouch/jump/hide, blob hatch/fall/pause/hop, plus
+merman fall/walk/spit, hanging bat hang/swoop/bob, skull pile idle/windup/recover).
+Breakable
+walls named (`block_stamp` / `block_save_under` / restore; C470 kind 3).
+Candle blob named (`actor_blob_blue` / `_red` / `_white`; hatch `blob_hatch_type`;
+sprites `spr_blob` / `spr_blob_cc`; sheet **1A/1B/1C**). Dracula `ix+1` and torso
+blit named (`dracula_save_bg` / `dracula_blit_torso`; 32x32s are packed
+4bpp `dracula_body_closed`/`open` at page-1 Y=0x80). Portrait eye/mouth
+16x16s are `dracula_portrait_parts` at Y=0xA0.
+s18r9 collision uses event-6 threshold 6 (`tile_is_solid` l7c7ah). Leftover
+fake `DISPATCH_A`
+in-lines converted to `defw` (seg1 `sub_6875h` / 0x6AB4). Seg2 hit-class
+named: `hit_class_c800` / `_shot` tables, `actor_vs_*` / `shot_vs_*`,
+`overlap_simon` / `_whip` / `_projectile` / `_shield`. Shot ticks named
+(`fireball`, `medusa_snake`, `mummy_bandage`, `shot_sickle`, `shot_axe`, `shot_bone`);
+kind table `shot_kind_type`.
+
+Seg3 boss events 1–6 named: `event_giant_bat` / `event_medusa` /
+`event_mummies` / `event_frankenstein` / `event_grim_reaper` /
+`event_dracula`, plus their CE01 steps, `ix+1` machines (bat, medusa,
+mummy, Frank/Igor, grim), `aim_at_simon`, `event_ce01_next`,
+`boss_clear_arm`. Ending credits still: last `event_dracula` step raises
+CE40; `credits_tick` (0x66C1) plays `cr` strings (seg8 story + seg5 staff;
+**HUMANBEINGS** spelling, `LET;S` apostrophe). Other bosses skip this and
+use `room_event_ce10` → C409.
+
+1. Sprites/graphics: playfield tilesets mapped. `load_stage_tileset` (0x5653)
+   blits `tileset_ptr[D000]` (0xBF uncompressed 8x8 4bpp tiles) to VRAM 0x8004.
+   8 unique sources (hubs of 3 stages; s0 and s18 unique). `make gfx` writes
+   `gfx/tileset_s00.png` … `tileset_s18.png`. Pixel room sheets:
+   `tools/roomperm.py --all --pixels` → `gfx/stage_sNN.png` (nametable
+   id N = ROM tile N−1, id 0 blank; HUD rows cropped). Banks 4–8 are labeled
+   source (`tileset_s00`..`s18`). Packed Simon/intro RLE is `segments/data/simon_rle.asm`
+   / `intro_sky.asm`. Seg9/10 are labeled (`room_gfx.asm`, `enemy_sprite_rle.asm`,
+   palettes). Seg15 is labeled (`psg_seg15.asm`, `dracula_portrait.asm`).
+   `actor_tick_tbl` now uses `enemy_*_go` / `merman_go` / `hanging_bat_go`
+   mid-entries (spawn stays `enemy_*_tick`). `vendor_outcome_tbl` converted.
 2. Convert the tile-layout block `0x4C3F-0x4D0E` in seg00 from misdisassembled
    "code" to `db` data - DONE (`l4c3fh` / `l4c5ah` / `l4ca0h` + `tile_layout_draw`).
-3. Annotate the in-game state handlers in `sub_414dh`: 0-5 named; 6=`state_death`,
-   7=`state_game_over`, 9=`state_room_trans`, 10=`state_stage_exit`, 12=`state_vendor`,
-   13=`state_game_start`.  8 (`state_c409`) and 11 (`state_f1_dismiss`) are labeled
-   from their flags; exact play meaning still wants a trace.
+3. Annotate the in-game state handlers in `sub_414dh`: 0-13 named.  8 =
+   `state_hub_advance` (0xC409 from boss-clear / credits: 0xD002++ then
+   `advance_stage`; hub wrap is game-complete / second loop).  11 =
+   `state_pause` (F1 sets 0xC40A; play tick freezes; F1 resumes).
+   Player-stats block 0xC400-0xC41F mapped (see game-notes); `run_seed_tbl`
+   / `add_score_c0` split out of fake `l44f0h` code.
 4. Annotate the seg1 player routines the movement trace located - DONE:
    `simon_walk_left/right`, `simon_add_x`, `simon_jump_*`, `simon_mirror_frames`,
    `whip_tick` / `simon_attack_tick`, action-state handlers 0-6 named.
    Play-loop tail in `sub_5c2ch` named: `room_event_tick`, `actors_tick`,
-   `d700_tick`, `vendor_tick`, `pickup_tick`, `break_spark_tick`,
+   `shot_tick`, `vendor_tick`, `pickup_tick`, `break_spark_tick`,
    `hazard_tick`, `platform_tick`, SAT build/emit, `frame_vram_refresh`.
 5. Continue disassembling segments 1-15.
 6. Room-map renderer (`tools/roomperm.py`) per-stage tile-semantics cleanup.
@@ -949,13 +986,12 @@ opaque `db` dumps.
        stair tiles (same ids the engine climbs) as decoration; they're just
        inaccessible in the intro. Decision: leave them coloured as stairs (a stair
        tile is a stair tile whether or not it's reachable).
-     * stage 18 room 9 (Dracula) - PARKED. Manual `PERM_OVERRIDE` (floor + 2x1
-       jump ledges) looks right in `gfx/minimap_s18.png` but is not engine-derived;
-       come back if we find a principled source (scripted platforms / collision).
-     * Type 17 (Dracula) torso blit on `enemy_sheet.png` - PARKED. SAT dump is
-       head + cape only; the 32x32 SCREEN 5 middle (`sub_ad87h` / `ladc3h`,
-       page-1 Y=0xA0 16x16s) is not composited. A s18r9 tileset crop was title
-       kana (Akumajo Dracula), not the cloak.
+     * stage 18 room 9 (Dracula) - event-6 `tile_is_solid` threshold 6 (ids
+       1-6). `roomperm.py` uses that for perm and `--collision`; no overlay.
+     * Type 17 (figure Dracula) on `enemy_sheet.png`: SAT head+cape plus the
+       32x32 cloak from `dracula_body_closed` (page-1 Y=0x80,
+       `dracula_blit_torso`). Portrait closed-mouth 16x16s at Y=0xA0 are
+       the wall painting, not the figure.
      * stage 6 room 5 - RESOLVED: leftover white speck was a lone body-09 (the
        old "errant 0c" was already gone with the 06/07 decoration rule).
      * stage 15 rooms 6-9 - RESOLVED for solids (lone 09 next to wallpaper);
@@ -972,7 +1008,7 @@ opaque `db` dumps.
      object-list tables graduated from INCBIN (`scenery_list_ptr`,
      `spawn_bitmask_ptr`, `object_list_ptr` in `segments/seg14.asm`). The rest of
      the bank is now source too: `credits_font` / `sound_tick` / `sfx_tbl` /
-     `music_ptr`, with packed PSG streams still INCBIN slices (some music tails
+     `music_ptr`, with packed PSG streams as labeled hex (some music tails
      in seg15).  `collect_bonus_tbl` ids are annotated in seg02.
 
 ## Next tracing session (resume plan)
@@ -1079,14 +1115,11 @@ Known live RAM map (runtime-confirmed this session):
     knockback throws Simon back (0xC427 X down) and up (0xC425 Y down, restored
       to 0xC0 ground on recovery).
   0xC450-C46F whip sprite buffer
-  0xC470 block: destructible scenery objects (braziers/candles), stride 0x10, up
-         to 4 per room (0xC470/80/90/A0).  +0x00 = state (0x02 = lit/present ->
-         0x00 the frame the whip destroys it); +0x06 = free-running flame-anim
-         phase (increments every frame).  Runtime-confirmed (castle candle room,
-         F8 recording): whipping candle 0xC490 cleared 0xC490 02->00 on the whip-
-         contact frame, candle 0xC470 likewise; unwhipped candles stayed 0x02.
-         (Writer PC not yet captured - WATCH this block next run to name the
-         candle-hit routine.)
+  0xC470 block: destructible scenery (candles **and** 32×32 wall blocks),
+         stride 0x10, 8 slots.  +00 state (1 first frame / 2 present / 0 gone);
+         +01 Y +02 X; +03 hit; +04 kind (0 castle candle, 1 courtyard, 3 4x4
+         block); +05 bonus id; +07/+08 E000 pos ptr.  First tick saves D100
+         under the slot (E480/E4A0) and stamps brick tiles for kind 3.
   0xC500 floor pickups/chests: 8 slots, stride 0x10 (`pickup_tick`).
   0xC580 hazard/projectile slots: 3 x 8 bytes (`hazard_tick`;
          `hurt_simon_projectile` overlap). Seeded on stage 6 room 1.
@@ -1150,6 +1183,11 @@ Known live RAM map (runtime-confirmed this session):
          WATCH=c880-c88f on a candle whip will confirm and give the handler PCs.)
   0xD000 stage row/flag  0xD001 room index (seg13 0xB98A)  level change = seg0
          0x4362/65
+  0xD700 shot slots: 8 slots, stride 0x80, same actor struct as C800. Enemy-
+         spawned flyers (fireballs, bones, axes, sickles, snakes,
+         bandages) plus the death flame (type 12 / kind 0xFF). Ticked by
+         `shot_tick`. Not Simon's thrown weapons (C450/C460 `projectile_*`)
+         and not the 3-slot C580 `hazard_*` pool.
 
 Snapshot session (F9 x7: baseline -> 5 braziers -> castle) nailed the inventory
 block that every prior movement WATCH missed.  Method note: the F9 RAM-diff alone
@@ -1190,6 +1228,14 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   a `.blocks` file only changes code-vs-data rendering, never the emitted bytes.
   BIOS names live once in `segments/bios.inc`; actor type ids in
   `segments/actors.inc`; routine names go in `segments/msx.sym`.
+- Identified binary data (standing practice): dump known blobs to labeled
+  `defb` (`tools/emit_identified_data.py` -> `segments/data/` and tileset
+  banks), Metal Gear style. 4bpp tiles are hex `defb` pixel-rows; 1bpp glyphs use
+  `defb %xxxxxxxx`. Packed sprite RLE uses `%` pixel rows (counts stay hex).
+  PNG/`rleenc.py` is preview/modding, not the assemble source (packer is not
+  byte-exact). Unidentified leftover slices are labeled
+  hex once a bank is off `.bin`. Do not mass-convert a whole unknown bank to
+  opaque `db`.
 - File placement (STANDING PRACTICE): all hand-authored disassembly metadata lives
   in `segments/` (`bios.inc`, `actors.inc`, `msx.sym`, `seg*.blocks`) - anything
   needed to reassemble or to regenerate the disassembly faithfully. `tools/` is
@@ -1228,7 +1274,11 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   advance_stage, room_map_build, zombie_generator, merman_generator,
   merman_generator_3, hanging_bat_generator, flying_skull_generator, ghost_head_generator,
   roc_generator, door_blit_tiles, read_buttons, input_edge, play_sound,
-  credits_font_load, credits_font_blit, load_weapon_sprites, load_vdoor_sprites;
+  frontend_input, frontend_to_title, frontend_game_start, slot_sig_7ffa,
+  credits_font_load, credits_font_blit, load_weapon_sprites, load_vdoor_sprites,
+  gfx_script_run, gfx_script_rle, gfx_script_copy, room_gfx_load,
+  load_stage_tileset, tileset_ptr, dracula_portrait_load,
+  dracula_portrait_palette;
   seg1: simon_action_tick, simon_walk_left/right, simon_jump_tick, simon_mirror_frames,
   simon_crouch, simon_stairs, simon_fall, simon_hurt, simon_dying,
   simon_portal_wait, simon_attack_tick, whip_tick, projectile_tick,
@@ -1236,28 +1286,49 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   holy_water_tick, map_cell_at, tile_is_solid, row_solid_thresh,
   set_stage_boundary, door_interact, door_try_open, door_open_walk,
   hourglass_use, stage_bgm_tbl, stage_bgm_play, stage_bgm_change,
-  event_vscroll, player_tick, simon_sat_build, simon_sat_cell0/1, combat_tick,
+  event_vscroll, credits_tick, credits_init, credits_frame, credits_clock,
+  credits_keyframe, credits_script_ptr, credits_wipe, player_tick, simon_sat_build, simon_sat_cell0/1, combat_tick,
   title_fill_strips, title_set_color2, title_sat_init, actor_sat_build,
-  actor_sat_emit, c800_sat_build/emit, d700_sat_build/emit, frame_vram_refresh;
+  actor_sat_emit, c800_sat_build/emit, shot_sat_build/emit, frame_vram_refresh;
   seg2: door_proximity, door_anim_tick, door_begin_open, spot_proximity,
   collect_bonus_tbl, bonus_holy_water, yellow_shield_tick, projectile_hit_actors,
-  lose_weapon, d700_throw, d700_spawn, d700_alloc, d700_bone_tick, d700_tick,
+  actor_vs_whip/simon/proj, shot_vs_simon/proj/shield/whip, overlap_simon/whip/projectile/shield,
+  lose_weapon, shot_throw, shot_spawn, shot_alloc, shot_bone, shot_tick,
+  shot_type_tick, fireball, medusa_snake, mummy_bandage, shot_axe, shot_sickle,
   actors_tick, c800_tick, pickup_tick, vendor_tick, break_spark_tick,
-  hazard_tick, platform_tick, platform_load, platform_tbl;
-  seg3: room_event_tick, enemy_zombie_tick, enemy_dog_tick, enemy_merman_tick,
+  hazard_tick, platform_tick, platform_load, platform_tbl,
+  actor_type_tick, actor_tick_tbl, vendor_outcome_tbl, vendor_hit_latch,
+  vendor_leave;
+  seg3: room_event_tick, shot_kind_type, mummy_bandage_init, shot_sickle_init, shot_axe_init,
+  enemy_zombie_tick, enemy_dog_tick, enemy_merman_tick,
   enemy_hanging_bat_tick, enemy_flying_skull_tick, enemy_ghost_head_tick,
   enemy_roc_tick, enemy_pikeman_tick, enemy_raven_tick, enemy_skull_pile_tick,
   enemy_hunchback_tick, enemy_bone_dragon_tick, enemy_red_skeleton_tick,
   enemy_white_skeleton_tick, white_skel_set_pose, white_skel_walk,
-  white_skel_air, white_skel_throw, enemy_axe_knight_tick, enemy_dracula_tick,
+  white_skel_air, white_skel_throw, enemy_raven_go, raven_wait, raven_coast,
+  raven_hover, raven_pick, raven_strafe_init, raven_strafe, raven_recover,
+  raven_hold, enemy_dog_go, dog_idle, dog_run, dog_air, enemy_bone_dragon_go,
+  bone_dragon_follow, bone_dragon_form, bone_dragon_idle, bone_dragon_spit,
+  enemy_red_skeleton_go, red_skel_wake, red_skel_walk, red_skel_pause,
+  hunchback_wait, hunchback_drop, hunchback_crouch, hunchback_jump,
+  hunchback_hide, blob_hatch, blob_fall, blob_pause, blob_hop, merman_fall,
+  merman_walk, merman_spit, hanging_bat_hang, hanging_bat_swoop,
+  hanging_bat_bob, enemy_skull_pile_go, skull_pile_idle, skull_pile_windup,
+  skull_pile_recover, enemy_axe_knight_tick, enemy_dracula_tick,
   enemy_giant_bat_tick, enemy_medusa_tick, enemy_mummy_tick,
   enemy_frankenstein_tick, enemy_grim_reaper_tick, enemy_placed_merman_init,
-  enemy_placed_bat_init;
+  enemy_placed_bat_init, event_giant_bat, event_medusa, event_mummies,
+  event_frankenstein, event_grim_reaper, event_dracula, event_ce01_next,
+  boss_clear_arm, aim_at_simon, room_event_ce10, boss_clear_cull, boss_clear_wait,
+  boss_clear_orb, boss_clear_orb_wait, boss_clear_heal, boss_clear_done;
   seg13: conn_lookup, conn_load_permits, conn_room_record, conn_ptr, door_load,
   door_load_coords, door_tbl, spot_load_coords, spot_tbl, simon_cell0_ptr,
-  simon_cell1_ptr;
+  simon_cell1_ptr, intro_simon, intro_sky;
   seg11/12: mtile_rowbase, mtile_roomptr, mtile_stream_c41a, mtile_streams,
   mtile_defbase, mtile_defs_s00..s18, mtile_def_c41a.
+  tilesets: tileset_s00..s18 (in-source; s00/s13 omitted from msx.sym — CPU
+  window collides with mtile_rowbase / scenery_list_ptr), hud_weapon_key_tiles,
+  title_logo_jp_tiles, title_logo_en_tiles, title_castle_tiles.
   seg14: scenery_list_ptr, scenery_list_s00, scenery_list_h0..h5,
   spawn_bitmask_ptr, spawn_mask_s00..s18, object_list_ptr,
   object_list_h0..h5, credits_font, credits_font_az, sound_tick, sound_idle,
@@ -1265,8 +1336,6 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   Actor type `equ`s: `segments/actors.inc` (`actor_zombie`..`actor_pickup`,
   `obj_next_room`/`obj_end_stream`); used in the packed object list and confirmed
   `spawn_actor` `ld c` sites.
-- Every `vk()`-emitting Lua block MUST use `LUA ALLPASS` — plain `LUA` emits only
-  on the final pass and drifts all later labels.
 - After any edit, run `make verify` before moving on.
 - Reusable methodology (for disassembling OTHER Konami MSX games later) lives in
   workspace skills at `.agents/skills/` (`konami-msx-disasm`, `msx-runtime-tracing`).

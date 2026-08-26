@@ -77,8 +77,8 @@ segment currently paged in (`X 06:be44` = seg 6, PC 0xBE44).
 2. If you need the *writer PC*, relaunch with a **tight** `WATCH` on just those
    addresses and repeat the action; grep the log for ` aaaa=` to get the `seg:pc`.
 3. Map that PC to code and annotate. For "who calls this?" go static instead:
-   `tools/romscan.py xref 0xPC` (it reads seg0/the resident bank too, which a
-   `segments/*.bin` grep misses).
+   `tools/romscan.py xref 0xPC` (it reads the ROM, so migrated banks with no
+   `.bin` are included).
 
 ## Analysis tips
 

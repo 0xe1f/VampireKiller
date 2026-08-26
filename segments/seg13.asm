@@ -8,14 +8,14 @@
 ;  (not z80dasm lxxxh / sub_xxxh) to avoid colliding with seg03.asm.
 ; ===========================================================================
 
-; --- 0xA000-0xB962: metatile defs + sprite RLE (graphics, not yet reversed) -
+; --- 0xA000-0xB962: metatile defs + sprite RLE -----------------------------
 ;  0xA000-0xA040 = tail of stage-18 defs (body at mtile_defs_s18 in seg12).
 ;  Landmarks: 0xA041 = mtile_def_c41a (room_map_build when 0xC41A != 0); 0xA281 /
-;  0xA2D1 = Simon cell pointer tables (below); 0xA319 = RLE streams
-;  (intro_simon + in-game frames); 0xB895 = intro_sky.
-	INCBIN "seg13.bin", 0, 0x0041
-mtile_def_c41a:                ; (seg13 0xA041)
-	INCBIN "seg13.bin", 0x0041, 0x0240
+;  0xA2D1 = Simon cell pointer tables (below); 0xA319 = packed sprite RLE
+;  (intro_simon + in-game frames); 0xB5A1-0xB894 figure Dracula 32x32 body;
+;  0xB895 = intro_sky.
+	INCLUDE "data/mtile_defs_s18_b.asm"
+	INCLUDE "data/mtile_def_c41a.asm"
 
 ; simon_cell0_ptr (seg13 0xA281): 40 words, indexed by 0xC42E (legs).
 ; Consumed by load_simon_sprites; streams catalogued as gfx/simon_cell0.
@@ -44,10 +44,10 @@ simon_cell1_ptr:
 	defw 0ac21h,0ac4ch,0ae05h,0ae43h
 	defw 0ae80h,0a4feh,0a53ch,0a579h
 
-; Sprite RLE streams 0xA319-0xB894 (intro_simon + in-game Simon frames).
-	INCBIN "seg13.bin", 0x0319, 0x157C
-intro_sky:                     ; (seg13 0xB895) loaded to VRAM 0xFA00
-	INCBIN "seg13.bin", 0x1895, 0x00CE
+; Packed sprite RLE 0xA319-0xB5A1 (intro_simon_0..7 + cell streams + 6 orphan planes).
+	INCLUDE "data/simon_rle.asm"
+	INCLUDE "data/seg13_b5a1.asm"
+	INCLUDE "data/intro_sky.asm"
 
 ; ---------------------------------------------------------------------------
 ;  conn_lookup (seg13 0xB963) - room-transition BRAIN.
@@ -479,4 +479,4 @@ spot_tbl:                        ; (seg13 0xBBCD) (stage, dest<<4|room, Y, X), 0
 	defb 0ffh                ; end
 
 ; Remainder of the bank (more graphics / unreversed data).
-	INCBIN "seg13.bin", 0x1BF6, 0x040A
+	INCLUDE "data/seg13_bbf6.asm"

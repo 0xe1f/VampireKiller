@@ -15,16 +15,21 @@ ROM exactly, so the game can be understood and modified.
 VampireKiller.asm   master file: stitches the 16 segments into the ROM image
 segments/           one file per 8 KiB segment
   seg00..03.asm     code banks — INCLUDE'd, being annotated
-  seg11..14.asm     map / scenery / credits font / PSG — INCLUDE'd
-  seg04..10, 15     still INCBIN (binaries gitignored)
+  seg04..10.asm     INCLUDE stitchers (tilesets, gfx scripts, palettes, RLE)
+  seg11..15.asm     map / scenery / credits font / PSG / portrait — INCLUDE'd
+  data/             metatiles, tilesets, 1bpp sprite RLE, PSG, gfx scripts
 tools/              helper scripts + symbol/block files (see below)
 docs/               notes (game behaviour, text encoding, sprites) + progress
-gfx/                readable graphics catalogue (manifest committed; dumps regen)
+gfx/                readable graphics catalogue (PNG sheets committed; `make gfx`)
+music/              BGM catalogue (WAV; `make music` from the ROM bytecode;
+                    recognizable, not fully hardware-accurate yet)
 Makefile            build / verify
 ```
 
-The original ROM and the per-segment
-binaries are excluded via `.gitignore`; you supply your own ROM to build.
+The original ROM is still required for `make verify`. All banks assemble from
+labeled `.asm` (no leftover `.bin`).
+Tilesets, gfx scripts, RLE, and PSG assemble from labeled `.asm`;
+`tools/emit_identified_data.py` regenerates those dumps from the ROM.
 
 ## Building
 
@@ -34,13 +39,12 @@ You need two things that are not in the repo:
    ([z00m128/sjasmplus](https://github.com/z00m128/sjasmplus)) and place the
    binary at `tools/sjasmplus`.
 2. **An original `VampireKiller.rom`** (128 KiB) placed at
-   `references/VampireKiller.rom`. It is gitignored and is used both
-   to create the segment binaries and to verify the build.
+   `references/VampireKiller.rom`. It is gitignored and is used to verify
+   the build.
 
 Then:
 
 ```sh
-make segments   # split the ROM into segments/seg01..15.bin (run once)
 make verify     # assemble and confirm the output is byte-identical to the ROM
 ```
 
@@ -54,14 +58,13 @@ output; the reference ROM lives in `references/`).
 disassembly one at a time, and after every change the ROM is rebuilt and compared
 against the original so it stays byte-for-byte identical.
 
-Text is stored as `ASCII - 0x10`; a small `vk()` helper (in `VampireKiller.asm`)
-lets strings be written as readable ASCII while emitting the exact original bytes.
+Text is stored as `ASCII - 0x10` (HUD/title) or plain ASCII (credits); the
+`vk` / `cr` macros in `VampireKiller.asm` let strings be written as readable
+ASCII while emitting the exact original bytes (space → 0x00).
 
-Graphics are SCREEN 5 (4bpp) bitmaps and 16×16 hardware sprites, stored
-RLE-compressed. `make gfx` decompresses the streams listed in `gfx/manifest.tsv`
-into readable `.bin`/`.txt` dumps (plus `.png` sheets for clarity) for
-inspection/editing; `tools/rleenc.py` re-packs them. The committed build keeps
-the original compressed bytes, so it stays byte-exact.
+Graphics: uncompressed playfield tilesets are hex `defb` (one 4-byte row per
+scanline). Sprites stay RLE-packed in source (`rleenc.py` is not byte-exact).
+`make gfx` writes PNG previews from the ROM.
 
 See `docs/` for reverse-engineering notes and `docs/progress.md` for current
 status and next steps.

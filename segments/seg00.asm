@@ -65,13 +65,15 @@ data_4010_end:
 ; ===========================================================================
 ;  int_handler - timer interrupt (H.TIMI hook, installed by init at 0xFD9F).
 ;  Runs once per VDP frame: PSG tick (`sound_tick` in segs 14/15), then
-;  the game tick.  Two guards keep a slow tick from re-entering itself.
+;  the game tick.  0xC005 bit0 skips a frame if the previous tick is still
+;  running.  0xE600 is the boot slot-scan result, not a re-entrancy flag:
+;  when NZ, l40c5h samples extra keys first, then usually falls into l4030h.
 ; ===========================================================================
 int_handler:
 	di
-	ld a,(0e600h)           ; hard re-entrancy guard (outer)
+	ld a,(0e600h)           ; 0xFF if boot slot-scan hit slot_sig_7ffa
 	or a
-	jp nz,l40c5h            ; already inside a tick -> just read keys
+	jp nz,l40c5h            ; companion path: extra keys, often still ticks
 l4030h:
 	di
 	ld a,00eh               ; page segment 14...
@@ -157,7 +159,7 @@ init:
 	ld (hl),000h
 	ldir                    ; (hl)=0 then propagate via LDIR
 	call sub_533dh          ; init subsystem
-	call sub_5c99h          ; init subsystem
+	call sub_5c99h          ; slot scan: E600=0xFF if 0x7FFA matches slot_sig_7ffa
 	call sub_533dh
 	call sub_4b60h          ; init subsystem
 	di
@@ -170,8 +172,8 @@ init:
 	ei                      ; interrupts on: game now runs from the tick
 l40c3h:
 	jr l40c3h               ; idle forever; work happens in int_handler
-; l40c5h - light path when int_handler re-enters during a busy tick: just
-; sample the SPACE key / joystick trigger so input isn't missed.
+; l40c5h - taken when E600 is NZ (slot_sig_7ffa found at boot). Extra SPACE /
+; row-1 sample; often jp l4030h and still runs the full tick.
 l40c5h:
 	ld a,007h               ; scan keyboard matrix row 7...
 	call SNSMAT
@@ -254,8 +256,9 @@ sub_4132h:
 ;              inside each handler (each `djnz` skips one sub-state).
 ;     0xC003 = free-running frame counter (bumped every tick).
 ;  For the three front-end states (0..2: logo / title / attract) the shared
-;  post-handler l4398h is pushed as a return address so it runs after the
-;  handler and drives the "press SPACE/trigger to start" transition.
+;  post-handler frontend_input (0x4398) is pushed as a return address so it
+;  runs after the handler: any press on logo/attract returns to the title;
+;  SPACE/TRG1 or TRG2/UP on the title starts the game (or password if E600).
 ; ===========================================================================
 sub_414dh:
 	ld hl,0c003h            ; frame counter...
@@ -264,7 +267,7 @@ sub_414dh:
 	ld a,c
 	cp 003h                 ; front-end states 0..2?
 	jr nc,l415eh            ; no -> in-game, skip post-handler
-	ld hl,l4398h            ; yes -> run front-end post-handler...
+	ld hl,frontend_input    ; yes -> run front-end post-handler...
 	push hl                 ; ...after the state handler returns
 l415eh:
 	call DISPATCH_A         ; jump to main_state_tbl[primary state]
@@ -282,10 +285,10 @@ main_state_tbl:
 	defw state_play             ; 5  in-stage play + next-state select
 	defw state_death            ; 6  lives left -> respawn (state 4); else game-over
 	defw state_game_over        ; 7  draw GAME OVER (l4d41h)
-	defw state_c409             ; 8  from 0xC409 (not the C408 key-door); bumps 0xD002
+	defw state_hub_advance      ; 8  from 0xC409 (boss-clear / credits): hub++ then advance_stage
 	defw state_room_trans       ; 9  pending exit 0xC41B: sub_5a35h then back to play
 	defw state_stage_exit       ; 10 from 0xC408: spend white key, advance_stage
-	defw state_f1_dismiss       ; 11 from 0xC40A: F1 to dismiss, back to play
+	defw state_pause            ; 11 from 0xC40A: F1 freeze; F1 again resumes play
 	defw state_vendor           ; 12 from 0xC40C: vendor offer / purchase
 	defw state_game_start       ; 13 from title start (A=0x0D): new game / password
 main_state_tbl_end:
@@ -309,12 +312,12 @@ l4198h:
 	call sub_47c0h
 	call konami_logo_draw   ; draw Konami logo + start the top-to-bottom wipe (seg1)
 	jr l41cch
-state_title:                   ; 1 (0x41A0)
+state_title:                   ; 1 (0x41A0): idle until C004==0, then attract
 	ld hl,0c004h
-	dec (hl)
+	dec (hl)               ; first entry C004=0 wraps to 0xFF (~4s @ 60Hz)
 	ret nz
 	call title_set_color2
-	jp l4249h
+	jp l4249h              ; C004=0x20, inc C000 -> state 2 attract
 state_attract:                 ; 2 (0x41AB)
 	djnz l41c1h
 	call sub_4e27h
@@ -354,7 +357,7 @@ l41e4h:
 l41ech:
 	djnz l41fbh
 	ld a,001h
-	ld (0c41ah),a
+	ld (0c41ah),a          ; intro: use mtile_stream_c41a
 	call 063dah
 	ld a,0a0h
 	jp l41c9h
@@ -370,7 +373,7 @@ l4206h:
 	ret nz
 	call sub_47f7h
 	xor a
-	ld (0c41ah),a
+	ld (0c41ah),a          ; intro map stream off
 	call 062d7h
 	ld hl,0e604h
 	ld a,(hl)
@@ -395,10 +398,10 @@ state_stage_bridge:            ; 4 (0x422C)
 	call sub_451ah
 	call 062edh
 	ld hl,0c413h
-	ld (hl),001h
+	ld (hl),001h           ; stay in play (0 = attract/death leave-play)
 	call stage_bgm_play
 	xor a
-	ld (0c40dh),a
+	ld (0c40dh),a          ; clear BGM force-replay (set on death/password)
 l4249h:
 	ld a,020h
 l424bh:
@@ -417,7 +420,7 @@ state_play:                    ; 5 (0x4257)
 	jp nz,l41b6h           ; 0xC40C -> vendor
 	ld a,(0c40ah)
 	and a
-	jp nz,l428ch           ; 0xC40A -> F1-dismiss
+	jp nz,l428ch           ; 0xC40A -> pause
 	ld a,(0c41bh)
 	and a
 	ld a,009h
@@ -429,7 +432,7 @@ state_play:                    ; 5 (0x4257)
 	ld a,(0c409h)
 	and a
 	ld a,008h
-	jp nz,l41b6h           ; 0xC409 -> state 8
+	jp nz,l41b6h           ; 0xC409 -> hub_advance
 	ld a,(0c413h)
 	or a
 	ret nz
@@ -448,7 +451,7 @@ l429bh:
 	xor a
 	ld (0c420h),a
 	inc a
-	ld (0c40dh),a
+	ld (0c40dh),a          ; force stage BGM replay on respawn
 	ld a,004h
 	jp l41b6h
 l42abh:
@@ -523,7 +526,7 @@ sub_4314h:
 	xor c
 	and (hl)
 	ret
-state_c409:                    ; 8 (0x4324): from play when 0xC409 set; ticks hub 0xD002
+state_hub_advance:             ; 8 (0x4324): boss-clear/credits set 0xC409; hub 0xD002++ then advance_stage
 	djnz l4377h
 	ld hl,0d002h
 	inc (hl)
@@ -565,8 +568,8 @@ advance_stage:
 	inc hl
 	xor a
 	ld (hl),a              ; room id (0xD001) = 0
-	ld (0c409h),a
-	ld (0c408h),a
+	ld (0c409h),a          ; clear hub-advance (boss-clear) latch
+	ld (0c408h),a          ; clear stage-boundary (white-key door) latch
 	ld a,004h
 	jp l41b6h
 	ld hl,CHKRAM
@@ -590,13 +593,17 @@ state_stage_exit:              ; 10 (0x438E): 0xC408, spend white key, next stag
 	ld (hl),a
 	jp advance_stage
 ; ===========================================================================
-;  l4398h - front-end post-handler (runs after the logo/title/attract handler,
-;  states 0..2).  Reads the start input; on press it moves logo/attract back to
-;  the title, or (from the title) begins the game.
+;  frontend_input (seg0 0x4398) - front-end post-handler (after logo/title/
+;  attract, states 0..2).  Same read_buttons mask as play, but input_edge
+;  latches 0xC401 held / 0xC400 new-press (play uses C007/C006).
+;    title (1): bits 4|5 only (SPACE/TRG1 or TRG2/kbd UP) start; else ignore.
+;      E600==0 -> intro (state 3); E600!=0 -> state_game_start (13).
+;    logo (0) / attract (2): any new press -> title_build.
+;  No press: state_title counts C004 down into attract (not this routine).
 ; ===========================================================================
-l4398h:
+frontend_input:
 	call read_buttons       ; A = joystick|keyboard mask
-	ld hl,0c401h            ; 0xC401 = start/trigger held; 0xC400 = new-press
+	ld hl,0c401h            ; 0xC401 = title held; 0xC400 = new-press
 	call input_edge         ; A = newly-pressed buttons this frame
 	or a
 	ret z                   ; nothing pressed -> stay in this state
@@ -604,26 +611,26 @@ l4398h:
 	ld (hl),000h            ; ...(0xC004 = 0)
 	ld hl,0c000h            ; HL -> primary state (0xC000)
 	ld b,(hl)               ; B = current state
-	djnz l43c1h             ; state != 1 (logo/attract) -> back to title
-	and 030h                ; title: was it SPACE/trigger (bits 4,5)?
+	djnz frontend_to_title  ; state != 1 (logo/attract) -> back to title
+	and 030h                ; title: bit4=SPACE|TRG1, bit5=TRG2|kbd UP?
 	ret z                   ; other key -> ignore
 	ld a,040h
-	ld (0c002h),a           ; flag "start pressed"
-	ld a,(0e600h)           ; in a tick already? (demo/attract guard)
+	ld (0c002h),a           ; C002 bit6: run active (score/minimap/start)
+	ld a,(0e600h)           ; slot-scan result (0xFF if slot_sig_7ffa hit)
 	or a
-	jr nz,l43cbh            ; yes -> full game-start setup
-	ld (hl),003h            ; else advance to state 3 (in-game)...
+	jr nz,frontend_game_start ; companion path -> password / new-game
+	ld (hl),003h            ; else C000 = 3 (intro)
 	inc hl
-	ld (hl),b               ; ...0xC001 = old state as sub-state
+	ld (hl),b               ; C001 = 0 (djnz already counted B from 1)
 	ret
 ; state 0 (logo) or 2 (attract) + any press -> return to the title screen.
-l43c1h:
+frontend_to_title:
 	ld (hl),001h            ; primary state = 1 (title)
 	ld a,000h
 	call play_sound          ; request sound/music change
 	jp title_build          ; (re)build the title screen
-; l43cbh - full game start: seed the run state then enter gameplay.
-l43cbh:
+; frontend_game_start (0x43CB): E600 path. Seed E604-E607, C000=13.
+frontend_game_start:
 	xor a
 	ld (0e604h),a           ; clear a run flag
 	ld a,001h
@@ -631,19 +638,19 @@ l43cbh:
 	ld (0e606h),a
 	ld a,003h
 	ld (0e607h),a
-	ld a,00dh               ; A = 0x0D -> next-state selector
-	jp l41b6h               ; enter gameplay via the state setter
-state_f1_dismiss:              ; 11 (0x43E1): 0xC40A, wait F1 (0xC00B bit0)
+	ld a,00dh               ; A = 0x0D -> state_game_start
+	jp l41b6h               ; enter via the state setter
+state_pause:                   ; 11 (0x43E1): F1 froze play (0xC40A); wait F1 (0xC00B bit0) to resume
 	ld a,(0c00bh)
 	rra
-	ret nc
+	ret nc                 ; still held/not pressed -> stay frozen
 	xor a
-	ld (0c40ah),a
-	call sub_44bfh
-	ld a,0feh
+	ld (0c40ah),a          ; clear pause latch
+	call sub_44bfh         ; restore the blit rectangle paused over
+	ld a,0feh              ; unpause BGM
 	call play_sound
 	ld a,005h
-	jp l41b6h
+	jp l41b6h              ; back to play
 state_vendor:                  ; 12 (0x43F7): 0xC40C whip-hit vendor
 	djnz l4402h
 	call 094c1h             ; vendor_purchase_tick body (seg2): poll buy/refuse
@@ -739,7 +746,7 @@ sub_449ch:
 	ld a,004h
 	push hl
 	push bc
-	call sub_494dh
+	call vdp_hmmm
 	pop bc
 	pop hl
 	call sub_5d15h
@@ -757,12 +764,12 @@ sub_44bfh:
 	ld bc,03010h
 	ld hl,0d070h
 	ld a,001h
-	jp sub_494dh
+	jp vdp_hmmm
 ; --- reset_run_state (sub_44cdh) - wipe the run's work RAM & seed defaults ------
 ;  Called from the intro handler (state 3) to start a fresh run.  Runtime trace
 ;  confirmed the ldir below zero-fills the entire game work block 0xC405..0xDFFF
 ;  in one sweep (event state 0xCE00+, actor arrays 0xD000+, etc.), then seeds the
-;  starting counters at 0xC410..0xC412 from l44f0h and the view defaults
+;  starting counters at 0xC410..0xC412 from run_seed_tbl and the view defaults
 ;  0xC415=0x20 / 0xC418=0x80.
 reset_run_state:
 	ld hl,0c405h           ; HL -> first byte to clear
@@ -772,7 +779,7 @@ reset_run_state:
 	inc e                  ; DE = HL+1 (classic ldir zero-fill)
 	ld (hl),000h
 	ldir                   ; 0xC405..0xDFFF = 0
-	ld hl,l44f0h           ; seed the starting counters...
+	ld hl,run_seed_tbl     ; seed the starting counters...
 	ld de,0c410h           ; ...into 0xC410..0xC412
 	ld bc,00003h
 	ldir
@@ -781,10 +788,10 @@ reset_run_state:
 	ld a,080h
 	ld (0c418h),a          ; enemy/boss energy meter = full (0x80)
 	ret
-l44f0h:
-	inc bc
-	nop
-	ld bc,0000eh
+run_seed_tbl:                  ; (0x44F0) new-game C410..C412: lives=3, STAGE=0, C412=1 (unread)
+	defb 003h,000h,001h
+add_score_c0:                  ; (0x44F3) callers jp here with DE=amount to force C=0
+	ld c,000h
 ; --- add_score (seg0 0x44F5) - add points to Simon's score ---------------------
 ; Score is a 3-byte packed-BCD counter at 0xC405 (low pair) / 0xC406 (mid pair -
 ; the hundreds/thousands digits, i.e. the main visible byte) / 0xC407 (high pair).
@@ -793,6 +800,8 @@ l44f0h:
 ; always multiples of 100, so callers set E=0 and put the hundreds in D).  Adds
 ; with `daa` carry-chained across the 3 bytes; on overflow past 999999 it clamps.
 ; Guard: skipped (ret p) unless bit 6 of the 0xC002 frame counter is set.
+; Overflow writes 0x99 into 0xC402-0xC404 (not the visible score); those bytes
+; have no readers.
 add_score:
 	ld a,(0c002h)
 	add a,a
@@ -814,7 +823,7 @@ add_score:
 	ld (hl),a
 	jr nc,l4538h           ; no overflow -> done
 	ld bc,09999h
-	ld (0c402h),bc
+	ld (0c402h),bc         ; unused (no readers); visible score is C405-C407
 	ld (0c403h),bc
 	jr l4538h
 sub_451ah:
@@ -1186,7 +1195,12 @@ l4715h:
 	out (c),a               ; ...write it b times to VRAM
 	djnz l4715h
 	jr l46ffh
-l471bh:
+; ---------------------------------------------------------------------------
+;  gfx_script_run (seg0 0x471B) - interpret a per-room gfx script (HL).
+;  Cmd 0xFF ends; 0 = gfx_script_rle (src word, VRAM dest word);
+;  1 = sub_4745h sprite convert; else gfx_script_copy (6-byte VRAM blit).
+; ---------------------------------------------------------------------------
+gfx_script_run:
 	ld a,(hl)
 	inc hl
 	inc a
@@ -1196,15 +1210,15 @@ l471bh:
 	jr z,l472bh
 	dec a
 	jr z,l4730h
-	call sub_4772h
-	jr l471bh
+	call gfx_script_copy
+	jr gfx_script_run
 l472bh:
-	call sub_4735h
-	jr l471bh
+	call gfx_script_rle
+	jr gfx_script_run
 l4730h:
 	call sub_4745h
-	jr l471bh
-sub_4735h:
+	jr gfx_script_run
+gfx_script_rle:
 	ld e,(hl)
 	inc hl
 	ld d,(hl)
@@ -1254,7 +1268,7 @@ sub_4745h:
 	call sub_467ch
 	pop hl
 	ret
-sub_4772h:
+gfx_script_copy:
 	ld e,(hl)
 	inc hl
 	ld d,(hl)
@@ -1578,7 +1592,9 @@ l493fh:
 	out (c),a
 	ei
 	ret
-sub_494dh:
+; vdp_hmmm (seg0 0x494D): V9938 HMMM. HL=(SX,SY), DE=(DX,DY), BC=(NX,NY).
+; A bits 1-0 = source page, bits 3-2 = dest page. ARG=0 (no X/Y flip).
+vdp_hmmm:
 	ex af,af'
 	call l4853h
 	push bc
@@ -1674,7 +1690,9 @@ l49d1h:
 	inc hl
 	out (c),a
 	jr l49d1h
-sub_49e2h:
+; vdp_lmmm (seg0 0x49E2): V9938 LMMM (colour-0 skip). Same HL/DE/BC as vdp_hmmm.
+; A is packed page + logic bits (0x48 = page-1 -> page-0, used for Dracula torso).
+vdp_lmmm:
 	ex af,af'
 	call l4853h
 	push bc
@@ -1856,8 +1874,8 @@ l4ad8h:
 	ld e,(hl)
 	inc hl
 l4adch:
-	ld a,(hl)
-	inc hl
+	ld a,(hl)              ; 0xFF end; 0xFE new (D,E); else glyph. C masks A
+	inc hl                 ; (credits: C=0xFF, ASCII letters; space=0 skips)
 	ld b,a
 	inc b
 	ret z
@@ -1882,7 +1900,7 @@ l4afah:
 	ld l,a
 	ld bc,00808h
 	ld a,001h
-	call sub_494dh
+	call vdp_hmmm
 	pop de
 	pop hl
 	pop bc
@@ -1901,7 +1919,7 @@ sub_4b12h:
 	call sub_4b48h
 	ld bc,00808h
 	ld a,001h
-	call sub_494dh
+	call vdp_hmmm
 	pop de
 	pop hl
 	pop bc
@@ -1912,7 +1930,7 @@ sub_4b12h:
 	call sub_4b48h
 	ld bc,00808h
 	ld a,048h
-	call sub_49e2h
+	call vdp_lmmm
 	pop de
 	pop hl
 	pop bc
@@ -1923,7 +1941,7 @@ sub_4b12h:
 	call sub_4b48h
 	ld bc,00808h
 	ld a,005h
-	call sub_494dh
+	call vdp_hmmm
 	pop de
 	pop hl
 	pop bc
@@ -2017,8 +2035,9 @@ input_edge:                    ; (seg0 0x4BBB) A=sample, (HL)=held, (HL-1)=new-p
 	ret
 ; read_buttons (seg0 0x4BC2): joystick (PSG port A, bits 0-5) OR keyboard row 8
 ; (arrows + SPACE).  Result in A.  Play latches held into 0xC007 and the rising
-; edge into 0xC006 via input_edge.  Consumer bits: 0=UP 1=DOWN 2=LEFT 3=RIGHT
-; 4=SPACE/trig (whip) 5=UP (jump / portal new-press).
+; edge into 0xC006 via input_edge.  Title uses a separate pair: 0xC401 held /
+; 0xC400 new-press (frontend_input).  Consumer bits: 0=UP 1=DOWN 2=LEFT 3=RIGHT
+; 4=SPACE/joy TRG1 (whip / title start) 5=kbd UP/joy TRG2 (jump / title start).
 read_buttons:
 	ld e,08fh
 	ld a,00fh
@@ -2073,19 +2092,27 @@ sub_4bfbh:
 	rlca
 	and 007h
 	ret
-; --- HUD / status-bar text set (drawn via 0x451a).  Text is ASCII-0x10, spelled
-;     out here with vk(); leading numbers are VDP name-table positions, 0xFE ends
-;     a field and 0xFF ends the set.  Byte-for-byte identical to the original.
+; --- HUD / status-bar text set (drawn via 0x451a).  vk "TEXT" is ASCII-0x10
+;     (space = 0x00).  Leading numbers are VDP positions; 0xFE ends a field,
+;     0xFF ends the set.  Byte-for-byte identical to the original.
 l4c07h:
-	LUA ALLPASS
-	  vk({0x08,0x00,"SCORE",0x30,0xfe})           -- "SCORE" + score-digit tile
-	  vk({0x08,0x0c,"PLAYER",0xfe})               -- "PLAYER"
-	  vk({0x08,0x14,"ENEMY",0xfe})                -- "ENEMY" (0x14 = HP-bar icon)
-	  vk({0xb0,0x00,0x50,0x30,0xfe})              -- enemy HP-bar cell position
-	  vk({0xd4,0x00,0x40,0x30,0xfe})              -- player HP-bar cell position
-	  vk({0x6c,0x00,"STAGE",0x30,0xff})           -- "STAGE" + number tile
-	  vk({0x60,0x38,"STAGE",0x00,0x00,0x00,0xff}) -- "STAGE" (alternate position)
-	ENDLUA
+	defb 008h, 000h
+	vk "SCORE"
+	defb 030h, 0feh            ; + score-digit tile
+	defb 008h, 00ch
+	vk "PLAYER"
+	defb 0feh
+	defb 008h, 014h            ; 0x14 = HP-bar icon column
+	vk "ENEMY"
+	defb 0feh
+	defb 0b0h, 000h, 050h, 030h, 0feh  ; enemy HP-bar cell
+	defb 0d4h, 000h, 040h, 030h, 0feh  ; player HP-bar cell
+	defb 06ch, 000h
+	vk "STAGE"
+	defb 030h, 0ffh            ; + number tile
+	defb 060h, 038h
+	vk "STAGE"
+	defb 000h, 000h, 000h, 0ffh
 ; --- title_layout (0x4C3F-0x4D0E): tile-id streams for the title screen -----
 ;  Consumed by tile_layout_draw (seg1 0x7B39).  0xFF = end of stream; 0xFE =
 ;  next row (following byte is added to D, E += 8); any other byte is a tile
@@ -2122,21 +2149,23 @@ title_logo_intl:               ; 0x4CA0 - export title ("VAMPIRE KILLER")
 	defb 05dh,000h,000h,065h,065h,0feh,000h,04eh,04fh,050h,051h,058h
 	defb 059h,05ah,059h,068h,069h,06ah,05eh,05fh,062h,063h,064h,063h
 	defb 064h,066h,0ffh
-; --- Title / front-end text (drawn by title_build).  ASCII-0x10 via vk(); leading
-;     numbers are VDP position/attribute prefixes, 0xFE/0xFF are separators.
+; --- Title / front-end text (drawn by title_build).  vk "TEXT" is ASCII-0x10;
+;     leading numbers are VDP position/attribute prefixes, 0xFE/0xFF separators.
 l4d0fh:
-	LUA ALLPASS
-	  vk({0x48,0x88,0x2a,0x00,"KONAMI 1986",0xfe})  -- "KONAMI 1986"
-	  vk({0x48,0xa0,"PUSH SPACE KEY",0xff})         -- "PUSH SPACE KEY"
-	ENDLUA
+	defb 048h, 088h, 02ah, 000h
+	vk "KONAMI 1986"
+	defb 0feh
+	defb 048h, 0a0h
+	vk "PUSH SPACE KEY"
+	defb 0ffh
 l4d30h:
-	LUA ALLPASS
-	  vk({0x48,0xa0,0x00,0x00,"PLAY START",0x00,0x00,0xff})  -- "PLAY START"
-	ENDLUA
+	defb 048h, 0a0h, 000h, 000h
+	vk "PLAY START"
+	defb 000h, 000h, 0ffh
 l4d41h:
-	LUA ALLPASS
-	  vk({0x58,0x58,"GAME",0x00,0x00,"OVER",0xff})  -- "GAME OVER"
-	ENDLUA
+	defb 058h, 058h
+	vk "GAME  OVER"
+	defb 0ffh
 ; title_build (0x4D4E) - build/redraw the title screen.  Regional: reads the
 ; MSX character-set nibble (0x002B) to pick the Japanese vs export title logo
 ; (see title_layout above); title_load_tiles (0x5A02) loads the matching glyphs.
@@ -3042,7 +3071,7 @@ sub_53bdh:
 	jp sub_533dh
 ; credits_font_load (seg0 0x53E5): page segs 14/15 and blit the 8x8 1bpp
 ; ending-credits font (digits+punct, then A-Z) into SCREEN 5 via l4a2eh.
-; Called from sub_6719h (post-Dracula script player). credits_font_blit
+; Called from credits_init (post-Dracula script player). credits_font_blit
 ; (0x53E8) skips the pager when those banks are already in.
 credits_font_load:
 	call sub_5357h         ; page seg14/15
@@ -3160,15 +3189,15 @@ l548ch:
 	nop
 	nop
 	call sub_5381h
-	ld hl,09000h           ; bonus ids 1-20 (16x16 4bpp, file 0x13000)
+	ld hl,bonus_hud_tiles  ; bonus ids 1-20 (16x16 4bpp)
 	ld de,0a800h           ; VRAM page 1 Y=0x50 (wraps to Y=0x60 after 16)
 	ld b,014h
 	call l4a97h
-	ld hl,09a00h           ; potion bottle (bonus id 22) -> VRAM (X=80,Y=96)
+	ld hl,bonus_hud_potion ; potion bottle (bonus id 22) -> VRAM (X=80,Y=96)
 	ld de,0b028h
 	ld b,001h
 	call l4a97h
-	ld hl,09a80h
+	ld hl,bonus_hud_9a80
 	ld de,08c70h
 	ld bc,00804h
 	ld a,001h
@@ -3178,7 +3207,7 @@ l548ch:
 l54c0h:
 	push bc
 	push de
-	ld hl,09a90h
+	ld hl,bonus_hud_9a90
 	ld bc,00808h
 	ld a,001h
 	call sub_4991h
@@ -3361,9 +3390,9 @@ l55cfh:
 l55dbh:
 	jp sub_533dh            ; restore default game banks
 weapon_sprite_ptr:             ; (seg0 0x55DE) word[C416-2] -> seg10 RLE
-	defw 0a24eh            ; 2 knife  (file 0x1424E)
-	defw 0a4c9h            ; 3 axe    (file 0x144C9)
-	defw 0a272h            ; 4 cross  (file 0x14272)
+	defw weapon_knife      ; 2 knife
+	defw weapon_axe        ; 3 axe
+	defw weapon_cross      ; 4 cross
 weapon_cvt_boomerang:          ; axe/cross: F8C0 x2 -> F980
 	defb 0c0h,0f8h,002h,080h,0f9h
 weapon_cvt_boomerang2:         ; axe/cross: F900 x2 -> F940
@@ -3374,7 +3403,7 @@ weapon_cvt_knife:              ; knife: F8C0 x2 -> F900
 ; (C5AC==5), then fall through into the door SAT at 0xD600.
 load_vdoor_sprites:
 	call sub_5381h
-	ld de,0a0eah            ; seg10 stream (file 0x140EA)
+	ld de,vdoor_rle         ; seg10 stream
 	ld hl,0f900h
 	call sub_46f8h
 	call sub_533dh
@@ -3429,26 +3458,32 @@ l564bh:
 	inc de
 	djnz l564bh
 	ret
+; ---------------------------------------------------------------------------
+;  load_stage_tileset (seg0 0x5653) - page tileset banks and blit 0xBF 8x8
+;  4bpp tiles from tileset_ptr[D000] into SCREEN 5 VRAM starting 0x8004.
+;  Stages 0-12: seg 4/5/6. Stage >= 13: sub_5393h overlays seg 7/8 on 8000/A000.
+; ---------------------------------------------------------------------------
+load_stage_tileset:
 	call sub_53a5h
 	ld a,(0d000h)
 	cp 00dh
 	call nc,sub_5393h
 	ld a,(0d000h)
 	add a,a
-	ld hl,l5749h
+	ld hl,tileset_ptr
 	call ADD_HL_A
 	ld e,(hl)
 	inc hl
 	ld d,(hl)
 	ex de,hl
-l566ch:
+tileset_blit:
 	ld de,08004h
 	ld b,0bfh
 	call l4a6dh
 	jp sub_533dh
 	call sub_5381h
-	ld hl,08000h
-	jr l566ch
+	ld hl,frontend_tiles
+	jr tileset_blit
 	call sub_5369h
 	ld hl,0f800h
 	ld de,0a319h
@@ -3516,7 +3551,7 @@ load_simon_sprites:
 	jp sub_533dh            ; restore default game banks
 	call sub_572eh
 	call sub_5381h
-	ld hl,0bea7h
+	ld hl,stage_palette_ptr
 	ld a,(0d000h)
 	add a,a
 	call ADD_HL_A
@@ -3527,64 +3562,57 @@ load_simon_sprites:
 	call l4845h
 	jp sub_533dh
 ; --- sub_572eh - load the 8 fixed HUD/sprite colours (0,1,2,3,8,12,14,15)
-;     from seg10 0xBF88.  Stage palettes (0xBEA7 ptrs) never overwrite these.
+;     from hud_fixed_palette (seg10 0xBF88).  Stage palettes (stage_palette_ptr)
+;     never overwrite these.
 sub_572eh:
 	call sub_5381h
-	ld hl,0bf88h
+	ld hl,hud_fixed_palette
 	call l4845h
 	jp sub_533dh
 	call sub_572eh
 	call sub_5381h
-	ld hl,0bfa1h
+	ld hl,pal_bfa1
 	call l4845h
 	jp sub_533dh
-l5749h:
-	nop
-	ld h,b
-	jr nz,$+116
-	jr nz,l57c1h
-	jr nz,$+116
-	or e
-	sub l
-	or e
-	sub l
-	or e
-	sub l
-	sub e
-	add a,h
-	sub e
-	add a,h
-	sub e
-	add a,h
-	ld (hl),e
-	sbc a,(hl)
-	ld (hl),e
-	sbc a,(hl)
-	ld (hl),e
-	sbc a,(hl)
-	nop
-	add a,b
-	nop
-	add a,b
-	nop
-	add a,b
-	ld b,b
-	sub (hl)
-	ld b,b
-	sub (hl)
-	ret nz
-	and h
+; tileset_ptr (seg0 0x5749): word[stage 0..18] -> uncompressed 8x8 4bpp
+; source in the tileset banks. 0xBF tiles blit to VRAM 0x8004.
+tileset_ptr:
+	defw 06000h            ; 0  courtyard (seg4)
+	defw 07220h            ; 1-3
+	defw 07220h
+	defw 07220h
+	defw 095b3h            ; 4-6 (seg5)
+	defw 095b3h
+	defw 095b3h
+	defw 08493h            ; 7-9 (seg5)
+	defw 08493h
+	defw 08493h
+	defw 09e73h            ; 10-12 (seg5)
+	defw 09e73h
+	defw 09e73h
+	defw 08000h            ; 13-15 (seg7 after sub_5393h)
+	defw 08000h
+	defw 08000h
+	defw 09640h            ; 16-17 (seg7)
+	defw 09640h
+	defw 0a4c0h            ; 18 (seg8)
 	call sub_5381h
-	ld hl,0ff00h
-	ld de,0a185h
+	ld hl,0ff00h           ; shared sprites; fireball at +0x80 (SAT pat 0xF0)
+	ld de,gfx_rle_a185
 	call sub_46f8h
-	ld de,0a147h
+	ld de,gfx_rle_a147
 	ld hl,0f9c0h
 	call sub_46f8h
 	jp sub_533dh
+; ---------------------------------------------------------------------------
+;  room_gfx_load (seg0 0x5787) - page seg9/10, then 9AB0[D000-1] + 4*D001:
+;  word 0 = gfx script (gfx_script_run), word 1 = palette table (l4845h).
+;  Stage 0 (D000==0) skips. Called from the screen builder (seg1 0x62ED).
+; ---------------------------------------------------------------------------
+room_gfx_load:
 	call l4805h
 	call sub_5381h
-	ld hl,09ab0h
+	ld hl,room_gfx_ptr      ; word[stage-1] -> {script, pal}
 	ld a,(0d000h)
 	or a
 	jr z,l57b8h
@@ -3604,7 +3632,7 @@ l5749h:
 	push hl
 	ld h,(hl)
 	ld l,a
-	call l471bh
+	call gfx_script_run
 	pop hl
 	inc hl
 	ld a,(hl)
@@ -3615,13 +3643,13 @@ l5749h:
 l57b8h:
 	jp sub_533dh
 	call sub_5381h
-	ld hl,09fedh
+	ld hl,gfx_script_9fed
 l57c1h:
-	call l471bh
+	call gfx_script_run
 	jp sub_533dh
 	call sub_5381h
 	ld hl,0fa00h
-	ld de,0b0aah
+	ld de,gfx_rle_b0aa
 	call sub_46f8h
 	ld a,(0d000h)
 	sub 003h
@@ -3631,23 +3659,33 @@ l57c1h:
 l57e0h:
 	call l4845h
 	jp sub_533dh
+; dracula_body_load (seg0 0x57E6) - event-6 figure Dracula 32x32 frames.
+; Pages seg11-13, unpacks dracula_body_closed / dracula_body_open (seg13
+; 0xB5A1 / 0xB719) and HMMCs each 32x32 to page-1 Y=0x80: closed at X=0
+; plus H-mirror at X=0x40, open at X=0x20 plus H-mirror at X=0x60.
+; Called from sub_633ah after dracula_portrait_load.  dracula_blit_torso
+; LMMMs slot CE0E-1 onto the playfield (0x5B=closed, 0x5C=chest-open,
+; 0x5D/0x5E = facing mirrors).
+dracula_body_load:
 	call sub_5369h
-	ld hl,0b5a1h
-	call sub_5834h
+	ld hl,dracula_body_closed
+	call dracula_body_unpack
 	ld de,0c000h
-	call sub_5816h
-	call sub_5858h
+	call dracula_body_vram
+	call dracula_body_hflip
 	ld de,0c020h
-	call sub_5816h
-	ld hl,0b719h
-	call sub_5834h
+	call dracula_body_vram
+	ld hl,dracula_body_open
+	call dracula_body_unpack
 	ld de,0c010h
-	call sub_5816h
-	call sub_5858h
+	call dracula_body_vram
+	call dracula_body_hflip
 	ld de,0c030h
-	call sub_5816h
+	call dracula_body_vram
 	jp sub_533dh
-sub_5816h:
+; dracula_body_vram (0x5816): 32 rows x 16 bytes (32px 4bpp) from 0xE800
+; to VRAM DE (SCREEN 5 linear: 0xC000 = page-1 Y=0x80 X=0).
+dracula_body_vram:
 	ld b,020h
 	ld hl,0e800h
 l581bh:
@@ -3665,7 +3703,9 @@ l581bh:
 	call ADD_DE_A
 	djnz l581bh
 	ret
-sub_5834h:
+; dracula_body_unpack (0x5834): 32 rows into 0xE800.  First byte N is the
+; count of leading 0s; then copy (12-N) payload bytes; then 4 trailing 0s.
+dracula_body_unpack:
 	ld b,020h
 	ld de,0e800h
 l5839h:
@@ -3695,7 +3735,9 @@ l5850h:
 	pop bc
 	djnz l5839h
 	ret
-sub_5858h:
+; dracula_body_hflip (0x5858): H-mirror the 32x32 at 0xE800 in place
+; (nibble-swap via sub_5873h, also used to H-mirror portrait 16x16s).
+dracula_body_hflip:
 	ld hl,0e800h
 	ld de,0e80fh
 	ld c,020h
@@ -3729,44 +3771,54 @@ sub_5873h:
 	dec de
 	djnz sub_5873h
 	ret
+; ---------------------------------------------------------------------------
+;  dracula_portrait_load (seg0 0x5887) - event-6 immediate gfx (stage 18 room 9).
+;  Pages seg14/15 and blits the picture-frame tiles plus 108 8x8 face tiles
+;  from seg15 into the page-1 tile atlas, then H-mirrors the face (ids
+;  0x1E-0x89 -> 0x8A-0xF5) and V-mirrors the frame (top -> bottom).  Also
+;  loads 8 x 16x16 eye/mouth tiles (`dracula_portrait_parts`) to page-1
+;  Y=0xA0.  Called from sub_633ah when CE00==6, after
+;  dracula_portrait_palette; figure body frames follow via dracula_body_load.
+; ---------------------------------------------------------------------------
+dracula_portrait_load:
 	call sub_5357h
 	call sub_589ch
 	call sub_58d3h
 	call sub_5931h
-	call sub_5992h
-	call sub_599dh
+	call dracula_portrait_parts_load
+	call dracula_portrait_parts_mirror
 	jp sub_533dh
 sub_589ch:
-	ld hl,0abf8h
+	ld hl,dracula_frame_abf8
 	ld b,008h
 	ld de,08018h
 	call l4a6dh
-	ld hl,0acf8h
+	ld hl,dracula_frame_acf8
 	ld b,002h
 	ld de,08040h
 	call l4a6dh
-	ld hl,0ad38h
+	ld hl,dracula_frame_ad38
 	ld b,002h
 	ld de,08060h
 	call l4a6dh
-	ld hl,0ad78h
+	ld hl,dracula_frame_ad78
 	ld b,001h
 	ld de,08070h
 	call l4a6dh
-	ld hl,0ad98h
+	ld hl,dracula_face
 	ld b,06ch
 	ld de,08078h
 	jp l4a6dh
 sub_58d3h:
-	ld hl,0ad78h
+	ld hl,dracula_frame_ad78
 	ld b,001h
 	ld de,08074h
 	call sub_58f1h
-	ld hl,0ad98h
+	ld hl,dracula_face
 	ld b,06ch
 	ld de,09028h
 	call sub_58f1h
-	ld hl,0acf8h
+	ld hl,dracula_frame_acf8
 	ld b,002h
 	ld de,08048h
 sub_58f1h:
@@ -3861,14 +3913,14 @@ l5976h:
 	ld hl,0e800h
 	ld b,001h
 	jp l4a6dh
-sub_5992h:
-	ld hl,0bbd8h
+dracula_portrait_parts_load:
+	ld hl,dracula_portrait_parts
 	ld de,0d000h
 	ld b,008h
 	jp l4a97h
-sub_599dh:
+dracula_portrait_parts_mirror:
 	ld b,004h
-	ld hl,0bdd8h
+	ld hl,dracula_portrait_parts_hi
 	ld de,0d040h
 l59a5h:
 	push bc
@@ -3916,9 +3968,16 @@ l59e0h:
 	dec c
 	jr nz,l59e0h
 	ret
+; ---------------------------------------------------------------------------
+;  dracula_portrait_palette (seg0 0x59F3) - event-6 palette.  HUD-fixed
+;  (sub_572eh / 0xBF88) then the title extras at 0xBF6F (pink/flesh; replaces
+;  stage 18's purple overlay on indices 4-7).  Called from sub_633ah with
+;  dracula_portrait_load.
+; ---------------------------------------------------------------------------
+dracula_portrait_palette:
 	call sub_572eh
 	call sub_5381h
-	ld hl,0bf6fh
+	ld hl,title_extra_palette
 	call l4845h
 	jp sub_533dh
 ; title_load_tiles (0x5A02) - load the title-screen tile bitmaps into VRAM.
@@ -3968,7 +4027,8 @@ door_load_paged:               ; 0x5A47
 	jp sub_533dh
 ; scenery_load (seg0 0x5A50) - on screen build, page seg14, unpack the current
 ; hub's scenery_list stream into 0xE000 (3 stages x 16 rooms x 24 bytes =
-; 0x480), then compact vendor ids into 0xDE00 (l5ab6h).
+; 0x480), then compact vendor ids into 0xDE00 (l5ab6h). Instantiation of
+; the current room is scenery_room_load (from sub_6389h).
 scenery_load:                  ; 0x5A50
 	ld hl,0e000h
 	ld de,0e001h
@@ -4075,7 +4135,7 @@ l5ae9h:
 	ld a,(hl)
 	push bc
 	push hl
-	ld hl,l5b12h
+	ld hl,vendor_offer_id
 	and 03ch
 	rrca
 	rrca
@@ -4098,22 +4158,25 @@ l5b07h:
 	inc hl
 	ld a,(hl)
 	jr l5ae9h
-l5b12h:
-	ld c,012h
-	inc bc
-	inc b
-	ld a,(bc)
-	ld d,01eh
-	dec e
-	dec de
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	call sub_5bd6h
+; vendor_offer_id (seg0 0x5B12) - vendor attr bits5-2 -> bonus id.
+; Walked by the 0xDE00 compact (l5ab6h). Trailing zeros unused.
+vendor_offer_id:
+	defb 00eh              ; 0 candle
+	defb 012h              ; 1 staff
+	defb 003h              ; 2 red shield
+	defb 004h              ; 3 yellow shield
+	defb 00ah              ; 4 hourglass
+	defb 016h              ; 5 potion
+	defb 01eh              ; 6 holy water
+	defb 01dh              ; 7 cross
+	defb 01bh              ; 8 knife
+	defb 000h,000h,000h,000h,000h,000h,000h
+; scenery_room_load (seg0 0x5B22) - instantiate the current room's unpacked
+; scenery (0xE000 slot) into C470 (8 candle/block slots), C500 (floor/chest),
+; C5B5/C5C5 (vendors). Attr bits7-5: 000 floor, 001 candle, 011 32x32 block,
+; 10x chest, 11x vendor. Block stamps 4x4 brick tiles over the nametable.
+scenery_room_load:
+	call scenery_room_ptr
 	ld de,0c470h
 	ld b,008h
 l5b2ah:
@@ -4131,57 +4194,57 @@ l5b2ah:
 	jr nz,l5bach
 	dec hl
 	ld a,001h
-	ld (de),a
+	ld (de),a              ; +00 = 1 (first tick stamps tiles)
 	inc de
 	push hl
 	push bc
-	call sub_5c1dh
+	call scenery_pos_xy
 	ld a,c
-	ld (de),a
+	ld (de),a              ; +01 Y
 	inc de
 	ld a,b
-	ld (de),a
+	ld (de),a              ; +02 X
 	inc de
 	pop bc
 	xor a
-	ld (de),a
+	ld (de),a              ; +03 hit
 	inc de
 	ld a,(hl)
 	ld b,a
 	rlca
 	rlca
 	rlca
-	and 007h
+	and 007h               ; attr bits7-5
 	dec a
-	jr nz,l5b61h
+	jr nz,l5b61h           ; 001 candle -> 0, else block (011 -> 2)
 	ld a,(0d000h)
 	or a
-	jr z,l5b61h
-	ld a,0ffh
+	jr z,l5b61h            ; courtyard candle: kind 1
+	ld a,0ffh              ; castle candle: kind 0
 l5b61h:
 	inc a
-	ld (de),a
+	ld (de),a              ; +04 kind (0 candle / 1 brazier / 3 4x4 block)
 	inc e
 	ld a,b
 	and 01fh
-	ld (de),a
+	ld (de),a              ; +05 bonus id
 	inc e
 	ex af,af'
 	ld a,l
-	ld (de),a
+	ld (de),a              ; +06 E000 attr ptr lo (tick overwrites as anim)
 	inc e
-	pop bc
+	pop bc                 ; BC = saved HL (E000 pos ptr)
 	ld a,b
-	ld (de),a
+	ld (de),a              ; +07 E000 pos ptr hi
 	inc e
 	ld a,c
-	ld (de),a
+	ld (de),a              ; +08 E000 pos ptr lo
 	inc e
 	ex af,af'
 	cp 01fh
 	jr nz,l5b7ch
 	inc hl
-	ldi
+	ldi                    ; +09 reveal byte (attr 0x7F)
 l5b7ch:
 	pop de
 	ld a,e
@@ -4210,7 +4273,7 @@ sub_5b9dh:
 	dec l
 	push hl
 	push bc
-	call sub_5c1dh
+	call scenery_pos_xy
 	ld d,b
 	ld e,c
 	pop bc
@@ -4243,7 +4306,9 @@ l5bbeh:
 	ld c,a
 	call 09180h
 	jr l5b7ch
-sub_5bd6h:
+; scenery_room_ptr (seg0 0x5BD6) - HL -> this room's 24-byte slot in 0xE000.
+; Stage 0 is slot 0; else scenery_stage_ofs[D000-1]<<4 + D001*24.
+scenery_room_ptr:
 	ld a,(0d001h)
 	ld (0cffeh),a
 	push bc
@@ -4253,7 +4318,7 @@ sub_5bd6h:
 	or a
 	jr z,l5bf5h
 	dec a
-	ld hl,l5c0bh
+	ld hl,scenery_stage_ofs
 	call ADD_HL_A
 	ld l,(hl)
 	ld h,d
@@ -4280,20 +4345,16 @@ l5bf5h:
 	pop de
 	pop bc
 	ret
-l5c0bh:
-	nop
-	jr $+50
-	nop
-	jr l5c41h
-	nop
-	jr l5c44h
-	nop
-	jr $+50
-	nop
-	jr $+50
-	nop
-	jr $+50
-sub_5c1dh:
+; (stage-within-hub)*0x18 for stages 1-18; *16 = 0x180 = 16 rooms * 24 bytes.
+scenery_stage_ofs:
+	defb 000h,018h,030h    ; hub 0  stages 1-3
+	defb 000h,018h,030h    ; hub 1  stages 4-6
+	defb 000h,018h,030h    ; hub 2  stages 7-9
+	defb 000h,018h,030h    ; hub 3  stages 10-12
+	defb 000h,018h,030h    ; hub 4  stages 13-15
+	defb 000h,018h,030h    ; hub 5  stages 16-18
+; scenery_pos_xy (seg0 0x5C1D) - pos byte (Yhi Xlo nibbles) -> C=Y, B=X pixels.
+scenery_pos_xy:
 	ld a,(hl)
 	ld b,a
 	and 0f0h
@@ -4312,7 +4373,7 @@ sub_5c2ch:
 	call frame_vram_refresh
 	ld a,(0ce40h)
 	and a
-	jp nz,066c1h
+	jp nz,credits_tick      ; CE40: ending credits after event 6
 	call minimap_driver
 	ld a,(0cf38h)
 	and a
@@ -4327,11 +4388,11 @@ l5c44h:
 	jr nc,l5c63h
 	ld a,(0ce00h)
 	cp 006h
-	call z,0ad9ah
+	call z,dracula_blit_torso
 	ld a,001h
-	ld (0c40ah),a
+	ld (0c40ah),a          ; F1 pause latch -> state_pause
 	call load_simon_sprites
-	ld a,0fdh
+	ld a,0fdh              ; pause BGM
 	jp play_sound
 l5c63h:
 	call load_simon_sprites
@@ -4339,7 +4400,7 @@ l5c63h:
 	call simon_sat_build
 	call room_event_tick    ; CE00 boss/event (seg3 0xB6B2)
 	call actors_tick        ; room_spawner + C800 (seg2 0x98EC)
-	call d700_tick          ; D700 projectiles (seg2 0x9E38)
+	call shot_tick          ; enemy shots at 0xD700 (seg2 0x9E38)
 	call combat_tick
 	call brazier_tick_all   ; C470 candles (seg2 0x8678)
 	call vendor_tick        ; C5B5/C5C5 (seg2 0x91C5)
@@ -4349,9 +4410,12 @@ l5c63h:
 	call platform_tick      ; C598 moving platforms (seg2 0x90A2)
 	call door_anim_tick
 	call c800_sat_build     ; shape streams -> actor SAT
-	call d700_sat_build
+	call shot_sat_build
 	call c800_sat_emit      ; actor SAT -> 0xD638 shadow
-	jp d700_sat_emit
+	jp shot_sat_emit
+; slot scan (0x5C99): walk EXPTBL; RDSLT 6 bytes at 0x7FFA vs slot_sig_7ffa.
+; Carry -> E600=0xFF (int_handler takes l40c5h first; title start skips intro).
+; No match -> E600=0 (normal standalone).
 sub_5c99h:
 	ld bc,00400h
 	ld hl,0fcc1h
@@ -4396,7 +4460,7 @@ l5cc5h:
 	and a
 	ret
 sub_5cd3h:
-	ld de,l5cf0h
+	ld de,slot_sig_7ffa
 	ld hl,07ffah
 	ld b,006h
 l5cdbh:
@@ -4419,12 +4483,8 @@ l5cdch:
 l5ceeh:
 	and a
 	ret
-l5cf0h:
-	nop
-	jr nc,l5d24h
-	inc de
-	dec (hl)
-	xor d
+slot_sig_7ffa:                 ; 6 bytes compared at CPU 0x7FFA via RDSLT
+	defb 000h,030h,031h,013h,035h,0aah
 sub_5cf6h:
 	call sub_5d04h
 	ld c,00eh
@@ -4659,7 +4719,7 @@ l5e4fh:
 	xor a
 	ld (0d001h),a
 	inc a
-	ld (0c40dh),a
+	ld (0c40dh),a          ; password/debug: force BGM replay
 l5e67h:
 	pop af
 	rra
@@ -4778,7 +4838,7 @@ room_spawner:
 	pop af
 	rra
 	push af
-	call c,merman_generator ; bit1 -> actor_merman
+	call c,merman_generator ; bit1 -> actor_merman_green
 	pop af
 	rra
 	push af
@@ -4906,11 +4966,12 @@ spawn_actor_init:
 ; odd-aligned from 0x6001) — confirmed actor_flame=flame_init,
 ; actor_placed_bat=enemy_placed_bat_init, actor_placed_merman=
 ; enemy_placed_merman_init, actor_orb, actor_roc_drop=enemy_hunchback_tick,
-; actor_pickup, actor_igor. Per-frame tick is a separate table (`sub_9942h`
+; actor_pickup, actor_igor, actor_blob_blue/_red/_white (0x19-0x1C). Per-frame tick is a
+; separate table (`actor_type_tick`
 ; in seg2). Names live in segments/actors.inc.
 entity_tbl:
 	defw enemy_zombie_tick  ; actor_zombie
-	defw enemy_merman_tick  ; actor_merman (green, 1 HP)
+	defw enemy_merman_tick  ; actor_merman_green (1 HP)
 	defw enemy_merman_tick  ; actor_merman_red (2 HP, spit)
 	defw enemy_hanging_bat_tick ; actor_hanging_bat
 	defw enemy_dog_tick     ; actor_dog

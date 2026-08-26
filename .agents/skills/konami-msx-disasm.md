@@ -31,8 +31,11 @@ Paths below are relative to this repo root.
 
 - Root: `<Game>.asm` (stitches segments via `PHASE`/`INCBIN`), `Makefile`,
   `README.md`, `.gitignore` (ignore `generated/`, built ROM, segment bins).
-- `segments/` — per-segment `.asm` (disassembled) + `.bin` (not-yet-reversed);
-  all hand-authored disassembly metadata lives here: `bios.inc` (MSX BIOS entry
+- `segments/` — per-segment `.asm`; `.bin` only for banks still `INCBIN`'d
+  (VK: none left). Fully migrated banks have no `.bin`;
+  `split-rom.sh` emits the leftovers and deletes migrated ones. Regen of a
+  migrated bank uses the original ROM (`regen-seg.sh` slices it itself).
+  All hand-authored disassembly metadata lives here: `bios.inc` (MSX BIOS entry
   names), `actors.inc` (spawn/object-list type `equ`s — small numeric ids, **not**
   in `msx.sym` or z80dasm rewrites every `0x01`), `msx.sym` (routine/label names
   for z80dasm regen), `seg*.blocks` (code/data split maps). Anything needed to
@@ -44,6 +47,8 @@ Paths below are relative to this repo root.
   `msx-runtime-tracing`). Executable tooling only.
 - `gfx/` — editable graphics assets (PNG + txt); original compressed bytes stay
   authoritative.
+- `music/` — rendered BGM WAVs from the PSG bytecode (`tools/psgplay.py`).
+  Recognizable but not fully hardware-accurate (later).
 
 ## Mapper first
 
@@ -59,15 +64,23 @@ of `<Game>.asm`.
    (listing comments already stripped) + `generated/segNN.raw.asm` (raw reference).
 2. Fold the clean disassembly into `segments/segNN.asm` by hand and annotate.
    Switch `<Game>.asm` for that segment from `INCBIN` to `INCLUDE`.
+   Once a bank has no remaining `INCBIN` slices, drop it from `split-rom.sh`
+   and delete `segNN.bin`.
    `PHASE` the bank to its CPU window.  Two banks that share a window (VK seg3
    and seg13 both `PHASE 0xA000`) cannot reuse z80dasm `lxxxh`/`sub_xxxh` names —
    give the second bank unique labels or the assembler will error on duplicates.
 3. Separate code vs data with a `segments/segNN.blocks` file (only changes
    rendering, never bytes). Mark mis-decoded tables and convert them to `db`.
   Keep unreversed graphics as `INCBIN` slices of the bank `.bin`, not a mass
-  `defb` dump. Mixed banks (named tables + `INCBIN` slices). VK seg14 is scenery
+  `defb` dump. Identified blobs (tilesets, metatile tables, named RLE streams)
+  graduate to labeled `defb` (Metal Gear style); 4bpp tiles are hex pixel-rows;
+  1bpp glyphs use `defb %xxxxxxxx`. Packed sprite RLE uses the same `%`
+  rows for pixel bytes (run/literal counts stay hex). PNG is preview-only
+  until the packer is byte-exact. Mixed banks (named tables + hex leftover
+  slices). VK seg15 is music tails + env tables + 4bpp Dracula portrait.
+  VK seg14 is scenery
   lists + spawn masks + enemy lists + sound: emit the cracked tables as commented
-  `defw`/`defb` once ids are named; leave the rest sliced.
+  `defw`/`defb` once ids are named; packed PSG as labeled hex streams.
 4. `make verify` → must stay byte-identical.
 
 ## Conventions (enforced)
@@ -88,10 +101,10 @@ of `<Game>.asm`.
   all game code/data. Small numeric type `equ`s (`actor_zombie: equ 0x01`) live in
   an `INCLUDE`d `.inc`, never `msx.sym`.
 - **Text**: MSX games often store text as `(ASCII - offset)` because the font is
-  loaded at a nonzero tile base. Crack the offset, then use an sjasmplus `LUA
-  ALLPASS`/`ENDLUA` helper (see `vk()` in `VampireKiller.asm`) to
-  spell strings in readable ASCII while emitting exact bytes. Use `LUA ALLPASS`
-  (plain `LUA` runs only on the final pass and drifts labels).
+  loaded at a nonzero tile base. Crack the offset, then use an sjasmplus `MACRO`
+  (`vk` / `cr` in `VampireKiller.asm`) so source strings stay readable ASCII
+  while the bytes match the ROM (space → 0x00; HUD also subtracts 0x10).
+  Position/control bytes stay as `defb`.
 - **Graphics**: usually custom RLE to VRAM (SCREEN 5 = 4bpp bitmap on MSX2, plus
   1bpp hardware sprites). Find the decompressor, then extract to editable assets
   with the gfx pipeline; keep compressed bytes authoritative.
@@ -252,10 +265,10 @@ game and give per-stage/per-room feedback; fix the classification, re-render.
 
 Gotchas this encodes (learned the hard way):
 
-- **Search the resident bank too.** Seg 0 has no committed `.bin` (it's `INCLUDE`d),
-  so grepping `segments/*.bin` silently misses every resident-bank caller. `romscan`
-  reads each bank straight from the ROM, so it sees seg0. A routine that looks
-  "never referenced" in the paged banks is often driven from seg0.
+- **Search source-only banks too.** Migrated banks have no `.bin`, so grepping
+  `segments/*.bin` misses them. `romscan` reads each bank straight from the ROM.
+  A routine that looks "never referenced" in leftover bins is often driven from
+  seg0.
 - **Cross-bank calls are normal.** The resident bank (0x4000-0x7FFF, always mapped)
   freely `call`s into whatever is paged at 0x8000/0xA000. When the callee is a named
   label, use it across banks — sjasmplus resolves the global label to the exact

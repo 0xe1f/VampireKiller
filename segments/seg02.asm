@@ -48,7 +48,7 @@ l8034h:
 	rra
 	jr nc,l8047h
 	push bc
-	call sub_82abh
+	call actor_vs_proj
 	pop bc
 	jr c,l8053h
 l8047h:
@@ -147,12 +147,12 @@ sub_80ech:
 	cp 003h
 	jr nz,l8104h
 	push hl
-	call sub_83a8h
+	call obj_vs_whip_lo
 	pop hl
 	jr c,l8119h
 l8104h:
 	push hl
-	call sub_83bah
+	call obj_vs_proj_lo
 	pop hl
 	ret nc
 	ld a,(iy+001h)
@@ -196,12 +196,12 @@ l813ch:
 	cp 003h
 	jr nz,l8151h
 	push hl
-	call sub_83a3h
+	call obj_vs_whip_hi
 	pop hl
 	jr c,l8160h
 l8151h:
 	push hl
-	call sub_83b5h
+	call obj_vs_proj_hi
 	pop hl
 	jr nc,l816ah
 	push hl
@@ -304,74 +304,22 @@ sub_81b2h:
 ; t05 dog 100/6; t07 flying skull 200/2; t08 ghost head 200/4; t0F roc 400/4.
 ; Hearts/keys are pickups (collect_bonus), not kills, so they award 0 here.
 l81d5h:
-	ld bc,00201h
-	ld (bc),a
-	ld (bc),a
-	ld (bc),a
-	ld bc,00101h
-	inc bc
-	ld (bc),a
-	ld (bc),a
-	ld (bc),a
-	ld bc,00202h
-	ld (bc),a
-	ld bc,00103h
-	ld (bc),a
-	ld bc,00101h
-	ld (bc),a
-	ld bc,00310h
-	inc b
-	ld (bc),a
-	inc bc
-	inc bc
-	nop
-	inc bc
-	jr nz,l81fbh
-	jr nz,l81fdh
-l81fbh:
-	jr nz,l81ffh
-l81fdh:
-	jr nc,l8202h
-l81ffh:
-	ld (hl),b
-	inc bc
-	nop
-l8202h:
-	nop
-	ld (bc),a
-	ld bc,00201h
-	ld bc,UPC
-	ld (bc),a
-	ld bc,00002h
-	nop
-	nop
-	nop
-	ld bc,00001h
-	nop
-	ld (bc),a
-	ld bc,CHKRAM
-	ld (bc),a
-	ld bc,CHKRAM
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	ld bc,00001h
-	nop
-	nop
-	nop
+	defb 001h,001h, 002h,002h, 002h,002h, 001h,001h  ; t01-04
+	defb 001h,003h, 002h,002h, 002h,001h, 002h,002h  ; t05-08
+	defb 002h,001h, 003h,001h, 002h,001h, 001h,001h  ; t09-0c
+	defb 002h,001h, 010h,003h, 004h,002h, 003h,003h  ; t0d-10
+	defb 000h,003h, 020h,002h, 020h,002h, 020h,002h  ; t11-14
+	defb 030h,003h, 070h,003h, 000h,000h, 002h,001h  ; t15-18
+	defb 001h,002h, 001h,002h, 001h,002h, 001h,002h  ; t19-1c blob
+	defb 000h,000h, 000h,000h, 001h,001h, 000h,000h  ; t1d-20
+	defb 002h,001h, 000h,000h, 002h,001h, 000h,000h  ; t21-24
+	defb 000h,000h, 000h,000h, 000h,000h, 000h,000h
+	defb 000h,000h, 000h,000h, 000h,000h, 001h,001h
+	defb 000h,000h, 000h,000h
+add_score_100:                 ; (0x8231) +100 for destroying a shot
 	ld de,00100h
-	jp 044f3h
+	jp add_score_c0
+pickup_vs_simon:               ; (0x8237) C500 slot HL vs Simon (Y+10, X+8, 10x8)
 	inc l
 	ld a,(hl)
 	add a,010h
@@ -381,236 +329,181 @@ l8202h:
 	add a,008h
 	ld d,a
 	ld hl,01008h
-	jp l8481h
+	jp overlap_simon
 proj_overlap_simon:            ; (0x8247) projectile DE vs Simon box (catch)
 	ld d,(ix+005h)
 	ld e,(ix+004h)
 	ld hl,01008h
-	jp l8481h
-	call sub_8302h
+	jp overlap_simon
+; Hit-class overlap: look up a box size by actor/shot type, then test vs
+; Simon / whip / projectile / yellow shield.  Shots use 3 classes (0..2);
+; C800 uses 7 (table 1..7, then dec a).  Carry = overlap.
+shot_vs_simon:                 ; (0x8253) shot vs Simon (hurt)
+	call hit_class_shot
 	call DISPATCH_A
-	rra
-	add a,e
-	ccf
-	add a,e
-	ld e,a
-	add a,e
-	call sub_8302h
+	defw shot_box_0_simon, shot_box_1_simon, shot_box_2_simon
+shot_vs_proj:                  ; (0x825F) C450/C460 vs shot
+	call hit_class_shot
 	call DISPATCH_A
-	cpl
-	add a,e
-	ld c,a
-	add a,e
-	ld l,a
-	add a,e
-sub_826bh:
-	call sub_8302h
+	defw shot_box_0_proj, shot_box_1_proj, shot_box_2_proj
+shot_vs_shield:                ; (0x826B) yellow shield vs shot
+	call hit_class_shot
 	call DISPATCH_A
-	scf
-	add a,e
-	ld d,a
-	add a,e
-	ld (hl),a
-	add a,e
-	call sub_8302h
+	defw shot_box_0_shield, shot_box_1_shield, shot_box_2_shield
+shot_vs_whip:                  ; (0x8277) whip vs shot
+	call hit_class_shot
 	call DISPATCH_A
-	daa
-	add a,e
-	ld b,a
-	add a,e
-	ld h,a
-	add a,e
-	call sub_82bfh
+	defw shot_box_0_whip, shot_box_1_whip, shot_box_2_whip
+actor_vs_whip:                 ; (0x8283) whip vs C800
+	call hit_class_c800
 	call DISPATCH_A
-	add a,a
-	add a,e
-	sbc a,a
-	add a,e
-	pop hl
-	add a,e
-	ld sp,hl
-	add a,e
-	ld de,02f84h
-	add a,h
-	ld b,a
-	add a,h
-	call sub_82bfh
+	defw box_1_whip, box_2_whip, box_3_whip, box_4_whip
+	defw box_5_whip, box_6_whip, box_7_whip
+actor_vs_simon:                ; (0x8297) C800 vs Simon (contact)
+	call hit_class_c800
 	call DISPATCH_A
-	ld a,a
-	add a,e
-	sub a
-	add a,e
-	exx
-	add a,e
-	pop af
-	add a,e
-	add hl,bc
-	add a,h
-	daa
-	add a,h
-	ccf
-	add a,h
-sub_82abh:
-	call sub_82bfh
+	defw box_1_simon, box_2_simon, box_3_simon, box_4_simon
+	defw box_5_simon, box_6_simon, box_7_simon
+actor_vs_proj:                 ; (0x82AB) C450/C460 vs C800
+	call hit_class_c800
 	call DISPATCH_A
-	adc a,a
-	add a,e
-	or c
-	add a,e
-	jp (hl)
-	add a,e
-	ld bc,01c84h
-	add a,h
-	scf
-	add a,h
-	ld c,a
-	add a,h
-sub_82bfh:
+	defw box_1_proj, box_2_proj, box_3_proj, box_4_proj
+	defw box_5_proj, box_6_proj, box_7_proj
+hit_class_c800:                ; (0x82BF) A = class 0..6; B=X C=Y
 	ld a,(ix+000h)
 	dec a
-	ld hl,l82d2h
+	ld hl,hit_class_c800_tbl
 	call ADD_HL_A
 	ld a,(hl)
 	dec a
 	ld b,(ix+005h)
 	ld c,(ix+003h)
 	ret
-l82d2h:
-	ld bc,00101h
-	ld (bc),a
-	inc bc
-	ld bc,00202h
-	ld bc,00101h
-	ld (bc),a
-	ld (bc),a
-	ld (bc),a
-	inc b
-	inc b
-	dec b
-	inc b
-	inc b
-	ld b,006h
-	rlca
-	ld (bc),a
-	ld (bc),a
-	ld (bc),a
-	ld (bc),a
-	ld (bc),a
-	ld (bc),a
-	ld bc,00201h
-	ld bc,00201h
-	ld (bc),a
-	ld (bc),a
-	ld bc,UPC
-	ld bc,00101h
-	ld bc,UPC
-	ld bc,00101h
-sub_8302h:
+hit_class_c800_tbl:            ; (0x82D2) type-1 -> class 1..7 (then dec a)
+	defb 001h,001h,001h,002h,003h,001h,002h,002h  ; 1-8
+	defb 001h,001h,001h,002h,002h,002h,004h,004h  ; 9-16
+	defb 005h,004h,004h,006h,006h,007h,002h,002h  ; 17-24
+	defb 002h,002h,002h,002h,001h,001h,002h,001h  ; 25-32
+	defb 001h,002h,002h,002h,001h,002h,001h,001h  ; 33-40
+	defb 001h,001h,001h,002h,001h,001h,001h,001h  ; 41-48
+hit_class_shot:                ; (0x8302) A = class 0..2; B=X C=Y
 	ld a,(ix+000h)
 	dec a
-	ld hl,l8314h
+	ld hl,hit_class_shot_tbl
 	call ADD_HL_A
 	ld a,(hl)
 	ld b,(ix+005h)
 	ld c,(ix+003h)
 	ret
-l8314h:
-	nop
-	nop
-	nop
-	ld (bc),a
-	nop
-	ld bc,00201h
-	ld (bc),a
-	nop
-	ld (bc),a
+hit_class_shot_tbl:            ; (0x8314) shot type-1 -> class 0..2
+	defb 000h,000h,000h,002h,000h,001h,001h,002h,002h,000h,002h
+shot_box_0_simon:                  ; 0x831F  3x6 vs Simon
 	ld hl,00603h
 	ld d,b
 	ld e,c
-	jp l8481h
+	jp overlap_simon
+shot_box_0_whip:                   ; 0x8327
 	ld hl,00603h
 	ld d,b
 	ld e,c
-	jp l84aeh
+	jp overlap_whip
+shot_box_0_proj:                   ; 0x832F
 	ld hl,00603h
 	ld d,b
 	ld e,c
-	jp l84f7h
+	jp overlap_projectile
+shot_box_0_shield:                 ; 0x8337
 	ld hl,00603h
 	ld d,b
 	ld e,c
-	jp l8652h
+	jp overlap_shield
+shot_box_1_simon:                  ; 0x833F  6x6
 	ld hl,00606h
 	ld d,b
 	ld e,c
-	jp l8481h
+	jp overlap_simon
+shot_box_1_whip:
 	ld hl,00606h
 	ld d,b
 	ld e,c
-	jp l84aeh
+	jp overlap_whip
+shot_box_1_proj:
 	ld hl,00606h
 	ld d,b
 	ld e,c
-	jp l84f7h
+	jp overlap_projectile
+shot_box_1_shield:
 	ld hl,00606h
 	ld d,b
 	ld e,c
-	jp l8652h
+	jp overlap_shield
+shot_box_2_simon:                  ; 0x835F  6x12 (bone / axe / sickle)
 	ld hl,00c06h
 	ld d,b
 	ld e,c
-	jp l8481h
+	jp overlap_simon
+shot_box_2_whip:
 	ld hl,00c06h
 	ld d,b
 	ld e,c
-	jp l84aeh
+	jp overlap_whip
+shot_box_2_proj:
 	ld hl,00c06h
 	ld d,b
 	ld e,c
-	jp l84f7h
+	jp overlap_projectile
+shot_box_2_shield:
 	ld hl,00c06h
 	ld d,b
 	ld e,c
-	jp l8652h
+	jp overlap_shield
+; C800 class 1 fodder (zombie, merman, pikeman, skels, pile): 5x24
+box_1_simon:                   ; 0x837F
 	ld hl,01805h
 	ld d,b
 	ld e,c
-	jp l8481h
+	jp overlap_simon
+box_1_whip:
 	ld hl,01805h
 	ld d,b
 	ld e,c
-	jp l84aeh
+	jp overlap_whip
+box_1_proj:
 	ld hl,01805h
 	ld d,b
 	ld e,c
-	jp l84f7h
+	jp overlap_projectile
+; class 2 flyers (bat, skull, ghost, raven, hunch, dragon, blob, igor): 8x16
+box_2_simon:                   ; 0x8397
 	ld hl,01008h
 	ld d,b
 	ld e,c
-	jp l8481h
+	jp overlap_simon
+box_2_whip:                    ; 0x839F -> shared 10x8 whip tail
 	ld d,b
 	ld e,c
-	jr l83abh
-sub_83a3h:
-	call sub_83ceh
-	jr l83abh
-sub_83a8h:
-	call sub_83c3h
-l83abh:
+	jr box_10x08_whip
+obj_vs_whip_hi:                ; (0x83A3) HL slot Y+10, X+8 vs whip
+	call obj_xy_10_8
+	jr box_10x08_whip
+obj_vs_whip_lo:                ; (0x83A8) HL slot Y+20, X+10 vs whip
+	call obj_xy_20_10
+box_10x08_whip:                ; 0x83AB
 	ld hl,01008h
-	jp l84aeh
+	jp overlap_whip
+box_2_proj:                    ; 0x83B1
 	ld d,b
 	ld e,c
-	jr l83bdh
-sub_83b5h:
-	call sub_83ceh
-	jr l83bdh
-sub_83bah:
-	call sub_83c3h
-l83bdh:
+	jr box_10x08_proj
+obj_vs_proj_hi:                ; (0x83B5)
+	call obj_xy_10_8
+	jr box_10x08_proj
+obj_vs_proj_lo:                ; (0x83BA)
+	call obj_xy_20_10
+box_10x08_proj:                ; 0x83BD
 	ld hl,01008h
-	jp l84f7h
-sub_83c3h:
+	jp overlap_projectile
+obj_xy_20_10:                  ; (0x83C3) E=Y+0x20, D=X+0x10 from HL
 	inc l
 	ld a,(hl)
 	add a,020h
@@ -620,7 +513,7 @@ sub_83c3h:
 	add a,010h
 	ld d,a
 	ret
-sub_83ceh:
+obj_xy_10_8:                   ; (0x83CE) E=Y+0x10, D=X+0x08 from HL
 	inc l
 	ld a,(hl)
 	add a,010h
@@ -630,70 +523,91 @@ sub_83ceh:
 	add a,008h
 	ld d,a
 	ret
+; class 3 dog: 12x10
+box_3_simon:                   ; 0x83D9
 	ld hl,00a0ch
 	ld d,b
 	ld e,c
-	jp l8481h
+	jp overlap_simon
+box_3_whip:
 	ld hl,00a0ch
 	ld d,b
 	ld e,c
-	jp l84aeh
+	jp overlap_whip
+box_3_proj:
 	ld hl,00a0ch
 	ld d,b
 	ld e,c
-	jp l84f7h
+	jp overlap_projectile
+; class 4 roc / axe / giant bat / medusa: 12x24
+box_4_simon:                   ; 0x83F1
 	ld hl,0180ch
 	ld d,b
 	ld e,c
-	jp l8481h
+	jp overlap_simon
+box_4_whip:
 	ld hl,0180ch
 	ld d,b
 	ld e,c
-	jp l84aeh
+	jp overlap_whip
+box_4_proj:
 	ld hl,0180ch
 	ld d,b
 	ld e,c
-	jp l84f7h
+	jp overlap_projectile
+; class 5 Dracula: 16x48 vs Simon; whip/proj use 5x24 at Y-0x20 (head)
+box_5_simon:                   ; 0x8409
 	ld hl,03010h
 	ld d,b
 	ld e,c
-	jp l8481h
+	jp overlap_simon
+box_5_whip:                    ; 0x8411
 	ld hl,01805h
 	ld d,b
 	ld a,c
 	sub 020h
 	ld e,a
-	jp l84aeh
+	jp overlap_whip
+box_5_proj:                    ; 0x841C
 	ld hl,01805h
 	ld d,b
 	ld a,c
 	sub 020h
 	ld e,a
-	jp l84f7h
+	jp overlap_projectile
+; class 6 mummy / Frankenstein: 5x40
+box_6_simon:                   ; 0x8427
 	ld hl,02805h
 	ld d,b
 	ld e,c
-	jp l8481h
+	jp overlap_simon
+box_6_whip:
 	ld hl,02805h
 	ld d,b
 	ld e,c
-	jp l84aeh
+	jp overlap_whip
+box_6_proj:
 	ld hl,02805h
 	ld d,b
 	ld e,c
-	jp l84f7h
+	jp overlap_projectile
+; class 7 grim reaper: 8x48
+box_7_simon:                   ; 0x843F
 	ld hl,03008h
 	ld d,b
 	ld e,c
-	jp l8481h
+	jp overlap_simon
+box_7_whip:
 	ld hl,03008h
 	ld d,b
 	ld e,c
-	jp l84aeh
+	jp overlap_whip
+box_7_proj:
 	ld hl,03008h
 	ld d,b
 	ld e,c
-	jp l84f7h
+	jp overlap_projectile
+candle_vs_whip:                ; (0x8457) C470 slot HL vs whip
 	inc hl
 	ld a,(hl)
 	add a,010h
@@ -703,7 +617,7 @@ sub_83ceh:
 	add a,008h
 	ld d,a
 	ld hl,01008h
-	jp l84aeh
+	jp overlap_whip
 sub_8467h:
 	ld a,(ix+004h)
 	cp 002h
@@ -717,8 +631,8 @@ l8474h:
 	ld a,(ix+002h)
 	add a,l
 	ld d,a
-	jp l84f7h
-l8481h:
+	jp overlap_projectile
+overlap_simon:                 ; (0x8481) DE=actor XY, HL=box; vs Simon C427/C425
 	ld a,005h
 	add a,l
 	ld l,a
@@ -751,7 +665,7 @@ l84a8h:
 	add a,c
 	cp h
 	ret
-l84aeh:
+overlap_whip:                  ; (0x84AE) DE=actor XY, HL=box; vs whip (facing + C416)
 	ld a,(0c416h)
 	dec a
 	ld a,00ch
@@ -803,7 +717,7 @@ l84eah:
 l84f5h:
 	add a,b
 	ret
-l84f7h:
+overlap_projectile:            ; (0x84F7) DE=actor XY, HL=box; vs C450 then C460
 	ld iy,0c450h
 	call sub_8507h
 	ret c
@@ -1010,7 +924,7 @@ spot_proximity:
 	cp 010h
 	ret                    ; CY if X in 0x10 box
 ; yellow_shield_tick (seg2 0x8617): if C701 bit5 (bonus id 4), overlap-test the
-; D700 hazard slots and absorb hits: free the projectile, spend a C441 charge,
+; shot slots and absorb hits: free the shot, spend a C441 charge,
 ; drop the yellow shield at 0.
 yellow_shield_tick:
 	ld a,(0c701h)
@@ -1025,7 +939,7 @@ l8623h:
 	jr z,l8649h
 	cp 00ch
 	jr z,l8649h
-	call sub_826bh
+	call shot_vs_shield
 	jr nc,l8649h
 	call sub_9a21h
 	ld a,00bh
@@ -1042,7 +956,7 @@ l8649h:
 	add ix,de
 	djnz l8623h
 	ret
-l8652h:
+overlap_shield:                ; (0x8652) yellow shield: Simon X ±8 by facing
 	ld a,004h
 	add a,l
 	ld l,a
@@ -1098,9 +1012,10 @@ l867eh:
 	ret
 
 ; ---------------------------------------------------------------------------
-;  brazier_tick (seg2 0x8693) - update one brazier/candle.  IX/HL -> object.
-;  Advances the flame animation (+0x06) and, when the object has been hit
-;  (+0x03 != 0), branches to brazier_destroyed to clear it and drop its item.
+;  brazier_tick (seg2 0x8693) - update one C470 slot (candle or breakable
+;  block).  First frame (old +00==1) saves the nametable under the object
+;  (`block_save_under`) then either draws the flame or stamps 4x4 brick
+;  tiles (`block_stamp`).  Hit (+0x03 != 0) -> brazier_destroyed.
 ; ---------------------------------------------------------------------------
 brazier_tick:
 	ld (hl),002h            ; +0x00 state = 2 (present/lit)
@@ -1113,30 +1028,30 @@ brazier_tick:
 	or a
 	jp nz,brazier_destroyed ; hit -> destroy + drop
 	inc l
-	ld a,(hl)               ; A = +0x04
+	ld a,(hl)               ; A = +0x04 kind
 	ex af,af'
 	inc l
 	inc l
-	inc (hl)                ; +0x06 flame animation phase++
+	inc (hl)                ; +0x06 anim
 	ld a,b
 	cp 001h
-	jr nz,l86bah
+	jr nz,l86bah            ; already stamped
 	ex af,af'
 	push af
 	push de
-	call sub_8741h
+	call block_save_under  ; copy nametable under this slot to E480/E4A0
 	pop de
 	pop af
 	cp 002h
-	jp c,l86c2h
-	jp l86d1h
+	jp c,l86c2h             ; kind 0/1: candle flame
+	jp block_stamp          ; kind 2/3: overlay brick tiles
 l86bah:
 	ld a,(hl)
 	and 003h
 	ret nz
 	ex af,af'
 	cp 002h
-	ret nc
+	ret nc                  ; blocks: stamp once
 l86c2h:
 	or a
 	ld a,000h
@@ -1148,13 +1063,16 @@ l86c9h:
 	inc a
 l86ceh:
 	jp l8991h
-l86d1h:
+; block_stamp (seg2 0x86D1) - blit brick tile ids to VRAM and into D100.
+; kind 2 = 16x16 (2x2); kind 3 = 32x32 (4x4, skip the leading 2x2 bytes).
+; Courtyard uses block_tiles_court; castle uses block_tiles_castle.
+block_stamp:
 	ld b,a
 	ld a,(0d002h)
 	or a
-	ld hl,l8799h
+	ld hl,block_tiles_court
 	jr z,l86deh
-	ld hl,l87adh
+	ld hl,block_tiles_castle
 l86deh:
 	ld a,b
 	ld bc,01002h
@@ -1170,13 +1088,13 @@ l86eeh:
 	push bc
 	push hl
 	push de
-	call sub_8783h
+	call tiles_blit_vram
 	pop de
-	call 07d36h
+	call 07d36h            ; map_cell_at
 	pop de
 	pop bc
 	ex de,hl
-	call sub_88beh
+	call tiles_to_map
 	pop hl
 	pop de
 	ld e,d
@@ -1223,7 +1141,9 @@ l8737h:
 	ld l,a
 	djnz l8719h
 	ret
-sub_8741h:
+; block_save_under (seg2 0x8741) - copy the nametable under this C470 slot
+; into E480 (2x2, kind!=3) or E4A0 (4x4, kind 3), indexed by slot C.
+block_save_under:
 	cp 003h
 	ld hl,0e4a0h
 	jr z,l875eh
@@ -1265,7 +1185,8 @@ l8773h:
 	call ADD_HL_A
 	djnz l8773h
 	ret
-sub_8783h:
+; tiles_blit_vram (seg2 0x8783) - B rows x C tile-ids from (HL) at pixel DE.
+tiles_blit_vram:
 	push bc
 	push de
 	ld b,c
@@ -1280,56 +1201,39 @@ l8786h:
 	add a,008h
 	ld e,a
 	pop bc
-	djnz sub_8783h
+	djnz tiles_blit_vram
 	ret
-l8799h:
-	ld bc,00902h
-	dec bc
-	ld bc,UPC
-	ld (bc),a
-	add hl,bc
-	dec bc
-	ld a,(bc)
-	add hl,bc
-	ld bc,UPC
-	ld (bc),a
-	add hl,bc
-	dec bc
-	ld a,(bc)
-	add hl,bc
-l87adh:
-	ld bc,00a02h
-	dec bc
-	ld bc,UPC
-	ld (bc),a
-	ld a,(bc)
-	dec bc
-	ld a,(bc)
-	dec bc
-	ld bc,UPC
-	ld (bc),a
-	ld a,(bc)
-	dec bc
-	ld a,(bc)
-	dec bc
+; 2x2 then 4x4 8x8 tile ids stamped over a breakable block (courtyard / castle).
+block_tiles_court:
+	defb 001h,002h,009h,00bh
+	defb 001h,002h,001h,002h
+	defb 009h,00bh,00ah,009h
+	defb 001h,002h,001h,002h
+	defb 009h,00bh,00ah,009h
+block_tiles_castle:
+	defb 001h,002h,00ah,00bh
+	defb 001h,002h,001h,002h
+	defb 00ah,00bh,00ah,00bh
+	defb 001h,002h,001h,002h
+	defb 00ah,00bh,00ah,00bh
 ; ---------------------------------------------------------------------------
-;  brazier_destroyed (seg2 0x87C1) - a brazier/candle has been hit.  HL -> +0x03.
-;  Clears the object (+0x03 = 0, +0x00 state = 0) and runs the item-drop logic;
-;  +0x04 (A) selects the drop and +0x05 (B) its parameter.  Objects with a drop
-;  spawn a flame at their spot (see flame_tick) which then yields the pickup.
+;  brazier_destroyed (seg2 0x87C1) - candle or block hit.  HL -> +0x03.
+;  Kind < 2: candle. Kind >= 2: restore nametable/VRAM from E480/E4A0, play
+;  SFX 0x0E.  +05 bonus 0x1F = reveal (vendor/chest from +09); 0x18 = white
+;  key floor spawn; else scenery_clear_rec + drop_spawn (slime = 0x15).
 ; ---------------------------------------------------------------------------
 brazier_destroyed:
 	ld (hl),000h            ; +0x03 hit flag = 0
 	inc l
 	ld (ix+000h),000h       ; +0x00 state = 0 (object gone)
-	ld a,(hl)               ; A = +0x04 (drop selector)
+	ld a,(hl)               ; A = +0x04 kind
 	inc l
-	ld b,(hl)               ; B = +0x05 (drop parameter)
+	ld b,(hl)               ; B = +0x05 bonus id
 	cp 002h
 	jp nc,l87d9h
-	call sub_8851h
-	call sub_887bh
-	jp l8996h
+	call block_restore_vram_2x2
+	call scenery_clear_rec
+	jp scenery_drop
 l87d9h:
 	push bc
 	push de
@@ -1341,19 +1245,19 @@ l87d9h:
 	pop bc
 	cp 002h
 	jr z,l87f0h
-	call sub_8865h
-	call sub_88a0h
+	call block_restore_vram_4x4
+	call block_restore_map_4x4
 	jr l87f6h
 l87f0h:
-	call sub_8851h
-	call sub_8884h
+	call block_restore_vram_2x2
+	call block_restore_map_2x2
 l87f6h:
-	ld a,(ix+005h)         ; A = object display-type
+	ld a,(ix+005h)         ; bonus id
 	cp 01fh
-	jr z,l881bh            ; type 0x1F = vendor / rare special object (NOT the white-key door)
+	jr z,l881bh            ; 0x1F = reveal (third scenery byte)
 	cp 018h
-	jr z,l8845h
-	call sub_887bh
+	jr z,l8845h            ; 0x18 = white key
+	call scenery_clear_rec
 	pop de
 	pop bc
 	ld a,b
@@ -1363,32 +1267,26 @@ l87f6h:
 	cp 003h
 	jr nz,l8815h
 	ld a,e
-	add a,010h
+	add a,010h             ; 4x4 block: drop at Y+16
 	ld e,a
 l8815h:
-	call sub_89eah
+	call drop_spawn
 l8818h:
 	jp l88ceh
-; --- special-object promoter (0x881B) ---------------------------------------
-;  Reached for a type-0x1F object.  This is the vendor / brazier-reveal path,
-;  NOT the white-key door (those come from seg13 door_tbl -> 0xC5AD/0xC5AE).
-;  ix+009 = the object's attribute byte, whose top two bits select the flavour:
-;    bits7-6 == 11  -> vendor/special: split attr into subtype (bits5-2) and
-;                      slot (bits1-0) and spawn a special-object struct via
-;                      l9180h (into 0xC5B5 or 0xC5C5).
-;    otherwise      -> ordinary large object drawn via l8a1ah (subtype = bits4-0).
-;  ix+007/008 = the object's map position (H,L) forwarded to the spawner.
+; --- reveal (bonus 0x1F): +09 is the third scenery byte, +07/+08 -> E000 pos.
+;  bits7-6 == 11 -> vendor (bits5-2 offer index, bits1-0 slot) via l9180h.
+;  otherwise -> chest contents bits4-0 via l8a1ah.
 l881bh:
 	pop de
 	pop bc
-	ld a,(ix+009h)         ; A = attribute byte
+	ld a,(ix+009h)         ; reveal byte
 	ld b,a
-	ld h,(ix+007h)         ; HL = object position (from +7/+8)
+	ld h,(ix+007h)         ; HL -> E000 pos
 	ld l,(ix+008h)
 	and 0c0h
 	cp 0c0h
 	ld a,b
-	jr z,l8838h            ; bits7-6 set -> door/vendor special object
+	jr z,l8838h
 	and 01fh
 	ld b,a
 	ld a,e
@@ -1397,14 +1295,14 @@ l881bh:
 	jp l8a1ah
 l8838h:
 	ld c,a
-	and 03ch               ; B = subtype (attr bits 5..2)
+	and 03ch
 	rrca
 	rrca
 	ld b,a
 	ld a,c
-	and 003h               ; C = slot / variant (attr bits 1..0)
+	and 003h
 	ld c,a
-	jp l9180h              ; spawn special object into 0xC5B5/0xC5C5
+	jp l9180h
 l8845h:
 	ld b,a
 	pop de
@@ -1412,9 +1310,9 @@ l8845h:
 	ld h,(ix+007h)
 	ld l,(ix+008h)
 	jp l8a04h
-sub_8851h:
+block_restore_vram_2x2:
 	ld hl,0e480h
-sub_8854h:
+sub_8854h:                     ; also: blit 2x2 from caller HL (door path)
 	push bc
 	push de
 	ld a,c
@@ -1422,11 +1320,11 @@ sub_8854h:
 	add a,a
 	call ADD_HL_A
 	ld bc,00202h
-	call sub_8783h
+	call tiles_blit_vram
 	pop de
 	pop bc
 	ret
-sub_8865h:
+block_restore_vram_4x4:
 	ld hl,0e4a0h
 l8868h:
 	push bc
@@ -1438,16 +1336,16 @@ l8868h:
 	add a,a
 	call ADD_HL_A
 	ld bc,00404h
-	call sub_8783h
+	call tiles_blit_vram
 	pop de
 	pop bc
 	ret
-sub_887bh:
+scenery_clear_rec:
 	ld h,(ix+007h)
 	ld l,(ix+008h)
-	ld (hl),000h
+	ld (hl),000h           ; zero E000 pos (record gone)
 	ret
-sub_8884h:
+block_restore_map_2x2:
 	ld hl,0e480h
 	push bc
 	push de
@@ -1462,13 +1360,13 @@ sub_8884h:
 	call ADD_DE_A
 	ex de,hl
 	ld bc,00202h
-	call sub_88beh
+	call tiles_to_map
 	pop de
 	pop bc
 	ret
-sub_88a0h:
+block_restore_map_4x4:
 	ld hl,0e4a0h
-sub_88a3h:
+sub_88a3h:                     ; also: 4x4 map restore from caller HL (vendor 0xE580)
 	push bc
 	push de
 	push hl
@@ -1484,11 +1382,11 @@ sub_88a3h:
 	call ADD_DE_A
 	ex de,hl
 	ld bc,00404h
-	call sub_88beh
+	call tiles_to_map
 	pop de
 	pop bc
 	ret
-sub_88beh:
+tiles_to_map:
 	push bc
 	ld b,000h
 	push de
@@ -1497,7 +1395,7 @@ sub_88beh:
 	pop bc
 	ld a,020h
 	call ADD_DE_A
-	djnz sub_88beh
+	djnz tiles_to_map
 	ret
 l88ceh:
 	ld hl,0c5a6h
@@ -1638,17 +1536,17 @@ l8984h:                        ; HMMM 16x16 from VRAM page 1 at (A*16, L)
 	ld h,a
 	ld bc,01010h
 	ld a,001h
-	jp 0494dh
+	jp vdp_hmmm
 l8991h:
 	ld l,070h
 	jp l8cd2h
-l8996h:
+scenery_drop:
 	call sub_8a30h
-l8999h:
+scenery_drop_slot:
 	ld a,b
 	or a
 	jr z,l89a5h
-	cp 015h
+	cp 015h                ; slime: no flame, C500 hatches actor_blob_*
 	jr z,l89a5h
 	call sub_89c6h
 	ret z
@@ -1702,10 +1600,10 @@ l89ddh:
 	pop de
 	pop bc
 	ret
-sub_89eah:
+drop_spawn:
 	ld a,b
 	cp 015h
-	jp z,l8999h
+	jp z,scenery_drop_slot
 	call sub_8a30h
 	call sub_8a3eh
 	ret nz
@@ -1863,7 +1761,7 @@ l8ad7h:
 	ld a,b
 	dec a
 	and 007h
-	ld hl,l8af7h           ; hub-1 -> actor type 0x1A/0x1B/0x1C
+	ld hl,blob_hatch_type          ; hub-1 -> blue / white / red
 	call ADD_HL_A
 	ld c,(hl)
 	push ix
@@ -1874,15 +1772,9 @@ l8ad7h:
 	pop ix
 l8af4h:
 	jp l8b22h
-l8af7h:
-	ld a,(de)
-	inc e
-	dec de
-	dec de
-	dec de
-	dec de
-	inc e
-	inc e
+blob_hatch_type:
+	defb actor_blob_blue, actor_blob_white, actor_blob_red, actor_blob_red
+	defb actor_blob_red, actor_blob_red, actor_blob_white, actor_blob_white
 	ld hl,00810h
 	add hl,de
 	ld a,0dbh
@@ -2137,7 +2029,7 @@ l8cd2h:
 	ld h,a
 	ld bc,01010h
 	ld a,048h
-	jp 049e2h
+	jp vdp_lmmm
 sub_8cdfh:
 	push bc
 	call 07d36h
@@ -2284,7 +2176,7 @@ bonus_red_shield:              ; id 3 (0x8D9F): C701 bit4, drop bit5, C441=16
 bonus_yellow_shield:           ; id 4 (0x8DA8): C701 bit5, drop bit4, C441=16
 	ld hl,0c701h
 	res 4,(hl)             ; drop red
-	ld b,020h              ; bit5 = yellow (absorb D700 projectiles)
+	ld b,020h              ; bit5 = yellow (absorb enemy shots)
 l8dafh:
 	ld a,010h
 	ld (0c441h),a          ; 16 charges
@@ -2300,7 +2192,7 @@ bonus_large_heart:             ; id 2 (0x8DBE): +5 heart currency
 	jr l8db8h
 bonus_white_cross:             ; id 5 (0x8DC2): despawn on-screen actors
 	push ix
-	call 0780dh            ; kill C800 + D700 actors
+	call 0780dh            ; kill C800 actors and shots
 	pop ix
 	call sub_9294h
 	ld a,018h
@@ -2382,7 +2274,7 @@ bonus_map:                     ; id 15 (0x8E3A): C431 bit6, C701 bit7, C70F=3
 bonus_white_bag:               ; id 19 (0x8E49): +5000 score
 	ld de,05000h
 l8e4ch:
-	call 044f3h            ; add_score
+	call add_score_c0
 	ld a,010h
 	ret
 bonus_blue_bag:                ; id 20 (0x8E52): +1000 score
@@ -2681,7 +2573,7 @@ l901ch:
 	ld hl,l8070h
 	ld bc,02010h
 	ld a,001h
-	jp 0494dh
+	jp vdp_hmmm
 sub_902eh:
 	call sub_8fa6h
 	jp l8fd9h
@@ -2907,7 +2799,7 @@ door_anim_tick:
 	inc l
 	ld bc,0082fh
 	ld a,000h
-	jp 0494dh              ; blit the next open frame
+	jp vdp_hmmm              ; blit the next open frame
 l916fh:
 	ld a,003h
 	ld (0c5ach),a          ; hold "open" state
@@ -3084,7 +2976,7 @@ sub_9265h:
 	ld l,0a0h
 	ld a,048h
 	ld bc,02020h
-	jp 049e2h
+	jp vdp_lmmm
 sub_9273h:
 	ld hl,0c5b5h
 	ld bc,00200h
@@ -3140,23 +3032,20 @@ l92a6h:
 ;   3 -> 0x934B  GIVE +5 hearts   (add_hearts, sfx 0x0F)
 ;   4 -> 0x9355  TAKE -5 hearts   (spend_hearts, sfx 0x1D)
 ;   5 -> 0x934A  do NOTHING       (points at a bare `ret`)
-;   6 -> 0x935F  LEAVE / vanish   (sfx 0x10, then awards +5000 via jp 044f3h)
+;   6 -> 0x935F  LEAVE / vanish   (sfx 0x10, then awards +5000 via jp add_score_c0)
 ; This is why whipping the vendor sometimes gives hearts, sometimes takes them,
 ; sometimes does nothing, and eventually makes him leave.
 vendor_outcome_dispatch:
 	ld a,(0c70ch)
 	call DISPATCH_A
-	ld l,093h
-	ld a,(04393h)
-	sub e
-	ld c,e
-	sub e
-	ld d,l
-	sub e
-	ld c,d
-	sub e
-	ld e,a
-	sub e
+vendor_outcome_tbl:
+	defw vendor_hit_latch    ; 0  C40C=FF, latch vendor id
+	defw vendor_mood_up      ; 1  D012++ (cap 3)
+	defw vendor_mood_down    ; 2  D012-- (floor 0)
+	defw vendor_give_hearts  ; 3  +5 hearts
+	defw vendor_take_hearts  ; 4  -5 hearts
+	defw vendor_noop         ; 5  ret (mood_down's ret)
+	defw vendor_leave        ; 6  vanish, +5000
 ; --- vendor_pick_outcome (0x92C2) ---------------------------------------------
 ; Advance the vendor state machine to the next outcome after a whip hit.
 ; vendor_transition_tbl is a table of 8-byte rows; the row is chosen by ix+005 (vendor variant/
@@ -3200,79 +3089,52 @@ l92f6h:
 	ld (0c70ch),a
 l92f9h:
 	ld a,(0c70ch)
-	ld hl,09327h           ; vendor_state_action_tbl[state] -> reaction id 0xC70B
+	ld hl,vendor_state_action_tbl
 	call ADD_HL_A
 	ld a,(hl)
 	ld (0c70bh),a
 	ret
-; vendor_transition_tbl: 8-byte rows, values 0..9 (>=7 are RNG coin-flips above)
+; vendor_transition_tbl: 4 x 8-byte rows, values 0..9 (>=7 are RNG coin-flips)
 vendor_transition_tbl:
-	nop
-	rlca
-	rlca
-	rlca
-	ex af,af'
-	ex af,af'
-	dec b
-	ld b,000h
-	inc bc
-	inc bc
-	ld bc,00505h
-	dec b
-	ld b,009h
-	add hl,bc
-	nop
-	dec b
-	dec b
-	dec b
-	ld (bc),a
-	ld b,005h
-	dec b
-	dec b
-	dec b
-	nop
-	inc bc
-	dec b
-	ld b,001h
-	inc b
-	inc b
-	nop
-	nop
-	inc bc
-	inc bc
-; vendor outcome 0 (0x932E): register that the vendor was hit this frame
+	defb 000h,007h,007h,007h,008h,008h,005h,006h
+	defb 000h,003h,003h,001h,005h,005h,005h,006h
+	defb 009h,009h,000h,005h,005h,005h,002h,006h
+	defb 005h,005h,005h,005h,000h,003h,005h,006h
+vendor_state_action_tbl:       ; (0x9327) state -> reaction id 0xC70B
+	defb 001h,004h,004h,000h,000h,003h,003h
+vendor_hit_latch:              ; (0x932E) register that the vendor was hit
 	ld a,0ffh
 	ld (0c40ch),a
 	ld a,(ix+009h)
 	ld (0c703h),a          ; latch vendor object id
 	ret
-; vendor outcome 1 (0x933A): raise vendor "mood" 0xD012 (cap 3)
+vendor_mood_up:                ; (0x933A) raise D012 (cap 3)
 	ld hl,0d012h
 	ld a,(hl)
 	cp 003h
 	ret z
 	inc (hl)
 	ret
-; vendor outcome 2 (0x9343): lower vendor "mood" 0xD012 (floor 0)
+vendor_mood_down:              ; (0x9343) lower D012 (floor 0)
 	ld hl,0d012h
 	ld a,(hl)
 	or a
 	ret z
 	dec (hl)
+vendor_noop:                   ; (0x934A) outcome 5: do nothing
 	ret
-; vendor outcome 3 (0x934B): GIVE Simon +5 hearts (sfx 0x0F)
+vendor_give_hearts:            ; (0x934B) +5 hearts (sfx 0x0F)
 	ld a,00fh
 	call play_sound
 	ld b,005h
 	jp add_hearts
-; vendor outcome 4 (0x9355): TAKE 5 hearts from Simon (sfx 0x1D)
+vendor_take_hearts:            ; (0x9355) -5 hearts (sfx 0x1D)
 	ld a,01dh
 	call play_sound
 	ld b,005h
 	jp spend_hearts
-; (vendor outcome 5 = the bare `ret` two lines above = do nothing)
-; vendor outcome 6 (0x935F): vendor LEAVES - erase sprite, sfx 0x10, then
-; award +5000 points (DE=0x5000 -> add_score via 0x44F3).
+; vendor_leave (0x935F): erase sprite, sfx 0x10, then +5000 (jp add_score_c0).
+vendor_leave:
 	ld (ix+000h),000h
 	call sub_937fh
 	ld hl,0e580h
@@ -3283,7 +3145,7 @@ vendor_transition_tbl:
 	ld a,010h
 	call play_sound
 	ld de,05000h
-	jp 044f3h              ; add_score += 5000 (departure bonus)
+	jp add_score_c0        ; add_score += 5000 (departure bonus)
 sub_937fh:
 	ld e,(ix+001h)
 	ld d,(ix+002h)
@@ -3332,7 +3194,7 @@ l93bah:
 	ld a,004h
 	push hl
 	push bc
-	call 0494dh
+	call vdp_hmmm
 	pop bc
 	pop hl
 	call 05d15h
@@ -3545,7 +3407,7 @@ sub_9514h:
 	ld de,(0c704h)
 	ld bc,05020h
 	ld a,001h
-	call 0494dh
+	call vdp_hmmm
 	pop bc
 	ret
 ; --- vendor_read_buttons (0x9526) ---------------------------------------------
@@ -4250,7 +4112,7 @@ l98f9h:
 	push bc
 	call sub_9936h
 	jr c,l990bh
-	call sub_9942h
+	call actor_type_tick
 	call sub_99c0h
 l990bh:
 	call actor_cull_offscreen
@@ -4260,7 +4122,7 @@ l990fh:
 	add ix,de
 	djnz l98f9h
 	ret
-d700_sat_build:                    ; (seg2 0x9917) D700 shape streams -> actor SAT
+shot_sat_build:                    ; (seg2 0x9917) shot shape streams -> actor SAT
 	ld ix,0d700h
 	ld b,008h
 	jr l9925h
@@ -4286,100 +4148,58 @@ sub_9936h:
 	ret z
 	scf
 	ret
-; sub_9942h (seg2 0x9942) - per-frame C800 actor tick. DISPATCH_A on type-1
-; into the inline word table (separate from spawn-time entity_tbl). List-id
-; 0x1F shares type 4's tick (0xB0FF); 0x21 shares types 2/3 (0xA317).
-sub_9942h:
+; actor_type_tick (seg2 0x9942) - per-frame C800 tick. DISPATCH_A on type-1.
+; Separate from spawn-time entity_tbl: most entries are a later instruction of
+; the same enemy_*_tick (skip spawn pose / splash / fly-in). Types 0x17 and
+; 0x1D are `ret` (no per-frame work). 0x1F shares type 4; 0x21 shares 2/3;
+; 0x23 shares type 13 (hunchback).
+actor_type_tick:
 	ld a,(ix+000h)
 	dec a
 	call DISPATCH_A
-	ld l,e
-	xor c
-	rla
-	and e
-	rla
-	and e
-	rst 38h
-	or b
-	add a,h
-	xor b
-	sbc a,c
-	and l
-	add a,d
-	or b
-	ld (066a5h),hl
-	xor a
-	dec (hl)
-	and d
-	add a,l
-	or e
-	add a,h
-	and (hl)
-	ld c,a
-	or d
-	cp (hl)
-	xor c
-	jp z,0ffb1h
-	xor l
-	ld c,c
-	xor e
-	ld (hl),a
-	cp (hl)
-	jr nz,$-65
-	sbc a,d
-	cp b
-	ld l,e
-	cp d
-	ld (hl),h
-	cp h
-	ld c,a
-	ld l,d
-	defb 0fdh,0bah,0f1h ;illegal sequence
-	or h
-	pop af
-	or h
-	pop af
-	or h
-	pop af
-	or h
-	and l
-	sbc a,c
-	ld a,b
-	sbc a,e
-	rst 38h
-	or b
-	xor d
-	sbc a,h
-	rla
-	and e
-	xor b
-	or a
-	ld c,a
-	or d
-	ret po
-	sbc a,e
-	and l
-	sbc a,c
-	dec h
-	sbc a,h
-	cp d
-	ld c,(hl)
-	nop
-	ld c,a
-	nop
-	ld c,a
-	inc a
-	ld c,a
-	and l
-	sbc a,c
-	and e
-	ld l,d
-	add hl,de
-	xor l
-	ld (hl),h
-	ld l,b
+actor_tick_tbl:
+	defw enemy_zombie_go    ; 1
+	defw merman_go          ; 2
+	defw merman_go          ; 3  merman_red
+	defw hanging_bat_go     ; 4  past fly-in
+	defw enemy_dog_go       ; 5
+	defw enemy_pikeman_go   ; 6
+	defw enemy_flying_skull_go ; 7
+	defw enemy_ghost_head_go ; 8
+	defw enemy_red_skeleton_go ; 9
+	defw enemy_skull_pile_go ; 10
+	defw white_skel_go      ; 11
+	defw enemy_raven_go     ; 12
+	defw hunchback_go       ; 13
+	defw enemy_bone_dragon_go ; 14
+	defw enemy_roc_go       ; 15
+	defw enemy_axe_knight_go ; 16
+	defw enemy_dracula_go   ; 17
+	defw enemy_giant_bat_go ; 18
+	defw enemy_medusa_go    ; 19
+	defw enemy_mummy_go     ; 20
+	defw enemy_frankenstein_go ; 21
+	defw enemy_grim_reaper_go ; 22
+	defw tick_nop           ; 23 ret (no SAT; actor_sat_build skips 0x17)
+	defw igor_go            ; 24
+	defw enemy_blob_go      ; 25 type 0x19 (same tick; not in hatch table)
+	defw enemy_blob_go      ; 26 actor_blob_blue
+	defw enemy_blob_go      ; 27 actor_blob_red
+	defw enemy_blob_go      ; 28 actor_blob_white
+	defw tick_nop_seg2      ; 29 ret
+	defw flame_tick         ; 30 actor_flame
+	defw hanging_bat_go     ; 31 placed_bat
+	defw merman_splash_go   ; 32
+	defw merman_go          ; 33 placed_merman
+	defw actor_orb_go       ; 34
+	defw hunchback_go       ; 35 roc_drop
+	defw actor_pickup_go    ; 36
+	defb 0a5h,099h,025h,09ch,0bah,04eh,000h,04fh
+	defb 000h,04fh,03ch,04fh,0a5h,099h,0a3h,06ah
+	defb 019h,0adh,074h,068h
+tick_nop_seg2:
 	ret
-actors_rearm_hittable:         ; (0x99A6) if actor +0E bit2, set bit0 (C800 then D700)
+actors_rearm_hittable:         ; (0x99A6) if actor +0E bit2, set bit0 (C800 then shots)
 	ld de,00080h
 	ld hl,0c80eh
 	ld b,007h
@@ -4474,7 +4294,7 @@ sub_9a21h:
 	ld d,h
 	ld a,0ffh
 	push ix
-	call d700_spawn
+	call shot_spawn
 	ld (ix+01fh),000h
 	ld (ix+07eh),000h
 	pop ix
@@ -4727,6 +4547,7 @@ l9b88h:
 	ld (ix+00bh),001h
 	ld (ix+07eh),000h
 	ret
+actor_pickup_go:
 	call sub_9c64h
 	jr c,l9c0ah
 	inc (ix+00ch)
@@ -4739,7 +4560,7 @@ l9b88h:
 	ld (ix+00ch),a
 	ld e,(ix+010h)
 	ld d,(ix+011h)
-	call 0a183h
+	call neg_de
 	ld (ix+010h),e
 	ld (ix+011h),d
 	ret
@@ -4757,7 +4578,7 @@ l9c12h:
 	add a,004h
 	and 0f8h
 	ld d,a
-	jp sub_89eah
+	jp drop_spawn
 	ld hl,l9c60h
 	ld a,(0c003h)
 	and 003h
@@ -4788,7 +4609,7 @@ l9c60h:
 sub_9c64h:
 	ld e,(ix+003h)
 	ld d,(ix+005h)
-	jp 07b9fh
+	jp map_solid_pair
 	ld (ix+00eh),000h
 	ld c,00eh
 	ld a,(0d000h)
@@ -4814,6 +4635,7 @@ l9ca3h:
 	call actor_set_xvel
 	ex de,hl
 	jp actor_set_yvel
+merman_splash_go:
 	ld de,00080h
 	jp actor_add_yvel
 	ld hl,0cf00h
@@ -4934,9 +4756,9 @@ l9d3fh:
 	ret
 l9d4ah:                        ; zombie spawn-rate thresholds (8 bytes)
 	defb 00ch,012h,00ch,00ch,00ch,012h,00ch,00ch
-merman_generator:           ; (0x9D52) bit1, actor_merman (green, 1 HP)
+merman_generator:           ; (0x9D52) bit1, actor_merman_green (1 HP)
 	ld hl,0cf02h
-	ld c,actor_merman
+	ld c,actor_merman_green
 	jr merman_spawn
 merman_generator_3:         ; (0x9D59) bit2, actor_merman_red (spit, 2 HP)
 	ld hl,0cf02h
@@ -5054,7 +4876,7 @@ l9e33h:
 l9e35h:
 	ld d,010h
 	ret
-d700_tick:                         ; (seg2 0x9E38) 8 x D700 projectile/sub-actor slots
+shot_tick:                         ; (seg2 0x9E38) 8 shot slots at 0xD700
 	ld ix,0d700h
 	ld b,008h
 l9e3eh:
@@ -5064,7 +4886,7 @@ l9e3eh:
 	push bc
 	call sub_9936h
 	jr c,l9e50h
-	call sub_9e5fh
+	call shot_type_tick
 	call sub_99c0h
 l9e50h:
 	call actor_sat_build
@@ -5075,25 +4897,29 @@ l9e57h:
 	add ix,de
 	djnz l9e3eh
 	ret
-sub_9e5fh:                     ; (seg2 0x9E5F) D700 per-type tick (type-1)
+shot_type_tick:                ; (seg2 0x9E5F) shot per-type tick (type-1)
 	ld a,(ix+000h)
 	dec a
 	call DISPATCH_A
-	defw l9e7eh            ; 1
-	defw l9e7eh            ; 2
-	defw l9e7eh            ; 3
-	defw d700_bone_tick    ; 4  white-skeleton bone (kind 11)
-	defw l9e7eh            ; 5
-	defw l9e7fh            ; 6
-	defw l9e97h            ; 7
-	defw l9f29h            ; 8
-	defw l9ecch            ; 9
-	defw l9e7eh            ; 10
-	defw l9ecbh            ; 11
+	defw fireball          ; 1  merman, dragon, g-bat
+	defw fireball          ; 2
+	defw fireball          ; 3  skull-pile
+	defw shot_bone    ; 4  white-skeleton bone (kind 11)
+	defw fireball          ; 5  Dracula
+	defw medusa_snake  ; 6  kind 0x13
+	defw mummy_bandage   ; 7  kind 0x14
+	defw shot_sickle       ; 8  grim sickle (kind 0x16)
+	defw shot_axe          ; 9  axe knight (kind 16)
+	defw fireball          ; 10 igor (kind 24)
+	defw shot_nop          ; 11 unused
 	defw flame_tick        ; 12 kind 0xFF (death flame from sub_9a21h)
-l9e7eh:
+; fireball (seg2 0x9E7E) - types 1-3, 5, 10. Shared sprite: pose 3, SAT
+; pattern 0xF0 (shape 0xB5CF), colours 0/8 from shot_sat_ptr 0xA0EA.
+; Pixels are gfx_rle_a185 at VRAM 0xFF80 (loaded with the HUD sprites).
+; Tick is ret; actor_integrate coasts on spawn velocity.
+fireball:
 	ret
-l9e7fh:
+medusa_snake:             ; (0x9E7F) poses 0x27-0x2A, facing
 	inc (ix+00ch)
 	bit 1,(ix+00ch)
 	ld a,027h
@@ -5106,7 +4932,7 @@ l9e8bh:
 l9e93h:
 	ld (ix+00bh),a
 	ret
-l9e97h:
+mummy_bandage:            ; (0x9E97) seek stored Y (ix+10/11), poses 0x39/0x3A
 	ld e,(ix+012h)
 	ld d,(ix+013h)
 	ld l,(ix+010h)
@@ -5129,9 +4955,9 @@ l9eb7h:
 	ld de,0ffd0h
 l9ec8h:
 	jp actor_add_yvel
-l9ecbh:
+shot_nop:
 	ret
-l9ecch:
+shot_axe:                      ; (0x9ECC) poses 0x63-0x66; homing on thrower CFFC
 	inc (ix+00ch)
 	ld a,(ix+00ch)
 	rra
@@ -5165,10 +4991,10 @@ l9ef4h:
 	cp 020h
 	ret nc
 	jp actor_free
-; d700_bone_tick (seg2 0x9F0E) - D700 type 4, the white skeleton's bone.
+; shot_bone (seg2 0x9F0E) - shot type 4, the white skeleton's bone.
 ; 4-frame spin (shapes 0x4B-0x4E, packed after the skeleton walk 0x47-0x4A)
-; plus gravity 0x50/frame. Spawned by d700_throw with kind 11.
-d700_bone_tick:
+; plus gravity 0x50/frame. Spawned by shot_throw with kind 11.
+shot_bone:
 	ld a,(ix+00ch)
 	inc a
 	cp 00ch                ; 12-step timer -> 4 poses x 3 frames
@@ -5183,7 +5009,7 @@ l9f17h:
 	ld (ix+00bh),a
 	ld de,SETRD            ; +0x50/frame (SETRD equ 0x50, not the BIOS entry)
 	jp actor_add_yvel
-l9f29h:
+shot_sickle:                   ; (0x9F29) poses 0x7D-0x80; windup then fly 0x1E
 	ld a,(ix+00ch)
 	rra
 	rra
@@ -5212,32 +5038,32 @@ l9f53h:
 	ld (ix+00ch),03ch
 	ld (ix+001h),e
 	ret
-; d700_throw (seg2 0x9F68) - spawn a D700 projectile from the current actor.
-; Kind = ix+0 (via 0xA095 -> D700 type). Pos = (X, Y-16). Yvel in HL, Xvel in DE.
-; White skeleton (type 11) -> D700 type 4 (d700_bone_tick).
-d700_throw:
+; shot_throw (seg2 0x9F68) - spawn a shot from the current actor.
+; Kind = ix+0 (via shot_kind_type -> shot type). Pos = (X, Y-16). Yvel HL, Xvel DE.
+; White skeleton (type 11) -> shot type 4 (shot_bone). Axe (16) -> type 9.
+shot_throw:
 	ld a,(ix+003h)
 	sub 010h               ; spawn 16 px above the actor
 	ld c,a
 	ld b,(ix+005h)         ; B = actor X
 	ld a,(ix+000h)         ; A = actor type as kind
-; d700_spawn (seg2 0x9F74) - A=kind, BC=pos, HL=yvel, DE=xvel. Allocates a
-; D700 slot. Kind 0xFF is type 12 (flame); else type = 0xA095[kind].
-d700_spawn:
+; shot_spawn (seg2 0x9F74) - A=kind, BC=pos, HL=yvel, DE=xvel. Allocates a
+; shot slot. Kind 0xFF is type 12 (flame); else type = shot_kind_type[kind].
+shot_spawn:
 	ld (0cff9h),a          ; kind
 	ld (0cff1h),bc         ; pixel pos
 	ld (0cff5h),hl         ; Y velocity
 	ld (0cff7h),de         ; X velocity
 	push ix
-	call d700_alloc
+	call shot_alloc
 	pop ix
 	ret
-d700_alloc:                    ; (seg2 0x9F8A) find a free D700 slot and arm it
+shot_alloc:                    ; (seg2 0x9F8A) find a free shot slot and arm it
 	ld a,(0cff9h)
 	cp 0ffh
-	ld c,00ch              ; kind 0xFF -> D700 type 12 (flame_tick)
+	ld c,00ch              ; kind 0xFF -> shot type 12 (flame_tick)
 	jr z,l9f9ah
-	ld hl,0a095h           ; kind -> D700 type; [11]=4 bone, [16]=9 axe
+	ld hl,shot_kind_type   ; kind -> shot type; [11]=4 bone, [16]=9 axe
 	call ADD_HL_A
 	ld c,(hl)
 l9f9ah:

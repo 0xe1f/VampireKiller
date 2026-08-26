@@ -1,0 +1,4362 @@
+; Packed 1bpp sprite RLE (sub_46f8h), CPU 0xA319-0xB5A1.
+; Pixel bytes are defb %xxxxxxxx (MSB=left, one 8px row of an 8x8
+; cell; VRAM order TL/BL/TR/BR per 16x16).  Run/literal counts stay
+; hex so the packed stream is byte-exact.
+; Pointers: simon_cell0_ptr (0xA281), simon_cell1_ptr (0xA2D1),
+; intro load at 0x5682 (intro_simon_0..7).  Six orphan streams are
+; the second 16x16 plane after a listed frame; not in those tables.
+; PNG previews: gfx/intro_simon, gfx/simon_cell0, gfx/simon_cell1.
+
+intro_simon_0:  ; 0xA319  packed 56; intro_simon + reused by cell ptrs
+	defb 0x07, %00000000
+	defb 0x89
+	defb %00000110
+	defb %00010111
+	defb %00011011
+	defb %00110000
+	defb %00110000
+	defb %01100000
+	defb %01101011
+	defb %01101011
+	defb %01000000
+	defb 0x07, %00000000
+	defb 0x95
+	defb %00011000
+	defb %11111010
+	defb %11110110
+	defb %00000010
+	defb %00000000
+	defb %00000010
+	defb %11110010
+	defb %11110000
+	defb %00000000
+	defb %00000001
+	defb %00000011
+	defb %00000011
+	defb %00000111
+	defb %00000011
+	defb %00000001
+	defb %00001111
+	defb %00011111
+	defb %00101111
+	defb %00100111
+	defb %01001111
+	defb %01001111
+	defb 0x04, %11111111
+	defb 0x81
+	defb %11100000
+	defb 0x03, %11110000
+	defb 0x02, %11100000
+	defb 0x8a
+	defb %11111100
+	defb %11111110
+	defb %11111101
+	defb %11111001
+	defb %11111101
+	defb %11111111
+	defb %11111111
+	defb %11110111
+	defb %11111111
+	defb %11111111
+	defb 0x00
+intro_simon_1:  ; 0xA351  packed 59; intro_simon + reused by cell ptrs
+	defb 0x89
+	defb %00100000
+	defb %00001000
+	defb %00001000
+	defb %00001010
+	defb %00000010
+	defb %00000110
+	defb %00000110
+	defb %00000000
+	defb %00000100
+	defb 0x03, %00000110
+	defb 0x87
+	defb %00000100
+	defb %00001110
+	defb %00011110
+	defb %00000000
+	defb %00000000
+	defb %00000100
+	defb %00000000
+	defb 0x04, %00110000
+	defb 0x82
+	defb %00000000
+	defb %00010000
+	defb 0x03, %00110000
+	defb 0x8b
+	defb %00010000
+	defb %00111000
+	defb %00111100
+	defb %00000000
+	defb %01011111
+	defb %00111111
+	defb %00011111
+	defb %00011101
+	defb %00011101
+	defb %00001001
+	defb %00001011
+	defb 0x06, %00001111
+	defb 0x8a
+	defb %00011111
+	defb %00111111
+	defb %00111111
+	defb %11111110
+	defb %11111010
+	defb %11111110
+	defb %11001110
+	defb %11001000
+	defb %01001000
+	defb %01101000
+	defb 0x06, %01111000
+	defb 0x83
+	defb %01111100
+	defb %01111110
+	defb %01111110
+	defb 0x00
+intro_simon_2:  ; 0xA38C  packed 62; intro_simon + reused by cell ptrs
+	defb 0x03, %00000000
+	defb 0x8d
+	defb %00001100
+	defb %00001110
+	defb %00001110
+	defb %00001100
+	defb %00000011
+	defb %00000111
+	defb %00000000
+	defb %00000110
+	defb %01100110
+	defb %01101010
+	defb %00101100
+	defb %00000000
+	defb %00000001
+	defb 0x06, %00000000
+	defb 0xaa
+	defb %01111000
+	defb %11110000
+	defb %11110000
+	defb %01100110
+	defb %00000010
+	defb %00000000
+	defb %00000000
+	defb %01000000
+	defb %00001000
+	defb %01010000
+	defb %00000000
+	defb %00001111
+	defb %00011111
+	defb %00010011
+	defb %00011011
+	defb %00010011
+	defb %00010111
+	defb %00011101
+	defb %00000011
+	defb %00001111
+	defb %01111001
+	defb %10011001
+	defb %10011101
+	defb %01011111
+	defb %00111111
+	defb %00000011
+	defb %00000000
+	defb %00000000
+	defb %10000000
+	defb %11000000
+	defb %11000000
+	defb %11111000
+	defb %11111100
+	defb %11111100
+	defb %11111110
+	defb %11111001
+	defb %11111101
+	defb %11111111
+	defb %11111100
+	defb %11111100
+	defb %11111000
+	defb %11111000
+	defb 0x00
+intro_simon_3:  ; 0xA3CA  packed 65; intro_simon + reused by cell ptrs
+	defb 0x88
+	defb %00000000
+	defb %00000010
+	defb %00000100
+	defb %00000110
+	defb %00001110
+	defb %00001100
+	defb %00010000
+	defb %00000000
+	defb 0x03, %00011000
+	defb 0x8f
+	defb %00010000
+	defb %00111000
+	defb %01111000
+	defb %00000000
+	defb %00000000
+	defb %01000000
+	defb %01000000
+	defb %00000000
+	defb %01110000
+	defb %01110000
+	defb %00110000
+	defb %00100000
+	defb %00001000
+	defb %00011000
+	defb %00001100
+	defb 0x03, %00000110
+	defb 0x8a
+	defb %00001110
+	defb %00000000
+	defb %00000000
+	defb %00000001
+	defb %00000011
+	defb %00000111
+	defb %00001001
+	defb %00010001
+	defb %00110010
+	defb %00101100
+	defb 0x04, %00111100
+	defb 0x81
+	defb %00111000
+	defb 0x03, %11111100
+	defb 0x81
+	defb %00000000
+	defb 0x03, %11111100
+	defb 0x02, %10001000
+	defb 0x85
+	defb %11001000
+	defb %01011000
+	defb %01111100
+	defb %00111110
+	defb %00011111
+	defb 0x03, %00001111
+	defb 0x02, %00011111
+	defb 0x81
+	defb %00000000
+	defb 0x00
+intro_simon_4:  ; 0xA40B  packed 60; intro_simon + reused by cell ptrs
+	defb 0x02, %00000000
+	defb 0x8d
+	defb %01100000
+	defb %01110000
+	defb %01111000
+	defb %01111011
+	defb %00010111
+	defb %00000100
+	defb %01011001
+	defb %00110000
+	defb %00100000
+	defb %00000001
+	defb %00010011
+	defb %00111111
+	defb %00111110
+	defb 0x06, %00000000
+	defb 0x9b
+	defb %10000000
+	defb %01000000
+	defb %10100000
+	defb %11000000
+	defb %11000000
+	defb %00100000
+	defb %01100000
+	defb %10100000
+	defb %10000000
+	defb %00000000
+	defb %10000000
+	defb %01111100
+	defb %11111100
+	defb %10011110
+	defb %11011110
+	defb %10011111
+	defb %10111101
+	defb %11111011
+	defb %01111111
+	defb %11111110
+	defb %01111111
+	defb %00111111
+	defb %00111110
+	defb %00101101
+	defb %01000011
+	defb %01000011
+	defb %00111111
+	defb 0x04, %00000000
+	defb 0x88
+	defb %10000000
+	defb %11000000
+	defb %11000000
+	defb %01100000
+	defb %00100000
+	defb %00100000
+	defb %11000000
+	defb %11010000
+	defb 0x04, %11110000
+	defb 0x00
+intro_simon_5:  ; 0xA447  packed 57; intro_simon + reused by cell ptrs
+	defb 0x02, %00010000
+	defb 0x02, %00000011
+	defb 0x86
+	defb %00001011
+	defb %00011011
+	defb %00011011
+	defb %00001000
+	defb %00000111
+	defb %00000011
+	defb 0x03, %00000001
+	defb 0x84
+	defb %00000011
+	defb %00000000
+	defb %00000000
+	defb %10000000
+	defb 0x09, %00000000
+	defb 0x02, %10100000
+	defb 0x02, %11000000
+	defb 0x02, %00000000
+; 16x16 +0x20
+	defb 0x02, %00011111
+	defb 0x88
+	defb %00011100
+	defb %00001100
+	defb %00010100
+	defb %00100100
+	defb %00100100
+	defb %00110111
+	defb %00011111
+	defb %00000111
+	defb 0x03, %00000011
+	defb 0x02, %00000111
+	defb 0x81
+	defb %00000000
+	defb 0x03, %11100000
+	defb 0x05, %10000000
+	defb 0x81
+	defb %11000000
+	defb 0x03, %11110000
+	defb 0x02, %11100000
+	defb 0x82
+	defb %11000000
+	defb %00000000
+	defb 0x00
+intro_simon_6:  ; 0xA480  packed 60; intro_simon + reused by cell ptrs
+	defb 0x03, %00000000
+	defb 0x8d
+	defb %01100000
+	defb %01110000
+	defb %01111000
+	defb %01111001
+	defb %00010011
+	defb %00000110
+	defb %00101100
+	defb %00011000
+	defb %00010000
+	defb %00000100
+	defb %00001111
+	defb %00001111
+	defb %00001100
+	defb 0x06, %00000000
+	defb 0x9a
+	defb %10000000
+	defb %11000000
+	defb %00000000
+	defb %11100000
+	defb %01000000
+	defb %00010000
+	defb %11000000
+	defb %11100000
+	defb %10001000
+	defb %01001000
+	defb %00000000
+	defb %01111100
+	defb %11111110
+	defb %10011110
+	defb %11011111
+	defb %10011111
+	defb %10111110
+	defb %11111101
+	defb %00111111
+	defb %01011111
+	defb %00111111
+	defb %00111111
+	defb %00111011
+	defb %00010000
+	defb %00010001
+	defb %00011111
+	defb 0x05, %00000000
+	defb 0x8b
+	defb %10000000
+	defb %11000000
+	defb %11100000
+	defb %11100000
+	defb %00010000
+	defb %10111000
+	defb %11111000
+	defb %00111000
+	defb %11111000
+	defb %11111100
+	defb %11111100
+	defb 0x00
+intro_simon_7:  ; 0xA4BC  packed 66; intro_simon + reused by cell ptrs
+	defb 0x88
+	defb %00000001
+	defb %00000011
+	defb %00000111
+	defb %00001110
+	defb %00011100
+	defb %00000000
+	defb %00000000
+	defb %00110000
+	defb 0x03, %00111000
+	defb 0xa1
+	defb %00110000
+	defb %01110000
+	defb %11110000
+	defb %00000000
+	defb %00000000
+	defb %10111000
+	defb %11000000
+	defb %10000000
+	defb %00000000
+	defb %01100000
+	defb %01100000
+	defb %00000000
+	defb %00010000
+	defb %00111000
+	defb %00011000
+	defb %00001100
+	defb %00000110
+	defb %00001100
+	defb %00011100
+	defb %00000000
+	defb %00000000
+	defb %00001110
+	defb %00000100
+	defb %00001000
+	defb %00110001
+	defb %01100011
+	defb %01111100
+	defb %01111000
+	defb %01111000
+	defb %01111100
+	defb %01111100
+	defb %01111000
+	defb %01111000
+	defb 0x03, %11111000
+	defb 0x91
+	defb %00000000
+	defb %01111100
+	defb %00111100
+	defb %01111100
+	defb %11110000
+	defb %10010000
+	defb %10010000
+	defb %11110000
+	defb %11111000
+	defb %01111100
+	defb %00111110
+	defb %00011110
+	defb %00001110
+	defb %00011110
+	defb %00111110
+	defb %01111110
+	defb %00000000
+	defb 0x00
+simon_rle_a4fe:  ; 0xA4FE  packed 62; simon_cell0/1_ptr
+	defb 0x03, %00000000
+	defb 0x8d
+	defb %00001100
+	defb %00001110
+	defb %00001110
+	defb %00001100
+	defb %01000011
+	defb %01100111
+	defb %01100000
+	defb %01000110
+	defb %00100110
+	defb %01101010
+	defb %01101100
+	defb %01100000
+	defb %01000001
+	defb 0x06, %00000000
+	defb 0xaa
+	defb %01111000
+	defb %11110000
+	defb %11110000
+	defb %01100110
+	defb %00000010
+	defb %00000000
+	defb %00000000
+	defb %01000000
+	defb %00001000
+	defb %01010000
+	defb %00000000
+	defb %00001111
+	defb %00011111
+	defb %00010011
+	defb %00011011
+	defb %00010011
+	defb %11010111
+	defb %11111101
+	defb %10110011
+	defb %10111111
+	defb %11111001
+	defb %11111001
+	defb %10111101
+	defb %10111111
+	defb %10111111
+	defb %10110011
+	defb %00000000
+	defb %00000000
+	defb %10000000
+	defb %11000000
+	defb %11000000
+	defb %11111000
+	defb %11111100
+	defb %11111100
+	defb %11111110
+	defb %11111001
+	defb %11111101
+	defb %11111111
+	defb %11111100
+	defb %11111100
+	defb %11111000
+	defb %11111000
+	defb 0x00
+simon_rle_a53c:  ; 0xA53C  packed 61; simon_cell0/1_ptr
+	defb 0x02, %00000000
+	defb 0x8e
+	defb %01100000
+	defb %01110000
+	defb %01111000
+	defb %01111011
+	defb %00010111
+	defb %00000100
+	defb %00011001
+	defb %01000000
+	defb %01100000
+	defb %01100001
+	defb %01000011
+	defb %00101111
+	defb %01101110
+	defb %01100000
+	defb 0x05, %00000000
+	defb 0x9b
+	defb %10000000
+	defb %01000000
+	defb %10100000
+	defb %11000000
+	defb %11000000
+	defb %00100000
+	defb %01100000
+	defb %10100000
+	defb %10000000
+	defb %00000000
+	defb %10000000
+	defb %01111100
+	defb %11111100
+	defb %10011110
+	defb %11011110
+	defb %10011111
+	defb %10111101
+	defb %11111011
+	defb %01111111
+	defb %11111110
+	defb %11111111
+	defb %10111111
+	defb %10111110
+	defb %11111101
+	defb %11110011
+	defb %10110011
+	defb %10111111
+	defb 0x04, %00000000
+	defb 0x88
+	defb %10000000
+	defb %11000000
+	defb %11000000
+	defb %01100000
+	defb %00100000
+	defb %00100000
+	defb %11000000
+	defb %11010000
+	defb 0x04, %11110000
+	defb 0x00
+simon_rle_a579:  ; 0xA579  packed 60; simon_cell0/1_ptr
+	defb 0x03, %00000000
+	defb 0x8d
+	defb %01100000
+	defb %01110000
+	defb %01111000
+	defb %01111001
+	defb %00010011
+	defb %00000110
+	defb %01001100
+	defb %01101000
+	defb %01100000
+	defb %01000100
+	defb %00101111
+	defb %01101111
+	defb %01101100
+	defb 0x06, %00000000
+	defb 0x9a
+	defb %10000000
+	defb %11000000
+	defb %00000000
+	defb %11100000
+	defb %01000000
+	defb %00010000
+	defb %11000000
+	defb %11100000
+	defb %10001000
+	defb %01001000
+	defb %00000000
+	defb %01111100
+	defb %11111110
+	defb %10011110
+	defb %11011111
+	defb %10011111
+	defb %10111110
+	defb %11111101
+	defb %11111111
+	defb %11111111
+	defb %10111111
+	defb %10111111
+	defb %11111011
+	defb %11110000
+	defb %10110001
+	defb %10111111
+	defb 0x05, %00000000
+	defb 0x8b
+	defb %10000000
+	defb %11000000
+	defb %11100000
+	defb %11100000
+	defb %00010000
+	defb %10111000
+	defb %11111000
+	defb %00111000
+	defb %11111000
+	defb %11111100
+	defb %11111100
+	defb 0x00
+simon_rle_a5b5:  ; 0xA5B5  packed 65; simon_cell0/1_ptr
+	defb 0x88
+	defb %01000000
+	defb %01000010
+	defb %01000100
+	defb %00000110
+	defb %00001110
+	defb %00001100
+	defb %00010000
+	defb %00000000
+	defb 0x03, %00011000
+	defb 0x8f
+	defb %00010000
+	defb %00111000
+	defb %01111000
+	defb %00000000
+	defb %00000000
+	defb %01000000
+	defb %01000000
+	defb %00000000
+	defb %01110000
+	defb %01110000
+	defb %00110000
+	defb %00100000
+	defb %00001000
+	defb %00011000
+	defb %00001100
+	defb 0x03, %00000110
+	defb 0x8a
+	defb %00001110
+	defb %00000000
+	defb %00000000
+	defb %10100001
+	defb %11100011
+	defb %11100111
+	defb %11101001
+	defb %11010001
+	defb %10110010
+	defb %00101100
+	defb 0x04, %00111100
+	defb 0x81
+	defb %00111000
+	defb 0x03, %11111100
+	defb 0x81
+	defb %00000000
+	defb 0x03, %11111100
+	defb 0x02, %10001000
+	defb 0x85
+	defb %11001000
+	defb %01011000
+	defb %01111100
+	defb %00111110
+	defb %00011111
+	defb 0x03, %00001111
+	defb 0x02, %00011111
+	defb 0x81
+	defb %00000000
+	defb 0x00
+simon_rle_a5f6:  ; 0xA5F6  packed 57; simon_cell0/1_ptr
+	defb 0x8a
+	defb %01100000
+	defb %01000000
+	defb %01000011
+	defb %01000011
+	defb %01001011
+	defb %00011011
+	defb %00011011
+	defb %00001000
+	defb %00000111
+	defb %00000011
+	defb 0x03, %00000001
+	defb 0x84
+	defb %00000011
+	defb %00000000
+	defb %00000000
+	defb %10000000
+	defb 0x09, %00000000
+	defb 0x02, %10100000
+	defb 0x02, %11000000
+	defb 0x02, %00000000
+; 16x16 +0x20
+	defb 0x02, %10111111
+	defb 0x88
+	defb %10111100
+	defb %11101100
+	defb %11110100
+	defb %11100100
+	defb %11100100
+	defb %10110111
+	defb %00011111
+	defb %00000111
+	defb 0x03, %00000011
+	defb 0x02, %00000111
+	defb 0x81
+	defb %00000000
+	defb 0x03, %11100000
+	defb 0x05, %10000000
+	defb 0x81
+	defb %11000000
+	defb 0x03, %11110000
+	defb 0x02, %11100000
+	defb 0x82
+	defb %11000000
+	defb %00000000
+	defb 0x00
+simon_rle_a62f:  ; 0xA62F  packed 66; simon_cell0/1_ptr
+	defb 0x88
+	defb %01100001
+	defb %01000011
+	defb %01000111
+	defb %01001110
+	defb %01011100
+	defb %00000000
+	defb %00000000
+	defb %00110000
+	defb 0x03, %00111000
+	defb 0xa1
+	defb %00110000
+	defb %01110000
+	defb %11110000
+	defb %00000000
+	defb %00000000
+	defb %10111000
+	defb %11000000
+	defb %10000000
+	defb %00000000
+	defb %01100000
+	defb %01100000
+	defb %00000000
+	defb %00010000
+	defb %00111000
+	defb %00011000
+	defb %00001100
+	defb %00000110
+	defb %00001100
+	defb %00011100
+	defb %00000000
+	defb %00000000
+	defb %10111110
+	defb %10110100
+	defb %10101000
+	defb %11110001
+	defb %11100011
+	defb %11111100
+	defb %11111000
+	defb %11111000
+	defb %01111100
+	defb %01111100
+	defb %01111000
+	defb %01111000
+	defb 0x03, %11111000
+	defb 0x91
+	defb %00000000
+	defb %01111100
+	defb %00111100
+	defb %01111100
+	defb %11110000
+	defb %10010000
+	defb %10010000
+	defb %11110000
+	defb %11111000
+	defb %01111100
+	defb %00111110
+	defb %00011110
+	defb %00001110
+	defb %00011110
+	defb %00111110
+	defb %01111110
+	defb %00000000
+	defb 0x00
+simon_rle_a671:  ; 0xA671  packed 60; not in cell/intro ptrs (orphan plane)
+	defb 0x03, %00000000
+	defb 0x8d
+	defb %01100000
+	defb %01110000
+	defb %01111000
+	defb %01111001
+	defb %00010011
+	defb %00000110
+	defb %00101100
+	defb %00011000
+	defb %00010000
+	defb %00000100
+	defb %00001111
+	defb %00001111
+	defb %00001100
+	defb 0x06, %00000000
+	defb 0x9a
+	defb %10000000
+	defb %11000000
+	defb %00000000
+	defb %11100000
+	defb %01000000
+	defb %00010000
+	defb %11000000
+	defb %11100000
+	defb %10001000
+	defb %01001000
+	defb %00000000
+	defb %01111100
+	defb %11111110
+	defb %10011110
+	defb %11011111
+	defb %10011111
+	defb %10111110
+	defb %11111101
+	defb %00111111
+	defb %01011111
+	defb %00111111
+	defb %00111111
+	defb %00111011
+	defb %00010000
+	defb %00010001
+	defb %00011111
+	defb 0x05, %00000000
+	defb 0x8b
+	defb %10000000
+	defb %11000000
+	defb %11100000
+	defb %11100000
+	defb %00010000
+	defb %10111000
+	defb %11111000
+	defb %00111000
+	defb %11111000
+	defb %11111100
+	defb %11111100
+	defb 0x00
+simon_rle_a6ad:  ; 0xA6AD  packed 55; simon_cell0/1_ptr
+	defb 0x88
+	defb %00000000
+	defb %00000110
+	defb %00001110
+	defb %00001111
+	defb %00011110
+	defb %00011101
+	defb %00011000
+	defb %00000000
+	defb 0x03, %00111000
+	defb 0x02, %00011000
+	defb 0x83
+	defb %00011100
+	defb %00111000
+	defb %01110000
+	defb 0x03, %00000000
+	defb 0x85
+	defb %10000110
+	defb %11001110
+	defb %00111010
+	defb %01000010
+	defb %00000110
+	defb 0x08, %00000000
+; 16x16 +0x20
+	defb 0x88
+	defb %00000111
+	defb %00001001
+	defb %00010001
+	defb %00010000
+	defb %00100001
+	defb %00100010
+	defb %00100101
+	defb %00111000
+	defb 0x03, %01111100
+	defb 0x02, %00111100
+	defb 0x8b
+	defb %00111110
+	defb %01111110
+	defb %11111000
+	defb %11111100
+	defb %11111100
+	defb %11111110
+	defb %01111111
+	defb %00111111
+	defb %11111111
+	defb %11111111
+	defb %11011111
+	defb 0x08, %00000000
+	defb 0x00
+simon_rle_a6e4:  ; 0xA6E4  packed 60; not in cell/intro ptrs (orphan plane)
+	defb 0x02, %00000000
+	defb 0x8d
+	defb %01100000
+	defb %01110000
+	defb %01111000
+	defb %01111011
+	defb %00010111
+	defb %00000100
+	defb %01011001
+	defb %00110000
+	defb %00100000
+	defb %00000001
+	defb %00010011
+	defb %00111111
+	defb %00111110
+	defb 0x06, %00000000
+	defb 0x9b
+	defb %10000000
+	defb %01000000
+	defb %10100000
+	defb %11000000
+	defb %11000000
+	defb %00100000
+	defb %01100000
+	defb %10100000
+	defb %10000000
+	defb %00000000
+	defb %10000000
+	defb %01111100
+	defb %11111100
+	defb %10011110
+	defb %11011110
+	defb %10011111
+	defb %10111101
+	defb %11111011
+	defb %01111111
+	defb %11111110
+	defb %01111111
+	defb %00111111
+	defb %00111110
+	defb %00101101
+	defb %01000011
+	defb %01000011
+	defb %00111111
+	defb 0x04, %00000000
+	defb 0x88
+	defb %10000000
+	defb %11000000
+	defb %11000000
+	defb %01100000
+	defb %00100000
+	defb %00100000
+	defb %11000000
+	defb %11010000
+	defb 0x04, %11110000
+	defb 0x00
+simon_rle_a720:  ; 0xA720  packed 57; simon_cell0/1_ptr
+	defb 0x02, %00010000
+	defb 0x02, %00000011
+	defb 0x86
+	defb %00001011
+	defb %00011011
+	defb %00011011
+	defb %00001000
+	defb %00000111
+	defb %00000011
+	defb 0x03, %00000001
+	defb 0x84
+	defb %00000011
+	defb %00000000
+	defb %00000000
+	defb %10000000
+	defb 0x09, %00000000
+	defb 0x02, %10100000
+	defb 0x02, %11000000
+	defb 0x02, %00000000
+; 16x16 +0x20
+	defb 0x02, %00011111
+	defb 0x88
+	defb %00011100
+	defb %00001100
+	defb %00010100
+	defb %00100100
+	defb %00100100
+	defb %00110111
+	defb %00011111
+	defb %00000111
+	defb 0x03, %00000011
+	defb 0x02, %00000111
+	defb 0x81
+	defb %00000000
+	defb 0x03, %11100000
+	defb 0x05, %10000000
+	defb 0x81
+	defb %11000000
+	defb 0x03, %11110000
+	defb 0x02, %11100000
+	defb 0x82
+	defb %11000000
+	defb %00000000
+	defb 0x00
+simon_rle_a759:  ; 0xA759  packed 60; not in cell/intro ptrs (orphan plane)
+	defb 0x03, %00000000
+	defb 0x8d
+	defb %01100000
+	defb %01110000
+	defb %01111000
+	defb %01111001
+	defb %00010011
+	defb %00000110
+	defb %00101100
+	defb %00011000
+	defb %00010000
+	defb %00000100
+	defb %00001111
+	defb %00001111
+	defb %00001100
+	defb 0x06, %00000000
+	defb 0x9a
+	defb %10000000
+	defb %11000000
+	defb %00000000
+	defb %11100000
+	defb %01000000
+	defb %00010000
+	defb %11000000
+	defb %11100000
+	defb %10001000
+	defb %01001000
+	defb %00000000
+	defb %01111100
+	defb %11111110
+	defb %10011110
+	defb %11011111
+	defb %10011111
+	defb %10111110
+	defb %11111101
+	defb %00111111
+	defb %01011111
+	defb %00111111
+	defb %00111111
+	defb %00111011
+	defb %00010000
+	defb %00010001
+	defb %00011111
+	defb 0x05, %00000000
+	defb 0x8b
+	defb %10000000
+	defb %11000000
+	defb %11100000
+	defb %11100000
+	defb %00010000
+	defb %10111000
+	defb %11111000
+	defb %00111000
+	defb %11111000
+	defb %11111100
+	defb %11111100
+	defb 0x00
+simon_rle_a795:  ; 0xA795  packed 50; simon_cell0/1_ptr
+	defb 0x88
+	defb %00000000
+	defb %01111110
+	defb %00000011
+	defb %00111000
+	defb %00011000
+	defb %00001100
+	defb %00011110
+	defb %00111110
+	defb 0x0c, %00000000
+	defb 0x86
+	defb %00110000
+	defb %01110000
+	defb %01110000
+	defb %01100000
+	defb %00010000
+	defb %00111000
+	defb 0x03, %00011000
+	defb 0x8b
+	defb %00011100
+	defb %00111000
+	defb %01110000
+	defb %01111111
+	defb %10000001
+	defb %11111100
+	defb %01111111
+	defb %00111100
+	defb %00011110
+	defb %00101111
+	defb %01011111
+	defb 0x08, %00000000
+	defb 0x04, %11111100
+	defb 0x84
+	defb %11001000
+	defb %10001000
+	defb %10001000
+	defb %11111000
+	defb 0x03, %01111100
+	defb 0x02, %00111100
+	defb 0x83
+	defb %00111110
+	defb %01011110
+	defb %10111000
+	defb 0x00
+simon_rle_a7c7:  ; 0xA7C7  packed 55; simon_cell0/1_ptr
+	defb 0x88
+	defb %01100000
+	defb %01000110
+	defb %01001110
+	defb %01001111
+	defb %01011110
+	defb %00011101
+	defb %00011000
+	defb %00000000
+	defb 0x03, %00111000
+	defb 0x02, %00011000
+	defb 0x83
+	defb %00011100
+	defb %00111000
+	defb %01110000
+	defb 0x03, %00000000
+	defb 0x85
+	defb %10000110
+	defb %11001110
+	defb %00111010
+	defb %01000010
+	defb %00000110
+	defb 0x08, %00000000
+; 16x16 +0x20
+	defb 0x88
+	defb %10110111
+	defb %10111001
+	defb %10110001
+	defb %11110000
+	defb %11100001
+	defb %11100010
+	defb %11100101
+	defb %10111000
+	defb 0x03, %01111100
+	defb 0x02, %00111100
+	defb 0x8b
+	defb %00111110
+	defb %01111110
+	defb %11111000
+	defb %11111100
+	defb %11111100
+	defb %11111110
+	defb %01111111
+	defb %00111111
+	defb %11111111
+	defb %11111111
+	defb %11011111
+	defb 0x08, %00000000
+	defb 0x00
+simon_rle_a7fe:  ; 0xA7FE  packed 57; simon_cell0/1_ptr
+	defb 0x8a
+	defb %01100000
+	defb %01000000
+	defb %01000011
+	defb %01000011
+	defb %01001011
+	defb %00011011
+	defb %00011011
+	defb %00001000
+	defb %00000111
+	defb %00000011
+	defb 0x03, %00000001
+	defb 0x84
+	defb %00000011
+	defb %00000000
+	defb %00000000
+	defb %10000000
+	defb 0x09, %00000000
+	defb 0x02, %10100000
+	defb 0x02, %11000000
+	defb 0x02, %00000000
+; 16x16 +0x20
+	defb 0x02, %10111111
+	defb 0x88
+	defb %10111100
+	defb %11101100
+	defb %11110100
+	defb %11100100
+	defb %11100100
+	defb %10110111
+	defb %00011111
+	defb %00000111
+	defb 0x03, %00000011
+	defb 0x02, %00000111
+	defb 0x81
+	defb %00000000
+	defb 0x03, %11100000
+	defb 0x05, %10000000
+	defb 0x81
+	defb %11000000
+	defb 0x03, %11110000
+	defb 0x02, %11100000
+	defb 0x82
+	defb %11000000
+	defb %00000000
+	defb 0x00
+simon_rle_a837:  ; 0xA837  packed 50; simon_cell0/1_ptr
+	defb 0x88
+	defb %01100000
+	defb %01001110
+	defb %01000011
+	defb %01011000
+	defb %01011000
+	defb %00001100
+	defb %00011110
+	defb %00111110
+	defb 0x0c, %00000000
+	defb 0x86
+	defb %00110000
+	defb %01110000
+	defb %01110000
+	defb %01100000
+	defb %00010000
+	defb %00111000
+	defb 0x03, %00011000
+	defb 0x8b
+	defb %00011100
+	defb %00111000
+	defb %01110000
+	defb %10111111
+	defb %10110001
+	defb %10111100
+	defb %11111111
+	defb %11111100
+	defb %11111110
+	defb %11101111
+	defb %11011111
+	defb 0x08, %00000000
+	defb 0x04, %11111100
+	defb 0x84
+	defb %11001000
+	defb %10001000
+	defb %10001000
+	defb %11111000
+	defb 0x03, %01111100
+	defb 0x02, %00111100
+	defb 0x83
+	defb %00111110
+	defb %01011110
+	defb %10111000
+	defb 0x00
+simon_rle_a869:  ; 0xA869  packed 44; simon_cell0/1_ptr
+	defb 0x88
+	defb %00000000
+	defb %01101100
+	defb %01110100
+	defb %01110001
+	defb %00110011
+	defb %00011010
+	defb %00111011
+	defb %01111100
+	defb 0x0b, %00000000
+	defb 0x85
+	defb %10000110
+	defb %11001110
+	defb %00111010
+	defb %01000010
+	defb %00000110
+	defb 0x08, %00000000
+; 16x16 +0x20
+	defb 0x89
+	defb %01111111
+	defb %11110011
+	defb %11111011
+	defb %11111110
+	defb %01111100
+	defb %00111101
+	defb %01111100
+	defb %11111111
+	defb %11111110
+	defb 0x07, %00000000
+	defb 0x02, %11111100
+	defb 0x87
+	defb %11111110
+	defb %01111111
+	defb %00111111
+	defb %11111111
+	defb %11111111
+	defb %11011111
+	defb %00011111
+	defb 0x07, %00000000
+	defb 0x00
+simon_rle_a895:  ; 0xA895  packed 44; simon_cell0/1_ptr
+	defb 0x88
+	defb %01000000
+	defb %01001100
+	defb %01010100
+	defb %00010001
+	defb %00110011
+	defb %00011010
+	defb %00111011
+	defb %01111100
+	defb 0x0b, %00000000
+	defb 0x85
+	defb %10000110
+	defb %11001110
+	defb %00111010
+	defb %01000010
+	defb %00000110
+	defb 0x08, %00000000
+; 16x16 +0x20
+	defb 0x89
+	defb %10111111
+	defb %11110011
+	defb %11111011
+	defb %11111110
+	defb %11111100
+	defb %10111101
+	defb %01111100
+	defb %11111111
+	defb %11111110
+	defb 0x07, %00000000
+	defb 0x02, %11111100
+	defb 0x87
+	defb %11111110
+	defb %01111111
+	defb %00111111
+	defb %11111111
+	defb %11111111
+	defb %11011111
+	defb %00011111
+	defb 0x07, %00000000
+	defb 0x00
+simon_rle_a8c1:  ; 0xA8C1  packed 51; simon_cell0/1_ptr
+	defb 0x06, %00000000
+	defb 0x89
+	defb %00000011
+	defb %00000111
+	defb %00000011
+	defb %00010101
+	defb %00000110
+	defb %00000111
+	defb %00000111
+	defb %00110110
+	defb %00110000
+	defb 0x08, %00000000
+	defb 0x89
+	defb %10000000
+	defb %11111000
+	defb %11111000
+	defb %00000000
+	defb %00000000
+	defb %00000100
+	defb %00000100
+	defb %00001000
+	defb %11110000
+; 16x16 +0x20
+	defb 0x03, %00000000
+	defb 0x82
+	defb %00101100
+	defb %01111100
+	defb 0x04, %11111111
+	defb 0x87
+	defb %11101111
+	defb %00011101
+	defb %00001000
+	defb %00111000
+	defb %01111001
+	defb %01111111
+	defb %00111111
+	defb 0x06, %00000000
+	defb 0x82
+	defb %10000000
+	defb %11111000
+	defb 0x04, %11111100
+	defb 0x02, %11111010
+	defb 0x02, %11111100
+	defb 0x00
+simon_rle_a8f4:  ; 0xA8F4  packed 55; simon_cell0/1_ptr
+	defb 0x88
+	defb %00000000
+	defb %00000110
+	defb %00001110
+	defb %00001111
+	defb %00011110
+	defb %00011101
+	defb %00011000
+	defb %00000000
+	defb 0x03, %00111000
+	defb 0x02, %00011000
+	defb 0x83
+	defb %00011100
+	defb %00111000
+	defb %01110000
+	defb 0x03, %00000000
+	defb 0x85
+	defb %10000110
+	defb %11001110
+	defb %00111010
+	defb %01000010
+	defb %00000110
+	defb 0x08, %00000000
+; 16x16 +0x20
+	defb 0x88
+	defb %00000111
+	defb %00001001
+	defb %00010001
+	defb %00010000
+	defb %00100001
+	defb %00100010
+	defb %00100101
+	defb %00111000
+	defb 0x03, %01111100
+	defb 0x02, %00111100
+	defb 0x8b
+	defb %00111110
+	defb %01111110
+	defb %11111000
+	defb %11111100
+	defb %11111100
+	defb %11111110
+	defb %01111111
+	defb %00111111
+	defb %11111111
+	defb %11111111
+	defb %11011111
+	defb 0x08, %00000000
+	defb 0x00
+simon_rle_a92b:  ; 0xA92B  packed 22; simon_cell0/1_ptr
+	defb 0x0e, %00000000
+	defb 0x82
+	defb %00000011
+	defb %00000111
+	defb 0x0f, %00000000
+	defb 0x81
+	defb %10000000
+; 16x16 +0x20
+	defb 0x0b, %00000000
+	defb 0x82
+	defb %00101100
+	defb %01111100
+	defb 0x03, %11111111
+	defb 0x0e, %00000000
+	defb 0x82
+	defb %10000000
+	defb %11111000
+	defb 0x00
+simon_rle_a941:  ; 0xA941  packed 63; simon_cell0/1_ptr
+	defb 0x98
+	defb %00000011
+	defb %00010101
+	defb %00000110
+	defb %00000111
+	defb %00000111
+	defb %00110110
+	defb %00110000
+	defb %00000000
+	defb %00000000
+	defb %01111100
+	defb %01111100
+	defb %01110001
+	defb %00110011
+	defb %00011010
+	defb %00111011
+	defb %01111100
+	defb %11111000
+	defb %11111000
+	defb %00000000
+	defb %00000000
+	defb %00000100
+	defb %00000100
+	defb %00001000
+	defb %11110000
+	defb 0x03, %00000000
+	defb 0x95
+	defb %10000110
+	defb %11001110
+	defb %00111010
+	defb %01000010
+	defb %00000110
+	defb %11111111
+	defb %11101111
+	defb %00011101
+	defb %00001000
+	defb %00111000
+	defb %01111001
+	defb %01111111
+	defb %00111111
+	defb %01111111
+	defb %11110011
+	defb %11110011
+	defb %11111110
+	defb %01111100
+	defb %00111101
+	defb %01111100
+	defb %11111111
+	defb 0x04, %11111100
+	defb 0x02, %11111010
+	defb 0x04, %11111100
+	defb 0x86
+	defb %11111110
+	defb %01111111
+	defb %00111111
+	defb %11111111
+	defb %11111111
+	defb %11011111
+	defb 0x00
+simon_rle_a980:  ; 0xA980  packed 49; simon_cell0/1_ptr
+	defb 0x0b, %00000000
+	defb 0x84
+	defb %00000010
+	defb %00000111
+	defb %00000111
+	defb %00000110
+	defb 0x06, %00000000
+	defb 0x8b
+	defb %00000011
+	defb %00001100
+	defb %00100000
+	defb %11100000
+	defb %11000000
+	defb %11000000
+	defb %01011100
+	defb %01011011
+	defb %00000111
+	defb %01110110
+	defb %01100000
+; 16x16 +0x20
+	defb 0x08, %00000000
+	defb 0x90
+	defb %00000001
+	defb %00001111
+	defb %00111111
+	defb %00111101
+	defb %01111000
+	defb %01111111
+	defb %11111111
+	defb %11111110
+	defb %00000000
+	defb %00000001
+	defb %00000001
+	defb %00000000
+	defb %00000011
+	defb %00001111
+	defb %00111111
+	defb %11011111
+	defb 0x03, %11111111
+	defb 0x85
+	defb %11100011
+	defb %11100111
+	defb %11111111
+	defb %10001111
+	defb %00011111
+	defb 0x00
+simon_rle_a9b1:  ; 0xA9B1  packed 49; simon_cell0/1_ptr
+	defb 0x02, %00000000
+	defb 0x8d
+	defb %10000000
+	defb %00000000
+	defb %00100000
+	defb %00010000
+	defb %00001000
+	defb %00000000
+	defb %00011000
+	defb %00111100
+	defb %01011110
+	defb %01101110
+	defb %01100111
+	defb %01011011
+	defb %01111100
+	defb 0x0c, %00000000
+	defb 0x95
+	defb %11101100
+	defb %01111100
+	defb %01101110
+	defb %00001110
+	defb %11000110
+	defb %00000000
+	defb %10000000
+	defb %11000000
+	defb %11100000
+	defb %11110000
+	defb %11111000
+	defb %11111100
+	defb %11111100
+	defb %11100100
+	defb %11000010
+	defb %10100001
+	defb %10010001
+	defb %10011000
+	defb %10111100
+	defb %10011111
+	defb %11111111
+	defb 0x0a, %00000000
+	defb 0x83
+	defb %11111100
+	defb %11111110
+	defb %11111110
+	defb 0x03, %11111111
+	defb 0x00
+simon_rle_a9e2:  ; 0xA9E2  packed 93; simon_cell0/1_ptr
+	defb 0x03, %00000000
+	defb 0x81
+	defb %00011000
+	defb 0x03, %00011100
+	defb 0x89
+	defb %01000000
+	defb %00000011
+	defb %10111110
+	defb %00111100
+	defb %00000001
+	defb %00000000
+	defb %00000010
+	defb %11110010
+	defb %11111000
+	defb 0x08, %00000000
+	defb 0x85
+	defb %10000110
+	defb %01000111
+	defb %11000010
+	defb %11001100
+	defb %01011100
+	defb 0x04, %00000000
+	defb 0x8b
+	defb %00011110
+	defb %00111111
+	defb %00110111
+	defb %00100011
+	defb %00100111
+	defb %01111111
+	defb %11111111
+	defb %11111111
+	defb %01111111
+	defb %11111111
+	defb %11111110
+	defb 0x04, %11111111
+	defb 0x03, %00000000
+	defb 0x03, %10000000
+	defb 0x88
+	defb %00000000
+	defb %10000110
+	defb %11001001
+	defb %11101000
+	defb %00111101
+	defb %00111110
+	defb %10111110
+	defb %01111100
+	defb 0x0b, %00000000
+	defb 0x81
+	defb %01111110
+	defb 0x05, %00000010
+	defb 0x81
+	defb %00000100
+	defb 0x18, %00000000
+	defb 0x83
+	defb %11111110
+	defb %11111111
+	defb %11111101
+	defb 0x04, %00000101
+	defb 0x81
+	defb %00001010
+	defb 0x10, %00000000
+; 16x16 +0x80
+	defb 0x04, %00001000
+	defb 0x84
+	defb %00001100
+	defb %00000110
+	defb %00000011
+	defb %01111110
+	defb 0x18, %00000000
+; 16x16 +0xA0
+	defb 0x04, %00010100
+	defb 0x85
+	defb %00010010
+	defb %00001001
+	defb %11111100
+	defb %10000001
+	defb %01111110
+	defb 0x17, %00000000
+	defb 0x00
+simon_rle_aa3f:  ; 0xAA3F  packed 72; simon_cell0/1_ptr
+	defb 0x03, %00000000
+	defb 0x02, %01100000
+	defb 0x8b
+	defb %01111011
+	defb %01111000
+	defb %00011100
+	defb %00011110
+	defb %01101110
+	defb %01001111
+	defb %10000100
+	defb %10000000
+	defb %01110100
+	defb %11110100
+	defb %10000000
+	defb 0x06, %00000000
+	defb 0x82
+	defb %01110000
+	defb %00001111
+	defb 0x09, %00000000
+	defb 0x8b
+	defb %01111000
+	defb %11111100
+	defb %11111110
+	defb %10011111
+	defb %10011100
+	defb %10110111
+	defb %11110011
+	defb %01110001
+	defb %11110001
+	defb %11110001
+	defb %11111011
+	defb 0x04, %11111110
+	defb 0x05, %00000000
+	defb 0x86
+	defb %11110000
+	defb %10001111
+	defb %01110000
+	defb %00001111
+	defb %10000000
+	defb %10000000
+	defb 0x05, %00000000
+; 16x16 +0x40
+	defb 0x88
+	defb %10000000
+	defb %01000000
+	defb %00100000
+	defb %00011000
+	defb %00000100
+	defb %00000100
+	defb %00000010
+	defb %00000010
+	defb 0x18, %00000000
+; 16x16 +0x60
+	defb 0x89
+	defb %01000000
+	defb %10100000
+	defb %01011000
+	defb %00100100
+	defb %00011010
+	defb %00001010
+	defb %00000101
+	defb %00000101
+	defb %00000010
+	defb 0x17, %00000000
+	defb 0x00
+simon_rle_aa87:  ; 0xAA87  packed 103; simon_cell0/1_ptr
+	defb 0x04, %00000000
+	defb 0x8a
+	defb %00001000
+	defb %00001100
+	defb %00000000
+	defb %00000111
+	defb %00000000
+	defb %00011100
+	defb %00111100
+	defb %10111000
+	defb %10100010
+	defb %11000000
+	defb 0x09, %00000000
+	defb 0x8f
+	defb %11111100
+	defb %11111000
+	defb %00000110
+	defb %00000010
+	defb %00001011
+	defb %00001010
+	defb %00000000
+	defb %01110100
+	defb %11000100
+	defb %00000000
+	defb %00000000
+	defb %00001111
+	defb %00011111
+	defb %00010111
+	defb %00011011
+	defb 0x03, %00011111
+	defb 0x94
+	defb %00100011
+	defb %11000011
+	defb %11000111
+	defb %11011011
+	defb %11110011
+	defb %11000001
+	defb %00000001
+	defb %00000000
+	defb %00000000
+	defb %10000000
+	defb %11000000
+	defb %11100000
+	defb %11000000
+	defb %11111100
+	defb %11111110
+	defb %11111111
+	defb %11111101
+	defb %11111101
+	defb %11111110
+	defb %11111111
+	defb 0x03, %11111110
+; 16x16 +0x40
+	defb 0x19, %00000000
+	defb 0x02, %10000000
+	defb 0x83
+	defb %01000000
+	defb %00110000
+	defb %00001111
+	defb 0x0b, %00000000
+	defb 0x02, %00000001
+	defb 0x0d, %00000000
+	defb 0x87
+	defb %10000000
+	defb %01000000
+	defb %01000000
+	defb %10110000
+	defb %01001111
+	defb %00110000
+	defb %00001111
+	defb 0x0f, %00000000
+	defb 0x81
+	defb %11111111
+	defb 0x0d, %00000000
+	defb 0x83
+	defb %00000101
+	defb %00001011
+	defb %11001100
+	defb 0x0e, %00000000
+	defb 0x83
+	defb %11111111
+	defb %00000000
+	defb %11111111
+	defb 0x0b, %00000000
+	defb 0x85
+	defb %00000101
+	defb %00011011
+	defb %11110111
+	defb %11110011
+	defb %11111110
+	defb 0x00
+simon_rle_aaee:  ; 0xAAEE  packed 114; simon_cell0/1_ptr
+	defb 0x03, %00000000
+	defb 0x81
+	defb %00011000
+	defb 0x03, %00011100
+	defb 0x89
+	defb %01000000
+	defb %00000011
+	defb %10111110
+	defb %00111100
+	defb %00000001
+	defb %00000000
+	defb %00000010
+	defb %11110010
+	defb %11111000
+	defb 0x08, %00000000
+	defb 0x85
+	defb %10000110
+	defb %01000111
+	defb %11000010
+	defb %11001100
+	defb %01011100
+	defb 0x04, %00000000
+	defb 0x8b
+	defb %00011110
+	defb %00111111
+	defb %00110111
+	defb %00100011
+	defb %00100111
+	defb %01111111
+	defb %11111111
+	defb %11111111
+	defb %01111111
+	defb %11111111
+	defb %11111110
+	defb 0x04, %11111111
+	defb 0x03, %00000000
+	defb 0x03, %10000000
+	defb 0x88
+	defb %00000000
+	defb %10000110
+	defb %11001001
+	defb %11101000
+	defb %00111101
+	defb %00111110
+	defb %10111110
+	defb %01111100
+	defb 0x0b, %00000000
+	defb 0x87
+	defb %01111110
+	defb %00000000
+	defb %00000010
+	defb %00000000
+	defb %00000010
+	defb %00000000
+	defb %00000100
+	defb 0x18, %00000000
+	defb 0x88
+	defb %11111110
+	defb %11111111
+	defb %11111111
+	defb %00000101
+	defb %00000111
+	defb %00000101
+	defb %00000111
+	defb %00001010
+	defb 0x11, %00000000
+	defb 0x8f
+	defb %00010000
+	defb %00000000
+	defb %00010000
+	defb %00000000
+	defb %00010000
+	defb %00000000
+	defb %00001000
+	defb %00000000
+	defb %00001000
+	defb %00000000
+	defb %00001000
+	defb %00000100
+	defb %00000000
+	defb %00000010
+	defb %10101000
+	defb 0x10, %00000000
+; 16x16 +0xA0
+	defb 0x90
+	defb %00011100
+	defb %00101000
+	defb %00111000
+	defb %00101000
+	defb %00111000
+	defb %00101000
+	defb %00111000
+	defb %00010100
+	defb %00011100
+	defb %00010100
+	defb %00011100
+	defb %00010100
+	defb %00011010
+	defb %00001111
+	defb %11111101
+	defb %01010111
+	defb 0x10, %00000000
+	defb 0x00
+simon_rle_ab60:  ; 0xAB60  packed 84; simon_cell0/1_ptr
+	defb 0x03, %00000000
+	defb 0x02, %01100000
+	defb 0x8b
+	defb %01111011
+	defb %01111000
+	defb %00011100
+	defb %00011110
+	defb %01101110
+	defb %01001111
+	defb %10000100
+	defb %10000000
+	defb %01110100
+	defb %11110100
+	defb %10000000
+	defb 0x06, %00000000
+	defb 0x82
+	defb %01010000
+	defb %00000101
+	defb 0x09, %00000000
+	defb 0x8b
+	defb %01111000
+	defb %11111100
+	defb %11111110
+	defb %10011111
+	defb %10011100
+	defb %10110111
+	defb %11110011
+	defb %01110001
+	defb %11110001
+	defb %11110001
+	defb %11111011
+	defb 0x04, %11111110
+	defb 0x05, %00000000
+	defb 0x86
+	defb %11110000
+	defb %10101111
+	defb %01111010
+	defb %00001111
+	defb %10000000
+	defb %10000000
+	defb 0x05, %00000000
+; 16x16 +0x40
+	defb 0x8e
+	defb %10000000
+	defb %00000000
+	defb %00100000
+	defb %00001000
+	defb %00000000
+	defb %00000100
+	defb %00000000
+	defb %00000010
+	defb %00000000
+	defb %00000010
+	defb %00000000
+	defb %00000100
+	defb %00010000
+	defb %00100000
+	defb 0x12, %00000000
+; 16x16 +0x60
+	defb 0x8f
+	defb %01000000
+	defb %11100000
+	defb %01011000
+	defb %00110100
+	defb %00011110
+	defb %00001010
+	defb %00000111
+	defb %00000101
+	defb %00000111
+	defb %00000101
+	defb %00001110
+	defb %00011010
+	defb %00101100
+	defb %01011000
+	defb %01100000
+	defb 0x11, %00000000
+	defb 0x00
+simon_rle_abb4:  ; 0xABB4  packed 109; simon_cell0/1_ptr
+	defb 0x04, %00000000
+	defb 0x8a
+	defb %00001000
+	defb %00001100
+	defb %00000000
+	defb %00000111
+	defb %00000000
+	defb %00011100
+	defb %00111100
+	defb %10111000
+	defb %10100010
+	defb %11000000
+	defb 0x09, %00000000
+	defb 0x8f
+	defb %11111100
+	defb %11111000
+	defb %00000110
+	defb %00000010
+	defb %00001011
+	defb %00001010
+	defb %00000000
+	defb %01110100
+	defb %11000100
+	defb %00000000
+	defb %00000000
+	defb %00001111
+	defb %00011111
+	defb %00010111
+	defb %00011011
+	defb 0x03, %00011111
+	defb 0x94
+	defb %00100011
+	defb %11000011
+	defb %11000111
+	defb %11011011
+	defb %11110011
+	defb %11000001
+	defb %00000001
+	defb %00000000
+	defb %00000000
+	defb %10000000
+	defb %11000000
+	defb %11100000
+	defb %11000000
+	defb %11111100
+	defb %11111110
+	defb %11111111
+	defb %11111101
+	defb %11111101
+	defb %11111110
+	defb %11111111
+	defb 0x03, %11111110
+; 16x16 +0x40
+	defb 0x09, %00000000
+	defb 0x85
+	defb %10000000
+	defb %00000000
+	defb %01000000
+	defb %00010000
+	defb %00000101
+	defb 0x10, %00000000
+	defb 0x81
+	defb %01010101
+	defb 0x09, %00000000
+	defb 0x87
+	defb %10000000
+	defb %01000000
+	defb %11000000
+	defb %10110000
+	defb %01101111
+	defb %00111010
+	defb %00001111
+	defb 0x0e, %00000000
+	defb 0x83
+	defb %11111111
+	defb %10101010
+	defb %11111111
+; 16x16 +0x80
+	defb 0x0e, %00000000
+	defb 0x81
+	defb %01010101
+	defb 0x0d, %00000000
+	defb 0x83
+	defb %00000101
+	defb %00001011
+	defb %01001100
+	defb 0x0e, %00000000
+	defb 0x83
+	defb %11111111
+	defb %10101010
+	defb %11111111
+	defb 0x0b, %00000000
+	defb 0x85
+	defb %00000101
+	defb %00011011
+	defb %11110111
+	defb %11110011
+	defb %11111110
+	defb 0x00
+simon_rle_ac21:  ; 0xAC21  packed 43; simon_cell0/1_ptr
+	defb 0x03, %00000000
+	defb 0x02, %01100000
+	defb 0x8b
+	defb %01111011
+	defb %01111000
+	defb %00011100
+	defb %00011110
+	defb %01101110
+	defb %01001111
+	defb %10000100
+	defb %10000000
+	defb %01110100
+	defb %11110100
+	defb %10000000
+	defb 0x11, %00000000
+	defb 0x8b
+	defb %01111000
+	defb %11111100
+	defb %11111110
+	defb %10011111
+	defb %10011100
+	defb %10110111
+	defb %11110011
+	defb %01110001
+	defb %11110001
+	defb %11110001
+	defb %11111011
+	defb 0x04, %11111110
+	defb 0x05, %00000000
+	defb 0x02, %10000000
+	defb 0x02, %00000000
+	defb 0x02, %10000000
+	defb 0x05, %00000000
+	defb 0x00
+simon_rle_ac4c:  ; 0xAC4C  packed 71; simon_cell0/1_ptr
+	defb 0x04, %00000000
+	defb 0x8a
+	defb %00001000
+	defb %00001100
+	defb %00000000
+	defb %00000111
+	defb %00000000
+	defb %00011100
+	defb %00111100
+	defb %10111000
+	defb %10100010
+	defb %11000000
+	defb 0x09, %00000000
+	defb 0x8f
+	defb %11111100
+	defb %11111000
+	defb %00000110
+	defb %00000010
+	defb %00001011
+	defb %00001010
+	defb %00000000
+	defb %01110100
+	defb %11000100
+	defb %00000000
+	defb %00000000
+	defb %00001111
+	defb %00011111
+	defb %00010111
+	defb %00011011
+	defb 0x03, %00011111
+	defb 0x94
+	defb %00100011
+	defb %11000011
+	defb %11000111
+	defb %11011011
+	defb %11110011
+	defb %11000001
+	defb %00000001
+	defb %00000000
+	defb %00000000
+	defb %10000000
+	defb %11000000
+	defb %11100000
+	defb %11000000
+	defb %11111100
+	defb %11111110
+	defb %11111111
+	defb %11111101
+	defb %11111101
+	defb %11111110
+	defb %11111111
+	defb 0x03, %11111110
+; 16x16 +0x40
+	defb 0x1c, %00000000
+	defb 0x83
+	defb %00000101
+	defb %00001011
+	defb %00001100
+	defb 0x1c, %00000000
+	defb 0x85
+	defb %00000101
+	defb %00001011
+	defb %00010111
+	defb %00010011
+	defb %00001110
+	defb 0x00
+simon_rle_ac93:  ; 0xAC93  packed 62; simon_cell0/1_ptr
+	defb 0x06, %00000000
+	defb 0x8a
+	defb %00011110
+	defb %00001111
+	defb %00001111
+	defb %01100110
+	defb %01000000
+	defb %00000000
+	defb %00000000
+	defb %00000010
+	defb %00010000
+	defb %00001010
+	defb 0x03, %00000000
+	defb 0xad
+	defb %00110000
+	defb %01110000
+	defb %01110000
+	defb %00110000
+	defb %11000000
+	defb %11100000
+	defb %00000000
+	defb %01100000
+	defb %01100110
+	defb %01010110
+	defb %00110100
+	defb %00000000
+	defb %10000000
+	defb %00000000
+	defb %00000000
+	defb %00000001
+	defb %00000011
+	defb %00000011
+	defb %00011111
+	defb %00111111
+	defb %00111111
+	defb %01111111
+	defb %10011111
+	defb %10111111
+	defb %11111111
+	defb %00111111
+	defb %00111111
+	defb %00011111
+	defb %00011111
+	defb %00000000
+	defb %11110000
+	defb %11111000
+	defb %11001000
+	defb %11011000
+	defb %11001000
+	defb %11101000
+	defb %10111000
+	defb %11000000
+	defb %11110000
+	defb %10011110
+	defb %10011001
+	defb %10111001
+	defb %11111010
+	defb %11111100
+	defb %11000000
+	defb 0x00
+simon_rle_acd1:  ; 0xACD1  packed 65; simon_cell0/1_ptr
+	defb 0x02, %00000010
+	defb 0x88
+	defb %00000000
+	defb %00001110
+	defb %00001110
+	defb %00001100
+	defb %00000100
+	defb %00010000
+	defb %00011000
+	defb %00110000
+	defb 0x03, %01100000
+	defb 0x81
+	defb %01110000
+	defb 0x03, %00000000
+	defb 0x87
+	defb %01000000
+	defb %00100000
+	defb %01100000
+	defb %01110000
+	defb %00110000
+	defb %00001000
+	defb %00000000
+	defb 0x03, %00011000
+	defb 0x85
+	defb %00001000
+	defb %00011100
+	defb %00011110
+	defb %00000000
+	defb %00000000
+; 16x16 +0x20
+	defb 0x03, %00111111
+	defb 0x02, %00010001
+	defb 0x85
+	defb %00010011
+	defb %00011010
+	defb %00111110
+	defb %01111100
+	defb %11111000
+	defb 0x03, %11110000
+	defb 0x02, %11111000
+	defb 0x88
+	defb %00000000
+	defb %10000000
+	defb %11000000
+	defb %11100000
+	defb %10010000
+	defb %10001000
+	defb %01001100
+	defb %00110100
+	defb 0x04, %00111100
+	defb 0x81
+	defb %00011100
+	defb 0x03, %00111111
+	defb 0x81
+	defb %00000000
+	defb 0x00
+simon_rle_ad12:  ; 0xAD12  packed 60; simon_cell0/1_ptr
+	defb 0x05, %00000000
+	defb 0x9a
+	defb %00000001
+	defb %00000010
+	defb %00000101
+	defb %00000011
+	defb %00000011
+	defb %00000100
+	defb %00000110
+	defb %00000101
+	defb %00000001
+	defb %00000000
+	defb %00000001
+	defb %00000000
+	defb %00000000
+	defb %00000110
+	defb %00001110
+	defb %00011110
+	defb %11011110
+	defb %11101000
+	defb %00100000
+	defb %10011010
+	defb %00001100
+	defb %00000100
+	defb %10000000
+	defb %11001000
+	defb %11111100
+	defb %01111100
+	defb 0x05, %00000000
+	defb 0x88
+	defb %00000001
+	defb %00000011
+	defb %00000011
+	defb %00000110
+	defb %00000100
+	defb %00000100
+	defb %00000011
+	defb %00001011
+	defb 0x04, %00001111
+	defb 0x90
+	defb %00111110
+	defb %00111111
+	defb %01111001
+	defb %01111011
+	defb %11111001
+	defb %10111101
+	defb %11011111
+	defb %11111110
+	defb %01111111
+	defb %11111110
+	defb %11111100
+	defb %01111100
+	defb %10110100
+	defb %11000010
+	defb %11000010
+	defb %11111100
+	defb 0x00
+simon_rle_ad4e:  ; 0xAD4E  packed 57; simon_cell0/1_ptr
+	defb 0x81
+	defb %00000001
+	defb 0x09, %00000000
+	defb 0x02, %00000101
+	defb 0x02, %00000011
+	defb 0x02, %00000000
+	defb 0x02, %00001000
+	defb 0x02, %11000000
+	defb 0x86
+	defb %11010000
+	defb %11011000
+	defb %11011000
+	defb %00010000
+	defb %11100000
+	defb %11000000
+	defb 0x03, %10000000
+	defb 0x83
+	defb %11000000
+	defb %00000000
+	defb %00000000
+; 16x16 +0x20
+	defb 0x03, %00000111
+	defb 0x05, %00000001
+	defb 0x81
+	defb %00000011
+	defb 0x03, %00001111
+	defb 0x02, %00000111
+	defb 0x8c
+	defb %00000011
+	defb %00000000
+	defb %11111000
+	defb %11111000
+	defb %00111000
+	defb %00110000
+	defb %00101000
+	defb %00100100
+	defb %00100100
+	defb %11101100
+	defb %11111000
+	defb %11100000
+	defb 0x03, %11000000
+	defb 0x02, %11100000
+	defb 0x81
+	defb %00000000
+	defb 0x00
+simon_rle_ad87:  ; 0xAD87  packed 60; simon_cell0/1_ptr
+	defb 0x06, %00000000
+	defb 0x8a
+	defb %00000001
+	defb %00000011
+	defb %00000000
+	defb %00000111
+	defb %00000010
+	defb %00001000
+	defb %00000011
+	defb %00000111
+	defb %00010001
+	defb %00010010
+	defb 0x03, %00000000
+	defb 0x8d
+	defb %00000110
+	defb %00001110
+	defb %00011110
+	defb %10011110
+	defb %11001000
+	defb %01100000
+	defb %00110100
+	defb %00011000
+	defb %00001000
+	defb %00100000
+	defb %11110000
+	defb %11110000
+	defb %00110000
+; 16x16 +0x20
+	defb 0x05, %00000000
+	defb 0x9b
+	defb %00000001
+	defb %00000011
+	defb %00000111
+	defb %00000111
+	defb %00001000
+	defb %00011101
+	defb %00011111
+	defb %00011100
+	defb %00011111
+	defb %00111111
+	defb %00111111
+	defb %00000000
+	defb %00111110
+	defb %01111111
+	defb %01111001
+	defb %11111011
+	defb %11111001
+	defb %01111101
+	defb %10111111
+	defb %11111100
+	defb %11111010
+	defb %11111100
+	defb %11111100
+	defb %11011100
+	defb %00001000
+	defb %10001000
+	defb %11111000
+	defb 0x00
+simon_rle_adc3:  ; 0xADC3  packed 66; simon_cell0/1_ptr
+	defb 0x98
+	defb %00011101
+	defb %00000011
+	defb %00000001
+	defb %00000000
+	defb %00000110
+	defb %00000110
+	defb %00000000
+	defb %00001000
+	defb %00011100
+	defb %00011000
+	defb %00110000
+	defb %01100000
+	defb %00110000
+	defb %00111000
+	defb %00000000
+	defb %00000000
+	defb %10000000
+	defb %11000000
+	defb %11100000
+	defb %01110000
+	defb %00111000
+	defb %00000000
+	defb %00000000
+	defb %00001100
+	defb 0x03, %00011100
+	defb 0xa1
+	defb %00001100
+	defb %00001110
+	defb %00001111
+	defb %00000000
+	defb %00000000
+	defb %00111110
+	defb %00111100
+	defb %00111110
+	defb %00001111
+	defb %00001001
+	defb %00001001
+	defb %00001111
+	defb %00011111
+	defb %00111110
+	defb %01111100
+	defb %01111000
+	defb %01110000
+	defb %01111000
+	defb %01111100
+	defb %01111110
+	defb %00000000
+	defb %01110000
+	defb %00100000
+	defb %00010000
+	defb %10001100
+	defb %11000110
+	defb %00111110
+	defb %00011110
+	defb %00011110
+	defb %00111110
+	defb %00111110
+	defb %00011110
+	defb %00011110
+	defb 0x03, %00011111
+	defb 0x81
+	defb %00000000
+	defb 0x00
+simon_rle_ae05:  ; 0xAE05  packed 62; simon_cell0/1_ptr
+	defb 0x06, %00000000
+	defb 0x8a
+	defb %00011110
+	defb %00001111
+	defb %00001111
+	defb %01100110
+	defb %01000000
+	defb %00000000
+	defb %00000000
+	defb %00000010
+	defb %00010000
+	defb %00001010
+	defb 0x03, %00000000
+	defb 0xad
+	defb %00110000
+	defb %01110000
+	defb %01110000
+	defb %00110000
+	defb %11000010
+	defb %11100110
+	defb %00000110
+	defb %01100010
+	defb %01100100
+	defb %01010110
+	defb %00110110
+	defb %00000110
+	defb %10000010
+	defb %00000000
+	defb %00000000
+	defb %00000001
+	defb %00000011
+	defb %00000011
+	defb %00011111
+	defb %00111111
+	defb %00111111
+	defb %01111111
+	defb %10011111
+	defb %10111111
+	defb %11111111
+	defb %00111111
+	defb %00111111
+	defb %00011111
+	defb %00011111
+	defb %00000000
+	defb %11110000
+	defb %11111000
+	defb %11001000
+	defb %11011000
+	defb %11001000
+	defb %11101011
+	defb %10111111
+	defb %11001101
+	defb %11111101
+	defb %10011111
+	defb %10011111
+	defb %10111101
+	defb %11111101
+	defb %11111101
+	defb %11001101
+	defb 0x00
+simon_rle_ae43:  ; 0xAE43  packed 61; simon_cell0/1_ptr
+	defb 0x05, %00000000
+	defb 0x9b
+	defb %00000001
+	defb %00000010
+	defb %00000101
+	defb %00000011
+	defb %00000011
+	defb %00000100
+	defb %00000110
+	defb %00000101
+	defb %00000001
+	defb %00000000
+	defb %00000001
+	defb %00000000
+	defb %00000000
+	defb %00000110
+	defb %00001110
+	defb %00011110
+	defb %11011110
+	defb %11101000
+	defb %00100000
+	defb %10011000
+	defb %00000010
+	defb %00000110
+	defb %10000110
+	defb %11000010
+	defb %11110100
+	defb %01110110
+	defb %00000110
+; 16x16 +0x20
+	defb 0x04, %00000000
+	defb 0x88
+	defb %00000001
+	defb %00000011
+	defb %00000011
+	defb %00000110
+	defb %00000100
+	defb %00000100
+	defb %00000011
+	defb %00001011
+	defb 0x04, %00001111
+	defb 0x90
+	defb %00111110
+	defb %00111111
+	defb %01111001
+	defb %01111011
+	defb %11111001
+	defb %10111101
+	defb %11011111
+	defb %11111110
+	defb %01111111
+	defb %11111111
+	defb %11111101
+	defb %01111101
+	defb %10111111
+	defb %11001111
+	defb %11001101
+	defb %11111101
+	defb 0x00
+simon_rle_ae80:  ; 0xAE80  packed 60; simon_cell0/1_ptr
+	defb 0x06, %00000000
+	defb 0x8a
+	defb %00000001
+	defb %00000011
+	defb %00000000
+	defb %00000111
+	defb %00000010
+	defb %00001000
+	defb %00000011
+	defb %00000111
+	defb %00010001
+	defb %00010010
+	defb 0x03, %00000000
+	defb 0x8d
+	defb %00000110
+	defb %00001110
+	defb %00011110
+	defb %10011110
+	defb %11001000
+	defb %01100000
+	defb %00110010
+	defb %00010110
+	defb %00000110
+	defb %00100010
+	defb %11110100
+	defb %11110110
+	defb %00110110
+; 16x16 +0x20
+	defb 0x05, %00000000
+	defb 0x9b
+	defb %00000001
+	defb %00000011
+	defb %00000111
+	defb %00000111
+	defb %00001000
+	defb %00011101
+	defb %00011111
+	defb %00011100
+	defb %00011111
+	defb %00111111
+	defb %00111111
+	defb %00000000
+	defb %00111110
+	defb %01111111
+	defb %01111001
+	defb %11111011
+	defb %11111001
+	defb %01111101
+	defb %10111111
+	defb %11111111
+	defb %11111111
+	defb %11111101
+	defb %11111101
+	defb %11011111
+	defb %00001111
+	defb %10001101
+	defb %11111101
+	defb 0x00
+simon_rle_aebc:  ; 0xAEBC  packed 65; simon_cell0/1_ptr
+	defb 0x02, %00000010
+	defb 0x88
+	defb %00000000
+	defb %00001110
+	defb %00001110
+	defb %00001100
+	defb %00000100
+	defb %00010000
+	defb %00011000
+	defb %00110000
+	defb 0x03, %01100000
+	defb 0x8b
+	defb %01110000
+	defb %00000000
+	defb %00000000
+	defb %00000010
+	defb %01000010
+	defb %00100010
+	defb %01100000
+	defb %01110000
+	defb %00110000
+	defb %00001000
+	defb %00000000
+	defb 0x03, %00011000
+	defb 0x85
+	defb %00001000
+	defb %00011100
+	defb %00011110
+	defb %00000000
+	defb %00000000
+; 16x16 +0x20
+	defb 0x03, %00111111
+	defb 0x02, %00010001
+	defb 0x85
+	defb %00010011
+	defb %00011010
+	defb %00111110
+	defb %01111100
+	defb %11111000
+	defb 0x03, %11110000
+	defb 0x02, %11111000
+	defb 0x88
+	defb %00000000
+	defb %10000101
+	defb %11000111
+	defb %11100111
+	defb %10010111
+	defb %10001011
+	defb %01001101
+	defb %00110100
+	defb 0x04, %00111100
+	defb 0x81
+	defb %00011100
+	defb 0x03, %00111111
+	defb 0x81
+	defb %00000000
+	defb 0x00
+simon_rle_aefd:  ; 0xAEFD  packed 57; simon_cell0/1_ptr
+	defb 0x81
+	defb %00000001
+	defb 0x09, %00000000
+	defb 0x02, %00000101
+	defb 0x02, %00000011
+	defb 0x02, %00000000
+	defb 0x8a
+	defb %00000110
+	defb %00000010
+	defb %11000010
+	defb %11000010
+	defb %11010010
+	defb %11011000
+	defb %11011000
+	defb %00010000
+	defb %11100000
+	defb %11000000
+	defb 0x03, %10000000
+	defb 0x83
+	defb %11000000
+	defb %00000000
+	defb %00000000
+; 16x16 +0x20
+	defb 0x03, %00000111
+	defb 0x05, %00000001
+	defb 0x81
+	defb %00000011
+	defb 0x03, %00001111
+	defb 0x02, %00000111
+	defb 0x8c
+	defb %00000011
+	defb %00000000
+	defb %11111101
+	defb %11111101
+	defb %00111101
+	defb %00110111
+	defb %00101111
+	defb %00100111
+	defb %00100111
+	defb %11101101
+	defb %11111000
+	defb %11100000
+	defb 0x03, %11000000
+	defb 0x02, %11100000
+	defb 0x81
+	defb %00000000
+	defb 0x00
+simon_rle_af36:  ; 0xAF36  packed 66; simon_cell0/1_ptr
+	defb 0x98
+	defb %00011101
+	defb %00000011
+	defb %00000001
+	defb %00000000
+	defb %00000110
+	defb %00000110
+	defb %00000000
+	defb %00001000
+	defb %00011100
+	defb %00011000
+	defb %00110000
+	defb %01100000
+	defb %00110000
+	defb %00111000
+	defb %00000000
+	defb %00000000
+	defb %10000110
+	defb %11000010
+	defb %11100010
+	defb %01110010
+	defb %00111010
+	defb %00000000
+	defb %00000000
+	defb %00001100
+	defb 0x03, %00011100
+	defb 0xa1
+	defb %00001100
+	defb %00001110
+	defb %00001111
+	defb %00000000
+	defb %00000000
+	defb %00111110
+	defb %00111100
+	defb %00111110
+	defb %00001111
+	defb %00001001
+	defb %00001001
+	defb %00001111
+	defb %00011111
+	defb %00111110
+	defb %01111100
+	defb %01111000
+	defb %01110000
+	defb %01111000
+	defb %01111100
+	defb %01111110
+	defb %00000000
+	defb %01111101
+	defb %00101101
+	defb %00010101
+	defb %10001111
+	defb %11000111
+	defb %00111111
+	defb %00011111
+	defb %00011111
+	defb %00111110
+	defb %00111110
+	defb %00011110
+	defb %00011110
+	defb 0x03, %00011111
+	defb 0x81
+	defb %00000000
+	defb 0x00
+simon_rle_af78:  ; 0xAF78  packed 60; not in cell/intro ptrs (orphan plane)
+	defb 0x06, %00000000
+	defb 0x8a
+	defb %00000001
+	defb %00000011
+	defb %00000000
+	defb %00000111
+	defb %00000010
+	defb %00001000
+	defb %00000011
+	defb %00000111
+	defb %00010001
+	defb %00010010
+	defb 0x03, %00000000
+	defb 0x8d
+	defb %00000110
+	defb %00001110
+	defb %00011110
+	defb %10011110
+	defb %11001000
+	defb %01100000
+	defb %00110100
+	defb %00011000
+	defb %00001000
+	defb %00100000
+	defb %11110000
+	defb %11110000
+	defb %00110000
+; 16x16 +0x20
+	defb 0x05, %00000000
+	defb 0x9b
+	defb %00000001
+	defb %00000011
+	defb %00000111
+	defb %00000111
+	defb %00001000
+	defb %00011101
+	defb %00011111
+	defb %00011100
+	defb %00011111
+	defb %00111111
+	defb %00111111
+	defb %00000000
+	defb %00111110
+	defb %01111111
+	defb %01111001
+	defb %11111011
+	defb %11111001
+	defb %01111101
+	defb %10111111
+	defb %11111100
+	defb %11111010
+	defb %11111100
+	defb %11111100
+	defb %11011100
+	defb %00001000
+	defb %10001000
+	defb %11111000
+	defb 0x00
+simon_rle_afb4:  ; 0xAFB4  packed 54; simon_cell0/1_ptr
+	defb 0x03, %00000000
+	defb 0x85
+	defb %01100001
+	defb %01110011
+	defb %01011100
+	defb %01000010
+	defb %01100000
+	defb 0x09, %00000000
+	defb 0x87
+	defb %01100000
+	defb %01110000
+	defb %11110000
+	defb %01111000
+	defb %10111000
+	defb %00011000
+	defb %00000000
+	defb 0x03, %00011100
+	defb 0x02, %00011000
+	defb 0x8b
+	defb %00111000
+	defb %00011100
+	defb %00001110
+	defb %00111111
+	defb %00111111
+	defb %01111111
+	defb %11111110
+	defb %11111100
+	defb %11111111
+	defb %11111111
+	defb %11111011
+	defb 0x08, %00000000
+	defb 0x88
+	defb %11100000
+	defb %10010000
+	defb %10001000
+	defb %00001000
+	defb %10000100
+	defb %01000100
+	defb %10100100
+	defb %00011100
+	defb 0x03, %00111110
+	defb 0x02, %00111100
+	defb 0x83
+	defb %01111100
+	defb %01111110
+	defb %00011111
+	defb 0x00
+simon_rle_afea:  ; 0xAFEA  packed 60; not in cell/intro ptrs (orphan plane)
+	defb 0x05, %00000000
+	defb 0x9a
+	defb %00000001
+	defb %00000010
+	defb %00000101
+	defb %00000011
+	defb %00000011
+	defb %00000100
+	defb %00000110
+	defb %00000101
+	defb %00000001
+	defb %00000000
+	defb %00000001
+	defb %00000000
+	defb %00000000
+	defb %00000110
+	defb %00001110
+	defb %00011110
+	defb %11011110
+	defb %11101000
+	defb %00100000
+	defb %10011010
+	defb %00001100
+	defb %00000100
+	defb %10000000
+	defb %11001000
+	defb %11111100
+	defb %01111100
+	defb 0x05, %00000000
+	defb 0x88
+	defb %00000001
+	defb %00000011
+	defb %00000011
+	defb %00000110
+	defb %00000100
+	defb %00000100
+	defb %00000011
+	defb %00001011
+	defb 0x04, %00001111
+	defb 0x90
+	defb %00111110
+	defb %00111111
+	defb %01111001
+	defb %01111011
+	defb %11111001
+	defb %10111101
+	defb %11011111
+	defb %11111110
+	defb %01111111
+	defb %11111110
+	defb %11111100
+	defb %01111100
+	defb %10110100
+	defb %11000010
+	defb %11000010
+	defb %11111100
+	defb 0x00
+simon_rle_b026:  ; 0xB026  packed 57; simon_cell0/1_ptr
+	defb 0x81
+	defb %00000001
+	defb 0x09, %00000000
+	defb 0x02, %00000101
+	defb 0x02, %00000011
+	defb 0x02, %00000000
+	defb 0x02, %00001000
+	defb 0x02, %11000000
+	defb 0x86
+	defb %11010000
+	defb %11011000
+	defb %11011000
+	defb %00010000
+	defb %11100000
+	defb %11000000
+	defb 0x03, %10000000
+	defb 0x83
+	defb %11000000
+	defb %00000000
+	defb %00000000
+; 16x16 +0x20
+	defb 0x03, %00000111
+	defb 0x05, %00000001
+	defb 0x81
+	defb %00000011
+	defb 0x03, %00001111
+	defb 0x02, %00000111
+	defb 0x8c
+	defb %00000011
+	defb %00000000
+	defb %11111000
+	defb %11111000
+	defb %00111000
+	defb %00110000
+	defb %00101000
+	defb %00100100
+	defb %00100100
+	defb %11101100
+	defb %11111000
+	defb %11100000
+	defb 0x03, %11000000
+	defb 0x02, %11100000
+	defb 0x81
+	defb %00000000
+	defb 0x00
+simon_rle_b05f:  ; 0xB05F  packed 60; not in cell/intro ptrs (orphan plane)
+	defb 0x06, %00000000
+	defb 0x8a
+	defb %00000001
+	defb %00000011
+	defb %00000000
+	defb %00000111
+	defb %00000010
+	defb %00001000
+	defb %00000011
+	defb %00000111
+	defb %00010001
+	defb %00010010
+	defb 0x03, %00000000
+	defb 0x8d
+	defb %00000110
+	defb %00001110
+	defb %00011110
+	defb %10011110
+	defb %11001000
+	defb %01100000
+	defb %00110100
+	defb %00011000
+	defb %00001000
+	defb %00100000
+	defb %11110000
+	defb %11110000
+	defb %00110000
+; 16x16 +0x20
+	defb 0x05, %00000000
+	defb 0x9b
+	defb %00000001
+	defb %00000011
+	defb %00000111
+	defb %00000111
+	defb %00001000
+	defb %00011101
+	defb %00011111
+	defb %00011100
+	defb %00011111
+	defb %00111111
+	defb %00111111
+	defb %00000000
+	defb %00111110
+	defb %01111111
+	defb %01111001
+	defb %11111011
+	defb %11111001
+	defb %01111101
+	defb %10111111
+	defb %11111100
+	defb %11111010
+	defb %11111100
+	defb %11111100
+	defb %11011100
+	defb %00001000
+	defb %10001000
+	defb %11111000
+	defb 0x00
+simon_rle_b09b:  ; 0xB09B  packed 51; simon_cell0/1_ptr
+	defb 0x04, %00000000
+	defb 0x86
+	defb %00001100
+	defb %00001110
+	defb %00001110
+	defb %00000110
+	defb %00001000
+	defb %00011100
+	defb 0x03, %00011000
+	defb 0x8b
+	defb %00111000
+	defb %00011100
+	defb %00001110
+	defb %00000000
+	defb %01111110
+	defb %11000000
+	defb %00011100
+	defb %00011000
+	defb %00110000
+	defb %01111000
+	defb %01111100
+	defb 0x08, %00000000
+; 16x16 +0x20
+	defb 0x04, %00111111
+	defb 0x84
+	defb %00010011
+	defb %00010001
+	defb %00010001
+	defb %00011111
+	defb 0x03, %00111110
+	defb 0x02, %00111100
+	defb 0x8b
+	defb %01111100
+	defb %01111010
+	defb %00011101
+	defb %11111110
+	defb %10000001
+	defb %00111111
+	defb %11111110
+	defb %00111100
+	defb %01111000
+	defb %11110100
+	defb %11111010
+	defb 0x08, %00000000
+	defb 0x00
+simon_rle_b0ce:  ; 0xB0CE  packed 55; simon_cell0/1_ptr
+	defb 0x03, %00000000
+	defb 0x85
+	defb %01100001
+	defb %01110011
+	defb %01011100
+	defb %01000010
+	defb %01100000
+	defb 0x08, %00000000
+	defb 0x88
+	defb %00000110
+	defb %01100010
+	defb %01110010
+	defb %11110010
+	defb %01111010
+	defb %10111000
+	defb %00011000
+	defb %00000000
+	defb 0x03, %00011100
+	defb 0x02, %00011000
+	defb 0x8b
+	defb %00111000
+	defb %00011100
+	defb %00001110
+	defb %00111111
+	defb %00111111
+	defb %01111111
+	defb %11111110
+	defb %11111100
+	defb %11111111
+	defb %11111111
+	defb %11111011
+	defb 0x08, %00000000
+	defb 0x88
+	defb %11101101
+	defb %10011101
+	defb %10001101
+	defb %00001111
+	defb %10000111
+	defb %01000111
+	defb %10100111
+	defb %00011101
+	defb 0x03, %00111110
+	defb 0x02, %00111100
+	defb 0x83
+	defb %01111100
+	defb %01111110
+	defb %00011111
+	defb 0x00
+simon_rle_b105:  ; 0xB105  packed 57; simon_cell0/1_ptr
+	defb 0x81
+	defb %00000001
+	defb 0x09, %00000000
+	defb 0x02, %00000101
+	defb 0x02, %00000011
+	defb 0x02, %00000000
+	defb 0x8a
+	defb %00000110
+	defb %00000010
+	defb %11000010
+	defb %11000010
+	defb %11010010
+	defb %11011000
+	defb %11011000
+	defb %00010000
+	defb %11100000
+	defb %11000000
+	defb 0x03, %10000000
+	defb 0x83
+	defb %11000000
+	defb %00000000
+	defb %00000000
+; 16x16 +0x20
+	defb 0x03, %00000111
+	defb 0x05, %00000001
+	defb 0x81
+	defb %00000011
+	defb 0x03, %00001111
+	defb 0x02, %00000111
+	defb 0x8c
+	defb %00000011
+	defb %00000000
+	defb %11111101
+	defb %11111101
+	defb %00111101
+	defb %00110111
+	defb %00101111
+	defb %00100111
+	defb %00100111
+	defb %11101101
+	defb %11111000
+	defb %11100000
+	defb 0x03, %11000000
+	defb 0x02, %11100000
+	defb 0x81
+	defb %00000000
+	defb 0x00
+simon_rle_b13e:  ; 0xB13E  packed 51; simon_cell0/1_ptr
+	defb 0x04, %00000000
+	defb 0x86
+	defb %00001100
+	defb %00001110
+	defb %00001110
+	defb %00000110
+	defb %00001000
+	defb %00011100
+	defb 0x03, %00011000
+	defb 0x8b
+	defb %00111000
+	defb %00011100
+	defb %00001110
+	defb %00000110
+	defb %01110010
+	defb %11000010
+	defb %00011010
+	defb %00011010
+	defb %00110000
+	defb %01111000
+	defb %01111100
+	defb 0x08, %00000000
+; 16x16 +0x20
+	defb 0x04, %00111111
+	defb 0x84
+	defb %00010011
+	defb %00010001
+	defb %00010001
+	defb %00011111
+	defb 0x03, %00111110
+	defb 0x02, %00111100
+	defb 0x8b
+	defb %01111100
+	defb %01111010
+	defb %00011101
+	defb %11111101
+	defb %10001101
+	defb %00111101
+	defb %11111111
+	defb %00111111
+	defb %01111111
+	defb %11110111
+	defb %11111011
+	defb 0x08, %00000000
+	defb 0x00
+simon_rle_b171:  ; 0xB171  packed 45; simon_cell0/1_ptr
+	defb 0x03, %00000000
+	defb 0x85
+	defb %01100001
+	defb %01110011
+	defb %01011100
+	defb %01000010
+	defb %01100000
+	defb 0x09, %00000000
+	defb 0x87
+	defb %00110110
+	defb %00101110
+	defb %10001110
+	defb %11001100
+	defb %01011000
+	defb %11011100
+	defb %00111110
+	defb 0x08, %00000000
+; 16x16 +0x20
+	defb 0x02, %00111111
+	defb 0x87
+	defb %01111111
+	defb %11111110
+	defb %11111100
+	defb %11111111
+	defb %11111111
+	defb %11111011
+	defb %11111000
+	defb 0x07, %00000000
+	defb 0x89
+	defb %11111110
+	defb %11001111
+	defb %11011111
+	defb %01111111
+	defb %00111110
+	defb %10111100
+	defb %00111110
+	defb %11111111
+	defb %01111111
+	defb 0x07, %00000000
+	defb 0x00
+simon_rle_b19e:  ; 0xB19E  packed 46; simon_cell0/1_ptr
+	defb 0x03, %00000000
+	defb 0x85
+	defb %01100001
+	defb %01110011
+	defb %01011100
+	defb %01000010
+	defb %01100000
+	defb 0x08, %00000000
+	defb 0x88
+	defb %00000010
+	defb %00110010
+	defb %00101010
+	defb %10001000
+	defb %11001100
+	defb %01011000
+	defb %11011100
+	defb %00111110
+	defb 0x08, %00000000
+; 16x16 +0x20
+	defb 0x02, %00111111
+	defb 0x87
+	defb %01111111
+	defb %11111110
+	defb %11111100
+	defb %11111111
+	defb %11111111
+	defb %11111011
+	defb %11111000
+	defb 0x07, %00000000
+	defb 0x89
+	defb %11111101
+	defb %11001111
+	defb %11011111
+	defb %01111111
+	defb %00111111
+	defb %10111101
+	defb %00111110
+	defb %11111111
+	defb %01111111
+	defb 0x07, %00000000
+	defb 0x00
+simon_rle_b1cc:  ; 0xB1CC  packed 51; simon_cell0/1_ptr
+	defb 0x07, %00000000
+	defb 0x89
+	defb %00000001
+	defb %00011111
+	defb %00011111
+	defb %00000000
+	defb %00000000
+	defb %00100000
+	defb %00100000
+	defb %00010000
+	defb %00001111
+	defb 0x06, %00000000
+	defb 0x89
+	defb %11000000
+	defb %11100000
+	defb %11000000
+	defb %10101000
+	defb %01100000
+	defb %11100000
+	defb %11100000
+	defb %01101100
+	defb %00001100
+	defb 0x07, %00000000
+	defb 0x82
+	defb %00000001
+	defb %00011111
+	defb 0x04, %00111111
+	defb 0x02, %01011111
+	defb 0x02, %00111111
+	defb 0x03, %00000000
+	defb 0x82
+	defb %00110100
+	defb %00111110
+	defb 0x04, %11111111
+	defb 0x87
+	defb %11110111
+	defb %10111000
+	defb %00010000
+	defb %00011100
+	defb %10011110
+	defb %11111110
+	defb %11111100
+	defb 0x00
+simon_rle_b1ff:  ; 0xB1FF  packed 54; simon_cell0/1_ptr
+	defb 0x03, %00000000
+	defb 0x85
+	defb %01100001
+	defb %01110011
+	defb %01011100
+	defb %01000010
+	defb %01100000
+	defb 0x09, %00000000
+	defb 0x87
+	defb %01100000
+	defb %01110000
+	defb %11110000
+	defb %01111000
+	defb %10111000
+	defb %00011000
+	defb %00000000
+	defb 0x03, %00011100
+	defb 0x02, %00011000
+	defb 0x8b
+	defb %00111000
+	defb %00011100
+	defb %00001110
+	defb %00111111
+	defb %00111111
+	defb %01111111
+	defb %11111110
+	defb %11111100
+	defb %11111111
+	defb %11111111
+	defb %11111011
+	defb 0x08, %00000000
+	defb 0x88
+	defb %11100000
+	defb %10010000
+	defb %10001000
+	defb %00001000
+	defb %10000100
+	defb %01000100
+	defb %10100100
+	defb %00011100
+	defb 0x03, %00111110
+	defb 0x02, %00111100
+	defb 0x83
+	defb %01111100
+	defb %01111110
+	defb %00011111
+	defb 0x00
+simon_rle_b235:  ; 0xB235  packed 22; simon_cell0/1_ptr
+	defb 0x0f, %00000000
+	defb 0x81
+	defb %00000001
+	defb 0x0e, %00000000
+	defb 0x82
+	defb %11000000
+	defb %11100000
+; 16x16 +0x20
+	defb 0x0e, %00000000
+	defb 0x82
+	defb %00000001
+	defb %00011111
+	defb 0x0b, %00000000
+	defb 0x82
+	defb %00110100
+	defb %00111110
+	defb 0x03, %11111111
+	defb 0x00
+simon_rle_b24b:  ; 0xB24B  packed 63; simon_cell0/1_ptr
+	defb 0x02, %00011111
+	defb 0x02, %00000000
+	defb 0x02, %00100000
+	defb 0x82
+	defb %00010000
+	defb %00001111
+	defb 0x03, %00000000
+	defb 0x95
+	defb %01100001
+	defb %01110011
+	defb %01011100
+	defb %01000010
+	defb %01100000
+	defb %11000000
+	defb %10101000
+	defb %01100000
+	defb %11100000
+	defb %11100000
+	defb %01101100
+	defb %00001100
+	defb %00000000
+	defb %00000000
+	defb %00111110
+	defb %00111110
+	defb %10001110
+	defb %11001100
+	defb %01011000
+	defb %11011100
+	defb %00111110
+; 16x16 +0x20
+	defb 0x04, %00111111
+	defb 0x02, %01011111
+	defb 0x04, %00111111
+	defb 0x96
+	defb %01111111
+	defb %11111110
+	defb %11111100
+	defb %11111111
+	defb %11111111
+	defb %11111011
+	defb %11111111
+	defb %11110111
+	defb %10111000
+	defb %00010000
+	defb %00011100
+	defb %10011110
+	defb %11111110
+	defb %11111100
+	defb %11111110
+	defb %11001111
+	defb %11001111
+	defb %01111111
+	defb %00111110
+	defb %10111100
+	defb %00111110
+	defb %11111111
+	defb 0x00
+simon_rle_b28a:  ; 0xB28A  packed 50; simon_cell0/1_ptr
+	defb 0x05, %00000000
+	defb 0x8b
+	defb %11000000
+	defb %00110000
+	defb %00000100
+	defb %00000111
+	defb %00000011
+	defb %00000011
+	defb %00111010
+	defb %11011010
+	defb %11100000
+	defb %01101110
+	defb %00000110
+	defb 0x0b, %00000000
+	defb 0x8d
+	defb %01000000
+	defb %11100000
+	defb %11100000
+	defb %01100000
+	defb %00000000
+	defb %00000000
+	defb %10000000
+	defb %10000000
+	defb %00000000
+	defb %11000000
+	defb %11110000
+	defb %11111100
+	defb %11111011
+	defb 0x03, %11111111
+	defb 0x85
+	defb %11000111
+	defb %11100111
+	defb %11111111
+	defb %11110001
+	defb %11111000
+	defb 0x08, %00000000
+	defb 0x88
+	defb %10000000
+	defb %11110000
+	defb %11111100
+	defb %10111100
+	defb %00011110
+	defb %11111110
+	defb %11111111
+	defb %01111111
+	defb 0x00
+simon_rle_b2bc:  ; 0xB2BC  packed 49; simon_cell0/1_ptr
+	defb 0x0b, %00000000
+	defb 0x94
+	defb %00110111
+	defb %00111110
+	defb %01110110
+	defb %01110000
+	defb %01100011
+	defb %00000000
+	defb %00000000
+	defb %00000001
+	defb %00000000
+	defb %00000100
+	defb %00001000
+	defb %00010000
+	defb %00000000
+	defb %00011000
+	defb %00111100
+	defb %01111010
+	defb %01110110
+	defb %11100110
+	defb %11011010
+	defb %00111110
+	defb 0x0b, %00000000
+	defb 0x83
+	defb %00111111
+	defb %01111111
+	defb %01111111
+	defb 0x03, %11111111
+	defb 0x90
+	defb %00000000
+	defb %00000001
+	defb %00000011
+	defb %00000111
+	defb %00001111
+	defb %00011111
+	defb %00111111
+	defb %00111111
+	defb %00100111
+	defb %01000011
+	defb %10000101
+	defb %10001001
+	defb %00011001
+	defb %00111101
+	defb %11111001
+	defb %11111111
+	defb 0x00
+simon_rle_b2ed:  ; 0xB2ED  packed 93; simon_cell0/1_ptr
+	defb 0x08, %00000000
+	defb 0x85
+	defb %01100001
+	defb %11100010
+	defb %01000011
+	defb %00110011
+	defb %00111010
+	defb 0x06, %00000000
+	defb 0x81
+	defb %00011000
+	defb 0x03, %00111000
+	defb 0x89
+	defb %00000010
+	defb %11000000
+	defb %01111101
+	defb %00111100
+	defb %10000000
+	defb %00000000
+	defb %01000000
+	defb %01001111
+	defb %00011111
+; 16x16 +0x20
+	defb 0x03, %00000000
+	defb 0x03, %00000001
+	defb 0x88
+	defb %00000000
+	defb %01100001
+	defb %10010011
+	defb %00010111
+	defb %10111100
+	defb %01111100
+	defb %01111101
+	defb %00111110
+	defb 0x03, %00000000
+	defb 0x8b
+	defb %01111000
+	defb %11111100
+	defb %11101100
+	defb %11000100
+	defb %11100100
+	defb %11111110
+	defb %11111111
+	defb %11111111
+	defb %11111110
+	defb %11111111
+	defb %01111111
+	defb 0x04, %11111111
+; 16x16 +0x40
+	defb 0x19, %00000000
+	defb 0x81
+	defb %01111110
+	defb 0x05, %01000000
+	defb 0x81
+	defb %00100000
+; 16x16 +0x60
+	defb 0x18, %00000000
+	defb 0x83
+	defb %01111111
+	defb %11111111
+	defb %10111111
+	defb 0x04, %10100000
+	defb 0x81
+	defb %01010000
+; 16x16 +0x80
+	defb 0x10, %00000000
+	defb 0x04, %00010000
+	defb 0x84
+	defb %00110000
+	defb %01100000
+	defb %11000000
+	defb %01111110
+	defb 0x18, %00000000
+	defb 0x04, %00101000
+	defb 0x85
+	defb %01001000
+	defb %10010000
+	defb %00111111
+	defb %10000001
+	defb %01111110
+	defb 0x07, %00000000
+	defb 0x00
+simon_rle_b34a:  ; 0xB34A  packed 72; simon_cell0/1_ptr
+	defb 0x06, %00000000
+	defb 0x82
+	defb %00001110
+	defb %11110000
+	defb 0x0b, %00000000
+	defb 0x02, %00000110
+	defb 0x8b
+	defb %11011110
+	defb %00011110
+	defb %00111000
+	defb %01111000
+	defb %01110110
+	defb %11110010
+	defb %00100001
+	defb %00000001
+	defb %00101110
+	defb %00101111
+	defb %00000001
+; 16x16 +0x20
+	defb 0x05, %00000000
+	defb 0x86
+	defb %00001111
+	defb %11110001
+	defb %00001110
+	defb %11110000
+	defb %00000001
+	defb %00000001
+	defb 0x06, %00000000
+	defb 0x8b
+	defb %00011110
+	defb %00111111
+	defb %01111111
+	defb %11111001
+	defb %00111001
+	defb %11101101
+	defb %11001111
+	defb %10001110
+	defb %10001111
+	defb %10001111
+	defb %11011111
+	defb 0x04, %01111111
+; 16x16 +0x40
+	defb 0x10, %00000000
+	defb 0x88
+	defb %00000001
+	defb %00000010
+	defb %00000100
+	defb %00011000
+	defb %00100000
+	defb %00100000
+	defb %01000000
+	defb %01000000
+	defb 0x18, %00000000
+	defb 0x89
+	defb %00000010
+	defb %00000101
+	defb %00011010
+	defb %00100100
+	defb %01011000
+	defb %01010000
+	defb %10100000
+	defb %10100000
+	defb %01000000
+	defb 0x07, %00000000
+	defb 0x00
+simon_rle_b392:  ; 0xB392  packed 105; simon_cell0/1_ptr
+	defb 0x07, %00000000
+	defb 0x89
+	defb %00111111
+	defb %00011111
+	defb %01100000
+	defb %01000000
+	defb %11010000
+	defb %01010000
+	defb %00000000
+	defb %00101110
+	defb %00100011
+	defb 0x04, %00000000
+	defb 0x8a
+	defb %00010000
+	defb %00110000
+	defb %00000000
+	defb %11100000
+	defb %00000000
+	defb %00111000
+	defb %00111100
+	defb %00011101
+	defb %01000101
+	defb %00000011
+	defb 0x04, %00000000
+	defb 0x8b
+	defb %00000001
+	defb %00000011
+	defb %00000111
+	defb %00000011
+	defb %00111111
+	defb %01111111
+	defb %11111111
+	defb %10111111
+	defb %10111111
+	defb %01111111
+	defb %11111111
+	defb 0x03, %01111111
+	defb 0x02, %00000000
+	defb 0x84
+	defb %11110000
+	defb %11111000
+	defb %11101000
+	defb %11011000
+	defb 0x03, %11111000
+	defb 0x87
+	defb %11000100
+	defb %11000011
+	defb %11100011
+	defb %11011011
+	defb %11001111
+	defb %10000011
+	defb %10000000
+; 16x16 +0x40
+	defb 0x09, %00000000
+	defb 0x02, %00000001
+	defb 0x83
+	defb %00000010
+	defb %00001100
+	defb %11110000
+	defb 0x1a, %00000000
+	defb 0x87
+	defb %00000001
+	defb %00000010
+	defb %00000010
+	defb %00001101
+	defb %11110010
+	defb %00001100
+	defb %11110000
+	defb 0x0a, %00000000
+	defb 0x02, %10000000
+	defb 0x11, %00000000
+	defb 0x83
+	defb %10100000
+	defb %11010000
+	defb %00110011
+	defb 0x0f, %00000000
+	defb 0x81
+	defb %11111111
+	defb 0x0c, %00000000
+	defb 0x85
+	defb %10100000
+	defb %11011000
+	defb %11101111
+	defb %11001111
+	defb %01111111
+	defb 0x0d, %00000000
+	defb 0x83
+	defb %11111111
+	defb %00000000
+	defb %11111111
+	defb 0x00
+simon_rle_b3fb:  ; 0xB3FB  packed 112; simon_cell0/1_ptr
+	defb 0x08, %00000000
+	defb 0x85
+	defb %01100001
+	defb %11100010
+	defb %01000011
+	defb %00110011
+	defb %00111010
+	defb 0x06, %00000000
+	defb 0x81
+	defb %00011000
+	defb 0x03, %00111000
+	defb 0x89
+	defb %00000010
+	defb %11000000
+	defb %01111101
+	defb %00111100
+	defb %10000000
+	defb %00000000
+	defb %01000000
+	defb %01001111
+	defb %00011111
+; 16x16 +0x20
+	defb 0x03, %00000000
+	defb 0x03, %00000001
+	defb 0x88
+	defb %00000000
+	defb %01100001
+	defb %10010011
+	defb %00010111
+	defb %10111100
+	defb %01111100
+	defb %01111101
+	defb %00111110
+	defb 0x03, %00000000
+	defb 0x8b
+	defb %01111000
+	defb %11111100
+	defb %11101100
+	defb %11000100
+	defb %11100100
+	defb %11111110
+	defb %11111111
+	defb %11111111
+	defb %11111110
+	defb %11111111
+	defb %01111111
+	defb 0x04, %11111111
+; 16x16 +0x40
+	defb 0x19, %00000000
+	defb 0x87
+	defb %01111110
+	defb %00000000
+	defb %01000000
+	defb %00000000
+	defb %01000000
+	defb %00000000
+	defb %00100000
+; 16x16 +0x60
+	defb 0x18, %00000000
+	defb 0x88
+	defb %01111111
+	defb %11111111
+	defb %11111111
+	defb %10100000
+	defb %11100000
+	defb %10100000
+	defb %11100000
+	defb %01010000
+; 16x16 +0x80
+	defb 0x11, %00000000
+	defb 0x8f
+	defb %00001000
+	defb %00000000
+	defb %00001000
+	defb %00000000
+	defb %00001000
+	defb %00000000
+	defb %00010000
+	defb %00000000
+	defb %00010000
+	defb %00000000
+	defb %00010000
+	defb %00100000
+	defb %00000000
+	defb %01000000
+	defb %00010101
+; 16x16 +0xA0
+	defb 0x10, %00000000
+	defb 0x90
+	defb %00111000
+	defb %00010100
+	defb %00011100
+	defb %00010100
+	defb %00011100
+	defb %00010100
+	defb %00011100
+	defb %00101000
+	defb %00111000
+	defb %00101000
+	defb %00111000
+	defb %00101000
+	defb %01011000
+	defb %11110000
+	defb %10111111
+	defb %11101010
+	defb 0x00
+simon_rle_b46b:  ; 0xB46B  packed 83; simon_cell0/1_ptr
+	defb 0x06, %00000000
+	defb 0x82
+	defb %00001010
+	defb %10100000
+	defb 0x0b, %00000000
+	defb 0x02, %00000110
+	defb 0x8b
+	defb %11011110
+	defb %00011110
+	defb %00111000
+	defb %01111000
+	defb %01110110
+	defb %11110010
+	defb %00100001
+	defb %00000001
+	defb %00101110
+	defb %00101111
+	defb %00000001
+; 16x16 +0x20
+	defb 0x05, %00000000
+	defb 0x86
+	defb %00001111
+	defb %11110101
+	defb %01011110
+	defb %11110000
+	defb %00000001
+	defb %00000001
+	defb 0x06, %00000000
+	defb 0x8b
+	defb %00011110
+	defb %00111111
+	defb %01111111
+	defb %11111001
+	defb %00111001
+	defb %11101101
+	defb %11001111
+	defb %10001110
+	defb %10001111
+	defb %10001111
+	defb %11011111
+	defb 0x04, %01111111
+; 16x16 +0x40
+	defb 0x10, %00000000
+	defb 0x8e
+	defb %00000001
+	defb %00000000
+	defb %00000100
+	defb %00010000
+	defb %00000000
+	defb %00100000
+	defb %00000000
+	defb %01000000
+	defb %00000000
+	defb %01000000
+	defb %00000000
+	defb %00100000
+	defb %00001000
+	defb %00000100
+	defb 0x12, %00000000
+	defb 0x90
+	defb %00000010
+	defb %00000111
+	defb %00011010
+	defb %00101100
+	defb %01111000
+	defb %01010000
+	defb %11100000
+	defb %10100000
+	defb %11100000
+	defb %10100000
+	defb %01110000
+	defb %01011000
+	defb %00110100
+	defb %00011010
+	defb %00000110
+	defb %00000000
+	defb 0x00
+simon_rle_b4be:  ; 0xB4BE  packed 111; simon_cell0/1_ptr
+	defb 0x07, %00000000
+	defb 0x89
+	defb %00111111
+	defb %00011111
+	defb %01100000
+	defb %01000000
+	defb %11010000
+	defb %01010000
+	defb %00000000
+	defb %00101110
+	defb %00100011
+	defb 0x04, %00000000
+	defb 0x8a
+	defb %00010000
+	defb %00110000
+	defb %00000000
+	defb %11100000
+	defb %00000000
+	defb %00111000
+	defb %00111100
+	defb %00011101
+	defb %01000101
+	defb %00000011
+	defb 0x04, %00000000
+	defb 0x8b
+	defb %00000001
+	defb %00000011
+	defb %00000111
+	defb %00000011
+	defb %00111111
+	defb %01111111
+	defb %11111111
+	defb %10111111
+	defb %10111111
+	defb %01111111
+	defb %11111111
+	defb 0x03, %01111111
+	defb 0x02, %00000000
+	defb 0x84
+	defb %11110000
+	defb %11111000
+	defb %11101000
+	defb %11011000
+	defb 0x03, %11111000
+	defb 0x87
+	defb %11000100
+	defb %11000011
+	defb %11100011
+	defb %11011011
+	defb %11001111
+	defb %10000011
+	defb %10000000
+; 16x16 +0x40
+	defb 0x0e, %00000000
+	defb 0x81
+	defb %10101010
+	defb 0x0a, %00000000
+	defb 0x85
+	defb %00000001
+	defb %00000000
+	defb %00000010
+	defb %00001000
+	defb %10100000
+	defb 0x0f, %00000000
+	defb 0x83
+	defb %11111111
+	defb %01010101
+	defb %11111111
+	defb 0x08, %00000000
+	defb 0x87
+	defb %00000001
+	defb %00000010
+	defb %00000011
+	defb %00001101
+	defb %11110110
+	defb %01011100
+	defb %11110000
+	defb 0x0d, %00000000
+	defb 0x83
+	defb %10100000
+	defb %11010000
+	defb %00110010
+	defb 0x0f, %00000000
+	defb 0x81
+	defb %10101010
+	defb 0x0c, %00000000
+	defb 0x85
+	defb %10100000
+	defb %11011000
+	defb %11101111
+	defb %11001111
+	defb %01111111
+	defb 0x0d, %00000000
+	defb 0x83
+	defb %11111111
+	defb %01010101
+	defb %11111111
+	defb 0x00
+simon_rle_b52d:  ; 0xB52D  packed 41; simon_cell0/1_ptr
+	defb 0x13, %00000000
+	defb 0x02, %00000110
+	defb 0x8b
+	defb %11011110
+	defb %00011110
+	defb %00111000
+	defb %01111000
+	defb %01110110
+	defb %11110010
+	defb %00100001
+	defb %00000001
+	defb %00101110
+	defb %00101111
+	defb %00000001
+; 16x16 +0x20
+	defb 0x05, %00000000
+	defb 0x02, %00000001
+	defb 0x02, %00000000
+	defb 0x02, %00000001
+	defb 0x06, %00000000
+	defb 0x8b
+	defb %00011110
+	defb %00111111
+	defb %01111111
+	defb %11111001
+	defb %00111001
+	defb %11101101
+	defb %11001111
+	defb %10001110
+	defb %10001111
+	defb %10001111
+	defb %11011111
+	defb 0x04, %01111111
+	defb 0x00
+simon_rle_b556:  ; 0xB556  packed 75; simon_cell0/1_ptr
+	defb 0x07, %00000000
+	defb 0x89
+	defb %00111111
+	defb %00011111
+	defb %01100000
+	defb %01000000
+	defb %11010000
+	defb %01010000
+	defb %00000000
+	defb %00101110
+	defb %00100011
+	defb 0x04, %00000000
+	defb 0x8a
+	defb %00010000
+	defb %00110000
+	defb %00000000
+	defb %11100000
+	defb %00000000
+	defb %00111000
+	defb %00111100
+	defb %00011101
+	defb %01000101
+	defb %00000011
+	defb 0x04, %00000000
+	defb 0x8b
+	defb %00000001
+	defb %00000011
+	defb %00000111
+	defb %00000011
+	defb %00111111
+	defb %01111111
+	defb %11111111
+	defb %10111111
+	defb %10111111
+	defb %01111111
+	defb %11111111
+	defb 0x03, %01111111
+	defb 0x02, %00000000
+	defb 0x84
+	defb %11110000
+	defb %11111000
+	defb %11101000
+	defb %11011000
+	defb 0x03, %11111000
+	defb 0x87
+	defb %11000100
+	defb %11000011
+	defb %11100011
+	defb %11011011
+	defb %11001111
+	defb %10000011
+	defb %10000000
+; 16x16 +0x40
+	defb 0x0c, %00000000
+	defb 0x83
+	defb %10100000
+	defb %11010000
+	defb %00110000
+	defb 0x1c, %00000000
+	defb 0x85
+	defb %10100000
+	defb %11010000
+	defb %11101000
+	defb %11001000
+	defb %01110000
+	defb 0x10, %00000000
+	defb 0x00

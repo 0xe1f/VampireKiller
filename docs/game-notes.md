@@ -16,9 +16,20 @@ not yet confirmed in code is marked *(unconfirmed)*.
    glyphs at seg8 0xB260). The castle emblem (`title_castle` 0x4C3F) is shared.
    This is the ROM's only region difference (confirmed by rendering both
    tilesets straight from the ROM).
-3. If the player presses **space** (joystick trigger also supported *(unconfirmed)*),
-   the game starts. Otherwise a short **attract-mode demo** plays, then loops back
-   to the title.
+3. **Title input** (`frontend_input`, seg0 0x4398) runs after logo / title /
+   attract. Same `read_buttons` mask as play, latched at **0xC401** held /
+   **0xC400** new-press (play uses C007/C006).
+   - On the **title** (state 1), only bits **4** (keyboard SPACE **or** joystick
+     TRG1) and **5** (joystick TRG2 **or** keyboard UP) start. Other keys are
+     ignored. Start sets `0xC002` bit 6, then: `0xE600 == 0` (normal) →
+     **intro** (state 3); `0xE600 != 0` (boot slot-scan found `slot_sig_7ffa`
+     at 0x7FFA in another slot) → `state_game_start` (13, new-game / password),
+     skipping the intro.
+   - On **logo** or **attract**, any new press returns to the title
+     (`title_build`).
+   - No start on the title: `state_title` counts down `0xC004` (first frame
+     wraps 0→255, ~4s at 60 Hz), then `title_set_color2` and `inc 0xC000` →
+     **attract** (state 2).
 4. Game start plays an **intro animation**: Simon arriving at the castle.
 5. Play proceeds through the **courtyard**, then the **castle interior**.
 
@@ -36,7 +47,13 @@ not yet confirmed in code is marked *(unconfirmed)*.
   | 3 | 9 | 7 | 20, 20 | mummies (two of the same type) |
   | 4 | 12 | 6 | 21 + 24 | Frankenstein + Igor |
   | 5 | 15 | 9 | 22 | grim reaper |
-  | 6 | 18 | 9 | (via `sub_65b7h`) | Dracula |
+  | 6 | 18 | 9 | 17 | Dracula (`event_dracula`) |
+
+  CE01 machines (seg3 except event 6 in seg1): `event_giant_bat`,
+  `event_medusa`, `event_mummies`, `event_frankenstein`, `event_grim_reaper`,
+  `event_dracula`. Shared epilogue `event_ce01_next`; other bosses then
+  `boss_clear_arm` → `room_event_ce10`. Dracula raises CE40 for credits
+  instead.
 
   Frankenstein (`actor_frankenstein`) walks with shapes `0x79/0x7A/0x7B` and is
   on the bar. Igor (`actor_igor`, overflow, not in the 1–22 sheet) uses the same
@@ -44,7 +61,7 @@ not yet confirmed in code is marked *(unconfirmed)*.
   fodder, not metered. `actor_giant_bat` is also placed as a regular enemy on
   stage 16.
 
-### Enemy types 1–22 (`gfx/enemy_sheet.png`)
+### Enemy types 1–22 + blob (`gfx/enemy_sheet.png`)
 
 `actor_*` names live in `segments/actors.inc`. Pictures are from the sheet
 (play + SAT); behaviour is the ROM handler. HP is `0x60E9[type]` (`ix+0D`);
@@ -55,7 +72,7 @@ type 18 in a boss room) use the shared meter `0xC418`; the rest die when
 | # | Name | In-game behaviour |
 | ---: | --- | --- |
 | 1 | `actor_zombie` | Walks in from a screen edge toward centre/Simon. 1 HP, 100 pts. Spawn bit 0. |
-| 2 | `actor_merman` | Walk/pounce. Closed-mouth frames `0x0B`/`0x08`. 1 HP, 200 pts. Spawn bit 1. Shared handler with 3 (`enemy_merman_tick`). When `ix+1B` is set and Simon’s Y is within ±8 it writes type 3 and pose `0x12` (open mouth), then the type-3 spit path runs. |
+| 2 | `actor_merman_green` | Walk/pounce. Closed-mouth frames `0x0B`/`0x08`. 1 HP, 200 pts. Spawn bit 1. Shared handler with 3 (`enemy_merman_tick`). When `ix+1B` is set and Simon’s Y is within ±8 it writes type 3 and pose `0x12` (open mouth), then the type-3 spit path runs. |
 | 3 | `actor_merman_red` | Open-mouth spit. Frames `0x12`/`0x0F`. Same walk/pounce, then state 2 hides and fires `0x9F74` kind 2 from Y−0x14 (the mouth). 2 HP. Bit 0 of the type id selects the spit countdown. Spawn bit 2 jumps out of the water (splash pair). Object-list id `actor_placed_merman` is the same spit enemy already standing on the platform — stage 10 rooms 6–8, play-confirmed, no water exit. |
 | 4 | `actor_hanging_bat` | Hangs (shape `0x1A`) until Simon is close (Y window `0x50`, X `0x40`), then flies at him. 1 HP, 100 pts. Spawn bit 3 flies in already moving. Object-list id `actor_placed_bat` is the same enemy already hanging — s3r2, s4r1, s4r3, play-confirmed. |
 | 5 | `actor_dog` | Idles; charges when Simon is within 64 px. 1 HP, 100 pts, 6 contact unshielded. Object list. |
@@ -63,24 +80,78 @@ type 18 in a boss room) use the shared meter `0xC418`; the rest die when
 | 7 | `actor_flying_skull` | Homes on Simon X **and** Y from off-screen. 2 HP, 200 pts. Spawn bit 4. |
 | 8 | `actor_ghost_head` | Flies across, bobbing around spawn Y. 1 HP, 200 pts. Spawn bit 5. |
 | 9 | `actor_red_skeleton` | Fast walk (`0x0220`), **no** projectile. 2 HP, 200 pts. Stage 13 object list (same skeleton script as 11; SAT `02 45`). |
-| 10 | `actor_skull_pile` | Stationary; faces Simon and shoots (`d700_spawn` 0x9F74, kind `0x0A`). 8 HP, 300 pts. Object list. |
-| 11 | `actor_white_skeleton` | Same 0x9FB2 skeleton art as 9, SAT `02 4C`. Kites Simon (walk toward if far, away if close); hops a gap (`Yvel 0xFB8F`) when the floor probe ahead is empty; throws a spinning bone (`d700_throw` 0x9F68, D700 type 4, shapes `0x4B–0x4E`). 4 HP, 200 pts. Stages 7–9, 13, 17. |
+| 10 | `actor_skull_pile` | Stationary; faces Simon and shoots (`shot_spawn` 0x9F74, kind `0x0A`). 8 HP, 300 pts. Object list. |
+| 11 | `actor_white_skeleton` | Same 0x9FB2 skeleton art as 9, SAT `02 4C`. Kites Simon (walk toward if far, away if close); hops a gap (`Yvel 0xFB8F`) when the floor probe ahead is empty; throws a spinning bone (`shot_throw` 0x9F68, shot type 4, shapes `0x4B–0x4E`). 4 HP, 200 pts. Stages 7–9, 13, 17. |
 | 12 | `actor_raven` | Flies, then stalls (Yvel→0) and hovers mid-flight; strafes when Simon’s Y is close. Not the type-8 sine bob. 1 HP, 100 pts. Object list, stages 7–8. |
 | 13 | `actor_hunchback` | Jumps toward Simon. 1 HP, 200 pts. Object list. `actor_igor` reuses pose `0x67`. |
 | 14 | `actor_bone_dragon` | 8 SAT cells (custom tick, skips `0x644C`). 12 HP, 1000 pts. Stages 11–12. |
 | 15 | `actor_roc` | Large 6-cell flyer (phoenix-like). Flies across, pauses to drop `actor_roc_drop`, then continues off. 8 HP, 400 pts. Spawn bit 6. Not the small raven (`actor_raven`). |
-| 16 | `actor_axe_knight` | Same SAT layout as 9, but stage 14+ VRAM is the knight. Throws (`d700_throw` 0x9F68). 8 HP, 300 pts, slower walk (`0x0140`). |
-| 17 | `actor_dracula` | Event 6, stage 18 room 9. 32 HP on the bar, +30000. SAT is head + cape; 32×32 torso blit is **PARKED** (sheet shows the gap). |
+| 16 | `actor_axe_knight` | Same SAT layout as 9, but stage 14+ VRAM is the knight. Throws (`shot_throw` 0x9F68). 8 HP, 300 pts, slower walk (`0x0140`). |
+| 17 | `actor_dracula` | Event 6, stage 18 room 9. 32 HP on the bar, +30000. SAT is head + cape; sheet composites the 32×32 torso from `dracula_body_closed` via `dracula_blit_torso` (page-1 Y=`0x80`). Portrait 16×16s at Y=`0xA0` are eyes/mouth, not the figure. |
 | 18 | `actor_giant_bat` | Event 1 boss; also a normal enemy on stage 16 when `CE00==0` (per-actor HP). 16 HP, 2000 pts. |
 | 19 | `actor_medusa` | Event 2, stage 6 room 5. 16 HP, 2000 pts. |
 | 20 | `actor_mummy` | Event 3, two of them in stage 9 room 7. 16 HP, 2000 pts. Walk `0x33–0x38`. |
 | 21 | `actor_frankenstein` | Event 4 with `actor_igor`. Walk `0x79/0x7A/0x7B`. 32 HP on the bar, 3000 pts. |
 | 22 | `actor_grim_reaper` | Event 5, stage 15 room 9. 32 HP, 12 cells, 7000 pts. |
+| 0x1A | `actor_blob_blue` | Candle blob. Bonus-21 slime hatches this if left to land. First in stage 4 (hub 1). 1 HP, 2 SAT cells (shape `0x9B`/`0x9C`). SAT `0F 42`. Sprites `spr_blob` / `spr_blob_cc`. |
+| 0x1B | `actor_blob_red` | Same tick; hub 3+ (stages 10+). SAT `08 42`. |
+| 0x1C | `actor_blob_white` | Same tick; hub 2 (stages 7–9). SAT `0E 42`. |
+
+Per-frame `ix+1` machines (DISPATCH_A or `dec a`/`jr z`) are named in
+`segments/seg03.asm`: raven wait/coast/hover/pick/strafe, dog idle/run/air,
+bone dragon form/idle/spit, red skeleton wake/walk/pause, hunchback
+wait/drop/crouch/jump/hide, blob hatch/fall/pause/hop, merman
+fall/walk/spit, hanging bat hang/swoop/bob, skull pile idle/windup/recover.
+White skeleton was already walk/air/throw; bosses have their own `*_go`
+states.
 
 When a boss dies an **orb descends** (`actor_orb`, not bonus id 22):
   - Pick it up (`0xCE11=1`) → life drip-fills (+1 HP/frame via `0x4658`)
     until full, then advance to the next level.
   - Leave it → still advance after the timer, but **life is not refilled**.
+
+### Ending / credits
+
+Beating **event 6** (Dracula, stage 18 room 9) is the only path into the
+credits. `room_event_tick` runs `event_dracula` (the CE01 machine); the last
+handler clears `CE00` and raises **`CE40=1`**. The play tick (`sub_5c2ch`)
+then calls `credits_tick` (seg1 0x66C1) instead of the normal loop:
+
+1. **CE40=1** `credits_start` — `play_sound 0x8E` (ending theme), `credits_init`
+   (load `credits_font`, clear CE30–CE34, CE34=1 so `event_vscroll` writes
+   CE33 to VDP R23).
+2. **CE40=2** `credits_pump` — each frame `credits_clock` bumps CE33 every 4th
+   frame (byte, wraps). `credits_keyframe` pages **seg8 @ 0xA000** and
+   **seg5 @ 0x8000**, looks up `credits_script_ptr[CE31]`, and if the
+   record's tick equals CE33 blits it via `l4adch` (C=0xFF).
+   `credits_wipe` FILVRMs the strip two ticks behind so scrolled-off glyphs
+   don't wrap. Format `{tick, x, chars..., 0xFF}`; letters are ASCII, space
+   is `0x00` (not `0x20`); X is
+   SCREEN 5 X (`inc a` to test the 0xFF end-of-roll marker, so blit starts
+   at X+1). Apostrophe in this font is **`;`** (`LET;S`).
+3. **CE40=3/4** wait, then **C409** → `state_hub_advance` (hub wrap / second
+   loop), `D012++` (capped at 3), R23=0.
+
+Other bosses never raise CE40; they use `room_event_ce10` → C409 directly.
+
+**Ending paragraph** (seg8, `credits_ending.asm` @ 0xBF20, last line in seg5):
+
+> SO THE BRAVE YOUNG MAN PUT DRACULA INTO DEEP SLEEP AGAIN AND THE TOWN
+> RESTORED ITS PEACE: LET;S PRAY THAT THE EVIL MIND OF **HUMANBEINGS** WILL
+> NOT LET DRACULA COME TO LIFE EVER AGAIN::::
+
+**Staff** (seg5, `credits_staff.asm` @ 0x82C0): STAFF; GAME DESIGNER A:NAGATA;
+PROGRAMMER A:HARIMA / I:AKADA / K:NAGAE; SOUND PROGRAMMER H:SHIKAMA;
+GRAPHIC DESIGNER S:IWAMOTO / N:MATSUI / K:MIZUTANI / A:FUJIMOTO; SOUND
+EFFECT BY K:UEHARA; MUSIC BY K:YAMASHITA / S:TERASHIMA; ART DESIGNER
+F:HAYAKAWA; ASSISTANT PROGRAMMER K:TOYOHARA / T:OKA / H:EDA / T:OHTSUKA /
+T:DANJYO; SPECIAL THANKS K:HIRAOKA / FC:TEAM; PRODUCED BY AKIHIKO NAGATA;
+PRESENTED BY KONAMI. End marker `{0x20, 0xFF}` at 0x8491 (table's last two
+entries both point here). The `cr` macro writes these (`"SO THE BRAVE"` with
+spaces becoming `0x00`); do **not** use `vk` (that is HUD ASCII−0x10).
+
+CE30–CE34: CE30 cleared unused; CE31 = line index; CE32 = done; CE33 =
+tick + R23; CE34 = player active.
 
 ## World structure (hubs / stages / rooms)
 
@@ -198,16 +269,29 @@ list): candles, breakable blocks, floor pickups, chests, and vendors. Same 6
 hubs; stage 0 is **`scenery_list_s00` @ 0x800C** (the courtyard is not in the
 hub table — `scenery_list_lookup` 0x5A9F returns it when `D000==0`). Grammar is
 **not** the enemy list's: `0xFE` next room, `0xFF` next stage, `0x00` end hub.
-`scenery_unpack` (0x5A63) expands into **0xE000** (3×16×24 bytes); 0x5B22
-instantiates the current room into **0xC470** (8 candle/block slots), **0xC500**
+`scenery_unpack` (0x5A63) expands into **0xE000** (3×16×24 bytes); `scenery_room_load`
+(0x5B22) instantiates the current room into **0xC470** (8 candle/block slots), **0xC500**
 (floor items/chests), and **0xC5B5**/**0xC5C5** (vendors). Record: pos (hi
 nibble Y, lo nibble X, ×16 px), attr; attr `0x7F` adds a third reveal byte
-(whipped block → chest or vendor). bits7-6 `00` = candle (bits7-5 `011` =
-breakable block, drawn on the F2 map) or floor pickup (bits7-5 `000`); `10` =
-chest; `11` = vendor. bits4-0 = bonus id. Stage 18 room 9 (Dracula) is omitted
-and stays empty. ~620 records.
+(whipped block → chest or vendor). **attr bits7-5**: `000` floor pickup, `001`
+candle/brazier, `011` 32×32 breakable block (stamped over the nametable).
+bits7-6 `10` = chest; `11` = vendor. bits4-0 = bonus id. Stage 18 room 9
+(Dracula) is omitted and stays empty. ~620 records.
 
-Spawn-bit types (`actor_zombie`/`actor_merman`/`actor_merman_red`/
+**Breakable walls** are scenery blocks (`attr 0x60–0x7F`), not extra tile types.
+`scenery_room_load` sets C470 `+04=3`; the first `brazier_tick` saves the
+nametable under the slot (`block_save_under` → 0xE4A0) then `block_stamp`s a
+4×4 of brick ids (`block_tiles_castle`: 01/02/0A/0B) into VRAM **and** D100,
+so the wall is solid. Whip → `brazier_destroyed` restores the saved tiles
+(`block_restore_map_4x4` / `_vram_4x4`), zeros the E000 pos byte, and
+`drop_spawn`s the bonus. Slime (`0x15`) skips the flame and goes to a C500
+slot that hatches `actor_blob_blue` / `_red` / `_white` if left to land.
+
+Wall-slime (`attr 0x75`) rooms: **s06r0** (6,10)/(8,10)/(10,10); **s08r0**
+five-block cluster; **s08r7** (12,4); **s16r9** (8,5). **s04r0** has a
+candle-slime at (8,4) and a white-key wall at (2,4) — not a hidden blob.
+
+Spawn-bit types (`actor_zombie`/`actor_merman_green`/`actor_merman_red`/
 `actor_hanging_bat`/`actor_flying_skull`/`actor_ghost_head`/`actor_roc`) and
 bosses (`actor_dracula`, `actor_medusa`–`actor_grim_reaper`) are **not** in this
 list; they come from `room_spawner` or the event table. Two extra list-ids reuse
@@ -303,7 +387,7 @@ per-frame edge/stair detector `sub_7682h` (seg1 0x7682) sets the pending-exit
 direction in 0xC41B (1=up,2=down,3=left,4=right; **0xFF** = spot/portal warp), and the four RAM permit bytes
 0xC41C-0xC41F are loaded from the same nibbles (seg13 0xB99A). Stage advance
 (0xD000++, 0xD001=0) is separate: `advance_stage` (seg0 0x434E), reached via the
-white-key door (0xC409) or the castle-boundary flag (0xC408). `0xD000` is never
+white-key door (`0xC408` / `state_stage_exit`) or after a boss (`0xC409` / `state_hub_advance`). `0xD000` is never
 changed by the connectivity path - vertical moves stay within the stage.
 - Verified: decode matches all 6 recorded consecutive stage-1 transitions and the
   stage-1 horizontal loop (room 3 right->0, room 0 left->3).
@@ -358,9 +442,45 @@ the dest-room digit in the same colour beside it (`--no-spots` to skip).
 
 `read_buttons` (seg0 0x4BC2) samples the joystick (PSG port A) and keyboard row 8
 (arrows + SPACE). `input_edge` (0x4BBB) latches the held mask at **0xC007** and
-the rising edge at **0xC006**. Bits: 0=UP, 1=DOWN, 2=LEFT, 3=RIGHT, 4=SPACE/trig
-(whip), 5=UP (jump and portal new-press). Crouch is DOWN *held* (C007 bit 1);
-jump/portal is UP *new-press* (C006 bit 5).
+the rising edge at **0xC006** during play. The title uses a separate pair:
+**0xC401** held / **0xC400** new-press (`frontend_input`). Bits: 0=UP, 1=DOWN,
+2=LEFT, 3=RIGHT, 4=SPACE **or** joystick TRG1 (whip / title start), 5=keyboard
+UP **or** joystick TRG2 (jump, portal new-press, and also title start). Crouch
+is DOWN *held* (C007 bit 1); jump/portal is UP *new-press* (C006 bit 5).
+
+### Player stats / HUD (RAM 0xC400–0xC41F)
+
+New-game seeds `0xC410–0xC412` from `run_seed_tbl` (lives=3, STAGE=0, C412=1).
+Score, hearts, lives, HP, weapon, and the enemy meter were already named from
+play traces; the leftover bytes in this block are flags, not a second inventory
+(keys/map/bibles live in `0xC700–0xC70F`).
+
+| addr | meaning |
+| ---: | --- |
+| `0xC400` / `0xC401` | title start: new-press / held (bit4 SPACE\|TRG1, bit5 TRG2\|kbd UP) |
+| `0xC402–0xC404` | unread. `add_score` overflow writes `0x99` here; visible score is C405–C407 |
+| `0xC405–0xC407` | score, 3-byte packed BCD (low/mid/high). HUD draws C407→C405 |
+| `0xC408` | stage-boundary / white-key door → `state_stage_exit` |
+| `0xC409` | hub-advance (boss-clear or ending credits) → `state_hub_advance` |
+| `0xC40A` | F1 pause latch → `state_pause` (frozen; F1 again resumes, BGM `0xFD`/`0xFE`) |
+| `0xC40C` | vendor whip-hit → `state_vendor` |
+| `0xC40D` | force stage BGM replay (death respawn / password) |
+| `0xC410` | lives, packed BCD |
+| `0xC411` | HUD STAGE, packed BCD |
+| `0xC412` | seeded `1` at new game; no readers |
+| `0xC413` | stay-in-play (`1`); `0` leaves play (attract end / death) |
+| `0xC415` | Simon HP (`0x20` full) |
+| `0xC416` | equipped weapon (0 leather … 4 cross) |
+| `0xC417` | hearts, packed BCD |
+| `0xC418` | enemy/boss meter (`0x80` full) |
+| `0xC419` | last-collected bonus id |
+| `0xC41A` | intro: nonzero → `mtile_stream_c41a` |
+| `0xC41B` | pending exit (1–4 dir, `0xFF` spot) |
+| `0xC41C–0xC41F` | exit permits up/down/left/right (`0xFF` = blocked) |
+
+`0xC40B`, `0xC40E–0xC40F`, `0xC414` have no code xrefs.
+
+Callers that only need a 4-digit award `jp add_score_c0` (`0x44F3`: `ld c,0` then `add_score`).
 
 ### Score (RAM 0xC405–0xC407)
 
@@ -384,7 +504,7 @@ on-screen **ENEMY/BOSS energy** (full `0x80`, used by HP-bar enemies, types ≥ 
   A raised **red shield** (`0xC701` bit 4, bonus id 3) uses table damage instead
   of 2× when Simon is facing the hit, and spends a shield charge (`0xC441`);
   when charges run out the shield drops.  The **yellow shield** (id 4, bit 5)
-  absorbs D700 projectiles instead.
+  absorbs enemy shots instead.
 - **Hazard / enemy projectile** — `hurt_simon_projectile` (seg2 0x85AD). Fixed
   **8**, or **16** if the slot's flag bit is set. Also forces the hurt state
   (`0xC420 = 5`). Ignored during i-frame/freeze timers (`0xC42D`, `0xC43A`).
@@ -398,6 +518,22 @@ by `(enemy type − 0x11)`:
 
 Lesser enemies (type < 0x11) have no HP bar; they use per-actor HP at `ix+0D`
 (table `0x60E9`). Leather whip subtracts 1 per connected hit, other weapons 2.
+
+Hit tests pick a **box size by type** then overlap Simon / whip / C450–C460 /
+the yellow shield. C800 actors use `hit_class_c800_tbl` (classes 1–7: fodder
+5×24, flyers 8×16, dog 12×10, roc/axe/bat/medusa 12×24, Dracula 16×48 with
+whip/proj at Y−0x20, mummy/Frank 5×40, grim 8×48). Shots (8 slots at 0xD700)
+use three smaller classes (`hit_class_shot_tbl`). Wrappers: `actor_vs_whip` /
+`actor_vs_simon` / `actor_vs_proj`, `shot_vs_*`.
+
+Shot **kind** (spawn A) maps through `shot_kind_type` to a slot type. Merman,
+skull pile, bone dragon, giant bat, Igor, and Dracula all spawn the same
+**fireball** (`fireball`: a `ret`, coast on spawn velocity). Shared sprite:
+pose 3, SAT pattern `0xF0`, colours 0/8; pixels from `gfx_rle_a185` at VRAM
+`0xFF80` (HUD load, not per-room). Slot types: pile 3; white-skeleton bone 4;
+Dracula 5 (same tick/sprite as type 1); medusa snake 6 (`medusa_snake`); mummy
+bandage 7 (`mummy_bandage`); grim sickle 8; axe 9; Igor 10. Kind `0xFF` is the
+death flame (type 12).
 
 ### Equippable weapons (strength tiers, per design)
 
@@ -554,7 +690,7 @@ stage changes.
   end state as picking up the boss orb, but a different graphic and collect
   path — the descending boss orb is `actor_orb`, not this bonus id.
 - **Shields** — **3** red (`C701` bit 4): facing the hit takes table damage
-  instead of 2×. **4** yellow (`C701` bit 5): absorbs D700 projectiles. Mutually
+  instead of 2×. **4** yellow (`C701` bit 5): absorbs enemy shots. Mutually
   exclusive; 16 charges in `C441`.
 - **Rosaries** — a **temporary "no new enemies" power-up** (id **6**). NOT a
   weapon and NOT a persistent inventory item. Runtime (frame 493): collected as a
@@ -581,7 +717,7 @@ stage changes.
 `collect_bonus_tbl` (seg2 **0x8D45**) is the 25-entry handler table for pickup
 ids 1–25 (index = id−1; id ≥ 0x1A goes through `l8d77h`). Confirmed: **1/2**
 small/large heart, **3** red shield (face-on contact uses table damage, not 2×),
-**4** yellow shield (absorbs D700 projectiles), **5** white cross (kill on-screen
+**4** yellow shield (absorbs enemy shots), **5** white cross (kill on-screen
 actors), **6** rosary, **7** small life orb (+8 HP), **8** blue gem (C43A invis, sprite
 flash white), **9** sapphire ring (C434, sprite flash red, touch-kills), **10**
 hourglass (jump+DOWN, 5 hearts → freeze), **11** tipped hourglass (secret:
@@ -589,7 +725,7 @@ whip the id-10 world pickup once; see section above),
 **12** boots, **13** wings, **14** candle (white outlines on breakable blocks),
 **15** map, **16/17** black/white bible, **18** staff (C700=3), **19/20**
 white/blue money bag (+5000/+1000), **21** slime (fake candle drop; collecting
-it is a no-effect stub, leaving it hatches actor 0x1A/0x1B/0x1C by hub), **22**
+it is a no-effect stub, leaving it hatches `actor_blob_blue` / `_red` / `_white` by hub), **22**
 potion/bottle (+32 = full bar; vendor 0x16; not the boss orb), **23** yellow
 key, **24** white key, **25** treasure chest (container; `l8c1bh` spends key/staff
 and reveals the contents id at `ix+0x0D`). Bonus **`0x1E`** (holy water) is not
@@ -607,10 +743,10 @@ tiles from VRAM page 1. Loaded at the HUD init copy (seg0 ~0x548C):
 | 22 (potion) | seg9 `0x9A00` | `0x13A00` | Y=`0x60` X=80 | `gfx/bonus_hud_items.png` (3×3) |
 | 23–30 | seg6 `0xB9C8` (after `sub_53a5h`) | `0xD9C8` | Y=`0x60` X=96..208 | same grid, tiles 1–8 |
 
-`bonus_hud_sheet.png` is ids 1–20 in order (5×4). `bonus_hud_items.png` is a 3×3
-of ids **22–30**: potion, yellow key, white key, chest, chain whip, knife, **axe**,
-**cross**, holy water. Each cell is labelled with its bonus id in a dark band
-(same 3×5 digits as the minimap renderer).
+`bonus_hud_sheet.png` is ids `01`–`14` in order (5×4). `bonus_hud_items.png` is a 3×3
+of ids **`16`–`1E`**: potion, yellow key, white key, chest, chain whip, knife, **axe**,
+**cross**, holy water. Each cell is labelled with its bonus id in hex
+(same 3×5 glyphs as the minimap renderer).
 
 **Palette.** `sub_481bh` writes one MSX2 entry (A=index, D=`0rrr0bbb`, E=`00000ggg`);
 `l4845h` walks an (index, rb, g)+ table ending in `0xFF`. `sub_572eh` loads the
@@ -646,7 +782,7 @@ in these sheets.
   | bit | generator (seg2) | actor type | handler (seg3) | enemy |
   |-----|------------------|------------|----------------|-------|
   | 0 | `zombie_generator` 0x9CED | `actor_zombie` | `enemy_zombie_tick` 0xA93B | zombie (100 pts) |
-  | 1 | `merman_generator` 0x9D52 | `actor_merman` | `enemy_merman_tick` 0xA2E7 | green merman, 1 HP (200 pts) |
+  | 1 | `merman_generator` 0x9D52 | `actor_merman_green` | `enemy_merman_tick` 0xA2E7 | green merman, 1 HP (200 pts) |
   | 2 | `merman_generator_3` 0x9D59 | `actor_merman_red` | same 0xA2E7 | red merman, 2 HP (open-mouth spit) |
   | 3 | `hanging_bat_generator` 0x9D9E | `actor_hanging_bat` | `enemy_hanging_bat_tick` 0xB0D1 | hanging bat (100 pts; generator fly-in. Placed bats that hang first are `actor_placed_bat`) |
   | 4 | `flying_skull_generator` 0x9DCA | `actor_flying_skull` | `enemy_flying_skull_tick` 0xB068 | flying skull (200 pts; homes on Simon X and Y) |
@@ -667,7 +803,7 @@ in these sheets.
 - Other enemies come from the per-room **object list** (list-id = actor type;
   see "World structure" for the full catalogue). Dogs, pikemen, skeletons,
   ravens, hunchbacks, bone dragons, axe knights, and stage-16 giant bats are
-  placed. Spawn-bit types (`actor_zombie`/`actor_merman`/`actor_merman_red`/
+  placed. Spawn-bit types (`actor_zombie`/`actor_merman_green`/`actor_merman_red`/
   `actor_hanging_bat`/`actor_flying_skull`/`actor_ghost_head`/`actor_roc`) are
   not in the list; placed bats and mermen use `actor_placed_bat` and
   `actor_placed_merman` instead (different spawn-init).
@@ -749,15 +885,11 @@ edge-detected through 0xC709):
 
 ## Text encoding (CRACKED + converted to ASCII)
 
-DONE: added a `vk()` helper (sjasmplus Lua, in VampireKiller.asm) so text is now
-authored as readable ASCII and still assembles byte-exact. Usage:
-`LUA ALLPASS vk({0x48,0xA0,"PUSH SPACE KEY",0xFF}) ENDLUA`
-- a Lua string -> each char as (char-0x10); a space -> 0x00 (blank tile)
-- a Lua number -> emitted verbatim (VDP position/attr, 0xFE field sep, 0xFF end)
-The HUD set (`l4c07h`) and title/front-end strings (`l4d0fh`,`l4d30h`,`l4d41h`)
-in seg00 are converted. NOTE: every vk-emitting LUA block MUST use `LUA ALLPASS`
-(plain `LUA` emits only on the last pass -> label drift -> wrong bytes).
-Still-as-data-misdisassembled: (none in the title/HUD path; `title_layout` 0x4C3F-0x4D0E is now `defb`).
+DONE: HUD/title strings use the `vk` macro (`vk "PUSH SPACE KEY"`): each
+char is (ASCII−0x10), space is 0x00. Position/attr bytes and 0xFE/0xFF
+stay as `defb`. Credits use `cr` (ASCII letters, space still 0x00).
+The HUD set (`l4c07h`) and title strings (`l4d0fh`, `l4d30h`, `l4d41h`)
+in seg00 are converted. `title_layout` 0x4C3F-0x4D0E is `defb`.
 
 ## Sprites (format understood; data still in banked ROM)
 
@@ -778,11 +910,17 @@ Still-as-data-misdisassembled: (none in the title/HUD path; `title_layout` 0x4C3
 
 Text is stored as **tile codes = ASCII - 0x10** (so decode with `+0x10`).
 Cross-checked against the Metal Gear disassembly (which stores text as plain
-ASCII); Vampire Killer offsets that by 0x10 because its font is loaded into VRAM
-starting at tile 0x10. Digits '0'-'9' = tiles 0x20-0x29 (confirmed by the score
-renderer `sub_458fh`: `and 0x0F / add 0x20`). `0x00` = space/blank tile between
-words; `0xFE` and `0xFF` are line/record control bytes; other high bytes
-(0x48,0xA0,0x58,0xD1...) are VDP position/attribute prefixes.
+ASCII); Vampire Killer offsets HUD/title text by 0x10 because that font is
+loaded into VRAM starting at tile 0x10. Digits '0'-'9' = tiles 0x20-0x29
+(confirmed by the score renderer `sub_458fh`: `and 0x0F / add 0x20`). `0x00`
+= space/blank tile between words; `0xFE` and `0xFF` are line/record control
+bytes; other high bytes (0x48,0xA0,0x58,0xD1...) are VDP position/attribute
+prefixes. The `vk` macro in `VampireKiller.asm` authors these.
+
+**Exception: ending credits** store letters as ASCII (no −0x10), but space
+is still `0x00` and the record ends with `0xFF`. The `cr` macro maps spaces
+to NUL; a raw `defb "..."` would emit `0x20` and be wrong. See *Ending /
+credits* above.
 
 ### Front-end / HUD strings found in segment 0 (runtime addresses)
 - 0x4C09 `SCORE`, 0x4C11 `PLAYER`, 0x4C19 `<icon>ENEMY`, 0x4C2D `STAGE`
@@ -794,17 +932,13 @@ words; `0xFE` and `0xFF` are line/record control bytes; other high bytes
 Data region is `l4c07h` .. 0x4D4D (right before `sub_4d4eh`, the title builder).
 `0x4C00-0x4C06` is real code (a keyboard-read routine).
 
-TODO (next session): add an sjasmplus macro to author these as readable ASCII
-(emit char-0x10) and convert the region to a data block byte-exactly; mark
-`l4c07h..0x4D4D` in segments/seg00.blocks as data.
-
-The 8x8 1bpp ending-credits glyphs live in seg14 `credits_font` (0x8824:
-digits 0-9 then `. ' : ,`) and `credits_font_az` (0x8894: A-Z), one
+HUD/title strings are authored with `vk` (ASCII−0x10) in seg0 `l4c07h` /
+`l4d0fh`. The 8x8 1bpp ending-credits glyphs live in seg14 `credits_font`
+(0x8824: digits 0-9 then `. ' : ,`) and `credits_font_az` (0x8894: A-Z), one
 `defb %xxxxxxxx` row per scanline. `credits_font_load` (seg0 0x53E5) is
-called from `sub_6719h` (post-Dracula script player: a message, then the
-credits) and blits them into SCREEN 5 via `l4a2eh` (ink C=0x0E). Sheet:
-`gfx/credits_font.png` (`make gfx`). HUD/title text uses a different font
-(tile base 0x10, ASCII-0x10 encoding above).
+called from `credits_init` and blits them into SCREEN 5 via `l4a2eh` (ink
+C=0x0E). Sheet: `gfx/credits_font.png` (`make gfx`). HUD/title text uses a
+different font (tile base 0x10, ASCII-0x10 encoding above).
 
 ### PSG driver (seg14)
 
@@ -812,7 +946,11 @@ credits) and blits them into SCREEN 5 via `l4a2eh` (ink C=0x0E). Sheet:
 ids: 0 stop, 1-0x1D sfx (`sfx_tbl`), 0x80-0x8F music (`music_ptr`, 3 channel
 pointers each; stage table is seg1 `stage_bgm_tbl`), 0xFB/0xFD overlays
 (hourglass freeze / death-style), 0xFC/0xFE restore, 0xFF fade. Packed
-streams stay INCBIN; several music tails continue in seg15. Channel RAM:
+streams are labeled hex (`data/psg_streams.asm` / `data/psg_seg15.asm`).
+`tools/psgplay.py` (`make music`) runs the same bytecode through an AY model
+and writes `music/*.wav` (ids `0x80`–`0x8E`; `0x8F` is silence). The WAVs are
+recognizable but **not a complete match** to hardware (software AY, loop/fade
+heuristics); accuracy is later work. Channel RAM:
 C010..C016 tick pointers, 20-byte blocks at C01C/C030/C044/C058/C06C/C080,
 C097 mixer shadow, C098 overlay flags, C0A5 fade.
 
@@ -828,14 +966,17 @@ tick + state dispatch, graphics/RLE loaders, bank switching, and the
 entity-dispatch shell at 0x5FD0. All 14 `main_state_tbl` handlers live in seg0
 (0x417D-0x441B) but are thin - they call out into banked ROM:
 - state 0 (logo): `call 0x6253`   state 3 (in-game): `call 0x63DA`
-- per-entity behaviour (player/enemy AI) via `entity_tbl` -> 0xA000+
+- per-entity behaviour (player/enemy AI) via `entity_tbl` -> 0xA000+ (spawn
+  init). Per-frame C800 ticks go through `actor_type_tick` / `actor_tick_tbl`
+  (seg2 0x9942; most entries skip the spawn-init/splash). Boss-clear after
+  `CE0B` is `room_event_ce10` (`DISPATCH_A` on `CE10`: cull, orb, heal, done).
 
 During normal play the default banks (set by `sub_533dh`) are seg 1 @ 0x6000,
 seg 2 @ 0x8000, seg 3 @ 0xA000. So the substantive gameplay (movement, AI,
 collision, item logic) lives in **code segments 1/2/3** (`INCLUDE`'d, still being
-annotated).  Map tables are banks 11-12; remaining `INCBIN` banks are 4-10 and
-15.  Seg14 is scenery / object lists / credits font / PSG driver (sequence streams
-still sliced; music tails continue in seg15).
+annotated).  Map tables are banks 11-12; tileset banks 4-8 are labeled source.
+Seg 15 is labeled music tails / env tables / Dracula portrait.  Segs 9-10 are
+labeled gfx-script / palette / enemy+weapon RLE source.
 
 ## Graphics format (sprite/tile hunt)
 
@@ -915,6 +1056,51 @@ paged into page 1b / 2a / 2b. Helper routines (each also shadows the value at
 So a page-2b source `0xAxxx` read right after `sub_5369h` maps to file offset
 `13*0x2000 + (addr-0xA000)` (e.g. 0xA319 -> file 0x1A319).
 
+### Per-room gfx scripts (enemy sprite VRAM)
+
+`room_gfx_load` (seg0 0x5787), called from the screen builder, pages seg9/10
+then indexes `room_gfx_ptr` (`9AB0[D000-1]`) + `4*D001`. Four bytes per room:
+script word, then palette table (fed to `l4845h`). Stage 0 skips. The script
+is walked by `gfx_script_run` (0x471B):
+
+| cmd | payload | handler |
+|-----|---------|---------|
+| `0xFF` | — | end |
+| `0` | src word, VRAM dest word | `gfx_script_rle` → `sub_46f8h` (seg9 if src `0x8000-9FFF`, seg10 if `0xA000-BFFF`) |
+| `1` | src, count, dest | `sub_4745h` 1bpp quadrant convert |
+| else | 6 bytes | `gfx_script_copy` VRAM blit — unused by the 21 room scripts |
+
+There are **24 back-to-back scripts** at `0x9D38-0x9FFE` (21 used by rooms,
+plus two unused and frontend `gfx_script_9fed`). **30 unique cmd-0 RLE
+sources** plus weapons/vdoor/orphans live in `data/enemy_sprite_rle.asm`
+(pixel payloads as `defb %xxxxxxxx`, same as the credits font; run/literal
+counts stay hex). Every dest is sprite-generator VRAM (`FA00`, `FB80`, `FBC0`, `FC00`,
+`FC80`, `FD00`, `FD40`, `FE00`, `FE40`, `FE80`, `FEC0`) — not Simon (`F800`) or
+projectile weapons (`F8C0`). Playfield tilesets are a separate load (seg4-6 via
+`sub_53a5h`), not these scripts. `make gfx` writes `gfx/script_rle.png` (up to
+four 16×16 cells per unique stream, labelled by dest). Seg13 `0xA319+` is
+`intro_simon` then the `simon_cell0/1` streams, not leftover enemy art.
+
+### Playfield tilesets
+
+`load_stage_tileset` (seg0 0x5653), first call in the screen builder, pages
+seg 4/5/6 (`sub_53a5h`; stage ≥ 13 overlays seg 7/8 via `sub_5393h`) and blits
+**0xBF uncompressed 8×8 4bpp** tiles from `tileset_ptr[D000]` into SCREEN 5
+VRAM starting `0x8004` (`l4a6dh` / `sub_4a58h`, 32 bytes/tile). That dest is
+X=8 on page 1, so nametable id 0 samples unloaded VRAM (blank / colour 0) and
+id N is ROM tile N−1 (`sub_4b48h`: SX=(A&0x1F)*8, SY=(A&0xE0)>>2). The
+playfield drawer (`0x4F98`) paints 22 rows from `0xD140` (map rows 2–23).
+Eight unique sources (courtyard; stages 1-3 / 4-6 / 7-9 / 10-12 / 13-15 /
+16-17; Dracula). `make gfx` writes `gfx/tileset_s00.png` … `tileset_s18.png`
+(labelled by ROM tile index `00`–`BE`) and `gfx/stage_sNN.png` (nametable
+ids, HUD rows cropped). Event 6 (`dracula_portrait_load` 0x5887) then overlays
+seg15 frame tiles plus 108 face tiles at atlas ids 0x1E–0x89, H-mirrors them
+to 0x8A–0xF5, and V-mirrors the frame for the bottom edge. Tileset banks 4–8
+are labeled source (`tileset_s00` at 0x6000, overlapping/spilling sets in
+`segments/data/tileset_sNN.asm`, `hud_weapon_key_tiles` at 0xB9C8). Each 8×8
+tile is eight `defb` rows (4 bytes = 8 pixels; high nibble = left). `make gfx`
+PNG previews are derived, not the assemble source.
+
 ### Tools for the graphics pipeline
 
 - `tools/rledec.py <rom> <src-off> --dest 0xF800 --out x.bin` replays the RLE
@@ -929,10 +1115,11 @@ So a page-2b source `0xAxxx` read right after `sub_5369h` maps to file offset
 
 ### Editable graphics catalogue (chosen workflow: "path A")
 
-The ROM stays guaranteed byte-exact because the graphics banks remain the
-original compressed bytes (`INCBIN` of the split segment binaries). Editable
-copies live in `gfx/`, generated by `tools/gfxdump.py` from `gfx/manifest.tsv`
-(run `make gfx`):
+The committed build stays byte-exact because identified graphics are stored as
+the original bytes (labeled `defb` for uncompressed tilesets / metatiles; packed
+1bpp sprite RLE with `%xxxxxxxx` pixel rows; hex PSG / unidentified slices).
+Editable PNG copies live in `gfx/`, generated by
+`tools/gfxdump.py` from `gfx/manifest.tsv` (run `make gfx`):
 - `gfx/<name>.bin` - decompressed raw pixels (edit these)
 - `gfx/<name>.txt` - ASCII-art preview (definitive human-readable source)
 - `gfx/<name>.png` - scaled PNG sheet, for extra clarity (via the dependency-free
@@ -956,8 +1143,12 @@ Catalogued so far (extend `manifest.tsv` as more sets are identified):
   Knife = 2 patterns (one two-plane sprite); axe/cross = 4 (two frames).
   In-game SAT for Simon's body is `simon_sat_cell0/1` (seg1 0x798C/0x79DC).
 - `credits_font.png` - 40 x 8x8 1bpp ending-credits glyphs from seg14
-  `credits_font` (0-9 `. ' : ,` A-Z). Raw, not RLE; loaded by `sub_6719h`.
-- `enemy_sheet.png` - one labelled frame per `entity_tbl` type 1–22 (`make gfx`).
+  `credits_font` (0-9 `. ' : ,` A-Z). Raw, not RLE; loaded by `credits_init`.
+- `enemy_sheet.png` - one labelled frame per `entity_tbl` type `01`–`16`, plus
+  candle-blob recolours **1A/1B/1C** (`make gfx`). Each frame is cropped to
+  the SAT cells it actually occupies (16×16, 16×32, 32×16, … — type `16` is
+  40×48) and packed, rather than a uniform 64×64 cell. The label is
+  `HH WxH` (hex type id, decimal SAT size in source pixels).
   Layout from the seg6 shape table at 0xB473 (`ix+0B`); pixels from the per-room
   gfx-script RLE into VRAM 0xF800+ (plus the 0x4745 1bpp convert). Two-plane SAT
   colours with CC (`0x40`) OR the colour indices (2+4→6). Palette is the
@@ -966,18 +1157,36 @@ Catalogued so far (extend `manifest.tsv` as more sets are identified):
   Types 7/10 only use HUD-fixed 2/12/14, so they ignore the overlay. Type **9**
   is the red skeleton (stage 13; SAT `02 45`; faster walk, no projectile). Type
   **11** is the white skeleton (`02 4C`, same 0x9FB2 sprite script): kites Simon,
-  hops gaps, throws a spinning bone (D700 type 4, shapes `0x4B–0x4E`). Type **16**
-  is the axe knight (stages 14+; same SAT layout as 9, throws via `d700_throw`
+  hops gaps, throws a spinning bone (shot type 4, shapes `0x4B–0x4E`). Type **16**
+  is the axe knight (stages 14+; same SAT layout as 9, throws via `shot_throw`
   0x9F68). Type **14**
-  bypasses `0x644C` (custom SAT in its tick). Type **17** is Dracula: standing
-  shape `0x5B` is SAT head + cape only. The 32×32 middle is a SCREEN 5 blit
-  (`sub_ad87h` / `ladc3h`, dest `(X-16, Y=0x91)`, sources assembled from page-1
-  16×16s at Y=`0xA0`). **PARKED:** compositing that blit from the s18r9
-  playfield (crop 64,88) pulled title-screen kana (Akumajō Dracula), not the
-  cloak; the sheet leaves the SAT gap until the real VRAM source is found.
+  bypasses `0x644C` (custom SAT in its tick). Type **17** is figure Dracula
+  (stage 18 room 9, then portrait Dracula is a separate wall event): standing
+  shape `0x5B` is SAT head + cape; the 32×32 middle is `dracula_blit_torso`
+  (LMMM from `dracula_torso_src` onto `(X-16, Y=0x91)`). Those slots are packed
+  4bpp `dracula_body_closed` / `dracula_body_open` (seg13 0xB5A1 / 0xB719)
+  loaded to page-1 Y=`0x80` by `dracula_body_load`. The 16×16s at page-1 Y=`0xA0`
+  (`dracula_portrait_parts`) are the wall portrait's eyes and mouth — closed
+  during the figure fight, then animated after he dies. `make gfx` composites
+  the standing cloak into `enemy_sheet.png`.
   Type **21** is Frankenstein (`0x79`); type 13/24 share the hunchback pose
-  `0x67`. Boss types use the event-room tileset. Not in `manifest.tsv`
+  `0x67`. Types **0x1A/0x1B/0x1C** are `actor_blob_blue` / `_red` / `_white`
+  (`spr_blob` fill / `spr_blob_cc` outline at FE80+; SAT `0F 42` / `08 42` /
+  `0E 42` — HUD-fixed indices 15/8/14), appended as **1A/1B/1C**.
+  Boss types use the event-room tileset. Not in `manifest.tsv`
   (derived, like the HUD bonus sheets).
+- `script_rle.png` - unique per-room gfx-script cmd-0 RLE streams (30 sources,
+  21 scripts). First up-to-four 16×16 cells per stream, labelled by VRAM dest.
+  Derived; same `make gfx` pass as `enemy_sheet.png`.
+- `tileset_s00.png` … `tileset_s18.png` - 8 unique playfield tilesets (0xBF
+  8×8 4bpp tiles, labelled with hex tile id `00`–`BE` as in metatile defs). Shared across 3-stage hubs.
+- `stage_sNN.png` - per-stage pixel rooms (`roomperm.py --pixels`):
+  nametable id N → ROM tile N−1 (id 0 blank — blit starts at VRAM 0x8004),
+  per-room playfield palette, HUD rows cropped. `make gfx` emits these
+  alongside the tileset sheets. Stage 18 room 9 overlays `dracula_portrait_load`
+  (seg0 0x5887): seg15 frame + 108 face tiles, H-mirrored to ids 0x8A–0xF5.
+  Palette is `dracula_portrait_palette` (0x59F3): HUD-fixed then 0xBF6F
+  pink/flesh, which replaces stage 18's purple on indices 4–7.
 
 In-game Simon is two stacked, independently-animated 16x16 hardware-sprite cells
 (legs + torso/whip), refreshed each frame by `load_simon_sprites` (seg0 0x56E8):
@@ -987,11 +1196,9 @@ sprite pattern generator (0xF800 = cell 0, 0xF840 = cell 1).  The two-table desi
 is why legs and upper body can animate on different cadences (e.g. whipping while
 standing still).
 
-TODO (next): map the remaining sprite/tile sets - which streams belong to each
-enemy/boss/item. Simon's two pointer tables are resolved (0xA281 legs / 0xA2D1
-torso+whip), and projectile weapons are `weapon_sprite_ptr` (knife/axe/cross
-in seg10). Still to resolve: per-room gfx-script streams (enemy/tileset VRAM)
-and remaining actor art in seg13 0xA319+.
+Pixel room sheets are `gfx/stage_sNN.png` (`roomperm.py --all --pixels`; also
+`make gfx`). Candle blob is on `enemy_sheet.png` as **1A/1B/1C**. Gfx banks
+4–10 and 15 are labeled dumps.
 
 ## Reference: Metal Gear disassembly
 
@@ -1005,10 +1212,5 @@ record used by the entity dispatch at 0x5FD0 / `entity_tbl`).
 
 ## Open questions to resolve in code
 
-- Input poller is `read_buttons` (0xC007 held / 0xC006 new-press). Remaining:
-  title→game vs title→attract branch, and keyboard SPACE vs joystick trigger at
-  the title (`l4398h` tests bits 4 and 5).
-- State machine for logo → title → attract → intro → play → boss → next level.
-- Weapon/sub-item inventory representation in RAM.
-- Heart counter and vendor transaction logic.
-- Per-level / per-boss data tables (which bank they live in).
+- Per-level / per-boss data tables (which bank they live in). Boss CE01
+  machines for events 1–6 are named; leftover is other unnamed tables.

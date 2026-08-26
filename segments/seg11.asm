@@ -41,12 +41,10 @@ mtile_roomptr:
 
 ; mtile_stream_c41a (seg11 0x614B): 8x6 metatile ids used when 0xC41A != 0
 ; (room_map_build takes this instead of mtile_roomptr[index]).
-mtile_stream_c41a:
-	INCBIN "seg11.bin", 0x014B, 48
+	INCLUDE "data/mtile_stream_c41a.asm"
 
 ; Packed 8x6 streams for every room, index order, 48 bytes each.
-mtile_streams:
-	INCBIN "seg11.bin", 0x017B, 0x1D40
+	INCLUDE "data/mtile_streams.asm"
 
 ; mtile_defbase (seg11 0x7EBB): word[stage] -> 4x4 metatile-def table.
 ; Address window selects the bank: 0x6000=seg11, 0x8000=seg12, 0xA000=seg13.
@@ -58,5 +56,4 @@ mtile_defbase:
 	defw 09651h,09651h,09ac1h
 
 ; Stage 0 metatile defs (29 x 16 bytes), straddling into seg12 at 0x80B1.
-mtile_defs_s00:                  ; stage 0 (0x7EE1), tail in seg12
-	INCBIN "seg11.bin", 0x1EE1, 0x011F
+	INCLUDE "data/mtile_defs_s00_a.asm"

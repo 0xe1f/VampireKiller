@@ -12,7 +12,8 @@
 ; BLOCK 'data_6000' (start 0x6000 end 0x6030)
 ; Spawn-init overflow of entity_tbl (seg0 0x5FD3). The table is odd-aligned:
 ; type 23 reads 0x5FFF (047h) + 0x6000, type 24 starts at 0x6001. Confirmed
-; when page 1b is seg1: 0x18 Igor 0xBAE4, 0x1E flame_init 0x9B67, 0x1F
+; when page 1b is seg1: 0x18 Igor igor_tick 0xBAE4, 0x19-0x1C enemy_blob_tick
+; 0xB4D9, 0x1E flame_init 0x9B67, 0x1F
 ; enemy_placed_bat_init 0xB0D5, 0x21 enemy_placed_merman_init 0xA2CE,
 ; 0x23 hunchback 0xB219, 0x24 heart 0x9BA2. Do not word-align this block.
 data_6000_start:
@@ -526,7 +527,7 @@ l6265h:
 	ld hl,02840h           ; VDP source
 	ld de,02840h           ; VDP dest (reveal the exposed band at 0x2840)
 	ld a,001h
-	jp 0494dh              ; seg0 VDP block copy -> tail-call (returns to caller)
+	jp vdp_hmmm              ; seg0 VDP block copy -> tail-call (returns to caller)
 
 ; --- sub_6276h - tile-string interpreter ------------------------------------
 ;  Walks a byte stream at HL, placing tiles at screen position DE:
@@ -625,14 +626,14 @@ l62eah:
 ;  unpacks scenery (candles/blocks/chests/vendors), loads the packed object
 ;  list and spawns its actors (`l61c2h`).  Many steps are helpers in seg1/seg2
 ;  not yet mapped; the annotated ones below are the known pieces.
-	call 05653h
+	call load_stage_tileset
 	call 05714h
 	call sub_63beh         ; clear 0xC420..0xC46F per-screen state
 	call sub_6409h
 	call scenery_load      ; unpack scenery_list into 0xE000 / 0xDE00
 	call sub_63cch         ; hide all hardware sprites
 	call sub_6389h         ; reset the object/actor state area
-	call 05787h
+	call room_gfx_load
 	call 056e8h
 	call 04f8ah
 	call 047dbh
@@ -657,7 +658,8 @@ sub_6334h:
 ;  up the current map cell in l6376h[row=0xD000]: the byte's high nibble is the
 ;  column it applies to and the low nibble is the event code.  If the high nibble
 ;  matches the current column (0xD001) the event code is stored in 0xCE00; code 6
-;  additionally kicks off its handler (seg1 0x59F3/0x5887, tail-call 0x57E6).
+;  additionally kicks off its handler (seg0 dracula_portrait_load 0x5887, plus
+;  0x59F3 / tail-call dracula_body_load 0x57E6).
 ;  Non-event cells hold 0xFF (high nibble 0xF never matches a real column).
 sub_633ah:
 	xor a
@@ -687,9 +689,9 @@ sub_633ah:
 	ld (0ce00h),hl         ; store event code
 	cp 006h
 	ret nz                 ; only code 6 has an immediate handler
-	call 059f3h
-	call 05887h
-	jp 057e6h
+	call dracula_portrait_palette
+	call dracula_portrait_load
+	jp dracula_body_load
 ; l6376h: per-row event table, one byte each (column<<4 | event); 0xFF = none.
 l6376h:
 	rst 38h
@@ -713,7 +715,7 @@ l6376h:
 	sub (hl)
 ; --- sub_6389h - reset the big object/actor state area and its sub-systems ---
 ;  Clears 0xC470..0xC6FF (0x290 bytes) to 0, then calls the per-subsystem reset
-;  helpers (seg0 0x5B22 instantiate current-room scenery into C470, door_load_paged,
+;  helpers (scenery_room_load into C470, door_load_paged,
 ;  conn_load_permits_paged, platform_load/platform_tick, whip_slots_clear), then zeroes two
 ;  strided tables: 7 entries 0x80 apart from 0xC800, and 8 entries 0x80 apart
 ;  from 0xD700.
@@ -723,7 +725,7 @@ sub_6389h:
 	ld (hl),000h
 	ld bc,0028fh           ; clear 0xC470..0xC6FF (0x290 bytes)
 	ldir
-	call 05b22h
+	call scenery_room_load
 	call door_load_paged
 	call platform_load
 	call platform_tick
@@ -969,12 +971,12 @@ l64e0h:
 	pop af
 	ret m
 
-; --- d700_sat_emit (0x64EC) / c800_sat_emit (0x64F3) -------------------------
+; --- shot_sat_emit (0x64EC) / c800_sat_emit (0x64F3) -------------------------
 ;  Two entry points over the two actor arrays (stride 0x80 per actor):
-;    d700_sat_emit: 8 actors at 0xD700    c800_sat_emit: 7 actors at 0xC800
+;    shot_sat_emit: 8 shots at 0xD700    c800_sat_emit: 7 actors at 0xC800
 ;  Each non-empty slot (byte 0 != 0) is turned into sprites by actor_sat_emit.
-d700_sat_emit:
-	ld hl,0d700h           ; 8 actors from 0xD700
+shot_sat_emit:
+	ld hl,0d700h           ; 8 shots from 0xD700
 	ld b,008h
 	jr l64f8h
 c800_sat_emit:
@@ -1122,53 +1124,52 @@ l65abh:
 	ld de,0f400h
 	ld bc,00280h
 	jp 0467ch              ; -> seg0 CPU->VRAM copy helper
-; --- sub_65b7h - event sub-state machine (dispatched on 0xCE01) -------------
-;  Event-driven: it does NOT run during logo/title/attract/normal stage play
-;  (confirmed by tracing), so the trigger is a specific event - boss / death /
-;  transition - still TBD.  0xCE01 selects one of 11 handlers through the inline
-;  word table below; each handler tail-jumps to the shared epilogue 0xBE44 (in
-;  page 2b).  0xCE02 serves as a per-step frame timer, and the last handler
-;  clears 0xCE00 and raises the 0xCE40 "done" flag (same pattern as the logo).
-sub_65b7h:
+; --- event_dracula (seg1 0x65B7) - event-6 CE01 sub-state machine ------------
+;  room_event_tick dispatches event 6 here.  Does NOT run in logo/title/
+;  attract/normal play.  CE01 selects one of 11 handlers; 0xCE02 is a per-step
+;  timer.  The last handler clears CE00 and raises CE40=1, which the play tick
+;  turns into credits_tick (ending message + staff).  Other bosses skip this
+;  and go through room_event_ce10 -> C409.  Each step ends at event_ce01_next.
+event_dracula:
 	ld a,(0ce01h)          ; A = event sub-state index
-	call DISPATCH_A        ; jump via the inline word table that follows
-	defw 065d3h            ; 0  init: seed the 0xC0D0 block (0x11 entries, 0x5F24)
-	defw 065e5h            ; 1  wait on 0xCE16, then re-run 0xAD9A
-	defw 065fah            ; 2  sub_6856h; arm frame timer 0xCE02 = 0x78
-	defw 06609h            ; 3  count 0xCE02 down; when 0 and 0xC800==0 -> play_sound(0)
-	defw 06620h            ; 4  play_sound(0x88); 0xC418=0x80; falls into l662dh
-	defw 06645h            ; 5  sub_68cbh; when 0xCE36==2, arm 0xCE37 = 0xC0
-	defw 0665ch            ; 6  branch on 0xCE15 (two sub-flows)
-	defw 0667eh            ; 7  sub_68afh; when 0xCE36==0, play_sound(0x8D), timer 0xB4
-	defw 06693h            ; 8  count 0xCE02 down; then 0x6A03
-	defw 0669eh            ; 9  sub_6a15h; then 0x47B8/0x4805, timer = 8
-	defw 066b0h            ; 10 count down; then 0xCE00 = 0, 0xCE40 = 1 (done)
-; --- CE01=0: initialise the event -------------------------------------------
+	call DISPATCH_A
+	defw event_dracula_init    ; 0  seed C0D0 (0x11 entries)
+	defw event_dracula_wait    ; 1  wait CE16, re-run dracula_blit_torso
+	defw event_dracula_sparks  ; 2  sub_6856h; CE02 = 0x78
+	defw event_dracula_quiet   ; 3  wait CE02 and C800==0, play_sound 0
+	defw event_dracula_theme   ; 4  BGM 0x88, bar=0x80, falls into l662dh
+	defw event_dracula_rise    ; 5  sub_68cbh until CE36==2
+	defw event_dracula_fork    ; 6  branch on CE15
+	defw event_dracula_drop    ; 7  sub_68afh; BGM 0x8D, timer 0xB4
+	defw event_dracula_wait2   ; 8  count CE02; 0x6A03
+	defw event_dracula_fade    ; 9  sub_6a15h; 0x47B8/0x4805, timer 8
+	defw event_dracula_done    ; 10 CE00=0, CE40=1 -> credits_tick
+event_dracula_init:
 	xor a
 	ld (0ce16h),a          ; clear the "active" flag ...
 	ld (0ce0eh),a          ; ... and its companion
 	ld de,0c0d0h           ; DE -> 0xC0D0 work block
 	ld c,011h              ; 0x11 entries
 	call 05f24h            ; seg1 block-fill/setup helper
-	jp 0be44h              ; -> shared epilogue (page 2b)
-; --- CE01=1: wait for 0xCE16, then step ------------------------------------
-	call 0ad9ah            ; seg2b per-frame update
+	jp event_ce01_next              ; -> shared epilogue (page 2b)
+event_dracula_wait:
+	call dracula_blit_torso    ; per-frame 32x32 torso blit (CE0E)
 	ld a,(0ce16h)
 	and a
 	ret z                  ; not ready yet -> stay in this state
 	xor a
 	ld (0ce15h),a
 	ld (0ce0eh),a
-	call 0ad9ah
-	jp 0be44h
-; --- CE01=2: arm the dwell timer -------------------------------------------
+	call dracula_blit_torso
+	jp event_ce01_next
+event_dracula_sparks:
 	xor a
 	ld (0ce12h),a
 	call sub_6856h
 	ld a,078h
 	ld (0ce02h),a          ; frame timer = 0x78
-	jp 0be44h
-; --- CE01=3: wait out the timer, gated on 0xC800 ---------------------------
+	jp event_ce01_next
+event_dracula_quiet:
 	ld hl,0ce02h
 	ld a,(hl)
 	and a
@@ -1182,8 +1183,8 @@ l6611h:
 	ret nz                 ; first actor slot still busy -> stay
 	ld a,000h
 	call play_sound            ; trigger action 0
-	jp 0be44h
-; --- CE01=4: (then fall through to l662dh) ---------------------------------
+	jp event_ce01_next
+event_dracula_theme:
 	ld a,088h
 	call play_sound            ; trigger action 0x88
 	ld a,080h
@@ -1198,8 +1199,8 @@ l662dh:
 	xor a
 	ld (0ce36h),a          ; reset the pair of progress counters
 	ld (0ce37h),a
-	jp 0be44h
-; --- CE01=5: advance until 0xCE36 reaches 2 --------------------------------
+	jp event_ce01_next
+event_dracula_rise:
 	call sub_68cbh
 	ld a,(0ce36h)
 	sub 002h
@@ -1208,8 +1209,8 @@ l662dh:
 	ld (0ce39h),a
 	ld a,0c0h
 	ld (0ce37h),a          ; arm counter 0xCE37 = 0xC0
-	jp 0be44h
-; --- CE01=6: branch on 0xCE15 ----------------------------------------------
+	jp event_ce01_next
+event_dracula_fork:
 	ld a,(0ce15h)
 	and a
 	jr nz,l666eh
@@ -1223,8 +1224,8 @@ l666eh:
 	call sub_780dh
 	xor a
 	ld (0ce37h),a
-	jp 0be44h
-; --- CE01=7: advance until 0xCE36 reaches 0 --------------------------------
+	jp event_ce01_next
+event_dracula_drop:
 	call sub_68afh
 	ld a,(0ce36h)
 	and a
@@ -1233,233 +1234,204 @@ l666eh:
 	call play_sound            ; trigger action 0x8D
 	ld a,0b4h
 	ld (0ce02h),a          ; frame timer = 0xB4
-	jp 0be44h
-; --- CE01=8: wait out the timer, then 0x6A03 -------------------------------
+	jp event_ce01_next
+event_dracula_wait2:
 	ld hl,0ce02h
 	dec (hl)
 	ret nz
 	call 06a03h
-	jp 0be44h
-; --- CE01=9: finish, then short dwell --------------------------------------
+	jp event_ce01_next
+event_dracula_fade:
 	call sub_6a15h
 	ret nz                 ; sub_6a15h still working -> stay
 	call 047b8h
 	call 04805h
 	ld a,008h
 	ld (0ce02h),a          ; frame timer = 8
-	jp 0be44h
-; --- CE01=10: dwell, then end the event ------------------------------------
+	jp event_ce01_next
+event_dracula_done:
 	ld hl,0ce02h
 	dec (hl)
 	ret nz
 	ld hl,CHKRAM           ; 0x0000 (CHKRAM equ) -> reset event pointer
 	ld (0ce00h),hl         ; 0xCE00 = 0 (no event)
 	ld a,001h
-	ld (0ce40h),a          ; raise the "event done" flag
+	ld (0ce40h),a          ; start credits_tick (ending only; other bosses use C409)
 	ret
-; --- sub_66c1h - post-event sequence (dispatched on 0xCE40) -----------------
-;  Runs once the 0xCE01 event machine has finished (it raises 0xCE40 = 1).
-;  0xCE40 (1..4) minus 1 selects one of 4 handlers via the inline table; each
-;  advances 0xCE40 (via l66d8h) to step to the next.  This drives the cutscene
-;  script player and, at the end, bumps the level counter 0xD012 and pokes a
-;  VDP register.  Also event-gated (does not run in normal play).
-sub_66c1h:
-	ld a,(0ce40h)          ; A = post-event step (1..4)
+; --- credits_tick (seg1 0x66C1) - ending credits, dispatched on 0xCE40 ------
+;  Event 6 (Dracula) finishes the CE01 machine by raising CE40=1.  Play tick
+;  (sub_5c2ch) then calls here instead of the normal loop.  CE40 (1..4) minus
+;  1 selects the step; each advances via credits_next.  Story + staff text
+;  live in seg8 (0xBF20) and seg5 (0x82C0); see credits_ending.asm /
+;  credits_staff.asm.
+;  On done: C409 -> state_hub_advance (hub wrap / loop).
+credits_tick:
+	ld a,(0ce40h)          ; A = credits step (1..4)
 	dec a                  ; -> 0-based index
 	call DISPATCH_A        ; jump via the inline table below
-	defw 066d0h            ; 0 (0xCE40=1) start: init script player, advance
-	defw 066ddh            ; 1 (0xCE40=2) run the script each frame until done
-	defw 066e7h            ; 2 (0xCE40=3) wait on 0x5310, arm timer, advance
-	defw 066f8h            ; 3 (0xCE40=4) dwell, then end + bump level 0xD012
-; --- CE40=1: kick off the script player ------------------------------------
+	defw credits_start     ; 0 (CE40=1) BGM 0x8E, credits_init, advance
+	defw credits_pump      ; 1 (CE40=2) run the roll until CE32
+	defw credits_wait      ; 2 (CE40=3) wait on 0x5310, arm timer, advance
+	defw credits_finish    ; 3 (CE40=4) dwell, C409, bump 0xD012, R23=0
+credits_start:
 	ld a,08eh
-	call play_sound            ; trigger action 0x8E
-	call sub_6719h         ; reset script-player state
-l66d8h:
+	call play_sound        ; ending theme (music_ptr 0x8E)
+	call credits_init      ; load credits_font, clear CE30-CE34
+credits_next:
 	ld hl,0ce40h
-	inc (hl)               ; advance to the next post-event step
+	inc (hl)               ; advance to the next credits step
 	ret
-; --- CE40=2: pump the script until it flags completion ---------------------
-	call sub_6736h         ; run one script step
+credits_pump:
+	call credits_frame     ; one timeline + keyframe + wipe
 	ld a,(0ce32h)
 	and a
-	ret z                  ; script not finished -> stay
-	jr l66d8h              ; done -> advance
-; --- CE40=3: wait on 0x5310, then arm a dwell timer ------------------------
+	ret z                  ; roll not finished -> stay
+	jr credits_next        ; done -> advance
+credits_wait:
 	call 05310h
 	ret nz                 ; not ready -> stay
 	ld a,01eh
 	ld (0ce02h),a          ; frame timer = 0x1E
 	call 047b8h
 	call 047dbh
-	jr l66d8h              ; advance
-; --- CE40=4: dwell, then finish and advance the level ----------------------
+	jr credits_next        ; advance
+credits_finish:
 	ld hl,0ce02h
 	dec (hl)
 	ret nz                 ; timer running -> stay
 	xor a
-	ld (0ce34h),a
-	ld (0ce40h),a          ; clear the post-event step (sequence over)
+	ld (0ce34h),a          ; stop event_vscroll
+	ld (0ce40h),a          ; credits machine off
 	inc a
-	ld (0c409h),a          ; 0xC409 = 1 (signal next phase)
+	ld (0c409h),a          ; -> state_hub_advance (same latch as boss-clear)
 	ld hl,0d012h
 	ld a,(hl)
 	inc a
 	cp 003h
-	jr nc,l6712h           ; cap the level counter at 3
-	ld (hl),a              ; 0xD012 = min(level+1, ...)
+	jr nc,l6712h           ; cap the difficulty tier at 3
+	ld (hl),a              ; 0xD012 = min(tier+1, 3)
 l6712h:
 	ld b,000h
-	ld c,017h              ; VDP register 23 (R23 = vertical scroll)
+	ld c,017h              ; VDP R23 = 0 (undo credits v-scroll)
 	jp WRTVDP
-; --- sub_6719h - reset the ending-credits script-player state --------------
-sub_6719h:
+; --- credits_init (seg1 0x6719) - reset the ending-credits script player ---
+credits_init:
 	call credits_font_load
 	xor a
-	ld (0ce30h),a          ; clear the script cursors/counters ...
-	ld (0ce33h),a          ; 0xCE33 = per-step tick
-	ld (0ce31h),a          ; 0xCE31 = script index (into script_ptr_6795)
-	ld (0ce32h),a          ; 0xCE32 = done flag
+	ld (0ce30h),a          ; unused cursor (cleared, never read)
+	ld (0ce33h),a          ; timeline tick (also VDP R23 via event_vscroll)
+	ld (0ce31h),a          ; index into credits_script_ptr
+	ld (0ce32h),a          ; done flag
 	inc a
-	ld (0ce34h),a          ; 0xCE34 = 1 (player active)
+	ld (0ce34h),a          ; 1 = player active (gates event_vscroll)
 	ld a,00eh
 	ld d,0ffh
 	ld e,00fh
 	jp 0481bh              ; seg0 VRAM setup/fill helper
-; --- sub_6736h - advance the cutscene sequencer one frame ------------------
-sub_6736h:
-	call sub_673fh         ; tick the timeline clock (every 4th frame)
-	call sub_674ah         ; fire any keyframe due at this tick
-	jp l6831h              ; refresh the on-screen effect (ramp/scroll)
-; --- sub_673fh - timeline clock: bump 0xCE33 every 4th frame ---------------
-sub_673fh:
+; --- credits_frame (seg1 0x6736) - one credits frame -----------------------
+credits_frame:
+	call credits_clock     ; bump CE33 every 4th frame
+	call credits_keyframe  ; blit the line due at this tick
+	jp credits_wipe        ; FILVRM the strip 2 ticks behind
+; --- credits_clock (seg1 0x673F) - CE33 += 1 every 4th frame ---------------
+credits_clock:
 	ld a,(0c003h)
 	and 003h
-	ret nz                 ; only act on 1 frame in 4 (slows the sequence)
+	ret nz                 ; only act on 1 frame in 4
 	ld hl,0ce33h
-	inc (hl)               ; 0xCE33 = timeline tick
+	inc (hl)               ; byte; wraps.  Also the scroll offset.
 	ret
-; --- sub_674ah - keyframe player: fire the entry due at the current tick ----
-;  Pages seg 8 (0xA000) and seg 5 (0x8000) - where the script + payload live -
-;  then looks up the current script (0xCE31) in script_ptr_6795.  Each script
-;  is a list of {tick, action} keyframes; if the head keyframe's tick matches
-;  0xCE33 it fires: action 0xFF ends the script (raise done flag 0xCE32, call
-;  play_sound(0xFF)); otherwise it blits the payload row for this tick to 0xD8xx and
-;  steps to the next script (0xCE31++).  0x533D restores the original banks.
-sub_674ah:
+; --- credits_keyframe (seg1 0x674A) - blit the line due at CE33 ------------
+;  Pages seg 8 @ 0xA000 (ending paragraph) and seg 5 @ 0x8000 (staff), then
+;  looks up credits_script_ptr[CE31].  Record is {tick, x, chars..., 0xFF}.
+;  If tick != CE33, restore banks (0x533D) and return.  x==0xFF is the end
+;  of roll (CE32=1, play_sound 0xFF).  Else blit via l4adch: C=0xFF so
+;  letters pass as ASCII (space is already 0x00, not HUD ASCII-0x10).
+;  `inc a` tests the 0xFF end marker, so D = X+1; E = CE33+0xD8 (Y).
+credits_keyframe:
 	di
 	ld a,008h
-	ld (0a000h),a          ; page seg 8 into page 2b (script pointers/data)
+	ld (0a000h),a          ; page seg 8 into page 2b (ending text)
 	ld (0f0f3h),a
 	ei
 	di
 	ld a,005h
-	ld (08000h),a          ; page seg 5 into page 2a (payload)
+	ld (08000h),a          ; page seg 5 into page 2a (staff text)
 	ld (0f0f2h),a
 	ei
-	ld a,(0ce31h)          ; A = current script index
-	ld de,l6795h
-	call lookup_word_tbl   ; DE -> script[index]
-	ex de,hl               ; HL -> keyframe {tick, action, ...}
+	ld a,(0ce31h)          ; A = current line index
+	ld de,credits_script_ptr
+	call lookup_word_tbl   ; DE -> keyframe[index]
+	ex de,hl               ; HL -> {tick, x, ...}
 	ld a,(0ce33h)
-	cp (hl)                ; timeline tick == this keyframe's tick?
+	cp (hl)                ; timeline tick == this line's tick?
 	jp nz,0533dh           ; not yet -> restore banks and return
 	inc hl
-	ld a,(hl)              ; action byte
+	ld a,(hl)              ; X, or 0xFF = end of roll
 	inc hl
 	inc a
-	jr z,l6788h            ; 0xFF -> end of script
-	ld d,a                 ; D = payload source high byte
+	jr z,credits_script_done ; 0xFF -> end
+	ld d,a                 ; D = X+1 (inc a ate one pixel)
 	ld a,(0ce33h)
 	add a,0d8h
-	ld e,a                 ; DE -> payload row (0xD8xx + tick)
-	ld c,0ffh
-	call 04adch            ; blit the keyframe payload
+	ld e,a                 ; E = CE33+0xD8 (Y)
+	ld c,0ffh              ; pass tile ids through (ASCII; space already 0)
+	call 04adch            ; blit the line, +8 X per glyph
 	ld hl,0ce31h
-	inc (hl)               ; advance to the next script/keyframe
+	inc (hl)               ; next credits_script_ptr entry
 	jp 0533dh              ; restore banks and return
-l6788h:
+credits_script_done:
 	ld a,001h
 	ld (0ce32h),a          ; raise "script finished" flag
 	ld a,0ffh
-	call play_sound            ; trigger the end-of-script action
+	call play_sound        ; fade (play_sound 0xFF)
 	jp 0533dh              ; restore banks and return
-l6795h:
-	jr nz,$-63
-	add hl,sp
-	cp a
-	ld d,c
-	cp a
-	ld l,h
-	cp a
-	add a,d
-	cp a
-	sbc a,l
-	cp a
-	cp b
-	cp a
-	ret nz
-	add a,d
-	sub 082h
-	sbc a,082h
-	xor 082h
-	ld sp,hl
-	add a,d
-	ld b,083h
-	ld de,01b83h
-	add a,e
-	dec h
-	add a,e
-	jr c,$-123
-	ld b,h
-	add a,e
-	ld d,a
-	add a,e
-	ld h,e
-	add a,e
-	ld l,(hl)
-	add a,e
-	ld a,e
-	add a,e
-	adc a,b
-	add a,e
-	sbc a,d
-	add a,e
-	and l
-	add a,e
-	or b
-	add a,e
-	cp (hl)
-	add a,e
-	call z,0db83h
-	add a,e
-	ret pe
-	add a,e
-	rst 38h
-	add a,e
-	inc c
-	add a,h
-	inc d
-	add a,h
-	inc e
-	add a,h
-	jr z,$-122
-	inc sp
-	add a,h
-	ld b,h
-	add a,h
-	ld d,b
-	add a,h
-	ld e,d
-	add a,h
-	ld l,b
-	add a,h
-	ld a,d
-	add a,h
-	sub c
-	add a,h
-	sub c
-	add a,h
+; credits_script_ptr (seg1 0x6795): 43 words, indexed by CE31.  First 7 are
+; the ending paragraph in seg8; the rest are the last line + staff in seg5.
+credits_script_ptr:
+	defw credits_msg_brave         ; SO THE BRAVE YOUNG MAN
+	defw credits_msg_put           ; PUT DRACULA INTO DEEP
+	defw credits_msg_sleep         ; SLEEP AGAIN AND THE TOWN
+	defw credits_msg_peace         ; RESTORED ITS PEACE:
+	defw credits_msg_pray          ; LET;S PRAY THAT THE EVIL
+	defw credits_msg_humanbeings   ; MIND OF HUMANBEINGS WILL
+	defw credits_msg_come          ; NOT LET DRACULA COME TO
+	defw credits_msg_life          ; LIFE EVER AGAIN::::
+	defw credits_staff             ; STAFF
+	defw credits_game_designer     ; GAME DESIGNER
+	defw credits_nagata            ; A:NAGATA
+	defw credits_programmer        ; PROGRAMMER
+	defw credits_harima            ; A:HARIMA
+	defw credits_akada             ; I:AKADA
+	defw credits_nagae             ; K:NAGAE
+	defw credits_sound_programmer  ; SOUND PROGRAMMER
+	defw credits_shikama           ; H:SHIKAMA
+	defw credits_graphic_designer  ; GRAPHIC DESIGNER
+	defw credits_iwamoto           ; S:IWAMOTO
+	defw credits_matsui            ; N:MATSUI
+	defw credits_mizutani          ; K:MIZUTANI
+	defw credits_fujimoto          ; A:FUJIMOTO
+	defw credits_sound_effect      ; SOUND EFFECT BY
+	defw credits_uehara            ; K:UEHARA
+	defw credits_music_by          ; MUSIC BY
+	defw credits_yamashita         ; K:YAMASHITA
+	defw credits_terashima         ; S:TERASHIMA
+	defw credits_art_designer      ; ART DESIGNER
+	defw credits_hayakawa          ; F:HAYAKAWA
+	defw credits_assistant         ; ASSISTANT PROGRAMMER
+	defw credits_toyohara          ; K:TOYOHARA
+	defw credits_oka               ; T:OKA
+	defw credits_eda               ; H:EDA
+	defw credits_ohtsuka           ; T:OHTSUKA
+	defw credits_danjyo            ; T:DANJYO
+	defw credits_special_thanks    ; SPECIAL THANKS
+	defw credits_hiraoka           ; K:HIRAOKA
+	defw credits_fc_team           ; FC:TEAM
+	defw credits_produced_by       ; PRODUCED BY
+	defw credits_akihiko_nagata    ; AKIHIKO  NAGATA
+	defw credits_presented_by      ; PRESENTED BY  KONAMI
+	defw credits_script_end        ; {0x20, 0xFF}
+	defw credits_script_end
 sub_67ebh:
 	ld hl,0ce39h
 	ld a,(hl)
@@ -1509,7 +1481,7 @@ sub_681fh:
 	cp 01fh
 	ret nz
 	jp sub_698bh
-l6831h:
+credits_wipe:
 	ld a,(0ce33h)
 	sub 002h
 	ld h,a
@@ -1521,9 +1493,9 @@ l6831h:
 	ld bc,00080h
 	xor a
 	jp FILVRM
-; event_vscroll (seg1 0x6848): if 0xCE34 is set, write 0xCE33 to VDP R23
-; (vertical offset).  First call in the play tick; the cutscene player
-; animates CE33.
+; event_vscroll (seg1 0x6848): if CE34 is set (credits_init), write CE33 to
+; VDP R23.  First call in the play tick; the credits roll uses this as the
+; vertical scroll while CE33 is also the keyframe timeline.
 event_vscroll:
 	ld a,(0ce34h)
 	and a
@@ -1555,14 +1527,11 @@ l6858h:
 sub_6875h:
 	ld a,(0ce35h)
 	call DISPATCH_A
-	add a,e
-	ld l,b
-	adc a,l
-	ld l,b
-	add a,e
-	ld l,b
-	sbc a,h
-	ld l,b
+	defw l6883h            ; 0/2  wait CE37, then CE35++
+	defw l688dh            ; 1  sub_68afh until CE36=0
+	defw l6883h
+	defw l689ch            ; 3  sub_68cbh until CE36=2, reset
+l6883h:
 	ld hl,0ce37h
 	dec (hl)
 	ret nz
@@ -1570,6 +1539,7 @@ l6888h:
 	ld hl,0ce35h
 	inc (hl)
 	ret
+l688dh:
 	call sub_68afh
 	ld a,(0ce36h)
 	and a
@@ -1577,6 +1547,7 @@ l6888h:
 	ld a,040h
 	ld (0ce37h),a
 	jr l6888h
+l689ch:
 	call sub_68cbh
 	ld a,(0ce36h)
 	cp 002h
@@ -1622,86 +1593,86 @@ l68e3h:
 	ld de,07080h
 	ld bc,01010h
 	ld a,001h
-	call 0494dh
+	call vdp_hmmm
 	ld hl,0a0a0h
 	ld de,08080h
 	ld bc,01010h
 	ld a,001h
-	call 0494dh
+	call vdp_hmmm
 	ld hl,050a0h
 	ld de,l7090h
 	ld bc,01010h
 	ld a,001h
-	call 0494dh
+	call vdp_hmmm
 	ld hl,090a0h
 	ld de,08090h
 	ld bc,01010h
 	ld a,001h
-	jp 0494dh
+	jp vdp_hmmm
 sub_691bh:
 	ld hl,040a0h
 	ld de,07080h
 	ld bc,01010h
 	ld a,001h
-	call 0494dh
+	call vdp_hmmm
 	ld hl,080a0h
 	ld de,08080h
 	ld bc,01010h
 	ld a,001h
-	call 0494dh
+	call vdp_hmmm
 	ld hl,050a0h
 	ld de,l7090h
 	ld bc,01010h
 	ld a,001h
-	call 0494dh
+	call vdp_hmmm
 	ld hl,090a0h
 	ld de,08090h
 	ld bc,01010h
 	ld a,001h
-	jp 0494dh
+	jp vdp_hmmm
 l6953h:
 	ld hl,060a0h
 	ld de,07080h
 	ld bc,01010h
 	ld a,001h
-	call 0494dh
+	call vdp_hmmm
 	ld hl,0a0a0h
 	ld de,08080h
 	ld bc,01010h
 	ld a,001h
-	call 0494dh
+	call vdp_hmmm
 	ld hl,l70a0h
 	ld de,l7090h
 	ld bc,01010h
 	ld a,001h
-	call 0494dh
+	call vdp_hmmm
 	ld hl,0b0a0h
 	ld de,08090h
 	ld bc,01010h
 	ld a,001h
-	jp 0494dh
+	jp vdp_hmmm
 sub_698bh:
 	ld hl,000a0h
 	ld de,l6858h
 	ld bc,01010h
 	ld a,001h
-	call 0494dh
+	call vdp_hmmm
 	ld hl,010a0h
 	ld de,08858h
 	ld bc,01010h
 	ld a,001h
-	jp 0494dh
+	jp vdp_hmmm
 l69a7h:
 	ld hl,020a0h
 	ld de,l6858h
 	ld bc,01010h
 	ld a,001h
-	call 0494dh
+	call vdp_hmmm
 	ld hl,030a0h
 	ld de,08858h
 	ld bc,01010h
 	ld a,001h
-	jp 0494dh
+	jp vdp_hmmm
 	xor a
 	ld (ix+07eh),a
 	ld (ix+00eh),a
@@ -1784,6 +1755,7 @@ l6a3bh:
 	ret
 	ld (ix+00eh),005h
 	ld (ix+006h),000h
+tick_nop:
 	ret
 l6a50h:
 	ld a,(0ce36h)
@@ -1810,7 +1782,7 @@ l6a70h:
 	call lookup_word_tbl
 	ld a,(0c427h)
 	sub (ix+005h)
-	call c,0a183h
+	call c,neg_de
 	jp actor_set_xvel
 l6a93h:
 	nop
@@ -1828,18 +1800,19 @@ l6a93h:
 	call nz,actor_add_yvel
 	ld a,(ix+001h)
 	call DISPATCH_A
-	cp (hl)
-	ld l,d
-	adc a,06ah
-	and 06ah
-	jp p,0006ah
-	ld l,e
+	defw l6abeh
+	defw l6aceh
+	defw l6ae6h
+	defw l6af2h
+	defw sub_6b00h
+l6abeh:
 	dec (ix+00ch)
 	ret nz
 	ld (ix+00bh),0a5h
 	ld (ix+00ch),008h
 	inc (ix+001h)
 	ret
+l6aceh:
 	dec (ix+00ch)
 	ret nz
 	bit 7,(ix+00ah)
@@ -1851,11 +1824,13 @@ l6adbh:
 	ld (ix+00ch),008h
 	inc (ix+001h)
 	ret
+l6ae6h:
 	dec (ix+00ch)
 	ret nz
 	ld (ix+00ch),018h
 	inc (ix+001h)
 	ret
+l6af2h:
 	ld a,(ix+011h)
 	call sub_6b00h
 	dec (ix+00ch)
@@ -2659,7 +2634,7 @@ l70c6h:
 	ld (0c440h),a
 	ld (0d010h),a
 	ld (0d001h),a
-	ld (0c413h),a
+	ld (0c413h),a          ; leave play (death)
 sub_70e3h:
 	ld a,(0c701h)
 	and 080h               ; keep map (bit7); holy water/hourglass/keys go
@@ -3053,7 +3028,7 @@ boomerang_catch:               ; (0x73A4) overlap Simon -> despawn (keep C416)
 	jp projectile_clear
 ; holy_water_tick (seg1 0x73AB): C460 slot type 5.  State 0/1 spawn at Simon
 ; (Y=C425+offset, X=C427, velX=±2 from C468, velY=0).  State 2 = arc
-; (Y += 2*l7084h[phase], land via sub_7b9fh tile_is_solid).  State 3 = pool
+; (Y += 2*l7084h[phase], land via map_solid_pair tile_is_solid).  State 3 = pool
 ; (24 frames, SAT colour 8).
 holy_water_tick:
 	ld a,(ix+000h)
@@ -3101,7 +3076,7 @@ holy_water_arc:                ; (0x73E5) Y += 2*l7084h[ix+7]; land -> pool
 l7404h:
 	ld d,(ix+005h)
 	ld e,(ix+004h)
-	call sub_7b9fh
+	call map_solid_pair
 	ret nc
 	inc (ix+000h)
 	xor a
@@ -4319,7 +4294,9 @@ l7b99h:
 	ld a,(0c427h)
 	add a,005h
 	ld d,a
-sub_7b9fh:
+; map_solid_pair (seg1 0x7B9F): carry if the tile at (D,E) or (D-10,E) is solid.
+; Enemy floor test (feet + 10px toward the other side).
+map_solid_pair:
 	call map_cell_at
 	call tile_is_solid
 	ret c
@@ -4339,6 +4316,8 @@ sub_7bb0h:
 	ld bc,01004h
 	ld a,002h
 	jr l7bc7h
+; probe_wall_right (0x7BC5): A=1, BC from caller (often 0x0808). +X samples.
+probe_wall_right:
 	ld a,001h
 l7bc7h:
 	ld (0cff0h),a
@@ -4391,6 +4370,8 @@ sub_7c0ch:
 	ld bc,01004h
 	ld a,002h
 	jr l7c23h
+; probe_wall_left (0x7C21): A=1, BC from caller (often 0x0808). -X samples.
+probe_wall_left:
 	ld a,001h
 l7c23h:
 	ld (0cff0h),a
@@ -4455,28 +4436,11 @@ l7c7ah:
 	dec a
 	cp 006h                ; event-6: solid iff (id-1) < 6
 	ret
-; row_solid_thresh: one byte per world row (0xD000); see tile_is_solid.  Bytes:
-;   02 04 04 04 04 04 04 04 04 04 09 09 09 04 04 04 09 09 08 ...
+;  row_solid_thresh: one byte per world row (0xD000); see tile_is_solid.
+;  Event 6 (s18r9) ignores this table and uses threshold 6.
 row_solid_thresh:
-	ld (bc),a
-	inc b
-	inc b
-	inc b
-	inc b
-	inc b
-	inc b
-	inc b
-	inc b
-	inc b
-	add hl,bc
-	add hl,bc
-	add hl,bc
-	inc b
-	inc b
-	inc b
-	add hl,bc
-	add hl,bc
-	ex af,af'
+	defb 002h,004h,004h,004h,004h,004h,004h,004h,004h,004h
+	defb 009h,009h,009h,004h,004h,004h,009h,009h,008h
 sub_7c92h:
 	ld a,(0ce00h)
 	cp 006h
@@ -4697,7 +4661,7 @@ l7dc0h:
 	rra
 	jr nc,l7dd3h
 	push bc
-	call 08283h
+	call actor_vs_whip
 	pop bc
 	jr c,l7ddbh
 l7dd3h:
@@ -4812,7 +4776,7 @@ l7e8ah:
 	rra
 	jr nc,l7ee3h
 	push bc
-	call 08297h
+	call actor_vs_simon
 	pop bc
 	jr nc,l7ee3h
 	ld a,(ix+000h)
@@ -4875,13 +4839,13 @@ l7f07h:
 	jr z,l7f47h
 	cp 00ch
 	jr z,l7f47h
-	call 08253h
+	call shot_vs_simon
 	jr nc,l7f47h
 	call actor_free
 	pop bc
 	ld a,(0c434h)
 	and a
-	jp nz,08231h
+	jp nz,add_score_100
 	ld a,005h
 	ld (0c420h),a
 	xor a
@@ -4920,11 +4884,11 @@ l7f5ch:
 	jr z,l7f77h
 	cp 00ch
 	jr z,l7f77h
-	call 08277h
+	call shot_vs_whip
 	jr nc,l7f77h
 	ld a,00ch
 	call play_sound
-	call 08231h
+	call add_score_100
 	call 09a21h
 l7f77h:
 	pop bc
@@ -4947,7 +4911,7 @@ l7f8fh:
 	cp 00ch
 	jr z,l7fb6h
 	push bc
-	call 0825fh
+	call shot_vs_proj
 	pop bc
 	jr nc,l7fb6h
 	ld a,00ch
@@ -4957,7 +4921,7 @@ l7f8fh:
 	push iy
 	pop hl
 	call z,projectile_clear_hl
-	call 08231h
+	call add_score_100
 	jp 09a21h
 l7fb6h:
 	ld de,00080h
@@ -4976,7 +4940,7 @@ l7fc9h:
 	jr z,l7fe2h
 	push hl
 	push bc
-	call 08457h
+	call candle_vs_whip
 	pop bc
 	pop hl
 	jr nc,l7fe2h
@@ -5007,6 +4971,6 @@ sub_7fe9h:
 	rla
 	jr nc,$+37
 	push hl
-	call 08237h
+	call pickup_vs_simon
 	pop hl
 	jr nc,$+30

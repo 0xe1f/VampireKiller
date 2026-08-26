@@ -24,8 +24,13 @@
 ;  --- File layout --------------------------------------------------------
 ;  The .rom is the 16 segments concatenated (segment N at file offset N*0x2000).
 ;  This source is being converted segment-by-segment from raw `incbin` into
-;  commented disassembly.  Segments 0-3 and 11-14 are INCLUDE'd; the rest are
-;  still INCBIN so the rebuilt ROM stays byte-for-byte identical at every step.
+;  commented disassembly.  Segments 0-3 and 11-14 are INCLUDE'd; tileset
+;  banks 4-8 stitch `data/tileset_*.asm` (hex 4bpp rows); segs 9-10 are
+;  gfx scripts / palettes / enemy+weapon RLE; metatile streams/defs and
+;  Simon/intro RLE live in `segments/data/`; ending
+;  text is sliced from seg8 (`credits_ending.asm`) and staff from seg5
+;  (`credits_staff.asm`).  Seg15 is music tails / env tables / Dracula
+;  portrait.  Segs 9-10 are labeled gfx-script / palette / RLE.
 ;  `PHASE` sets each block's runtime address while the output stays contiguous.
 ; ===========================================================================
 
@@ -37,23 +42,33 @@
 ; Actor type ids (spawn_actor C / object-list id).  Readability only.
     INCLUDE "segments/actors.inc"
 
-; --- vk() text helper -------------------------------------------------------
-;  The game's font is loaded into VRAM starting at tile 0x10, so on-screen text
-;  is stored as (ASCII - 0x10).  vk() lets the disassembly spell strings out in
-;  readable ASCII and still emit the exact original bytes:
-;    - a Lua string   -> each char emitted as (char-0x10); a space emits 0x00
-;                        (words in the ROM are separated by the 0x00 blank tile)
-;    - a Lua number   -> emitted verbatim (VDP position/attribute/control bytes,
-;                        line separators 0xFE, record terminators 0xFF, ...)
-;  Usage inside the disassembly:   LUA vk({0x48,0xA0,"PUSH SPACE KEY",0xFF}) ENDLUA
-    LUA ALLPASS
-      function vk(t)
-        for _,v in ipairs(t) do
-          if type(v)=="number" then sj.add_byte(v & 0xff)
-          else for i=1,#v do local c=v:byte(i); sj.add_byte(c==32 and 0 or (c-0x10)&0xff) end end
-        end
-      end
-    ENDLUA
+; --- text helpers -----------------------------------------------------------
+;  HUD/title font is loaded at tile 0x10, so those strings are (ASCII-0x10)
+;  with space -> 0x00.  Credits font is 1:1 ASCII, space still -> 0x00.
+;    vk "SCORE"                      ; HUD/title glyph bytes
+;    cr 0x08, 0x20, "SO THE BRAVE"   ; credits: tick, x, text, 0xFF
+    MACRO vk str
+        LUA ALLPASS
+          local s = sj.get_define("str", true)
+          if s:sub(1,1) == '"' then s = s:sub(2, -2) end
+          for i = 1, #s do
+            local c = s:byte(i)
+            sj.add_byte(c == 32 and 0 or (c - 0x10) & 0xff)
+          end
+        ENDLUA
+    ENDM
+    MACRO cr tick, x, str
+        defb tick, x
+        LUA ALLPASS
+          local s = sj.get_define("str", true)
+          if s:sub(1,1) == '"' then s = s:sub(2, -2) end
+          for i = 1, #s do
+            local c = s:byte(i)
+            sj.add_byte(c == 32 and 0 or c)
+          end
+        ENDLUA
+        defb 0xFF
+    ENDM
 
 ; --- segment 0 : resident bank, runs at 0x4000-0x5FFF (DISASSEMBLED) ---------
     PHASE 0x4000
@@ -75,18 +90,33 @@
     INCLUDE "segments/seg03.asm"
     DEPHASE
 
-; --- segments 4..10 : paged in on demand (still INCBIN) ---------------------
-; Included verbatim and emitted contiguously.  The full image is 128 KiB, larger
-; than the Z80's 64 KiB address space, so the output pointer runs past 0x10000
-; here; the Makefile passes `--longptr` to allow that.  The output file is still
-; exact (verified by `make verify`).
-    INCBIN "segments/seg04.bin"
-    INCBIN "segments/seg05.bin"
-    INCBIN "segments/seg06.bin"
-    INCBIN "segments/seg07.bin"
-    INCBIN "segments/seg08.bin"
-    INCBIN "segments/seg09.bin"
-    INCBIN "segments/seg10.bin"
+; --- segments 4..8 : playfield tilesets (labeled 8x8 4bpp) -----------------
+; Paged by sub_53a5h (seg 4/5/6) and sub_5393h (seg 7/8, stage >= 13).
+; Sets overlap and spill across banks; labels mark tileset_ptr starts.
+; Staff / ending text are INCLUDE'd from the middle of seg5 / seg8.
+    PHASE 0x6000
+    INCLUDE "segments/seg04.asm"
+    DEPHASE
+    PHASE 0x8000
+    INCLUDE "segments/seg05.asm"
+    DEPHASE
+    PHASE 0xA000
+    INCLUDE "segments/seg06.asm"
+    DEPHASE
+    PHASE 0x8000
+    INCLUDE "segments/seg07.asm"
+    DEPHASE
+    PHASE 0xA000
+    INCLUDE "segments/seg08.asm"
+    DEPHASE
+
+; --- segments 9, 10 : gfx-script / palette / enemy+weapon RLE (labeled) ----
+    PHASE 0x8000
+    INCLUDE "segments/seg09.asm"
+    DEPHASE
+    PHASE 0xA000
+    INCLUDE "segments/seg10.asm"
+    DEPHASE
 
 ; --- segment 11 : bank 0x0B @ 0x6000 (room-map tables + metatile streams) ---
     PHASE 0x6000
@@ -108,4 +138,7 @@
     INCLUDE "segments/seg14.asm"
     DEPHASE
 
-    INCBIN "segments/seg15.bin"
+; --- segment 15 : bank 0x0F @ 0xA000 (music tails + Dracula portrait) --------
+    PHASE 0xA000
+    INCLUDE "segments/seg15.asm"
+    DEPHASE

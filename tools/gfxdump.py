@@ -135,6 +135,18 @@ def tile_grids(buf, kind):
         for i in range(0, len(buf) - step + 1, step):
             rows = gfxview.sprite16_1bpp(buf[i:i + step])
             grids.append([[1 if ch == "#" else 0 for ch in r] for r in rows])
+    elif kind == "tile8":
+        step = 32
+        for i in range(0, len(buf) - step + 1, step):
+            chunk = buf[i:i + step]
+            grid = []
+            for r in range(8):
+                row = chunk[r * 4:(r + 1) * 4]
+                px = []
+                for b in row:
+                    px += [b >> 4, b & 0xF]
+                grid.append(px)
+            grids.append(grid)
     elif kind == "tile4":
         step = 128
         for i in range(0, len(buf) - step + 1, step):
@@ -166,21 +178,28 @@ def combine_planes(grids, planes):
         cells.append(cell)
     return cells
 
+def _hex_id(n):
+    """Two-digit hex as drawn on sheets (matches defb / equ values)."""
+    return "%02X" % n
+
+
+def _label_band(labels, lab_scale):
+    if not labels:
+        return 0
+    return 5 * lab_scale + 4          # digit height + padding
+
+
 def render_png(path, cells, palette, cols=8, labels=None, lab_scale=2, size=16,
                scale=None):
     """Write a scaled contact sheet.  `labels` (optional) adds a dark band
     above each tile with a 3x5 bitmap id, same treatment as the minimap
     renderer in roomperm.py (`contact_sheet`).  `size` is the tile edge in
-    source pixels (16 for HUD tiles, 64 for enemy composites).  `scale`
+    source pixels (8 for glyphs/tilesets, 16 for HUD/Simon sprites).  `scale`
     defaults to SCALE (6); 8x8 glyphs use 12 so cells match 16x16 HUD tiles."""
     if not cells:
         return
     scale = SCALE if scale is None else scale
-    if labels:
-        from roomperm import draw_text, LABEL_RGB
-        lab_h = 5 * lab_scale + 4      # digit height + padding
-    else:
-        lab_h = 0
+    lab_h = _label_band(labels, lab_scale)
     rows_of = (len(cells) + cols - 1) // cols
     tile_s = size * scale
     cell_w = tile_s
@@ -190,26 +209,216 @@ def render_png(path, cells, palette, cols=8, labels=None, lab_scale=2, size=16,
     buf = bytearray(W * H * 3)
     for i in range(0, W * H):
         buf[i * 3], buf[i * 3 + 1], buf[i * 3 + 2] = BG
+    for idx, grid in enumerate(cells):
+        x0 = GAP + (idx % cols) * (cell_w + GAP)
+        y0 = GAP + (idx // cols) * (cell_h + GAP)
+        _blit_cell(buf, W, grid, palette, x0, y0, scale, lab_h,
+                   None if not labels or idx >= len(labels) else labels[idx],
+                   lab_scale, size, size)
+    pngwrite.write_rgb(path, W, H, bytes(buf))
 
+
+def _blit_cell(buf, W, grid, palette, x0, y0, scale, lab_h, label, lab_scale,
+               max_w=None, max_h=None):
     def put(px, py, rgb):
         o = (py * W + px) * 3
         buf[o], buf[o + 1], buf[o + 2] = rgb
 
+    if label is not None:
+        from roomperm import draw_text, LABEL_RGB
+        draw_text(buf, W, x0 + 2, y0 + 2, str(label), lab_scale, LABEL_RGB)
+    ty = y0 + lab_h
+    h = len(grid) if max_h is None else min(max_h, len(grid))
+    w = (len(grid[0]) if grid else 0) if max_w is None else min(
+        max_w, len(grid[0]) if grid else 0)
+    for y in range(h):
+        for x in range(w):
+            pix = grid[y][x]
+            rgb = pix if isinstance(pix, tuple) else palette[pix]
+            for dy in range(scale):
+                for dx in range(scale):
+                    put(x0 + x * scale + dx, ty + y * scale + dy, rgb)
+
+
+def _pack_slot(w, h, scale, lab_h):
+    """Output size of one labelled cell. Width is quantized to 16-pixel columns
+    so a 32-wide sprite is exactly two 16-wide slots (GAP is per column, not
+    per sprite — otherwise two 16s are 2px wider than one 32 and cannot sit
+    under the dog)."""
+    cols = max(1, (w + 15) // 16)
+    return cols * (16 * scale + GAP), lab_h + h * scale + GAP
+
+
+def _rects_overlap(a, b):
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    return not (ax + aw <= bx or bx + bw <= ax or ay + ah <= by or by + bh <= ay)
+
+
+def _gravity(pos, sizes, bin_w):
+    """Slide each item up, then left, into any hole that fits."""
+    n = len(pos)
+    moved = True
+    while moved:
+        moved = False
+        for i in sorted(range(n), key=lambda k: (pos[k][1], pos[k][0])):
+            x, y = pos[i]
+            w, h = sizes[i]
+            others = [(pos[j][0], pos[j][1], sizes[j][0], sizes[j][1])
+                      for j in range(n) if j != i]
+            cands_y = {0}
+            cands_x = {0}
+            for ox, oy, ow, oh in others:
+                cands_y.add(oy + oh)
+                cands_x.add(ox + ow)
+            nx, ny = x, y
+            for y2 in sorted(cands_y):
+                if y2 >= ny or x + w > bin_w:
+                    continue
+                if all(not _rects_overlap((x, y2, w, h), r) for r in others):
+                    ny = y2
+                    break
+            for x2 in sorted(cands_x):
+                if x2 >= nx or x2 + w > bin_w:
+                    continue
+                if all(not _rects_overlap((x2, ny, w, h), r) for r in others):
+                    nx = x2
+                    break
+            if (nx, ny) != (x, y):
+                pos[i] = (nx, ny)
+                moved = True
+    return pos
+
+
+def _maxrects_pack(sizes, bin_w):
+    """MaxRects BSSF. `sizes` is [(w, h), ...]; gravity then slides leftovers up."""
+    # Infinite-height bin; crop to used height after placing.
+    free = [(0, 0, bin_w, 1 << 20)]
+
+    def fits(i, w, h):
+        fx, fy, fw, fh = free[i]
+        if w > fw or h > fh:
+            return None
+        leftover_w, leftover_h = fw - w, fh - h
+        # Prefer a snug leftover so a 16x16 stacks under another 16x16 (beside
+        # a 16x32) instead of occupying the left of a merged 16+32 hole, which
+        # would push the 16x32s out from under the dog.
+        return (min(leftover_w, leftover_h), max(leftover_w, leftover_h), fy, fx)
+
+    def split(fr, used):
+        fx, fy, fw, fh = fr
+        ux, uy, uw, uh = used
+        if ux >= fx + fw or ux + uw <= fx or uy >= fy + fh or uy + uh <= fy:
+            return [fr]
+        out = []
+        if uy > fy and uy < fy + fh:
+            out.append((fx, fy, fw, uy - fy))
+        if uy + uh < fy + fh:
+            out.append((fx, uy + uh, fw, fy + fh - (uy + uh)))
+        if ux > fx and ux < fx + fw:
+            out.append((fx, fy, ux - fx, fh))
+        if ux + uw < fx + fw:
+            out.append((ux + uw, fy, fx + fw - (ux + uw), fh))
+        return out
+
+    def prune(rects):
+        keep = [True] * len(rects)
+        for i, a in enumerate(rects):
+            if not keep[i]:
+                continue
+            ax, ay, aw, ah = a
+            for j, b in enumerate(rects):
+                if i == j or not keep[j]:
+                    continue
+                bx, by, bw, bh = b
+                if ax >= bx and ay >= by and ax + aw <= bx + bw and ay + ah <= by + bh:
+                    keep[i] = False
+                    break
+        return [r for r, k in zip(rects, keep) if k]
+
+    pos = []
+    for w, h in sizes:
+        best_i, best_score = None, None
+        for i in range(len(free)):
+            score = fits(i, w, h)
+            if score is not None and (best_score is None or score < best_score):
+                best_i, best_score = i, score
+        if best_i is None:
+            raise ValueError("item %dx%d does not fit in bin width %d" % (w, h, bin_w))
+        x, y = free[best_i][0], free[best_i][1]
+        used = (x, y, w, h)
+        nxt = []
+        for fr in free:
+            nxt.extend(split(fr, used))
+        free = prune(nxt)
+        pos.append((x, y))
+    pos = _gravity(pos, sizes, bin_w)
+    height = max(y + h for (x, y), (w, h) in zip(pos, sizes))
+    return pos, height
+
+
+def render_packed_png(path, cells, labels=None, lab_scale=2, scale=None,
+                      col_units=8, groups=None):
+    """Contact sheet of mixed-size cells packed into `col_units` 16-pixel
+    columns.  Each cell is drawn at its own source width/height (SAT occupancy)
+    so a 16x32 can sit beside two stacked 16x16s instead of a uniform grid.
+    `groups` is a list of index lists packed as one horizontal strip (blob
+    recolours stay together instead of filling distant leftover holes)."""
+    if not cells:
+        return
+    scale = SCALE if scale is None else scale
+    lab_h = _label_band(labels, lab_scale)
+    grouped = set()
+    for g in groups or []:
+        grouped.update(g)
+    # Super-items: a group is one strip; ungrouped cells are 1-wide items.
+    items = []          # (pack_w, pack_h, [cell indices])
+    i = 0
+    while i < len(cells):
+        in_group = None
+        for g in groups or []:
+            if i == g[0] and all(j < len(cells) for j in g):
+                in_group = g
+                break
+        if in_group:
+            slots = [_pack_slot(len(cells[j][0]), len(cells[j]), scale, lab_h)
+                     for j in in_group]
+            items.append((sum(s[0] for s in slots), max(s[1] for s in slots),
+                          list(in_group)))
+            i = max(in_group) + 1
+            continue
+        if i in grouped:
+            i += 1
+            continue
+        h = len(cells[i])
+        w = len(cells[i][0]) if cells[i] else 0
+        items.append((*_pack_slot(w, h, scale, lab_h), [i]))
+        i += 1
+    sizes = [(w, h) for w, h, _ in items]
+    widest = max(w for w, _ in sizes)
+    bin_w = max(widest, col_units * (16 * scale + GAP))
+    pos, used_h = _maxrects_pack(sizes, bin_w)
+    # Expand strips to per-cell coordinates.
+    cell_pos = [None] * len(cells)
+    for (x, y), (pw, ph, idxs) in zip(pos, items):
+        if len(idxs) == 1:
+            cell_pos[idxs[0]] = (x, y)
+            continue
+        ox = x
+        for j in idxs:
+            cw, _ = _pack_slot(len(cells[j][0]), len(cells[j]), scale, lab_h)
+            cell_pos[j] = (ox, y)
+            ox += cw
+    W = GAP + bin_w
+    H = GAP + used_h
+    buf = bytearray(W * H * 3)
+    for i in range(0, W * H):
+        buf[i * 3], buf[i * 3 + 1], buf[i * 3 + 2] = BG
     for idx, grid in enumerate(cells):
-        x0 = GAP + (idx % cols) * (cell_w + GAP)
-        y0 = GAP + (idx // cols) * (cell_h + GAP)
-        if labels and idx < len(labels) and labels[idx] is not None:
-            draw_text(buf, W, x0 + 2, y0 + 2, str(labels[idx]), lab_scale, LABEL_RGB)
-        ty = y0 + lab_h
-        h = min(size, len(grid))
-        w = min(size, len(grid[0]) if grid else 0)
-        for y in range(h):
-            for x in range(w):
-                pix = grid[y][x]
-                rgb = pix if isinstance(pix, tuple) else palette[pix]
-                for dy in range(scale):
-                    for dx in range(scale):
-                        put(x0 + x * scale + dx, ty + y * scale + dy, rgb)
+        x, y = cell_pos[idx]
+        label = None if not labels or idx >= len(labels) else labels[idx]
+        _blit_cell(buf, W, grid, None, GAP + x, GAP + y, scale, lab_h,
+                   label, lab_scale)
     pngwrite.write_rgb(path, W, H, bytes(buf))
 
 def render_sheet(buf, kind, cols=8):
@@ -286,6 +495,8 @@ def main():
     dump_bonus_hud(data)
     dump_credits_font(data)
     dump_enemy_sheet(data)
+    dump_script_rle(data)
+    dump_tilesets(data)
 
 # First *recognisable* pose (ix+0B) for entity_tbl types 1-22.
 # Type 9's spawn state uses 0x26 (2-cell wait, legs only); the walk frame is 0x21.
@@ -298,12 +509,15 @@ def main():
 # Type 17 intro is 0x56 (2-cell); standing 0x5B is SAT head+cape, torso is a 32x32 blit.
 # Type 20 walk cycle is 0x33-0x38 (0x82 6-cell); 0x35 is a full stride, not the thin-waist 0x36.
 # Type 21 walk cycle is 0x79/0x7A/0x7B (Frankenstein); 0x67 is type 24 (Igor).
+# Types 0x1A/1B/1C are actor_blob_blue/_red/_white (SAT 0x81, shapes 0x9B-0xA0).
+# Recolour is HUD-fixed SAT 0F/08/0E = blue/red/white, not the stage palette.
 ENEMY_SHAPE_ID = {
     1: 0x3D, 2: 0x0B, 3: 0x12, 4: 0x1A, 5: 0x3F,
     6: 0x50, 7: 0x16, 8: 0x71, 9: 0x21, 10: 0x05,
     11: 0x49, 12: 0x89, 13: 0x67, 14: None, 15: 0x6D,
     16: 0x5F, 17: 0x5B, 18: 0x4F, 19: 0x2B, 20: 0x35,
     21: 0x79, 22: 0x7C,
+    0x1A: 0x9B, 0x1B: 0x9B, 0x1C: 0x9B,
 }
 # room_spawner bit -> actor type (bits 0-6).
 SPAWN_BIT_TYPE = {0: 1, 1: 2, 2: 3, 3: 4, 4: 7, 5: 8, 6: 15}
@@ -326,6 +540,12 @@ ENEMY_ROOMS = {
     20: [(9, 7)],
     21: [(12, 6)],
     22: [(15, 9)],
+    # Blob SAT is 2 CC cells (0x81, pats D0/D8 = FE80/FEC0). Fill/outline are
+    # spr_blob / spr_blob_cc (loaded on most rooms; s4 parks them at FB80 when
+    # FE80 is taken). SAT 0F/08/0E are HUD-fixed blue / red / white.
+    0x1A: [(1, 0)],
+    0x1B: [(1, 0)],
+    0x1C: [(1, 0)],
 }
 # Type 14 custom SAT (handler 0xAAD4): 4 columns of 2-plane 16x16.
 # lab25h X offsets; lab15h pattern/colour pairs.
@@ -343,12 +563,12 @@ SHAPE_OFS = {
     0x82: [(0xD1, 0xF8), (0xD1, 0xF8), (0xE1, 0xF8),
            (0xE1, 0xF8), (0xF1, 0xF8), (0xF1, 0xF8)],
 }
-ENEMY_CANVAS = 64
 # Type 17 standing (0x5B): SAT is only the head (dy=-64) and cape/legs (dy=-16).
-# The 32x32 middle is a SCREEN 5 LMMM (sub_ad87h / ladc3h) onto (X-16, Y=0x91),
-# assembled from page-1 16x16s at Y=0xA0. PARKED: a s18r9 playfield crop at
-# (64, 88) was title kana (Akumajo Dracula), not the cloak. Sheet is SAT-only
-# until the real blit source is found.
+# The 32x32 middle is a SCREEN 5 LMMM (dracula_blit_torso) onto (X-16, Y=0x91)
+# from page-1 Y=0x80.  Those slots are packed 4bpp in seg13 (dracula_body_closed
+# at 0xB5A1 = cloak; dracula_body_open at 0xB719 = chest cavity).  The 16x16s
+# at page-1 Y=0xA0 are portrait eyes/mouth, not the figure.
+DRACULA_BODY_FILE = 13 * 0x2000 + (0xB5A1 - 0xA000)
 
 def _s8(b):
     return b - 256 if b >= 128 else b
@@ -360,45 +580,69 @@ def _cpu_file(seg, cpu, win):
     return seg * 0x2000 + (cpu - win)
 
 def dump_enemy_sheet(data):
-    """One labelled frame per entity_tbl type (1-22), composited from the
-    seg6 shape stream + the 1bpp sprite patterns the per-room gfx script
-    RLE-loads into VRAM 0xF800+."""
+    """One labelled frame per entity_tbl type (1-22), plus the candle-blob
+    recolours (0x1A/1B/1C).  Composited from the seg6 shape stream + the
+    1bpp sprite patterns the per-room gfx script RLE-loads into VRAM 0xF800+.
+    Type 17 also blits the 32x32 4bpp cloak from dracula_body_closed.
+    Each frame is cropped to its SAT occupancy (16x16 / 16x32 / …) and the
+    mixed sizes are packed instead of a uniform 64x64 grid."""
+    types = list(range(1, 23)) + [0x1A, 0x1B, 0x1C]
     cells = []
     vram_cache = {}
-    for typ in range(1, 23):
+    for typ in types:
         cells.append(_composite_enemy(data, typ, vram_cache))
-    render_png(os.path.join(GFX, "enemy_sheet.png"), cells, None, cols=6,
-               labels=[str(i) for i in range(1, 23)], size=ENEMY_CANVAS)
-    print("enemy_sheet.png          entity types 1-22")
+    labels = []
+    for t, grid in zip(types, cells):
+        h = len(grid)
+        w = len(grid[0]) if grid else 0
+        labels.append("%s %dx%d" % (_hex_id(t), w, h))
+    n = len(cells)
+    # Blobs 1A-1C are the last three; pack as one strip so they stay together.
+    render_packed_png(os.path.join(GFX, "enemy_sheet.png"), cells, labels=labels,
+                      groups=[[n - 3, n - 2, n - 1]])
+    print("enemy_sheet.png          entity types 01-16 + blob 1A-1C")
+
+def _sat_bbox(typ, parts):
+    """Bounding box of unique 16x16 SAT cells (plus type 17's 32x32 torso)."""
+    dxs = [p[1] for p in parts]
+    dys = [p[0] for p in parts]
+    x0, y0 = min(dxs), min(dys)
+    x1, y1 = max(dxs) + 16, max(dys) + 16
+    if typ == 17:
+        x0, y0 = min(x0, -16), min(y0, -48)
+        x1, y1 = max(x1, 16), max(y1, -16)
+    return x0, y0, x1 - x0, y1 - y0
 
 def _composite_enemy(data, typ, vram_cache):
-    grid = [[BG] * ENEMY_CANVAS for _ in range(ENEMY_CANVAS)]
     ncells = data[_cpu_file(1, 0x605E, 0x6000) + typ]
     if typ == 14:
         parts, colors = _type14_parts()
     else:
         sid = ENEMY_SHAPE_ID.get(typ)
         if sid is None or not ncells:
-            return grid
+            return [[OFF]]
         parts = _parse_shape(data, sid, ncells)
         colors = _type_colors(data, typ, ncells)
         if typ == 17:
             # spawn table only colours 2 cells (intro 0x56). Standing 0x5B
-            # fills all 8 from lad5ah (02 48 repeated) via sub_ad4ch.
+            # fills all 8 from dracula_sat_cols (02 48 repeated).
             colors = [0x02, 0x48] * 4
     if not parts:
-        return grid
+        return [[OFF]]
     vram, stage, room = _vram_for_type(data, typ, parts, vram_cache)
     pal = vk_playfield_palette(data, stage, room)
-    index = [[0] * ENEMY_CANVAS for _ in range(ENEMY_CANVAS)]
-    dys = [p[0] for p in parts]
-    dxs = [p[1] for p in parts]
-    oy = 8 - min(dys)
-    ox = 8 - min(dxs)
-    if ox + max(dxs) + 16 > ENEMY_CANVAS:
-        ox = max(0, ENEMY_CANVAS - 16 - max(dxs))
-    if oy + max(dys) + 16 > ENEMY_CANVAS:
-        oy = max(0, ENEMY_CANVAS - 16 - max(dys))
+    if typ == 17:
+        _apply_palette_overlay(pal, load_palette_table(data, 0x15F88))
+        _apply_palette_overlay(pal, load_palette_table(data, 0x15F6F))
+    x0, y0, bw, bh = _sat_bbox(typ, parts)
+    # OFF fills the occupied SAT rectangle so cell bounds read like the
+    # 16x16 / 8x8 sheets (empty pixels are visible, not sheet-BG).
+    grid = [[OFF] * bw for _ in range(bh)]
+    index = [[0] * bw for _ in range(bh)]
+    ox, oy = -x0, -y0
+    if typ == 17:
+        # Playfield LMMM sits behind SAT head/cape.
+        _blit_dracula_torso(data, grid, pal, ox, oy)
     for i, (dy, dx, pat) in enumerate(parts):
         src = 0xF800 + (pat * 8)
         raw = bytes(vram[src + k] for k in range(32))
@@ -414,16 +658,43 @@ def _composite_enemy(data, typ, vram_cache):
                 if spr[y][x] != "#":
                     continue
                 yy, xx = py + y, px + x
-                if 0 <= yy < ENEMY_CANVAS and 0 <= xx < ENEMY_CANVAS:
+                if 0 <= yy < bh and 0 <= xx < bw:
                     if cc and index[yy][xx]:
                         index[yy][xx] |= idx
                     elif not cc or index[yy][xx] == 0:
                         index[yy][xx] = idx
-    for y in range(ENEMY_CANVAS):
-        for x in range(ENEMY_CANVAS):
+    for y in range(bh):
+        for x in range(bw):
             if index[y][x]:
                 grid[y][x] = pal[index[y][x]]
     return grid
+
+def _unpack_dracula_body(data, file_off):
+    """dracula_body_unpack (0x5834): 32 rows of N zeros + (12-N) bytes + 4 zeros."""
+    p = file_off
+    rows = []
+    for _ in range(32):
+        n = data[p]
+        p += 1
+        nbytes = 12 - n
+        payload = data[p:p + nbytes]
+        p += nbytes
+        rows.append(bytes(n) + bytes(payload) + bytes(4))
+    return rows, p
+
+def _blit_dracula_torso(data, grid, pal, ox, oy):
+    """Standing 32x32 cloak (dracula_body_closed) into the SAT gap."""
+    rows, _ = _unpack_dracula_body(data, DRACULA_BODY_FILE)
+    h, w = len(grid), len(grid[0])
+    x0, y0 = ox - 16, oy - 48
+    for y, row in enumerate(rows):
+        for i, b in enumerate(row):
+            for nibble, dx in ((b >> 4, i * 2), (b & 0x0F, i * 2 + 1)):
+                if not nibble:
+                    continue
+                yy, xx = y0 + y, x0 + dx
+                if 0 <= yy < h and 0 <= xx < w:
+                    grid[yy][xx] = pal[nibble]
 
 def _parse_shape(data, shape_id, ncells):
     tbl = _cpu_file(6, 0xB473, 0xA000)
@@ -520,10 +791,13 @@ def _script_key(data, stage, room):
         return None
     return script
 
-def _load_script_vram(data, script_cpu):
-    vram = bytearray(0x10000)
-    if not script_cpu:
-        return vram
+def _stage_nrooms(data, stage):
+    """minimap_room_count (seg2 0x95FD), indexed by D000 stage 0..18."""
+    return data[_cpu_file(2, 0x95FD, 0x8000) + stage]
+
+def _iter_script(data, script_cpu):
+    """Yield gfx_script_run ops: (0, src, dest, None), (1, src, dest, count),
+    or (cmd, None, None, None) for cmd>=2. Stops at 0xFF."""
     cpu = script_cpu
     for _ in range(80):
         if 0x8000 <= cpu < 0xA000:
@@ -531,34 +805,46 @@ def _load_script_vram(data, script_cpu):
         elif 0xA000 <= cpu < 0xC000:
             fo = _cpu_file(10, cpu, 0xA000)
         else:
-            break
+            return
         cmd = data[fo]
         cpu += 1
         fo += 1
         if cmd == 0xFF:
-            break
+            return
         if cmd == 0:
             src = _word(data, fo)
             dest = _word(data, fo + 2)
             cpu += 4
-            src_off = _rle_src_file(src)
-            if src_off is not None:
-                try:
-                    out, base, _end = rledec.decompress(data, src_off, dest)
-                    for i, b in enumerate(out):
-                        addr = base + i
-                        if addr < 0x10000:
-                            vram[addr] = b
-                except Exception:
-                    pass
+            yield 0, src, dest, None
         elif cmd == 1:
             src = _word(data, fo)
             cnt = data[fo + 2]
             dest = _word(data, fo + 3)
             cpu += 5
-            _apply_sprite_conv(vram, src, cnt, dest)
+            yield 1, src, dest, cnt
         else:
             cpu += 6
+            yield cmd, None, None, None
+
+def _load_script_vram(data, script_cpu):
+    vram = bytearray(0x10000)
+    if not script_cpu:
+        return vram
+    for cmd, src, dest, extra in _iter_script(data, script_cpu):
+        if cmd == 0:
+            src_off = _rle_src_file(src)
+            if src_off is None:
+                continue
+            try:
+                out, base, _end = rledec.decompress(data, src_off, dest)
+                for i, b in enumerate(out):
+                    addr = base + i
+                    if addr < 0x10000:
+                        vram[addr] = b
+            except Exception:
+                pass
+        elif cmd == 1:
+            _apply_sprite_conv(vram, src, extra, dest)
     return vram
 
 def _bitrev(b):
@@ -609,7 +895,7 @@ def _rle_src_file(cpu):
 
 def dump_bonus_hud(data):
     """Uncompressed HUD bonus tiles (not in manifest.tsv — they are raw 4bpp,
-    not RLE).  Two labelled sheets: ids 1-20 and ids 22-30."""
+    not RLE).  Two labelled sheets: ids 01-14 and ids 16-1E (hex)."""
     pal = vk_play_palette(data)
 
     def cells_at(off, n):
@@ -618,15 +904,15 @@ def dump_bonus_hud(data):
     ids_1_20 = cells_at(0x13000, 20)
     items = cells_at(0x13A00, 1) + cells_at(0xD9C8, 8)
     render_png(os.path.join(GFX, "bonus_hud_sheet.png"), ids_1_20, pal, cols=5,
-               labels=[str(i) for i in range(1, 21)])
+               labels=[_hex_id(i) for i in range(1, 21)])
     render_png(os.path.join(GFX, "bonus_hud_items.png"), items, pal, cols=3,
-               labels=[str(i) for i in range(22, 31)])
-    print("bonus_hud_sheet.png      ids 1-20")
-    print("bonus_hud_items.png      ids 22-30")
+               labels=[_hex_id(i) for i in range(22, 31)])
+    print("bonus_hud_sheet.png      ids 01-14")
+    print("bonus_hud_items.png      ids 16-1E")
 
 # seg14 credits_font @ CPU 0x8824 (file 0x1C824): 40 x 8x8 1bpp, MSB = left.
 # Order: 0-9 . ' : , then A-Z.  Colour 0x0E is the C register
-# credits_font_load passes (SCREEN 5 ink).  Loaded by sub_6719h for the
+# credits_font_load passes (SCREEN 5 ink).  Loaded by credits_init for the
 # ending message + credits, not the in-game HUD.
 CREDITS_FONT_FILE = 14 * 0x2000 + 0x0824
 CREDITS_FONT_CHARS = "0123456789.':," + "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -642,6 +928,95 @@ def dump_credits_font(data):
     render_png(os.path.join(GFX, "credits_font.png"), cells, [OFF, pal[14]],
                cols=10, size=8, scale=12, labels=list(CREDITS_FONT_CHARS))
     print("credits_font.png         40 x 8x8 1bpp (0-9 . ' : , A-Z)")
+
+def dump_script_rle(data):
+    """Unique gfx-script cmd-0 RLE streams targeting sprite VRAM (0xF800+).
+    room_gfx_ptr 9AB0[stage-1] -> 4 bytes/room {script, palette}; scripts in
+    seg9 ~0x9D38+. Derived sheet, not in manifest.tsv (like enemy_sheet)."""
+    unique_src = {}
+    scripts = set()
+    n_cmd1 = n_other = 0
+    dests = set()
+    for stage in range(1, 19):
+        for room in range(_stage_nrooms(data, stage)):
+            script, _pal = _room_record(data, stage, room)
+            if script is None or not (0x8000 <= script <= 0xBFFF):
+                continue
+            scripts.add(script)
+            for cmd, src, dest, _extra in _iter_script(data, script):
+                if cmd == 0:
+                    dests.add(dest)
+                    src_off = _rle_src_file(src)
+                    if src_off is not None and dest >= 0xF800:
+                        unique_src.setdefault(src_off, dest)
+                elif cmd == 1:
+                    n_cmd1 += 1
+                else:
+                    n_other += 1
+    cells, labels = [], []
+    for src_off, dest in sorted(unique_src.items()):
+        try:
+            out, _base, _end = rledec.decompress(data, src_off, dest)
+        except Exception:
+            continue
+        grids = tile_grids(out, "sprite16")
+        if not grids:
+            continue
+        cells.append(grids[0])
+        labels.append("%X" % dest)
+        for extra in grids[1:4]:
+            cells.append(extra)
+            labels.append("")
+    render_png(os.path.join(GFX, "script_rle.png"), cells, [OFF, FG],
+               cols=8, labels=labels)
+    print("script_rle.png           %d unique cmd-0 streams from %d scripts "
+          "(label=VRAM dest; cmd1=%d other=%d dests=%s)"
+          % (len(unique_src), len(scripts), n_cmd1, n_other,
+             ",".join("%04X" % d for d in sorted(dests))))
+
+# Unique tileset_ptr sources: first stage that uses each CPU pointer.
+# 0xBF uncompressed 8x8 4bpp tiles, blit by load_stage_tileset to VRAM 0x8004.
+TILESET_UNIQUE = (
+    (0, 0x6000),
+    (1, 0x7220),
+    (4, 0x95B3),
+    (7, 0x8493),
+    (10, 0x9E73),
+    (13, 0x8000),
+    (16, 0x9640),
+    (18, 0xA4C0),
+)
+NTILES = 0xBF
+
+def _tileset_file(stage, cpu):
+    if stage >= 13:
+        if 0xA000 <= cpu < 0xC000:
+            return _cpu_file(8, cpu, 0xA000)
+        if 0x8000 <= cpu < 0xA000:
+            return _cpu_file(7, cpu, 0x8000)
+        return _cpu_file(4, cpu, 0x6000)
+    if 0xA000 <= cpu < 0xC000:
+        return _cpu_file(6, cpu, 0xA000)
+    if 0x8000 <= cpu < 0xA000:
+        return _cpu_file(5, cpu, 0x8000)
+    return _cpu_file(4, cpu, 0x6000)
+
+def dump_tilesets(data):
+    """8 unique playfield tilesets (uncompressed 8x8 4bpp). Derived, not in
+    manifest.tsv. Label = hex tile id 00..BE as used in metatile defs.
+    Pixel rooms that paint these tiles: tools/roomperm.py --all --pixels
+    (gfx/stage_sNN.png)."""
+    for stage, cpu in TILESET_UNIQUE:
+        fo = _tileset_file(stage, cpu)
+        n = min(NTILES, max(0, (len(data) - fo) // 32))
+        raw = data[fo:fo + n * 32]
+        cells = tile_grids(raw, "tile8")
+        pal = vk_stage_palette(data, stage)
+        name = "tileset_s%02d.png" % stage
+        labels = [_hex_id(i) for i in range(len(cells))]
+        render_png(os.path.join(GFX, name), cells, pal, cols=16,
+                   labels=labels, size=8, scale=8)
+        print("%-22s stage %d cpu %04X  %d x 8x8 4bpp" % (name, stage, cpu, len(cells)))
 
 if __name__ == "__main__":
     main()

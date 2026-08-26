@@ -20,7 +20,7 @@
 	inc l
 	ld (hl),d
 	inc l
-	ld (hl),003h
+	ld (hl),003h           ; pose 3 = fireball (SAT pattern 0xF0)
 	ld a,(ix+000h)
 	ld de,0a0c4h
 	call lookup_word_tbl
@@ -42,31 +42,16 @@ la028h:
 	ld a,(ix+000h)
 	dec a
 	call DISPATCH_A
-	ld d,e
-	and b
-	ld d,e
-	and b
-	ld d,e
-	and b
-	ld d,e
-	and b
-	ld d,e
-	and b
-	ld d,e
-	and b
-	ld d,h
-	and b
-	ld (hl),c
-	and b
-	add a,d
-	and b
-	ld d,e
-	and b
-	ld d,e
-	and b
-	ld h,a
-	sbc a,e
+	defw shot_init_nop, shot_init_nop, shot_init_nop, shot_init_nop
+	defw shot_init_nop, shot_init_nop
+	defw mummy_bandage_init   ; 7
+	defw shot_sickle_init  ; 8
+	defw shot_axe_init     ; 9
+	defw shot_init_nop, shot_init_nop  ; 10-11
+	defw flame_init        ; 12 (seg2 0x9B67)
+shot_init_nop:
 	ret
+mummy_bandage_init:            ; (0xA054) store Y, drop Yvel by 0x100
 	ld (ix+010h),000h
 	ld a,(ix+003h)
 	ld (ix+011h),a
@@ -78,68 +63,41 @@ la028h:
 	ld (ix+012h),l
 	ld (ix+013h),h
 	ret
+shot_sickle_init:              ; (0xA071) visible, timer 0x3C, vel 0
 	ld (ix+006h),001h
 	ld (ix+00ch),03ch
 	ld de,CHKRAM
 	call actor_set_yvel
 	jp actor_set_xvel
+shot_axe_init:                 ; (0xA082) facing from Xvel; thrower ptr CFFC
 	ld a,(ix+00ah)
 	ld (ix+010h),a
 	ld (ix+013h),018h
 	ld hl,(0cffch)
 	ld (ix+011h),l
 	ld (ix+012h),h
-	ret
-	ld bc,00201h
-	ld bc,00101h
-	ld bc,00101h
-	inc bc
-	inc b
-	ld bc,00101h
-	ld bc,00509h
-	ld bc,00706h
-	ld bc,00b08h
-	ld a,(bc)
-	ld bc,00101h
-	ld bc,00101h
-	ld bc,00101h
-	ld bc,00101h
-	ld bc,00101h
-	ld bc,00101h
-	ld bc,00101h
-	ld bc,00101h
-	jp pe,0eaa0h
-	and b
-	jp pe,0dea0h
-	and b
-	jp pe,0e0a0h
-	and b
-	jp po,0e2a0h
-	and b
-	call po,0eaa0h
-	and b
-	and 0a0h
-	ret pe
-	and b
-	ld b,d
-	inc c
-	ld b,l
-	ld (bc),a
-	ld b,d
-	dec b
-	ld b,d
-	dec b
-	ld c,b
-	dec b
-	nop
-	ex af,af'
-	nop
-	ex af,af'
-sub_a0ech:
+shot_kind_type:                 ; (0xA095) kind -> shot type. Byte 0 is this RET
+	ret                     ; kind 0 unused
+	defb 001h,001h,002h,001h,001h,001h,001h,001h  ; 1-8
+	defb 001h,003h,004h,001h,001h,001h,001h,009h  ; 9-16  0x0A pile=3, 11 bone=4, 16 axe=9
+	defb 005h,001h,006h,007h,001h,008h,00bh,00ah  ; 17-24  0x11 fire=5, 13 snake=6, 14 bandage=7, 16 sickle=8, 24 igor=10
+	defb 001h,001h,001h,001h,001h,001h,001h,001h  ; 25-32
+	defb 001h,001h,001h,001h,001h,001h,001h,001h  ; 33-40
+	defb 001h,001h,001h,001h,001h,001h            ; 41-46
+shot_sat_ptr:                  ; (0xA0C4) word[type] SAT colours. 1-3,5,10 = fireball 00/08
+	defw 00101h, 0a0eah, 0a0eah, 0a0eah, 0a0deh, 0a0eah
+	defw 0a0e0h, 0a0e2h, 0a0e2h, 0a0e4h, 0a0eah, 0a0e6h
+	defb 0e8h,0a0h, 042h,00ch, 045h,002h, 042h,005h
+	defb 042h,005h, 048h,005h, 000h,008h, 000h,008h
+; aim_at_simon (seg3 0xA0EC): vector from actor (Y=ix+3, X=ix+5) toward
+; Simon.  Speed base 0x80 plus 8*D012.  Returns HL = packed vel; also
+; fills CFF0-CFF9.  aim_at_simon_spd (0xA0F4) takes the base speed in A
+; and Y/X already in E/D.
+aim_at_simon:
 	ld a,080h
 	ld e,(ix+003h)
 	ld d,(ix+005h)
-sub_a0f4h:
+aim_at_simon_spd:
 	ld c,a
 	ld a,(0d012h)
 	add a,a
@@ -167,14 +125,14 @@ sub_a0f4h:
 	call sub_a18bh
 	ld a,(0cff1h)
 	and a
-	call nz,sub_a183h
+	call nz,neg_de
 	ld (0cff3h),de
 	ld a,(0cff7h)
 	ld e,a
 	call sub_a18bh
 	ld a,(0cff2h)
 	and a
-	call nz,sub_a183h
+	call nz,neg_de
 	ld hl,(0cff3h)
 	ret
 sub_a13bh:
@@ -225,7 +183,7 @@ la17eh:
 	add a,b
 	ld (0cff9h),a
 	ret
-sub_a183h:
+neg_de:                        ; (0xA183) DE = -DE (two's complement)
 	ld a,d
 	cpl
 	ld d,a
@@ -356,18 +314,20 @@ la1feh:
 	rst 38h
 	rst 38h
 ; enemy_skull_pile_tick (seg3 0xA229) - type 10. Stationary; faces Simon
-; (sub_a2afh) and shoots d700_spawn (0x9F74) kind 0x0A. 8 HP, 300 pts.
+; (sub_a2afh) and shoots shot_spawn (0x9F74) kind 0x0A. 8 HP, 300 pts.
 enemy_skull_pile_tick:
 	call sub_a2afh          ; pick facing frame from Simon X
 	ld (ix+010h),008h
 	ld (ix+011h),020h
 	ret
+enemy_skull_pile_go:
 	call sub_a2afh
 	ld a,(ix+001h)
 	dec a
-	jr z,la25ah
+	jr z,skull_pile_windup
 	dec a
-	jr z,la2a0h
+	jr z,skull_pile_recover
+skull_pile_idle:
 	dec (ix+010h)
 	ret nz
 	inc (ix+001h)
@@ -380,7 +340,7 @@ enemy_skull_pile_tick:
 	neg
 	ld (ix+010h),a
 	ret
-la25ah:
+skull_pile_windup:
 	ld a,04ch
 	bit 0,(ix+011h)
 	jr z,la264h
@@ -402,8 +362,8 @@ la281h:
 	sub 014h
 	ld c,a
 	ld b,(ix+005h)
-	ld a,00ah               ; d700_spawn kind 0x0A -> D700 projectile
-	call d700_spawn
+	ld a,00ah               ; shot_spawn kind 0x0A -> type 3
+	call shot_spawn
 	ld a,04ch
 sub_a291h:
 	ld (ix+025h),002h
@@ -411,7 +371,7 @@ sub_a291h:
 	ld (ix+02fh),002h
 	ld (ix+034h),a
 	ret
-la2a0h:
+skull_pile_recover:
 	call sub_a2afh
 	dec (ix+013h)
 	ret nz
@@ -439,7 +399,7 @@ la2cah:
 ; Play-confirmed: red mermen already standing on the platform; they do not
 ; jump out of the water. Skips the type-0x20 splash pair that generator
 ; mermen spawn, arms ix+1B, jumps into the walk at la36dh. Same per-frame
-; tick as types 2/3 (`sub_9942h` -> 0xA317). Type bit0 set so it spits like
+; tick as types 2/3 (`actor_type_tick` -> 0xA317). Type bit0 set so it spits like
 ; type 3; HP/SAT match type 3 (2 HP, 0x612F).
 enemy_placed_merman_init:
 	ld (ix+01bh),001h
@@ -450,9 +410,9 @@ enemy_placed_merman_init:
 	ld (ix+019h),a
 	ld (ix+015h),001h
 	jp la36dh
-; enemy_merman_tick (seg3 0xA2E7) - types 02 (green, 1 HP, closed mouth) and
-; 03 (red, 2 HP, open-mouth spit). Shared walk/pounce; type 3 (bit 0 of the
-; type id) counts down ix+10 then enters state 2 and fires d700_spawn kind 2
+; enemy_merman_tick (seg3 0xA2E7) - actor_merman_green (1 HP, closed mouth) and
+; actor_merman_red (2 HP, open-mouth spit). Shared walk/pounce; type 3 (bit 0 of
+; the type id) counts down ix+10 then enters state 2 and fires shot_spawn kind 2
 ; from Y-0x14. Type 2 can write type=3 + pose 0x12 when ix+1B is set and
 ; Simon's Y is within ±8.
 enemy_merman_tick:
@@ -475,12 +435,14 @@ enemy_merman_tick:
 	pop de
 	ld c,actor_merman_splash
 	jp spawn_actor
+merman_go:
 	inc (ix+01dh)
 	ld a,(ix+001h)
 	dec a
-	jp z,la3a7h
+	jp z,merman_walk
 	dec a
-	jp z,la461h
+	jp z,merman_spit
+merman_fall:
 	bit 0,(ix+018h)
 	jr nz,la32eh
 	call merman_pick_frame
@@ -499,7 +461,7 @@ la32eh:
 	add a,008h
 	ld d,a
 la34fh:
-	call 07b9fh
+	call map_solid_pair
 	jr nc,la387h
 	ld a,007h
 	call sub_a4efh
@@ -535,7 +497,7 @@ la387h:
 	pop de
 	ld c,actor_merman_splash
 	jp spawn_actor
-la3a7h:                         ; state 1: walk
+merman_walk:                    ; state 1: walk
 	bit 0,(ix+01bh)
 	jr z,la3d2h
 	bit 0,(ix+01ch)
@@ -602,7 +564,7 @@ la436h:
 la441h:
 	ld d,a
 	ld e,(ix+003h)
-	call 07b9fh
+	call map_solid_pair
 	ret c
 	ld (ix+008h),000h
 	ld (ix+007h),000h
@@ -613,7 +575,7 @@ la459h:
 	defb 008h,009h,00fh,010h ; type2/type3 walk, facing 0
 la45dh:
 	defb 00bh,00ch,012h,013h ; facing 1
-la461h:                         ; state 2: open-mouth spit
+merman_spit:                    ; state 2: open-mouth spit
 	ld (ix+006h),000h       ; hide the body while the shot plays
 	dec (ix+011h)
 	jr z,la48dh
@@ -653,8 +615,8 @@ la4a8h:
 	sub 014h                ; from the mouth (Y-0x14)
 	ld c,a
 	ld b,(ix+005h)
-	ld a,002h               ; d700_spawn kind 2 -> D700 projectile
-	jp d700_spawn
+	ld a,002h               ; shot_spawn kind 2 -> type 1 (fireball)
+	jp shot_spawn
 la4b6h:
 	defb 00fh,012h,011h,014h ; spit anim frames
 merman_pick_frame:              ; (0xA4BA)
@@ -709,6 +671,7 @@ enemy_ghost_head_tick:
 	ld de,0fd80h           ; -X if spawned on the right
 la51fh:
 	jp actor_set_xvel_speedup
+enemy_ghost_head_go:
 	ld c,071h
 	ld a,(0d000h)
 	cp 015h
@@ -781,6 +744,7 @@ enemy_pikeman_tick:
 	ld (ix+00bh),050h
 	ld (ix+00ch),060h
 	ret
+enemy_pikeman_go:
 	dec (ix+00ch)
 	ld a,014h
 	bit 7,(ix+00ah)
@@ -790,16 +754,16 @@ la5a6h:
 	add a,(ix+005h)
 	ld d,a
 	ld e,(ix+003h)
-	call 07b9fh
+	call map_solid_pair
 	jr nc,la613h
 	ld d,(ix+005h)
 	ld bc,00808h
 	bit 7,(ix+00ah)
 	jr nz,la5c3h
-	call 07bc5h
+	call probe_wall_right
 	jr la5c6h
 la5c3h:
-	call 07c21h
+	call probe_wall_left
 la5c6h:
 	jr c,la613h
 	ld a,(ix+005h)
@@ -875,7 +839,7 @@ sub_a649h:
 	push de
 	ld e,(ix+009h)
 	ld d,(ix+00ah)
-	call sub_a183h
+	call neg_de
 	call actor_set_xvel
 	pop de
 	pop af
@@ -886,7 +850,7 @@ sub_a649h:
 ;  difficulty tier (0..3, bumped each level-advance in seg1 0x66FC and capped at
 ;  3), so enemies move faster the deeper you get.  Adds 0xD012 * 32 to the speed:
 ;  when the velocity is negative (moving left) the addend is negated first
-;  (sub_a183h) so the magnitude grows either way.  DE == 0 -> plain store.  Ends
+;  (neg_de) so the magnitude grows either way.  DE == 0 -> plain store.  Ends
 ;  by storing to +0x09/+0x0A via actor_set_xvel.  (VK does not scroll; this is a
 ;  speed ramp, not background scrolling.)
 ; ---------------------------------------------------------------------------
@@ -905,7 +869,7 @@ actor_set_xvel_speedup:
 	ld d,000h
 	ld e,a
 	bit 7,h
-	call nz,sub_a183h       ; negate the bias when moving left
+	call nz,neg_de       ; negate the bias when moving left
 	add hl,de               ; add the speed bias in the travel direction
 	ex de,hl
 	pop hl
@@ -918,30 +882,26 @@ enemy_raven_tick:
 	ld (ix+00bh),089h
 	ld (ix+012h),000h
 	ret
+enemy_raven_go:
 	inc (ix+018h)
 	ld a,(ix+001h)
 	call DISPATCH_A
-	sbc a,l
-	and (hl)
-	xor h
-	and (hl)
-	sbc a,0a6h
-	pop af
-	and (hl)
-	dec b
-	and a
-	cpl
-	and a
-	ld l,e
-	and a
-	sbc a,d
-	and a
+	defw raven_wait        ; 0  spawn timer, then fly
+	defw raven_coast       ; 1  damp Xvel to 0
+	defw raven_hover       ; 2  pause in place
+	defw raven_pick        ; 3  Simon Y close -> strafe, else new coast
+	defw raven_strafe_init ; 4  aim vertical at Simon
+	defw raven_strafe      ; 5  cross Simon X
+	defw raven_recover     ; 6  damp Yvel to the strafe cap
+	defw raven_hold        ; 7  flap; off-screen -> hover
+raven_wait:
 	dec (ix+010h)
 	ret nz
 	ld (ix+006h),001h
 	inc (ix+001h)
 	call sub_a7c4h
 	ret
+raven_coast:
 	call sub_a834h
 	ret c
 	call sub_a79eh
@@ -964,6 +924,7 @@ la6bdh:
 	ld (ix+01eh),018h
 	inc (ix+001h)
 	ret
+raven_hover:
 	call sub_a79eh
 	ld (ix+006h),000h
 	dec (ix+01eh)
@@ -971,6 +932,7 @@ la6bdh:
 	ld (ix+006h),001h
 	inc (ix+001h)
 	ret
+raven_pick:
 	ld (ix+001h),001h
 	ld a,(0c425h)
 	sub (ix+003h)
@@ -978,6 +940,7 @@ la6bdh:
 	jp nc,sub_a7c4h
 	ld (ix+001h),004h
 	ret
+raven_strafe_init:
 	ld (ix+00ah),003h
 	ld (ix+009h),000h
 	ld a,(0c427h)
@@ -991,6 +954,7 @@ la71dh:
 	inc (ix+001h)
 	ld (ix+010h),030h
 	jp sub_a79eh
+raven_strafe:
 	call sub_a834h
 	ret c
 	call sub_a79eh
@@ -1017,6 +981,7 @@ la763h:
 	call sub_a7c4h
 	ld (ix+001h),001h
 	ret
+raven_recover:
 	call sub_a834h
 	ret c
 	call sub_a79eh
@@ -1038,6 +1003,7 @@ la780h:
 	inc (ix+001h)
 	ld (ix+009h),000h
 	ret
+raven_hold:
 	call sub_a834h
 	ret c
 sub_a79eh:
@@ -1098,11 +1064,11 @@ la7f7h:
 	bit 7,d
 	jr z,la812h
 	cp 040h
-	call c,sub_a183h
+	call c,neg_de
 	jp actor_set_yvel
 la812h:
 	cp 0c0h
-	call nc,sub_a183h
+	call nc,neg_de
 	jp actor_set_yvel
 la81ah:
 	defb 0fdh,0e0h,0fdh ;illegal sequence
@@ -1172,17 +1138,16 @@ la870h:
 	ld de,CHKRAM            ; DE = 0 (offset, not the BIOS entry)
 	call actor_set_xvel
 	jp actor_set_yvel            ; chain to shared actor tail
+enemy_dog_go:
 	ld a,(ix+005h)
 	cp 018h
 	jp c,099fdh
 	ld a,(ix+001h)
 	call DISPATCH_A
-	sbc a,b
-	xor b
-	or e
-	xor b
-	exx
-	xor b
+	defw dog_idle          ; 0  sit until |Simon X| < 0x40
+	defw dog_run           ; 1  charge; leap if no floor
+	defw dog_air           ; 2  gravity until floor, then run
+dog_idle:
 	ld a,(0c427h)
 	sub (ix+005h)
 	ld de,00400h
@@ -1195,10 +1160,11 @@ la8a8h:
 	call actor_set_xvel
 	ld (ix+001h),001h
 	ret
+dog_run:
 	call sub_a910h
 	ld e,(ix+003h)
 	ld d,(ix+005h)
-	call 07b9fh
+	call map_solid_pair
 	ret c
 	ld de,0fef8h
 	call actor_set_yvel
@@ -1211,11 +1177,12 @@ la8d1h:
 	ld (ix+00bh),a
 	ld (ix+001h),002h
 	ret
+dog_air:
 	ld de,000a0h
 	call actor_add_yvel
 	ld e,(ix+003h)
 	ld d,(ix+005h)
-	call 07b9fh
+	call map_solid_pair
 	ret nc
 	ld b,(ix+005h)
 	ld a,(0c427h)
@@ -1282,6 +1249,7 @@ la952h:
 	ld (ix+010h),c          ; facing flag (+0x10 = 0 right / 1 left)
 	ld de,CHKRAM            ; DE = 0 (offset, not the BIOS entry)
 	jp actor_set_yvel            ; chain to shared actor tail
+enemy_zombie_go:
 	dec (ix+00ch)
 	jr nz,la98bh
 	ld a,(ix+010h)
@@ -1301,7 +1269,7 @@ la984h:
 la98bh:
 	ld d,(ix+005h)
 	ld e,(ix+003h)
-	call 07b9fh
+	call map_solid_pair
 	jr nc,la9b2h
 	ld de,CHKRAM
 	call actor_set_yvel
@@ -1319,16 +1287,15 @@ la9b2h:
 	call actor_set_xvel
 	ld de,00060h
 	jp actor_add_yvel
-	ld hl,la9ceh
+enemy_bone_dragon_go:
+	ld hl,bone_dragon_follow
 	push hl
 	ld a,(ix+001h)
 	call DISPATCH_A
-	rst 18h
-	xor c
-	ld (de),a
-	xor d
-	ld a,0aah
-la9ceh:
+	defw bone_dragon_form  ; 0  interpolate SAT into place
+	defw bone_dragon_idle  ; 1  undulate; then spit
+	defw bone_dragon_spit  ; 2  shot_spawn kind 0x0E, loop to idle
+bone_dragon_follow:
 	ld a,(ix+022h)
 	add a,010h
 	ld (ix+003h),a
@@ -1336,6 +1303,7 @@ la9ceh:
 	add a,008h
 	ld (ix+005h),a
 	ret
+bone_dragon_form:
 	push ix
 	pop hl
 	ld a,l
@@ -1363,6 +1331,7 @@ la9ceh:
 	ld (ix+018h),020h
 	ld (ix+019h),000h
 	ret
+bone_dragon_idle:
 	ld (ix+024h),080h
 	ld (ix+029h),084h
 	call sub_aa84h
@@ -1385,6 +1354,7 @@ la9ceh:
 	ld (ix+00ch),018h
 	inc (ix+001h)
 	ret
+bone_dragon_spit:
 	ld (ix+024h),070h
 	ld (ix+029h),074h
 	dec (ix+00ch)
@@ -1392,7 +1362,7 @@ la9ceh:
 	ld a,(ix+00ch)
 	cp 008h
 	ret nz
-	call sub_a0ech
+	call aim_at_simon
 	bit 7,d
 	ret z
 	ld a,(ix+022h)
@@ -1400,7 +1370,7 @@ la9ceh:
 	ld c,a
 	ld b,(ix+023h)
 	ld a,00eh
-	jp d700_spawn
+	jp shot_spawn
 laa65h:
 	ld (ix+00ch),01eh
 	ld (ix+001h),001h
@@ -1538,8 +1508,13 @@ lab25h:
 	ret p
 	nop
 ; enemy_dracula_tick (seg3 0xAB29) - type 17. Event 6, stage 18 room 9.
-; SAT is head + cape (shape 0x56 intro / 0x5B stand); 32x32 torso blit is
-; parked. 32 HP on the bar.
+; SAT is head + cape (shape 0x56 intro / 0x5B stand). 32x32 body is a
+; SCREEN 5 blit: dracula_save_bg stashes the playfield under him to page-1
+; (0x80,0x80); dracula_blit_torso LMMMs a 32x32 from dracula_torso_src
+; (page-1 Y=0x80: closed cloak / open chest / H-mirrors, filled by
+; dracula_body_load).  Portrait eye/mouth 16x16s live at page-1 Y=0xA0
+; (dracula_portrait_parts) and stamp the wall painting, not this figure.
+; 32 HP on the bar.
 enemy_dracula_tick:
 	ld (ix+006h),000h
 	ld de,0fe00h
@@ -1552,32 +1527,18 @@ enemy_dracula_tick:
 	ld (ix+010h),a
 	ld (ix+00eh),a
 	ret
-	ld hl,lab67h
+enemy_dracula_go:
+	ld hl,dracula_store_x
 	push hl
 	ld a,(ix+001h)
 	call DISPATCH_A
-	ld l,(hl)
-	xor e
-	adc a,l
-	xor e
-	or d
-	xor e
-	in a,(0abh)
-	ret p
-	xor e
-	jr z,lab0bh
-	ld b,a
-	xor h
-	add a,l
-	xor h
-	or l
-	xor h
-	ret po
-	xor h
-lab67h:
+	defw dracula_intro,dracula_drop,dracula_idle,dracula_idle_cast,dracula_fireballs
+	defw dracula_rise,dracula_teleport,dracula_idle_post,dracula_summon,dracula_done
+dracula_store_x:
 	ld a,(ix+005h)
 	ld (0ce0fh),a
 	ret
+dracula_intro:
 	ld a,(0c427h)
 	sub (ix+005h)
 	ld c,056h
@@ -1591,7 +1552,8 @@ lab7ah:
 	ld (ix+006h),001h
 	ld a,(ix+003h)
 	ld (ix+011h),a
-	jr labaeh
+	jr dracula_next
+dracula_drop:
 	ld a,(ix+011h)
 	sub (ix+003h)
 	cp 040h
@@ -1603,43 +1565,46 @@ lab7ah:
 	ld (ix+00bh),05bh
 	ld a,01eh
 	ld (ix+00ch),a
-	call sub_ad87h
-labaeh:
+	call dracula_save_bg
+dracula_next:
 	inc (ix+001h)
 	ret
+dracula_idle:
 	ld c,000h
-	ld hl,lacb1h
-	call sub_ad3eh
-	call sub_ad4ch
+	ld hl,dracula_pose_idle
+	call actor_set_pose_facing
+	call dracula_sat_color
 	bit 0,(ix+00ch)
 	call nz,sub_ad68h
-	call sub_add3h
+	call dracula_torso_from_shape
 	dec (ix+00ch)
 	ret nz
-	call sub_ad4ch
-	call sub_add9h
+	call dracula_sat_color
+	call dracula_torso_select
 	ld (ix+00ch),004h
 	ld (ix+00eh),007h
-	jr labaeh
+	jr dracula_next
+dracula_idle_cast:
 	dec (ix+00ch)
 	ret nz
 	ld c,001h
-	ld hl,lacb1h
-	call sub_ad3eh
-	call sub_add9h
+	ld hl,dracula_pose_idle
+	call actor_set_pose_facing
+	call dracula_torso_select
 	ld (ix+00ch),004h
-	jr labaeh
+	jr dracula_next
+dracula_fireballs:
 	dec (ix+00ch)
 	ret nz
 	ld hl,CHKRAM
-	call sub_ac0ch
+	call dracula_spawn_fireball
 	ld hl,00180h
-	call sub_ac0ch
+	call dracula_spawn_fireball
 	ld hl,0fe80h
-	call sub_ac0ch
+	call dracula_spawn_fireball
 	ld (ix+00ch),01eh
-	jr labaeh
-sub_ac0ch:
+	jr dracula_next
+dracula_spawn_fireball:
 	ld a,(0c427h)
 	cp (ix+005h)
 	ld de,00280h
@@ -1651,7 +1616,8 @@ lac1ah:
 	ld c,a
 	ld b,(ix+005h)
 	ld a,011h
-	jp d700_spawn
+	jp shot_spawn
+dracula_rise:
 	dec (ix+00ch)
 	ret nz
 	call sub_ad62h
@@ -1662,16 +1628,17 @@ lac1ah:
 	ld (ix+003h),a
 	ld (ix+00ch),05ah
 	ld (ix+00eh),000h
-	jp labaeh
+	jp dracula_next
+dracula_teleport:
 	dec (ix+00ch)
 	ret nz
 	ld a,(ix+003h)
 	add a,040h
 	ld (ix+003h),a
 	ld c,000h
-	ld hl,lacb1h
-	call sub_ad3eh
-	ld hl,lac7dh
+	ld hl,dracula_pose_idle
+	call actor_set_pose_facing
+	ld hl,dracula_warp_x
 	ld a,(ix+010h)
 	cp 007h
 	jr c,lac69h
@@ -1680,39 +1647,32 @@ lac69h:
 	call ADD_HL_A
 	ld a,(hl)
 	ld (ix+005h),a
-	call sub_ad87h
+	call dracula_save_bg
 	inc (ix+010h)
 	ld (ix+00ch),01eh
-	jp labaeh
-lac7dh:
-	jr nc,$-46
-	ld d,b
-	and b
-	ld b,b
-	ret nz
-	add a,b
-	or b
+	jp dracula_next
+dracula_warp_x:
+	defb 030h,0d0h,050h,0a0h,040h,0c0h,080h,0b0h
+dracula_idle_post:
 	ld c,000h
-	ld hl,lacb1h
-	call sub_ad3eh
-	call sub_ad4ch
+	ld hl,dracula_pose_idle
+	call actor_set_pose_facing
+	call dracula_sat_color
 	bit 0,(ix+00ch)
 	call nz,sub_ad62h
-	call sub_add3h
+	call dracula_torso_from_shape
 	dec (ix+00ch)
 	ret nz
-	call sub_ad4ch
-	call sub_add9h
+	call dracula_sat_color
+	call dracula_torso_select
 	ld (ix+00ch),004h
 	ld (ix+001h),003h
 	ld (ix+00eh),007h
 	ret
-lacb1h:
-	ld e,e
-	ld e,h
-	ld e,l
-	ld e,(hl)
-	call sub_add9h
+dracula_pose_idle:
+	defb 05bh,05ch,05dh,05eh
+dracula_summon:
+	call dracula_torso_select
 	xor a
 	ld (ix+025h),a
 	ld (ix+02ah),a
@@ -1728,12 +1688,13 @@ lacb1h:
 	ld d,(ix+005h)
 	ld c,02dh
 	jp spawn_actor
+dracula_done:
 	dec (ix+00ch)
 	ret nz
 	ld a,001h
 	ld (0ce16h),a
-	call sub_adcdh
-	jp 099fdh
+	call dracula_torso_hide
+	jp actor_free
 	ld (ix+006h),001h
 	ld (ix+00eh),000h
 	ld (ix+07eh),000h
@@ -1760,14 +1721,16 @@ sub_ad1fh:
 	ld b,007h
 lad2fh:
 	push bc
-	call 099fdh
+	call actor_free
 	ld de,00080h
 	add ix,de
 	pop bc
 	djnz lad2fh
 	pop ix
 	ret
-sub_ad3eh:
+; actor_set_pose_facing (0xAD3E): ix+0B = (HL)[C] or (HL)[C+2] if Simon is
+; to the right of the actor.  Shared by Dracula and the axe knight.
+actor_set_pose_facing:
 	ld a,(0c427h)
 	cp (ix+005h)
 	jp c,la636h
@@ -1775,23 +1738,16 @@ sub_ad3eh:
 lad48h:
 	inc c
 	jp la636h
-sub_ad4ch:
+dracula_sat_color:
 	ld b,008h
 	ld de,00025h
 lad51h:
-	ld hl,lad5ah
+	ld hl,dracula_sat_cols
 	call sub_ad74h
 	djnz lad51h
 	ret
-lad5ah:
-	ld (bc),a
-	ld c,b
-	ld (bc),a
-	ld c,b
-	ld (bc),a
-	ld c,b
-	ld (bc),a
-	ld c,b
+dracula_sat_cols:
+	defb 002h,048h,002h,048h,002h,048h,002h,048h
 sub_ad62h:
 	ld b,008h
 	ld e,025h
@@ -1820,7 +1776,9 @@ sub_ad79h:
 	add a,005h
 	ld e,a
 	ret
-sub_ad87h:
+; dracula_save_bg (0xAD87): HMMM 32x32 from playfield (X-16, Y=0x91) page 0
+; to page 1 (0x80,0x80), covering the last torso slot.  Called on land/teleport.
+dracula_save_bg:
 	ld a,(ix+005h)
 	sub 010h
 	ld h,a
@@ -1828,13 +1786,17 @@ sub_ad87h:
 	ld de,08080h
 	ld bc,02020h
 	ld a,004h
-	jp 0494dh
+	jp vdp_hmmm
+; dracula_blit_torso (0xAD9A): if CE0E was 1..5, copy that torso slot onto
+; (CE0F-16, Y=0x91).  Index 5 (SX=0x80) is the saved background (HMMM);
+; 0..3 are cloak/chest frames from dracula_body_load (LMMM, colour 0 skip).
+dracula_blit_torso:
 	ld hl,0ce0eh
 	ld a,(hl)
 	dec a
 	ret m
 	ld (hl),000h
-	ld de,ladc3h
+	ld de,dracula_torso_src
 	call lookup_word_tbl
 	ex de,hl
 	ld a,(0ce0fh)
@@ -1846,28 +1808,20 @@ sub_ad87h:
 	cp 080h
 	jr z,ladbeh
 	ld a,048h
-	jp 049e2h
+	jp vdp_lmmm
 ladbeh:
 	ld a,001h
-	jp 0494dh
-ladc3h:
-	add a,b
-	nop
-	add a,b
-	jr nz,lad48h
-	ld b,b
-	add a,b
-	ld h,b
-	add a,b
-	add a,b
-sub_adcdh:
+	jp vdp_hmmm
+dracula_torso_src:
+	defw 00080h,02080h,04080h,06080h,08080h
+dracula_torso_hide:
 	ld a,005h
 	ld (0ce0eh),a
 	ret
-sub_add3h:
+dracula_torso_from_shape:
 	bit 0,(ix+00ch)
-	jr nz,sub_adcdh
-sub_add9h:
+	jr nz,dracula_torso_hide
+dracula_torso_select:
 	ld a,(ix+00bh)
 	sub 05ah
 	cp 005h
@@ -1875,7 +1829,7 @@ sub_add9h:
 	ld (0ce0eh),a
 	ret
 ; enemy_axe_knight_tick (seg3 0xADE5) - type 16. Same SAT layout as type 9,
-; stage 14+ VRAM is the knight. Throws via d700_throw (0x9F68). 8 HP, 300
+; stage 14+ VRAM is the knight. Throws via shot_throw (0x9F68). 8 HP, 300
 ; pts, walk 0x0140. Shape 0x5F.
 enemy_axe_knight_tick:
 	ld (ix+006h),001h
@@ -1886,11 +1840,12 @@ enemy_axe_knight_tick:
 	ld (ix+010h),000h
 	ld (ix+011h),03ch
 	ret
+enemy_axe_knight_go:
 	bit 0,(ix+001h)
 	jr nz,lae3dh
 	ld d,(ix+005h)
 	ld e,(ix+003h)
-	call 07b9fh
+	call map_solid_pair
 	jr c,lae13h
 	jp lb345h
 lae13h:
@@ -1919,16 +1874,16 @@ lae4ah:
 	add a,(ix+005h)
 	ld d,a
 	ld e,(ix+003h)
-	call 07b9fh
+	call map_solid_pair
 	jp nc,laefdh
 	ld d,(ix+005h)
 	ld bc,00808h
 	bit 7,(ix+00ah)
 	jr nz,lae68h
-	call 07bc5h
+	call probe_wall_right
 	jr lae6bh
 lae68h:
-	call 07c21h
+	call probe_wall_left
 lae6bh:
 	jp c,laefdh
 	ld (ix+006h),001h
@@ -1981,7 +1936,7 @@ laec8h:
 	jr nc,laee3h
 	ld de,0fc00h
 laee3h:
-	jp d700_throw
+	jp shot_throw
 laee6h:
 	cp 060h
 	ret c
@@ -2017,7 +1972,7 @@ sub_af1fh:
 	inc c
 laf29h:
 	ld hl,laf2fh
-	jp sub_ad3eh
+	jp actor_set_pose_facing
 laf2fh:
 	ld e,a
 	ld h,b
@@ -2050,14 +2005,13 @@ enemy_red_skeleton_tick:
 	ld (ix+034h),a
 	ld (ix+00eh),a
 	ret
+enemy_red_skeleton_go:
 	ld a,(ix+001h)
 	call DISPATCH_A
-	ld (hl),d
-	xor a
-	push bc
-	xor a
-	inc a
-	or b
+	defw red_skel_wake     ; 0  pose 0x26 legs-only wait
+	defw red_skel_walk     ; 1  fast walk, turn at walls
+	defw red_skel_pause    ; 2  4-frame halt, then walk
+red_skel_wake:
 	dec (ix+011h)
 	jr z,laf85h
 	ld c,026h
@@ -2092,6 +2046,7 @@ lafb7h:
 	ld de,0fde0h
 lafc2h:
 	jp actor_set_xvel_speedup
+red_skel_walk:
 	ld a,(ix+005h)
 	bit 7,(ix+00ah)
 	ld c,010h
@@ -2101,7 +2056,7 @@ lafd2h:
 	add a,c
 	ld d,a
 	ld e,(ix+003h)
-	call 07b9fh
+	call map_solid_pair
 	jr nc,lb004h
 	ld d,(ix+005h)
 	ld e,(ix+003h)
@@ -2113,13 +2068,13 @@ lafd2h:
 	ld a,(ix+005h)
 	cp 0f0h
 	jr nc,lb004h
-	call 07bc5h
+	call probe_wall_right
 	jr lb002h
 laff8h:
 	ld a,(ix+005h)
 	cp 010h
 	jr c,lb004h
-	call 07c21h
+	call probe_wall_left
 lb002h:
 	jr nc,lb018h
 lb004h:
@@ -2128,7 +2083,7 @@ lb004h:
 	ld (ix+012h),a
 	ld e,(ix+009h)
 	ld d,(ix+00ah)
-	call sub_a183h
+	call neg_de
 	call actor_set_xvel_speedup
 lb018h:
 	bit 2,(ix+00ch)
@@ -2149,6 +2104,7 @@ lb029h:
 	ld (ix+00ch),004h
 	inc (ix+001h)
 	ret
+red_skel_pause:
 	dec (ix+00ch)
 	ret nz
 	call sub_afa2h
@@ -2177,6 +2133,7 @@ enemy_flying_skull_tick:
 lb07dh:
 	ld (ix+00bh),c
 	jr lb08dh
+enemy_flying_skull_go:
 	call sub_b0bch
 	dec (ix+00ch)
 	ret nz
@@ -2228,7 +2185,7 @@ enemy_placed_bat_init:         ; type 0x1F (s3r2, s4r1, s4r3): hang first
 	ld de,00300h
 	ld a,(0c427h)
 	sub (ix+005h)
-	call c,sub_a183h
+	call c,neg_de
 	call actor_set_xvel_speedup
 	ld (ix+006h),001h
 	ld (ix+011h),000h
@@ -2237,11 +2194,13 @@ enemy_placed_bat_init:         ; type 0x1F (s3r2, s4r1, s4r3): hang first
 	ld a,(ix+003h)
 	ld (ix+013h),a
 	ret
+hanging_bat_go:
 	ld a,(ix+001h)
 	dec a
-	jr z,lb145h
+	jr z,hanging_bat_swoop
 	dec a
-	jp z,lb186h
+	jp z,hanging_bat_bob
+hanging_bat_hang:
 	ld (ix+00bh),01ah
 	ld (ix+006h),000h
 	ld a,(0c425h)
@@ -2266,7 +2225,7 @@ lb12eh:
 	call actor_set_yvel
 	inc (ix+001h)
 	ret
-lb145h:
+hanging_bat_swoop:
 	ld a,(0c425h)
 	sub (ix+005h)
 	sub 004h
@@ -2300,7 +2259,7 @@ lb182h:
 	inc e
 	dec de
 	dec e
-lb186h:
+hanging_bat_bob:
 	call lb15fh
 	ld de,00019h
 	ld a,(ix+003h)
@@ -2337,6 +2296,7 @@ lb1b4h:
 	ld a,001h
 	ld (0cf0ch),a
 	jp 099fdh
+enemy_roc_go:
 	call sub_b1eeh
 	bit 0,(ix+001h)
 	jr nz,lb1e5h
@@ -2401,28 +2361,27 @@ lb23bh:
 	call actor_set_xvel
 	ld de,CHKRAM
 	jp actor_set_yvel
+hunchback_go:
 	ld a,(ix+001h)
 	call DISPATCH_A
-	ld e,a
-	or d
-	ld l,a
-	or d
-	adc a,h
-	or d
-	adc a,0b2h
-	ld hl,0cdb3h
-	ld b,a
-	xor a
+	defw hunchback_wait    ; 0  until |Simon X| < 0x3C
+	defw hunchback_drop    ; 1  gravity, then crouch
+	defw hunchback_crouch  ; 2  2-frame squat, then jump
+	defw hunchback_jump    ; 3  air; land -> crouch
+	defw hunchback_hide    ; 4  type-13 spawn: hidden until Simon close
+hunchback_wait:
+	call sub_af47h
 	cp 03ch
 	ret nc
 	ld de,CHKRAM
 	call actor_set_xvel
 	inc (ix+001h)
 	ret
+hunchback_drop:
 	call lb345h
 	ld d,(ix+005h)
 	ld e,(ix+003h)
-	call 07b9fh
+	call map_solid_pair
 	jr c,lb27dh
 lb27dh:
 	inc (ix+001h)
@@ -2431,9 +2390,10 @@ lb280h:
 	ld (ix+006h),000h
 	ld (ix+00ch),002h
 	ret
+hunchback_crouch:
 	ld c,000h
 	ld hl,lb341h
-	call sub_ad3eh
+	call actor_set_pose_facing
 	dec (ix+00ch)
 	ret nz
 	inc (ix+001h)
@@ -2458,7 +2418,8 @@ lb2c3h:
 	call actor_set_xvel
 	ld c,001h
 	ld hl,lb341h
-	jp sub_ad3eh
+	jp actor_set_pose_facing
+hunchback_jump:
 	call lb345h
 	call sub_b307h
 	ld de,CHKRAM
@@ -2470,16 +2431,16 @@ lb2c3h:
 	ld a,e
 	sub 010h
 	ld e,a
-	call 07b9fh
+	call map_solid_pair
 	ret nc
 	ld de,CHKRAM
 	jp actor_set_yvel
 lb2f4h:
-	call 07b9fh
+	call map_solid_pair
 	ret nc
 	ld c,000h
 	ld hl,lb341h
-	call sub_ad3eh
+	call actor_set_pose_facing
 	ld (ix+001h),002h
 	jp lb280h
 sub_b307h:
@@ -2492,9 +2453,10 @@ sub_b307h:
 	bit 7,(ix+00ah)
 	jp nz,07c1ah
 	jp 07bbeh
+hunchback_hide:
 	ld c,000h
 	ld hl,lb341h
-	call sub_ad3eh
+	call actor_set_pose_facing
 	call sub_af47h
 	cp 03ch
 	jr c,lb334h
@@ -2515,8 +2477,8 @@ lb345h:
 	jp actor_add_yvel
 ; enemy_white_skeleton_tick (seg3 0xB34B) - type 11. Kites Simon (walk
 ; toward if far, away if close), hops a gap when the floor probe ahead is
-; empty (Yvel 0xFB8F), then throws a spinning bone via d700_throw (kind 11
-; -> D700 type 4, shapes 0x4B-0x4E). 4 HP, 200 pts. SAT 02 4C. Walk poses
+; empty (Yvel 0xFB8F), then throws a spinning bone via shot_throw (kind 11
+; -> shot type 4, shapes 0x4B-0x4E). 4 HP, 200 pts. SAT 02 4C. Walk poses
 ; 0x47-0x4A; same skeleton art as type 9. Stages 7-9, 13, 17.
 ; ix+01 states: 0 walk, 1 air, 2 throw windup.
 enemy_white_skeleton_tick:
@@ -2546,12 +2508,13 @@ lb377h:
 lb381h:
 	ld (ix+00bh),c         ; pose
 	ret
+white_skel_go:
 	call white_skel_set_pose
 	ld a,(ix+001h)         ; per-frame: dispatch on walk / air / throw
 	call DISPATCH_A
 	defw white_skel_walk   ; 0  kite, throw trigger, ledge hop
 	defw white_skel_air    ; 1  gravity until floor
-	defw white_skel_throw  ; 2  16-frame windup, then d700_throw
+	defw white_skel_throw  ; 2  16-frame windup, then shot_throw
 white_skel_walk:               ; (0xB394)
 	ld a,(0c427h)          ; Simon X
 	ld b,a
@@ -2595,13 +2558,13 @@ lb3e2h:
 	ld a,(ix+00ah)
 	and 080h
 	jr nz,lb3ffh
-	call 07bc5h            ; wall to the right?
+	call probe_wall_right            ; wall to the right?
 	jr nc,lb40ah
 	ld de,0fdc0h           ; bounce left
 	call actor_set_xvel_speedup
 	jr lb40ah
 lb3ffh:
-	call 07c21h            ; wall to the left?
+	call probe_wall_left            ; wall to the left?
 	jr nc,lb40ah
 	ld de,00240h           ; bounce right
 	call actor_set_xvel
@@ -2618,11 +2581,11 @@ lb41ch:
 	ld a,(ix+005h)
 	add a,b
 	ld d,a
-	call 07b9fh            ; carry = solid floor at (D, E)
+	call map_solid_pair            ; carry = solid floor at (D, E)
 	jr c,lb43eh            ; floor there: stay grounded
 	ld de,00240h
 	bit 7,(ix+00ah)
-	call nz,sub_a183h      ; keep travel direction
+	call nz,neg_de      ; keep travel direction
 	call actor_set_xvel
 	ld de,0fb8fh           ; hop: Yvel ~ -4.5 px/frame
 	call actor_set_yvel
@@ -2646,11 +2609,11 @@ white_skel_air:                ; (0xB458)
 	ld d,(ix+005h)
 	bit 7,(ix+00ah)
 	jr z,lb46eh
-	call 07c21h            ; still facing a wall? stop xvel
+	call probe_wall_left            ; still facing a wall? stop xvel
 	jr nc,lb479h
 	jr lb473h
 lb46eh:
-	call 07bc5h
+	call probe_wall_right
 	jr nc,lb479h
 lb473h:
 	ld de,CHKRAM
@@ -2673,7 +2636,7 @@ lb497h:
 	ld a,(ix+005h)
 	add a,b
 	ld d,a
-	call 07b9fh
+	call map_solid_pair
 	ret nc                 ; no floor yet
 	xor a
 	ld (ix+001h),a         ; landed -> walk
@@ -2696,11 +2659,16 @@ lb4bfh:
 	jr nc,lb4cdh
 	ld de,0fe80h
 lb4cdh:
-	call d700_throw        ; kind 11 -> D700 type 4 (d700_bone_tick)
+	call shot_throw        ; kind 11 -> shot type 4 (shot_bone)
 	ld (ix+001h),000h      ; back to walk
 	ld (ix+006h),001h
 	ret
-	call sub_b618h
+; enemy_blob_tick (seg3 0xB4D9) - actor_blob_blue/_red/_white (also 0x19).
+; Hatched from bonus-21 slime if the pickup is left to land.  2 SAT cells
+; (shape 0x9B/0x9C anim, pats D0/D8 = spr_blob / spr_blob_cc).  1 HP.
+; Recolour is the SAT pair: 0F 42 blue, 08 42 red, 0E 42 white (HUD-fixed).
+enemy_blob_tick:
+	call blob_set_pose
 	ld (ix+006h),001h
 	ld de,CHKRAM
 	ld (ix+00eh),e
@@ -2708,17 +2676,15 @@ lb4cdh:
 	call actor_set_yvel
 	ld (ix+010h),008h
 	ret
-	call sub_b618h
+enemy_blob_go:
+	call blob_set_pose
 	ld a,(ix+001h)
 	call DISPATCH_A
-	ld (bc),a
-	or l
-	inc d
-	or l
-	ld a,(de)
-	or l
-	dec l
-	or l
+	defw blob_hatch        ; 0  wait ix+10, then fall
+	defw blob_fall         ; 1  gravity until floor
+	defw blob_pause        ; 2  grounded wait, then hop
+	defw blob_hop          ; 3  hop; land -> pause
+blob_hatch:
 	call sub_b590h
 	ret nz
 	ld de,00200h
@@ -2726,9 +2692,11 @@ lb4cdh:
 	ld (ix+00eh),007h
 	inc (ix+001h)
 	ret
+blob_fall:
 	call sub_b570h
 	ret nc
 	jr lb552h
+blob_pause:
 	ld (ix+006h),000h
 	dec (ix+010h)
 	ret nz
@@ -2736,8 +2704,9 @@ lb4cdh:
 	ld (ix+010h),01eh
 	inc (ix+001h)
 	ret
+blob_hop:
 	ld (ix+006h),001h
-	call sub_b618h
+	call blob_set_pose
 	call sub_b5c8h
 	jp nc,lb595h
 	call sub_b5e7h
@@ -2843,7 +2812,7 @@ sub_b607h:
 	ld de,0fe40h
 lb615h:
 	jp actor_set_xvel
-sub_b618h:
+blob_set_pose:
 	ld a,(0d000h)
 	ld de,lb645h+1
 	call lookup_word_tbl
@@ -2931,7 +2900,7 @@ lb649h:
 	ld b,h
 	ld b,h
 	ld b,h
-	djnz lb6d3h
+	defb 010h,040h         ; was djnz lb6d3h (tile data)
 	nop
 	ld b,c
 	ld de,04414h
@@ -2958,48 +2927,49 @@ lb6aeh:
 	ld b,h
 	ld b,h
 ; --- room_event_tick (seg3 0xB6B2) - per-frame CE00 room-event dispatcher ----
-;  CE00==0 -> ret.  Else DISPATCH_A on (CE00-1).  Event 6 is the shared
-;  CE01 cutscene machine (sub_65b7h).  When CE0B is set, tick CE10 instead
+;  CE00==0 -> ret.  Else DISPATCH_A on (CE00-1).  Events 1-5 spawn the
+;  boss then wait CE15 and arm boss_clear (CE0B).  Event 6 is Dracula's
+;  CE01 machine (event_dracula in seg1); its last step raises CE40 and
+;  the play tick runs credits_tick.  When CE0B is set, tick CE10 instead
 ;  (boss-clear: orb spawn, HP refill, then C409).
 room_event_tick:
 	ld a,(0ce0bh)
 	or a
-	jr nz,lb6cch
+	jr nz,room_event_ce10
 	ld a,(0ce00h)
 	dec a
 	ret m
 	call DISPATCH_A
-	defw 0be32h            ; 1
-	defw 0bce2h            ; 2
-	defw 0b85eh            ; 3
-	defw 0ba2dh            ; 4
-	defw 0bbfah            ; 5
-	defw sub_65b7h         ; 6 CE01 cutscene/boss machine
-lb6cch:
+	defw event_giant_bat    ; 1  s3r5 spawn type 18, wait CE15 -> boss_clear
+	defw event_medusa       ; 2  s6r5
+	defw event_mummies      ; 3  s9r7 two type 20
+	defw event_frankenstein ; 4  s12r6 type 21 + igor
+	defw event_grim_reaper  ; 5  s15r9 type 22 + sickles
+	defw event_dracula      ; 6  s18r9 CE01 machine -> CE40 -> credits_tick
+room_event_ce10:
 	ld a,(0ce10h)
 	call DISPATCH_A
-	ret po
-lb6d3h:
-	or (hl)
-	jp pe,0f4b6h
-	or (hl)
-	dec c
-	or a
-	jp pe,03db6h
-	or a
-	ld e,b
-	or a
+	defw boss_clear_cull    ; 0  hide actors, timer 0x3C
+	defw boss_clear_wait    ; 1
+	defw boss_clear_orb     ; 2  spawn actor_orb
+	defw boss_clear_orb_wait ; 3
+	defw boss_clear_wait    ; 4  same wait as 1
+	defw boss_clear_heal    ; 5  refill HP
+	defw boss_clear_done    ; 6  C409, clear CE00
+boss_clear_cull:
 	call sub_780dh
 	ld a,03ch
 	ld (0ce02h),a
-	jr lb6efh
+	jr boss_clear_next
+boss_clear_wait:
 	ld hl,0ce02h
 	dec (hl)
 	ret nz
-lb6efh:
+boss_clear_next:
 	ld hl,0ce10h
 	inc (hl)
 	ret
+boss_clear_orb:
 	call 057c7h
 	xor a
 	ld (0ce11h),a
@@ -3009,7 +2979,8 @@ lb6efh:
 	call spawn_actor
 	ld a,0b4h
 	ld (0ce02h),a
-	jr lb6efh
+	jr boss_clear_next
+boss_clear_orb_wait:
 	ld a,(0ce11h)
 	and a
 	jr nz,lb72ch
@@ -3032,7 +3003,8 @@ lb72ch:
 	call play_sound
 	ld a,096h
 	ld (0ce02h),a
-	jr lb6efh
+	jr boss_clear_next
+boss_clear_heal:
 	ld a,(0c003h)
 	rra
 	ret c
@@ -3045,7 +3017,8 @@ lb72ch:
 lb751h:
 	ld a,03ch
 	ld (0ce02h),a
-	jr lb6efh
+	jr boss_clear_next
+boss_clear_done:
 	ld hl,0ce02h
 	dec (hl)
 	ret nz
@@ -3063,8 +3036,10 @@ lb767h:
 	ld (0ce0ch),a
 	ld (0ce11h),a
 	inc a
-	ld (0c409h),a
+	ld (0c409h),a          ; hub-advance -> state_hub_advance
 	ret
+; actor_orb_tick (seg3 0xB77E) - type 0x22. Boss-clear orb spawn-init.
+actor_orb_tick:
 	ld a,05ah
 	ld (ix+010h),a
 	ld a,001h
@@ -3078,14 +3053,11 @@ lb767h:
 	call actor_set_xvel
 	ld de,00100h
 	jp actor_set_yvel
+actor_orb_go:
 	ld a,(ix+001h)
 	call DISPATCH_A
-	or h
-	or a
-	rra
-	cp b
-	ld b,(hl)
-	cp b
+	defw orb_flash, orb_settle, orb_spin
+orb_flash:
 	ld a,(0c003h)
 	and 001h
 	ld c,0ffh
@@ -3093,15 +3065,15 @@ lb7bbh:
 	jr nz,lb7beh
 	inc c
 lb7beh:
-	call sub_b7d2h
+	call orb_apply_sat
 	dec (ix+010h)
 	ret nz
 	ld c,0ffh
-	call sub_b7d2h
+	call orb_apply_sat
 	ld (ix+006h),001h
 	inc (ix+001h)
 	ret
-sub_b7d2h:
+orb_apply_sat:
 	ld a,(0d000h)
 	ld de,lb801h
 	sub 003h
@@ -3157,52 +3129,51 @@ lb810h:
 	dec b
 	ld (bc),a
 	nop
-	call sub_b846h
+orb_settle:
+	call orb_spin
 	ld e,(ix+003h)
 	ld d,(ix+005h)
-	call 07b9fh
+	call map_solid_pair
 	ret nc
 	ld (ix+006h),000h
 	ld (ix+00bh),08fh
 	ld c,0ffh
-	call sub_b7d2h
+	call orb_apply_sat
 	ld (ix+00eh),002h
 	ld a,001h
 	ld (0ce14h),a
 	inc (ix+001h)
 	ret
-sub_b846h:
+orb_spin:
 	ld a,(ix+00ch)
 	inc (ix+00ch)
 	rra
 	and 003h
-	ld hl,lb85ah
+	ld hl,orb_frames
 	call ADD_HL_A
 	ld a,(hl)
 	ld (ix+00bh),a
 	ret
-lb85ah:
-	adc a,a
-	sub b
-	sub c
-	sub b
+orb_frames:
+	defb 08fh,090h,091h,090h
+; event_mummies (seg3 0xB85E) - CE00=3, stage 9 room 7. Spawn a pair, wait CE15.
+event_mummies:
 	ld a,(0ce01h)
 	call DISPATCH_A
-	ld l,b
-	cp b
-	ld a,e
-	cp b
+	defw event_mummies_spawn, event_mummies_wait
+event_mummies_spawn:
 	ld c,actor_mummy
 	ld de,030c5h
 	call spawn_actor
 	ld c,actor_mummy
 	ld de,0d0c5h
 	call spawn_actor
-	jp lbe44h
+	jp event_ce01_next
+event_mummies_wait:
 	ld a,(0ce15h)
 	and a
 	ret z
-	jp lbe4eh
+	jp boss_clear_arm
 ; enemy_mummy_tick (seg3 0xB883) - type 20. Event 3 (two of them in s9r7).
 ; Walk 0x33-0x38. 16 HP, 2000 pts.
 enemy_mummy_tick:
@@ -3213,21 +3184,17 @@ enemy_mummy_tick:
 	ld (ix+014h),002h
 	ld (ix+015h),001h
 	ret
+enemy_mummy_go:
 	ld a,(ix+001h)
 	call DISPATCH_A
-	xor b
-	cp b
-	or h
-	cp b
-	rst 10h
-	cp b
-	ld h,a
-	cp c
+	defw mummy_idle, mummy_face, mummy_walk, mummy_spit
+mummy_idle:
 	dec (ix+010h)
 	ret nz
 	inc (ix+001h)
 	ld (ix+006h),001h
 	ret
+mummy_face:
 	ld de,0fdd0h
 	ld (ix+012h),001h
 	ld a,(0c427h)
@@ -3239,11 +3206,12 @@ lb8cah:
 	call actor_set_xvel
 	inc (ix+001h)
 	ld (ix+013h),007h
-	jp lb9bdh
-	call sub_b9d6h
+	jp mummy_set_timer
+mummy_walk:
+	call mummy_walk_anim
 	dec (ix+010h)
 	jr nz,lb937h
-	call lb9bdh
+	call mummy_set_timer
 	ld (ix+013h),007h
 	inc (ix+017h)
 	bit 0,(ix+017h)
@@ -3262,7 +3230,7 @@ lb8ffh:
 	ld a,(0c427h)
 	cp (ix+005h)
 	jr c,lb929h
-	call sub_b9d6h
+	call mummy_walk_anim
 lb914h:
 	ld de,00230h
 	call actor_set_xvel
@@ -3270,12 +3238,12 @@ lb914h:
 	ld a,(0c427h)
 	cp (ix+005h)
 	jr nc,lb929h
-	jp sub_b9d6h
+	jp mummy_walk_anim
 lb929h:
 	inc (ix+001h)
 	ld (ix+006h),000h
 	ld (ix+011h),030h
-	jp sub_b9d6h
+	jp mummy_walk_anim
 lb937h:
 	ld a,(ix+005h)
 	cp 020h
@@ -3294,8 +3262,9 @@ lb941h:
 	ld (ix+005h),0e0h
 	inc (ix+012h)
 lb962h:
-	call sub_b9d6h
-	jr lb9bdh
+	call mummy_walk_anim
+	jr mummy_set_timer
+mummy_spit:
 	dec (ix+011h)
 	jr z,lb98ch
 	ld a,008h
@@ -3316,38 +3285,34 @@ lb98ch:
 	ld e,a
 	ld d,(ix+005h)
 	ld a,040h
-	call sub_a0f4h
+	call aim_at_simon_spd
 	ld a,(ix+012h)
 	rrca
 	xor d
-	call m,sub_a183h
+	call m,neg_de
 	ld a,(ix+003h)
 	sub 018h
 	ld c,a
 	ld b,(ix+005h)
-	ld a,014h
-	call d700_spawn
+	ld a,014h               ; kind 0x14 -> mummy_bandage
+	call shot_spawn
 	ld a,00ah
 	call sub_a4efh
 	dec (ix+001h)
 	ld (ix+006h),001h
 	ret
-lb9bdh:
+mummy_set_timer:
 	ld a,r
 	or 080h
-	ld hl,lb9ceh
+	ld hl,mummy_timer_tbl
 	and 007h
 	call ADD_HL_A
 	ld a,(hl)
 	ld (ix+010h),a
 	ret
-lb9ceh:
-	ld b,b
-	ex af,af'
-	jr nc,lb9e2h
-	jr nz,lb9ech
-	jr c,lb9feh
-sub_b9d6h:
+mummy_timer_tbl:
+	defb 040h,008h,030h,010h,020h,018h,038h,028h
+mummy_walk_anim:
 	ld hl,lba2ah
 	bit 0,(ix+012h)
 	jr z,lb9e2h
@@ -3383,32 +3348,29 @@ lba1ch:
 	ld (ix+00bh),a
 	ret
 lba27h:
-	inc sp
-	inc (hl)
-	dec (hl)
+	defb 033h,034h,035h
 lba2ah:
-	ld (hl),037h
-	jr c,lba68h
-	ld bc,0cdceh
-	ld l,e
-	ld b,b
-	scf
-	cp d
-	ld c,(hl)
-	cp d
+	defb 036h,037h,038h
+; event_frankenstein (seg3 0xBA2D) - CE00=4, stage 12 room 6. Frank + Igor.
+event_frankenstein:
+	ld a,(0ce01h)
+	call DISPATCH_A
+	defw event_frankenstein_spawn, event_frankenstein_wait
+event_frankenstein_spawn:
 	xor a
-	ld (0ce07h),a
+	ld (0ce07h),a          ; Igor's jump trigger
 	ld c,actor_frankenstein
 	ld de,0d0c0h
 	call spawn_actor
 	ld c,actor_igor
 	ld de,0d0a0h
 	call spawn_actor
-	jp lbe44h
+	jp event_ce01_next
+event_frankenstein_wait:
 	ld a,(0ce15h)
 	and a
 	ret z
-	jp lbe4eh
+	jp boss_clear_arm
 ; enemy_frankenstein_tick (seg3 0xBA56) - type 21. Event 4 with Igor.
 ; Walk 0x79/0x7A/0x7B. 32 HP on the bar, 3000 pts.
 enemy_frankenstein_tick:
@@ -3419,13 +3381,15 @@ enemy_frankenstein_tick:
 	call actor_set_xvel
 lba68h:
 	jp actor_set_yvel
+enemy_frankenstein_go:
 	ld a,(ix+010h)
 	and a
-	call nz,sub_badah
-	call sub_bac0h
+	call nz,frank_arm_igor
+	call frank_walk_anim
 	ld a,(ix+001h)
 	dec a
-	jr z,lba9eh
+	jr z,frank_pace
+frank_chase:
 	ld (ix+00ch),020h
 	ld a,(0c427h)
 	sub (ix+005h)
@@ -3441,13 +3405,13 @@ lba93h:
 	call actor_set_xvel
 	inc (ix+001h)
 	ret
-lba9eh:
-	call sub_baaah
+frank_pace:
+	call frank_clamp_x
 	dec (ix+00ch)
 	ret nz
 	ld (ix+001h),000h
 	ret
-sub_baaah:
+frank_clamp_x:
 	ld a,(ix+005h)
 	cp 0e0h
 	jr nc,lbabah
@@ -3458,8 +3422,8 @@ sub_baaah:
 lbabah:
 	ld de,0fde0h
 	jp actor_set_xvel
-sub_bac0h:
-	ld hl,lbad6h
+frank_walk_anim:
+	ld hl,frank_poses
 	inc (ix+011h)
 	ld a,(ix+011h)
 	rra
@@ -3470,32 +3434,32 @@ sub_bac0h:
 	ld a,(hl)
 	ld (ix+00bh),a
 	ret
-lbad6h:
-	ld a,c
-	ld a,d
-	ld a,e
-	ld a,d
-sub_badah:
+frank_poses:
+	defb 079h,07ah,07bh,07ah
+frank_arm_igor:
 	dec (ix+010h)
 	ret nz
 	ld a,001h
 	ld (0ce07h),a
 	ret
+igor_tick:
 	ld (ix+006h),001h
 	ld (ix+010h),000h
 	ld de,CHKRAM
 	call actor_set_yvel
 	call actor_set_xvel
-	call sub_bbe8h
+	call igor_arm_throw
 	xor a
 	ld (ix+011h),a
 	ret
+igor_go:
 	ld a,(ix+001h)
 	dec a
-	jr z,lbb2ah
+	jr z,igor_air
 	dec a
-	jp z,lbb96h
-	call sub_bbc7h
+	jp z,igor_land
+igor_wait:
+	call igor_flash
 	ret c
 	ld a,(0ce07h)
 	and a
@@ -3509,8 +3473,8 @@ lbb1fh:
 	ld (ix+00bh),067h
 	ld de,(0ce09h)
 	jp actor_set_xvel
-lbb2ah:
-	call sub_bbc7h
+igor_air:
+	call igor_flash
 	ret c
 	inc (ix+011h)
 	ld a,(ix+011h)
@@ -3519,8 +3483,8 @@ lbb2ah:
 	jr c,lbb3bh
 	inc c
 lbb3bh:
-	call sub_bbedh
-	call sub_bbdbh
+	call igor_set_pose
+	call igor_try_throw
 	ld de,00060h
 	call actor_add_yvel
 	ld a,(ix+005h)
@@ -3528,18 +3492,18 @@ lbb3bh:
 	ld e,(ix+009h)
 	ld d,(ix+00ah)
 	push af
-	call nc,sub_bb84h
+	call nc,igor_bounce_r
 	pop af
 	cp 014h
-	call c,sub_bb8dh
+	call c,igor_bounce_l
 	bit 7,(ix+008h)
 	ret nz
 	ld e,(ix+003h)
 	ld d,(ix+005h)
-	call 07b9fh
+	call map_solid_pair
 	ret nc
 	ld c,069h
-	call sub_bbedh
+	call igor_set_pose
 	ld (ix+006h),000h
 	ld a,(ix+003h)
 	and 0f8h
@@ -3547,18 +3511,18 @@ lbb3bh:
 	ld (ix+00ch),010h
 	inc (ix+001h)
 	ret
-sub_bb84h:
+igor_bounce_r:
 	bit 7,d
 	ret nz
-	call sub_a183h
+	call neg_de
 	jp actor_set_xvel
-sub_bb8dh:
+igor_bounce_l:
 	bit 7,d
 	ret z
-	call sub_a183h
+	call neg_de
 	jp actor_set_xvel
-lbb96h:
-	call sub_bbc7h
+igor_land:
+	call igor_flash
 	ld (ix+006h),000h
 	ret c
 	dec (ix+00ch)
@@ -3581,7 +3545,7 @@ lbbafh:
 	ld (ix+011h),a
 	ld (ix+001h),a
 	ret
-sub_bbc7h:
+igor_flash:
 	ld a,(ix+010h)
 	and a
 	jr z,lbbd6h
@@ -3592,16 +3556,16 @@ sub_bbc7h:
 lbbd6h:
 	ld (ix+006h),001h
 	ret
-sub_bbdbh:
+igor_try_throw:
 	dec (ix+012h)
 	ret nz
-	call sub_bbe8h
-	call sub_a0ech
-	jp d700_throw
-sub_bbe8h:
+	call igor_arm_throw
+	call aim_at_simon
+	jp shot_throw
+igor_arm_throw:
 	ld (ix+012h),030h
 	ret
-sub_bbedh:
+igor_set_pose:
 	bit 7,(ix+00ah)
 	ld a,c
 	jr nz,lbbf6h
@@ -3609,37 +3573,39 @@ sub_bbedh:
 lbbf6h:
 	ld (ix+00bh),a
 	ret
+; event_grim_reaper (seg3 0xBBFA) - CE00=5, stage 15 room 9.
+; Spawn the reaper plus 4 sickles (shot kind 0x16 -> type 8); keep tossing while waiting.
+event_grim_reaper:
 	ld a,(0ce01h)
 	call DISPATCH_A
-	inc b
-	cp h
-	rra
-	cp h
+	defw event_grim_reaper_spawn, event_grim_reaper_wait
+event_grim_reaper_spawn:
 	ld de,0a090h
 	ld c,actor_grim_reaper
 	call spawn_actor
-	call sub_bc30h
-	call sub_bc30h
-	call sub_bc30h
-	call sub_bc30h
+	call grim_sickle_spawn
+	call grim_sickle_spawn
+	call grim_sickle_spawn
+	call grim_sickle_spawn
 	xor a
 	ld (0ce02h),a
-	jp lbe44h
+	jp event_ce01_next
+event_grim_reaper_wait:
 	ld a,(0ce15h)
 	and a
-	jp nz,lbe4eh
+	jp nz,boss_clear_arm
 	ld hl,0ce02h
 	dec (hl)
 	ret nz
 	ld (hl),080h
-	jp sub_bc30h
-sub_bc30h:
+	jp grim_sickle_spawn
+grim_sickle_spawn:
 	ld hl,0cf20h
 	ld a,(hl)
 	inc (hl)
 	and 007h
 	add a,a
-	ld hl,lbc4bh
+	ld hl,grim_sickle_xy
 	call ADD_HL_A
 	ld c,(hl)
 	inc hl
@@ -3648,20 +3614,9 @@ sub_bc30h:
 	ld h,e
 	ld l,e
 	ld a,016h
-	jp d700_spawn
-lbc4bh:
-	jr nc,lbc7dh
-	add a,b
-	ret nz
-	jr nc,$-62
-	ret nz
-	jr nc,$+74
-	add a,b
-	and b
-	add a,b
-	ld l,b
-	jr nc,$+106
-	ret nz
+	jp shot_spawn
+grim_sickle_xy:
+	defw 03030h,0c080h,0c030h,030c0h,08048h,080a0h,03068h,0c068h
 ; enemy_grim_reaper_tick (seg3 0xBC5B) - type 22. Event 5, stage 15 room 9.
 ; 32 HP, 12 cells, 7000 pts. Shape 0x7C.
 enemy_grim_reaper_tick:
@@ -3673,16 +3628,18 @@ enemy_grim_reaper_tick:
 	ld (ix+00ch),01eh
 	ld (ix+00bh),07ch
 	ret
+enemy_grim_reaper_go:
 	ld a,(ix+001h)
 	dec a
-	jr z,lbc86h
+	jr z,grim_fly
+grim_idle:
 	dec (ix+00ch)
 lbc7dh:
 	ret nz
 	inc (ix+001h)
 	ld (ix+006h),001h
 	ret
-lbc86h:
+grim_fly:
 	ld e,(ix+007h)
 	ld d,(ix+008h)
 	ld hl,SYNCHR
@@ -3694,10 +3651,10 @@ lbc86h:
 	ld a,(ix+005h)
 	cp 0e8h
 	push af
-	call nc,sub_bcd0h
+	call nc,grim_bounce_r
 	pop af
 	cp 018h
-	call c,sub_bcd9h
+	call c,grim_bounce_l
 	ld a,(ix+003h)
 	cp 040h
 	jr nc,lbcc0h
@@ -3705,41 +3662,40 @@ lbc86h:
 	ld d,(ix+008h)
 	bit 7,d
 	jr z,lbcc0h
-	call sub_a183h
+	call neg_de
 	call actor_set_yvel
 lbcc0h:
 	ld e,(ix+003h)
 	ld d,(ix+005h)
-	call 07b9fh
+	call map_solid_pair
 	ret nc
 	ld de,0fd00h
 	jp actor_set_yvel
-sub_bcd0h:
+grim_bounce_r:
 	bit 7,d
 	ret nz
-	call sub_a183h
+	call neg_de
 	jp actor_set_xvel
-sub_bcd9h:
+grim_bounce_l:
 	bit 7,d
 	ret z
-	call sub_a183h
+	call neg_de
 	jp actor_set_xvel
+; event_medusa (seg3 0xBCE2) - CE00=2, stage 6 room 5. Dwell, spawn, wait CE15.
+event_medusa:
 	ld a,(0ce01h)
 	call DISPATCH_A
-	ret p
-	cp h
-	ret m
-	cp h
-	nop
-	cp l
-	jr $-65
+	defw event_medusa_arm, event_medusa_dwell, event_medusa_spawn, event_medusa_wait
+event_medusa_arm:
 	ld a,078h
 	ld (0ce02h),a
-	jp lbe44h
+	jp event_ce01_next
+event_medusa_dwell:
 	ld hl,0ce02h
 	dec (hl)
 	ret nz
-	jp lbe44h
+	jp event_ce01_next
+event_medusa_spawn:
 	ld de,09090h
 	ld c,actor_medusa
 	call spawn_actor
@@ -3747,17 +3703,19 @@ sub_bcd9h:
 	ld bc,02020h
 	ld a,000h
 	ld d,000h
-	call 04911h
-	jp lbe44h
+	call 04911h            ; fill a 32x32 SCREEN 5 rect (entrance hole)
+	jp event_ce01_next
+event_medusa_wait:
 	ld a,(0ce15h)
 	and a
 	ret z
-	jp lbe4eh
-	call sub_be14h
+	jp boss_clear_arm
+enemy_medusa_go:
+	call medusa_try_spit
 	ld a,(ix+001h)
 	call DISPATCH_A
-	defw 0bd6dh
-	defw 0bda0h
+	defw medusa_cruise
+	defw medusa_reverse
 ; enemy_medusa_tick (seg3 0xBD2D) - type 19. Event 2, stage 6 room 5.
 ; 16 HP, 2000 pts. Shape 0x2B.
 enemy_medusa_tick:
@@ -3771,7 +3729,7 @@ enemy_medusa_tick:
 	ld (ix+015h),03ch
 	ld (ix+014h),008h
 	ret
-sub_bd4dh:
+medusa_bob:
 	dec (ix+014h)
 	ld c,02bh
 	bit 3,(ix+014h)
@@ -3787,7 +3745,8 @@ lbd59h:
 lbd69h:
 	add hl,de
 	jp actor_add_yvel
-	call sub_bd4dh
+medusa_cruise:
+	call medusa_bob
 	ld a,(ix+005h)
 	sub 010h
 	cp 0e0h
@@ -3812,6 +3771,7 @@ lbd86h:
 	ld (ix+013h),060h
 	inc (ix+001h)
 	ret
+medusa_reverse:
 	dec (ix+013h)
 	ld a,(ix+013h)
 	and a
@@ -3842,7 +3802,7 @@ lbdd3h:
 lbde3h:
 	ret
 lbde4h:
-	call sub_bd4dh
+	call medusa_bob
 	ld a,(ix+005h)
 	sub 010h
 	cp 0e0h
@@ -3866,37 +3826,39 @@ lbdfdh:
 	ld (ix+012h),03fh
 	ld (ix+013h),010h
 	ret
-sub_be14h:
+medusa_try_spit:
 	dec (ix+015h)
 	ret nz
 	ld (ix+015h),03ch
-	call sub_a0ech
+	call aim_at_simon
 	ld a,(ix+003h)
 	sub 010h
 	ld c,a
 	ld b,(ix+005h)
 	push ix
-	ld a,013h
-	call d700_spawn
+	ld a,013h               ; kind 0x13 -> medusa_snake
+	call shot_spawn
 	pop ix
 	ret
+; event_giant_bat (seg3 0xBE32) - CE00=1, stage 3 room 5. Spawn, wait CE15.
+; Spawn falls into event_ce01_next (the shared CE01++ lives here).
+event_giant_bat:
 	ld a,(0ce01h)
 	call DISPATCH_A
-	inc a
-	cp (hl)
-	ld c,c
-	cp (hl)
+	defw event_giant_bat_spawn, event_giant_bat_wait
+event_giant_bat_spawn:
 	ld c,actor_giant_bat
 	ld de,07040h
 	call spawn_actor
-lbe44h:
+event_ce01_next:               ; (0xBE44) CE01++; also Dracula CE01 epilogue
 	ld hl,0ce01h
 	inc (hl)
 	ret
+event_giant_bat_wait:
 	ld a,(0ce15h)
 	and a
 	ret z
-lbe4eh:
+boss_clear_arm:                ; (0xBE4E) CE10=0, CE0B=1 -> room_event_ce10
 	xor a
 	ld (0ce10h),a
 	inc a
@@ -3916,6 +3878,7 @@ lbe6eh:
 	ld de,CHKRAM
 	call actor_set_xvel
 	jp actor_set_yvel
+enemy_giant_bat_go:
 	inc (ix+014h)
 	inc (ix+00ch)
 	ld a,(ix+00ch)
@@ -3927,25 +3890,16 @@ lbe87h:
 	ld (ix+00bh),a
 	ld a,(ix+001h)
 	call DISPATCH_A
-	sbc a,h
-	cp (hl)
-	xor c
-	cp (hl)
-	xor l
-	cp (hl)
-	rst 30h
-	cp (hl)
-	ld d,c
-	cp a
-	sbc a,c
-	cp a
+	defw giant_bat_idle, giant_bat_begin, giant_bat_aim, giant_bat_swoop, giant_bat_spit, giant_bat_climb
+giant_bat_idle:
 	dec (ix+013h)
 	ret nz
 	ld (ix+006h),001h
 	ld (ix+001h),001h
 	ret
+giant_bat_begin:
 	ld (ix+001h),002h
-lbeadh:
+giant_bat_aim:
 	ld a,(0c425h)
 	sub 030h
 	ld b,030h
@@ -3973,7 +3927,7 @@ lbec5h:
 	ld (0c427h),a
 	ld a,b
 	ld (0c425h),a
-	call sub_a0ech
+	call aim_at_simon
 	call actor_set_xvel
 	ex de,hl
 	call actor_set_yvel
@@ -3984,6 +3938,7 @@ lbec5h:
 	ld (0c427h),a
 	ld (ix+001h),003h
 	ret
+giant_bat_swoop:
 	bit 7,(ix+008h)
 	ld a,(ix+003h)
 	jr z,lbf04h
@@ -4022,12 +3977,13 @@ lbf30h:
 	ld (ix+010h),a
 	ld (ix+001h),004h
 	ret
-sub_bf4bh:
-	call sub_a0ech
-	jp d700_throw
+giant_bat_throw:
+	call aim_at_simon
+	jp shot_throw
+giant_bat_spit:
 	ld a,(ix+010h)
 	cp 018h
-	call z,sub_bf4bh
+	call z,giant_bat_throw
 	dec (ix+010h)
 	ret nz
 	ld de,00280h
@@ -4056,10 +4012,11 @@ lbf6fh:
 	ld a,(0c427h)
 	ld b,(ix+005h)
 	cp b
-	call c,sub_a183h
+	call c,neg_de
 	call actor_set_xvel
 	ld (ix+001h),005h
 	ret
+giant_bat_climb:
 	ld de,0fff0h
 	call actor_add_yvel
 	ld a,(ix+005h)
@@ -4079,7 +4036,7 @@ lbfb5h:
 	cp 041h
 	ret nc
 	ld (ix+001h),002h
-	jp lbeadh
+	jp giant_bat_aim
 	rst 38h
 	rst 38h
 	rst 38h

@@ -21,10 +21,12 @@
 ; 0xFE next room, 0xFF next stage, 0x00 end hub. Instantiator 0x5B22 fills
 ; 8 C470 candle/block slots, C500 floor items/chests, C5B5/C5C5 vendors.
 ; Record: pos (hi nibble Y, lo nibble X, cell*16 px), attr; attr 0x7F adds a
-; third byte (reveal). attr bits7-6: 00 = candle (bits7-5==3 = breakable
-; block) or floor pickup (bits7-5==0); 10 = chest; 11 = vendor. bits4-0 =
-; bonus id (vendor uses bits5-2 as price-tbl index). Stage 18 room 9
-; (Dracula) is omitted and stays empty.
+; third byte (reveal). attr bits7-5: 000 floor pickup, 001 candle/brazier,
+; 011 32x32 breakable block (stamped over the nametable); bits7-6 10 chest,
+; 11 vendor. bits4-0 = bonus id (vendor uses bits5-2 as vendor_offer_id
+; index). Instantiator scenery_room_load fills 8 C470 candle/block slots,
+; C500 floor items/chests, C5B5/C5C5 vendors. Stage 18 room 9 (Dracula)
+; is omitted and stays empty.
 
 scenery_list_ptr:
 	defw scenery_list_h0     ; hub 0 = stages 1-3
@@ -166,7 +168,7 @@ scenery_list_h1:
 	; stage 4
 	defb 098h,021h         ; r0 candle (8,9) small heart
 	defb 09eh,028h         ; r0 candle (14,9) blue gem
-	defb 048h,035h         ; r0 candle (8,4) slime
+	defb 048h,035h         ; r0 candle (8,4) slime (not a wall)
 	defb 05dh,017h         ; r0 floor (13,5) yellow key
 	defb 042h,078h         ; r0 block (2,4) white key
 	defb 0feh              ; next room
@@ -239,6 +241,7 @@ scenery_list_h1:
 	defb 067h,017h         ; r0 floor (7,6) yellow key
 	defb 054h,029h         ; r0 candle (4,5) sapphire ring
 	defb 02ch,07fh,0d5h    ; r0 reveal (12,2) vendor potion slot1
+	; 32x32 wall row (Y=10): heart, three slimes, white key
 	defb 0a4h,062h         ; r0 block (4,10) large heart
 	defb 0a6h,075h         ; r0 block (6,10) slime
 	defb 0a8h,075h         ; r0 block (8,10) slime
@@ -1415,7 +1418,7 @@ object_list_h5:
 	defb obj_end_stream
 
 ; credits_font (seg14 0x8824): 40 x 8x8 1bpp glyphs for the ending message
-; and credits.  Loaded by credits_font_load (seg0 0x53E5) from sub_6719h.
+; and credits.  Loaded by credits_font_load (seg0 0x53E5) from credits_init.
 ; First 14 at VRAM dest DE=0x8040 (digits 0-9, then . ' : ,); A-Z at
 ; DE=0x0848.  Each defb is one row, MSB = left pixel.
 ; Preview: gfx/credits_font.png.
@@ -2128,7 +2131,7 @@ snd_8b49:
 snd_8b53:
 	bit 2,(ix+002h)        ; alt env table?
 	jp nz,snd_8b7b
-	ld hl,0aad6h                    ; seg15 env/period table
+	ld hl,sound_env_ptr             ; seg15 env/period table
 snd_8b5d:
 	ld a,c
 	and 0f0h               ; hi nibble = env index
@@ -2150,11 +2153,11 @@ snd_8b68:
 	ld (ix+00eh),a         ; duration 1 -> fetch next tick
 	ret
 snd_8b7b:
-	ld hl,0aaeeh                    ; seg15 alt env/period table
+	ld hl,sound_env_ptr_alt         ; seg15 alt env/period table
 	jp snd_8b5d
 ; One octave of AY periods (little-endian, 12 notes).  Hi nibble of a
 ; note byte * 2 indexes this; IX+7 extra SRL steps drop octaves.
-; Noise/env notes instead use the seg15 tables at 0xAAD6 / 0xAAEE.
+; Noise/env notes instead use sound_env_ptr / sound_env_ptr_alt (seg15).
 sound_note_tbl:
 	defw 01ab8h,01938h,017d0h,01678h
 	defw 01534h,01404h,012e4h,011d4h
@@ -2486,121 +2489,25 @@ sfx_tbl:
 	defw sfx_1d           ; 1D vendor take hearts
 
 ; music_ptr (seg14 0x8DC9): 16 records of 3 channel pointers (A,B,C).
-; Index = (id & 0x7F)*6.  Ids 0x80..0x8F; several tails live in seg15.
+; Index = (id & 0x7F)*6.  Ids 0x80..0x8F; 85c and 86-8F live in seg15.
 music_ptr:
-	defw music_80a,music_80b,music_80c  ; 80 stages 0-3
-	defw music_81a,music_81b,music_81c  ; 81 stages 4-6 and 11-12
-	defw music_82a,music_82b,music_82c  ; 82 stages 7-9
-	defw music_83a,music_83b,music_83c  ; 83 stages 16-17
-	defw music_84a,music_84b,music_84c  ; 84 stages 13-15
-	defw music_85a,music_85b,0a051h  ; 85 stages 10 and 18
-	defw 0a157h,0a217h,0a1b9h  ; 86 stage-18 room transition
-	defw 0a2c5h,0a303h,0a35bh  ; 87 room transition
-	defw 0a39eh,0a3e4h,0a43ch  ; 88 event (CE01=4)
-	defw 0a49bh,0a4b0h,0a4c4h  ; 89 death (simon_dying)
-	defw 0a4d1h,0a506h,0a51dh  ; 8A title / demo
-	defw 0a54eh,0a573h,0a5a5h  ; 8B title variant
-	defw 0a5dfh,0a5fdh,0a621h  ; 8C boss
-	defw 0a671h,0a68fh,0a6aah  ; 8D cutscene
-	defw 0a6c4h,0a764h,0a7feh  ; 8E cutscene 2
-	defw 0a81fh,0a81fh,0a81fh  ; 8F dummy silence (0xA81F x3, in seg15)
+	defw music_80a,music_80b,music_80c  ; 80 bgm stages 0-3
+	defw music_81a,music_81b,music_81c  ; 81 bgm stages 4-6 and 11-12
+	defw music_82a,music_82b,music_82c  ; 82 bgm stages 7-9
+	defw music_83a,music_83b,music_83c  ; 83 bgm stages 16-17
+	defw music_84a,music_84b,music_84c  ; 84 bgm stages 13-15
+	defw music_85a,music_85b,music_85c  ; 85 bgm stages 10 and 18
+	defw music_86a,music_86b,music_86c  ; 86 Dracula boss
+	defw music_87a,music_87b,music_87c  ; 87 boss
+	defw music_88a,music_88b,music_88c  ; 88 Dracula portrait (CE01=4)
+	defw music_89a,music_89b,music_89c  ; 89 game over (simon_dying)
+	defw music_8aa,music_8ab,music_8ac  ; 8A enter castle
+	defw music_8ba,music_8bb,music_8bc  ; 8B game over
+	defw music_8ca,music_8cb,music_8cc  ; 8C boss defeated
+	defw music_8da,music_8db,music_8dc  ; 8D Dracula defeated
+	defw music_8ea,music_8eb,music_8ec  ; 8E credits
+	defw music_8f,music_8f,music_8f  ; 8F dummy silence
 
 ; Packed PSG streams (sfx, 0xFB/0xFD specials, music that still fits).
-; Remaining music channel tails are in seg15 (0xA000+).
-	INCBIN "seg14.bin", 0x0E29, 0x0002  ; unused 1F A8 (= 0xA81F dummy)
-sfx_01:
-	INCBIN "seg14.bin", 0x0E2B, 0x002D
-sfx_02:
-	INCBIN "seg14.bin", 0x0E58, 0x0011
-sfx_1d:
-	INCBIN "seg14.bin", 0x0E69, 0x0021
-sfx_03:
-	INCBIN "seg14.bin", 0x0E8A, 0x000F
-sfx_04:
-	INCBIN "seg14.bin", 0x0E99, 0x0015
-sfx_05:
-	INCBIN "seg14.bin", 0x0EAE, 0x001D
-sfx_06:
-	INCBIN "seg14.bin", 0x0ECB, 0x0019
-sfx_07:
-	INCBIN "seg14.bin", 0x0EE4, 0x000F
-sfx_08:
-	INCBIN "seg14.bin", 0x0EF3, 0x0032
-sfx_09:
-	INCBIN "seg14.bin", 0x0F25, 0x0031
-sfx_0a:
-	INCBIN "seg14.bin", 0x0F56, 0x001F
-sfx_0b:
-	INCBIN "seg14.bin", 0x0F75, 0x0044
-sfx_0c:
-	INCBIN "seg14.bin", 0x0FB9, 0x0024
-sfx_0d:
-	INCBIN "seg14.bin", 0x0FDD, 0x0051
-sfx_0e:
-	INCBIN "seg14.bin", 0x102E, 0x0037
-sfx_0f:
-	INCBIN "seg14.bin", 0x1065, 0x0035
-sfx_10:
-	INCBIN "seg14.bin", 0x109A, 0x002D
-sfx_11:
-	INCBIN "seg14.bin", 0x10C7, 0x001F
-sfx_12:
-	INCBIN "seg14.bin", 0x10E6, 0x0051
-sfx_13:
-	INCBIN "seg14.bin", 0x1137, 0x001B
-sfx_14:
-	INCBIN "seg14.bin", 0x1152, 0x0027
-sfx_15:
-	INCBIN "seg14.bin", 0x1179, 0x0099
-sfx_16:
-	INCBIN "seg14.bin", 0x1212, 0x0063
-sfx_17:
-	INCBIN "seg14.bin", 0x1275, 0x0063
-sfx_18:
-	INCBIN "seg14.bin", 0x12D8, 0x0042
-sfx_1a:
-	INCBIN "seg14.bin", 0x131A, 0x0085
-sfx_1c:
-	INCBIN "seg14.bin", 0x139F, 0x002B
-sfx_1b:
-	INCBIN "seg14.bin", 0x13CA, 0x0099
-snd_fd_seq:
-	INCBIN "seg14.bin", 0x1463, 0x000D
-sfx_19:
-	INCBIN "seg14.bin", 0x1470, 0x001B
-snd_fb_seq:
-	INCBIN "seg14.bin", 0x148B, 0x0010
-music_80a:
-	INCBIN "seg14.bin", 0x149B, 0x0066
-music_80b:
-	INCBIN "seg14.bin", 0x1501, 0x0097
-music_80c:
-	INCBIN "seg14.bin", 0x1598, 0x00D1
-music_81a:
-	INCBIN "seg14.bin", 0x1669, 0x005E
-music_81b:
-	INCBIN "seg14.bin", 0x16C7, 0x00A6
-music_81c:
-	INCBIN "seg14.bin", 0x176D, 0x006D
-music_82a:
-	INCBIN "seg14.bin", 0x17DA, 0x00B7
-music_82b:
-	INCBIN "seg14.bin", 0x1891, 0x00AC
-music_82c:
-	INCBIN "seg14.bin", 0x193D, 0x011B
-music_83a:
-	INCBIN "seg14.bin", 0x1A58, 0x0060
-music_83b:
-	INCBIN "seg14.bin", 0x1AB8, 0x00B2
-music_83c:
-	INCBIN "seg14.bin", 0x1B6A, 0x00AB
-music_84a:
-	INCBIN "seg14.bin", 0x1C15, 0x00C6
-music_84b:
-	INCBIN "seg14.bin", 0x1CDB, 0x011D
-music_84c:
-	INCBIN "seg14.bin", 0x1DF8, 0x00C9
-music_85a:
-	INCBIN "seg14.bin", 0x1EC1, 0x00C8
-music_85b:
-	INCBIN "seg14.bin", 0x1F89, 0x0077
+; Tails 85b_cont / 85c / 86-8F are data/psg_seg15.asm (seg15).
+	INCLUDE "data/psg_streams.asm"

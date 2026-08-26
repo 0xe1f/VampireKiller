@@ -20,3 +20,11 @@ weapon_sprite_ptr: start 0x55DE end 0x55F3 type bytedata
 ; type (ix+0)-1.  Targets live in the banked 0xA000 ROM, so they can't be
 ; local labels.  Runs to the end of the segment.
 entity_tbl: start 0x5fd3 end 0x6000 type worddata
+; New-game C410..C412 seed (lives, STAGE, unread C412).
+run_seed_tbl: start 0x44F0 end 0x44F3 type bytedata
+; Vendor attr bits5-2 -> bonus id (scenery compact into 0xDE00).
+vendor_offer_id: start 0x5B12 end 0x5B22 type bytedata
+; 6-byte ROM signature compared at CPU 0x7FFA via RDSLT (boot slot scan).
+slot_sig_7ffa: start 0x5CF0 end 0x5CF6 type bytedata
+; Stage 1-18 -> (stage-within-hub)*0x18; scenery_room_ptr then <<4.
+scenery_stage_ofs: start 0x5C0B end 0x5C1D type bytedata

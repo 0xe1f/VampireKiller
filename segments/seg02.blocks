@@ -1,0 +1,8 @@
+; z80dasm block map for segment 2 (bank 0x02, paged at 0x8000).
+; The bank is almost entirely code; these are the authored tables inside it
+; that z80dasm would otherwise decode as instructions.
+; Block names avoid colliding with in-source labels (z80dasm emits NAME_start).
+
+; Moving-platform SAT cell table read through IX by platform_sat_cells
+; (0x9119): 4 x {X offset, pattern}.  As code it becomes `ret nc` / `call nc`.
+platform_sat_cell_tbl: start 0x9146 end 0x914e type bytedata

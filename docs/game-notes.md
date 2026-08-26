@@ -22,9 +22,9 @@ not yet confirmed in code is marked *(unconfirmed)*.
    - On the **title** (state 1), only bits **4** (keyboard SPACE **or** joystick
      TRG1) and **5** (joystick TRG2 **or** keyboard UP) start. Other keys are
      ignored. Start sets `0xC002` bit 6, then: `0xE600 == 0` (normal) →
-     **intro** (state 3); `0xE600 != 0` (boot slot-scan found `slot_sig_7ffa`
-     at 0x7FFA in another slot) → `state_game_start` (13, new-game / password),
-     skipping the intro.
+     **intro** (state 3); `0xE600 != 0` (a **Game Master** cartridge was found at
+     boot) → `state_game_master_menu` (13), the hidden stage/lives select,
+     skipping the intro. See "Game Master cartridge" below.
    - On **logo** or **attract**, any new press returns to the title
      (`title_build`).
    - No start on the title: `state_title` counts down `0xC004` (first frame
@@ -32,6 +32,73 @@ not yet confirmed in code is marked *(unconfirmed)*.
      **attract** (state 2).
 4. Game start plays an **intro animation**: Simon arriving at the castle.
 5. Play proceeds through the **courtyard**, then the **castle interior**.
+
+## Game Master cartridge (hidden cheat features)
+
+Konami sold a companion "cheat" cartridge, the **Game Master** (product code
+**RC-735**; Konami prefixed all its releases with `RC-`), and Vampire Killer
+unlocks three hidden features when it is plugged in alongside the game.
+Everything hangs off one flag, `0xE600`.
+
+**Detection** — `game_master_detect` (seg0 0x5C99) runs once from the boot path.
+It walks `EXPTBL` (0xFCC1, four primary slots, recursing into subslots via
+`gm_scan_expanded`) and `RDSLT`s six bytes at CPU **0x7FFA** in each, comparing
+them against `game_master_sig` (0x5CF0: `00 30 31 13 35 AA`). Match →
+`0xE600 = 0xFF`, no match → `0`. Nothing else ever writes `0xE600`, so all three
+features below are strictly gated on the cartridge being present.
+
+That address is the **last six bytes** of a 16 KB cartridge page mapped at
+0x4000-0x7FFF, i.e. the very tail of the Game Master ROM — so the six bytes are
+an arbitrary fingerprint, not an encoded ID string (they are not ASCII, and they
+don't spell RC-735 under the `vk` offset either). Confirming them against a
+Game Master ROM dump is still open; we don't have one in `references/`.
+
+**1. Pause / frame advance** — `gm_pause_check` (seg0 0x40C5) gets first look at
+the keyboard from `int_handler`, ahead of the game tick:
+
+- **STOP** (row 7 bit 4) toggles pause. Entering pause stashes PSG volume
+  registers 8-10 in `0xE611`-`0xE613`, silences them, and returns *without*
+  running `main_tick`, so the frame freezes. `0xE601` holds the pause state.
+- **`;`** (row 1 bit 7) while paused runs exactly one tick and stays paused —
+  frame-by-frame stepping.
+- Both keys are edge-detected through the `0xE610` latch.
+
+**2. Stage / lives select** — pressing start on the title goes to
+`state_game_master_menu` (state 13, seg0 0x441B) instead of the intro. The menu
+text (`gm_menu_text`, 0x5D1D) reads:
+
+```
+---MENU---
+> START GAME
+  MODIFY STAGE NUMBER
+  MODIFY PLAYER NUMBER
+```
+
+Picking a MODIFY item swaps the item rows for a prompt — `STAGE NUMBER=` or
+`PLAYER NUMBER=` — and takes two digits from the number keys (`gm_digit_entry`,
+RLD-ing each digit into the `0xE60F` BCD accumulator, with `gm_bcd_to_bin`
+keeping `0xE60E` as the binary value). **RETURN** commits. START GAME just sets
+state 3 (intro); the typed values are pushed into the run later by
+`gm_apply_values` (0x5E38): stage → `0xD000` (clamped to < 19) with `0xD002`
+re-derived from `gm_stage_hub_tbl` and the room reset to 0, lives → `0xC410`.
+
+Menu RAM: `0xE60B` = highlighted item 0-2, `0xE604` = which fields were edited,
+`0xE605`/`0xE606` = stage (BCD / binary), `0xE607` = lives, `0xE602` = where the
+current prompt prints its digits, `0xE615` = "a value was typed",
+`0xE608`-`0xE60A` = key edge latches.
+
+**3. Continue on game over** — `state_game_over` draws an extra line,
+`gm_continue_text` (0x4300): `F5 -> CONTINUE` (again the arrow glyph, not `_`).
+`gm_continue_key` (0x4314) edge-detects **F5** (row 7 bit 1, latched through
+`0xE614`) and restarts the run
+instead of dropping back to the title.
+
+**Font gotcha.** The HUD font's punctuation slots are not ASCII shapes, which is
+why these strings look odd in the source: glyph `@` (stream byte 0x30) is a
+horizontal rule, `_` (0x4F) is a right-pointing arrow (the menu cursor), and `?`
+(0x2F) is an **equals sign**. So `vk "@@@MENU@@@"` renders `---MENU---` and
+`vk "STAGE NUMBER?"` renders `STAGE NUMBER=`, with the typed digits butting up
+against the `=` at x=0xB0.
 
 ## Levels / bosses
 
@@ -61,7 +128,7 @@ not yet confirmed in code is marked *(unconfirmed)*.
   fodder, not metered. `actor_giant_bat` is also placed as a regular enemy on
   stage 16.
 
-### Enemy types 1–22 + blob (`gfx/enemy_sheet.png`)
+### Enemy types 1–22 + blob (`gfx/enemy_sheet.png`, `gfx/sheet_enemy_*.png`)
 
 `actor_*` names live in `segments/actors.inc`. Pictures are from the sheet
 (play + SAT); behaviour is the ROM handler. HP is `0x60E9[type]` (`ix+0D`);
@@ -348,7 +415,7 @@ from `hurt_simon_projectile` (0x85AD) over a 32×8 box: **16** while descending,
 **8** while retracting (it reads bit 0 of the state byte, which is what makes
 the two directions differ).
 
-The graphic is staged once by the HUD/bonus loader at seg0 0x54A6, which builds
+The graphic is staged once by the HUD/bonus loader at seg0 0x5494, which builds
 the picture in **VRAM page 1 at (0x80, 0x70)** out of two seg9 fragments:
 `spike_bar_mount` (8×4, one chain link) centred at X=140, and `spike` (8×8, a
 bar segment with one downward spike) blitted four times at X = `0x80`/`0x88`/
@@ -365,6 +432,55 @@ retracting paints the bar back over them (and the blank rows wipe the spike
 tips). That is why the three bars in the room have visibly different chain
 lengths: chain length *is* the drop distance. `spike_bars_restore` (0x902E)
 repaints them after the F2 map screen, reseeding so the sweep restarts.
+
+### Moving platforms (the 0xC598 pool)
+
+Two slots of 7 bytes, seeded per room by `platform_load` (0x9034) from
+`platform_tbl` (0x9073) and ticked by `platform_tick` (0x90A2). Unlike the
+spike bars these are **hardware sprites**, not background: each deck is 32×16
+built from four 16×16 SAT cells. They exist only on **stages 5 and 10**.
+
+| off | meaning |
+| ---: | --- |
+| +0 | slot id, 1 or 2; 0 = free |
+| +1 | Y, the fixed row (SAT Y is `+1 − 1`) |
+| +2 | X, the only thing that moves |
+| +3 | step, signed px/tick, negated at each end point |
+| +4 | span, ticks per sweep before reversing |
+| +5 | free-running tick counter, incremented but unread in `platform_move` |
+| +6 | ticks elapsed in the current sweep |
+
+`platform_move` (0x90BF) adds `+3` to `+2` each tick; when `+6` reaches `+4` it
+zeroes the counter and does `neg` on `+3` instead of moving, so the deck pauses
+one frame at each end. `platform_tbl` records are `{Y, X, step, span}` after a
+`{stage, room, count}` header, `0xFF`-terminated: stage 5 room 1 gets one deck
+(`5F 60 01 40`), stage 5 room 4 gets a **pair moving apart** (`5F 20 01 30` and
+`5F B8 FF 38`, the only negative step in the table), and stage 10 rooms 0/2/3/4
+get one each at Y `0x8F` or `0xA7` with spans 64–160.
+
+Note `platform_load` writes `+0` then `ldir`s four bytes into `+1..+4` and skips
+`+5`/`+6` with two `inc de`, so **the counters are never initialised** — correct
+behaviour depends on 0xC598 already being clear when the room loads. Not yet
+confirmed where that clear happens.
+
+`platform_sat_build` (0x90DF) emits slot 1 to SAT `0xD638` with colours at
+`0xD4E0`, slot 2 to `0xD648`/`0xD520`. Cell geometry comes from
+`platform_sat_ofs` — `{0,D0} {0,D4} {0x10,D0} {0x10,D4}` — so the four cells are
+two X positions × two patterns, and the pattern is shifted by `+8` off stage 5
+to give each hub its own deck artwork. The colour bytes alternate with the CC
+bit (`0x40`) set on the second of each pair, so cells 0+1 and 2+3 OR together
+into one two-colour 16×16 half each: **2/4 on stage 5, 9/0xC on stage 10**.
+
+Simon's side runs from `platform_stand_test` (0x852B), called by
+`simon_action_tick` every frame *before* the action-state dispatch so `0xC439`
+is fresh. It tests both slots with `platform_overlap` (0x8556) over a 32×8 box —
+Simon within 8px above the deck row, either foot (X ±7) inside the 32px deck —
+and stores the matching slot id in `0xC439`. While falling (`0xC420 == 4`) with
+jump phase `0xC428 < 3` the test is skipped entirely, so Simon rises *through* a
+deck instead of catching on its underside. `simon_grounded` then calls
+`platform_carry_simon` (seg1 0x6BB6), which nudges his X by one pixel in the
+direction of the slot's step byte, cancelled by a wall probe on that side so a
+deck cannot shove him into geometry.
 
 ## Room geometry / tile map (CONFIRMED, static + runtime, byte-exact)
 
@@ -942,7 +1058,23 @@ DONE: HUD/title strings use the `vk` macro (`vk "PUSH SPACE KEY"`): each
 char is (ASCII−0x10), space is 0x00. Position/attr bytes and 0xFE/0xFF
 stay as `defb`. Credits use `cr` (ASCII letters, space still 0x00).
 The HUD set (`l4c07h`) and title strings (`l4d0fh`, `l4d30h`, `l4d41h`)
-in seg00 are converted. `title_layout` 0x4C3F-0x4D0E is `defb`.
+in seg00 are converted, as are the Game Master menu strings (`gm_menu_text`,
+`gm_stage_text`, `gm_player_text`, `gm_continue_text`). `title_layout`
+0x4C3F-0x4D0E is `defb`.
+
+**The font's punctuation slots are not ASCII shapes.** `hud_font` covers ASCII
+`'0'`-`'_'`, but three of those slots hold symbols rather than the matching
+character, so a `vk` string can read very differently from what it draws:
+
+| `vk` char | stream byte | actually drawn |
+| --- | --- | --- |
+| `@` | 0x30 | a horizontal rule / dash |
+| `_` | 0x4F | a right-pointing arrow (used as the menu cursor) |
+| `?` | 0x2F | an equals sign |
+
+So `vk "@@@MENU@@@"` renders `---MENU---` and `vk "STAGE NUMBER?"` renders
+`STAGE NUMBER=`. Keep the `vk` spelling (it is what reproduces the bytes) and
+note the real glyph in a comment.
 
 ## Sprites (format understood; data still in banked ROM)
 
@@ -1227,7 +1359,7 @@ Catalogued so far (extend `manifest.tsv` as more sets are identified):
   (`data/font_logo.asm`; tile ids `01`–`34`). Raw, not RLE; loaded by
   `logo_font_load` from `konami_logo_draw`. Not `hud_font` (overlapping ids
   `2C`–`2E` are a different bitmap).
-- `enemy_sheet.png` - one labelled frame per `entity_tbl` type `01`–`16`, plus
+- `enemy_sheet.png` - one labelled frame per `entity_tbl` type `01`–`22`, plus
   candle-blob recolours **1A/1B/1C** (`make gfx`). Each frame is cropped to
   the SAT cells it actually occupies (16×16, 16×32, 32×16, … — type `16` is
   40×48) and packed, rather than a uniform 64×64 cell. The label is
@@ -1258,6 +1390,15 @@ Catalogued so far (extend `manifest.tsv` as more sets are identified):
   `0E 42` — HUD-fixed indices 15/8/14), appended as **1A/1B/1C**.
   Boss types use the event-room tileset. Not in `manifest.tsv`
   (derived, like the HUD bonus sheets).
+- `sheet_enemy_<name>_<id>.png` - every `ix+0B` pose for one actor (same
+  compositor as `enemy_sheet.png`). Filename id is the hex type (`sheet_enemy_axe_knight_10`);
+  the cell label is the hex shape id only (no `WxH`). Type 14 labels are SAT
+  head patterns (`80` idle / `70` spit); Frankenstein and the bone dragon
+  append H-flips (ROM has no convert facing). Skull pile is `04`/`05` (the
+  FE00 pair); `06`/`07` are the same art at FE40. Raven includes `8C` (convert
+  of `89`). Blob `0x9D–0xA2` are dest retargets of `0x9B/0x9C`.
+  Igor (`actor_igor`, type `18`) gets his own sheet; he is not on the group
+  sheet. Same `make gfx` pass.
 - `hazards.png` - environmental hazards: things that damage Simon but are not
   actors, so they never appear on `enemy_sheet.png`. The stage 6 room 1 spike
   bars are the **only** one in the game — every other damage source is an enemy

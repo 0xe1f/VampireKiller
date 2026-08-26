@@ -66,14 +66,15 @@ data_4010_end:
 ;  int_handler - timer interrupt (H.TIMI hook, installed by init at 0xFD9F).
 ;  Runs once per VDP frame: PSG tick (`sound_tick` in segs 14/15), then
 ;  the game tick.  0xC005 bit0 skips a frame if the previous tick is still
-;  running.  0xE600 is the boot slot-scan result, not a re-entrancy flag:
-;  when NZ, l40c5h samples extra keys first, then usually falls into l4030h.
+;  running.  0xE600 is the Game Master detection flag, not a re-entrancy flag:
+;  when set, gm_pause_check gets first look at the keyboard (STOP pause / ';'
+;  frame advance) and then usually falls into l4030h anyway.
 ; ===========================================================================
 int_handler:
 	di
-	ld a,(0e600h)           ; 0xFF if boot slot-scan hit slot_sig_7ffa
+	ld a,(0e600h)           ; Game Master cartridge present?
 	or a
-	jp nz,l40c5h            ; companion path: extra keys, often still ticks
+	jp nz,gm_pause_check    ; yes -> pause/frame-advance keys get first look
 l4030h:
 	di
 	ld a,00eh               ; page segment 14...
@@ -159,7 +160,7 @@ init:
 	ld (hl),000h
 	ldir                    ; (hl)=0 then propagate via LDIR
 	call page_play_banks          ; init subsystem
-	call sub_5c99h          ; slot scan: E600=0xFF if 0x7FFA matches slot_sig_7ffa
+	call game_master_detect ; E600=0xFF if a Game Master cartridge is plugged in
 	call page_play_banks
 	call video_init          ; init subsystem
 	di
@@ -172,50 +173,61 @@ init:
 	ei                      ; interrupts on: game now runs from the tick
 l40c3h:
 	jr l40c3h               ; idle forever; work happens in int_handler
-; l40c5h - taken when E600 is NZ (slot_sig_7ffa found at boot). Extra SPACE /
-; row-1 sample; often jp l4030h and still runs the full tick.
-l40c5h:
+; ===========================================================================
+;  gm_pause_check (0x40C5) - the Game Master cartridge's pause / frame-advance
+;  cheat, reached from int_handler only when 0xE600 is set.  Two edge-detected
+;  keys (latched through 0xE610):
+;    STOP (row 7 bit 4) toggles pause.  0xE601 holds the pause state; entering
+;      pause saves the three PSG volume registers and silences them, then
+;      returns without running main_tick, freezing the game mid-frame.
+;    ';'  (row 1 bit 7) while paused runs exactly one tick and stays paused,
+;      i.e. frame-by-frame stepping.
+;  Not paused and STOP not pressed -> falls straight through to the normal tick.
+; ===========================================================================
+gm_pause_check:
 	ld a,007h               ; scan keyboard matrix row 7...
 	call SNSMAT
 	cpl
-	and 010h                ; ...bit 4 = SPACE
+	and 010h                ; ...bit 4 = STOP
 	ld b,a
 	ld a,001h               ; scan row 1...
 	call SNSMAT
 	cpl
-	and 080h                ; ...bit 7
+	and 080h                ; ...bit 7 = ';'
 	or b                    ; merge the two key bits
-	ld hl,0e610h
+	ld hl,0e610h            ; previous sample (edge latch)
 	ld c,(hl)
 	ld (hl),a
 	xor c
 	and (hl)
-	ld c,a
-	ld hl,0e601h
+	ld c,a                  ; C = keys pressed this frame
+	ld hl,0e601h            ; pause state
 	ld a,(hl)
 	or a
-	jr nz,l40f1h
+	jr nz,l40f1h            ; already paused
 	bit 4,c
-	jp z,l4030h
-	ld (hl),c
-	call sub_4107h
+	jp z,l4030h             ; running, no STOP -> normal tick
+	ld (hl),c               ; STOP -> enter pause...
+	call gm_psg_save_mute   ; ...silence the PSG and skip the tick
 	ei
 	ret
-l40f1h:
+l40f1h:                         ; paused
 	bit 7,c
-	jp nz,l40fch
+	jp nz,l40fch            ; ';' -> single-step one frame, stay paused
 	bit 4,c
-	jr z,l4102h
+	jr z,l4102h             ; nothing pressed -> stay frozen
 	xor a
-	ld (hl),a
+	ld (hl),a               ; STOP again -> leave pause
 l40fch:
-	call sub_4132h
-	jp l4030h
+	call gm_psg_restore
+	jp l4030h               ; run one tick
 l4102h:
-	call sub_411fh
+	call gm_psg_mute        ; hold the PSG silent while frozen
 	ei
 	ret
-sub_4107h:
+; gm_psg_save_mute (0x4107) - stash PSG volume registers 8-10 in 0xE611-0xE613,
+; then fall through and silence them.
+gm_psg_save_mute:
 	ld a,008h
 	call RDPSG
 	ld (0e611h),a
@@ -225,7 +237,7 @@ sub_4107h:
 	ld a,00ah
 	call RDPSG
 	ld (0e613h),a
-sub_411fh:
+gm_psg_mute:
 	ld e,000h
 	ld a,008h
 	call WRTPSG
@@ -235,7 +247,7 @@ sub_411fh:
 	ld e,000h
 	inc a
 	jp WRTPSG
-sub_4132h:
+gm_psg_restore:
 	ld a,(0e611h)
 	ld e,a
 	ld a,008h
@@ -258,7 +270,8 @@ sub_4132h:
 ;  For the three front-end states (0..2: logo / title / attract) the shared
 ;  post-handler frontend_input (0x4398) is pushed as a return address so it
 ;  runs after the handler: any press on logo/attract returns to the title;
-;  SPACE/TRG1 or TRG2/UP on the title starts the game (or password if E600).
+;  SPACE/TRG1 or TRG2/UP on the title starts the game (or opens the Game Master
+;  menu if E600 is set).
 ; ===========================================================================
 main_tick:
 	ld hl,0c003h            ; frame counter...
@@ -290,7 +303,7 @@ main_state_tbl:
 	defw state_stage_exit       ; 10 from 0xC408: spend white key, advance_stage
 	defw state_pause            ; 11 from 0xC40A: F1 freeze; F1 again resumes play
 	defw state_vendor           ; 12 from 0xC40C: vendor offer / purchase
-	defw state_game_start       ; 13 from title start (A=0x0D): new game / password
+	defw state_game_master_menu ; 13 from title start (A=0x0D): Game Master menu
 main_state_tbl_end:
 state_logo:                    ; 0 (0x417D)
 	djnz l418ah
@@ -380,7 +393,7 @@ l4206h:
 	or a
 	jr z,l4220h
 	ld (hl),000h
-	call sub_5e38h
+	call gm_apply_values
 l4220h:
 	jr l4249h
 l4222h:
@@ -401,7 +414,7 @@ state_stage_bridge:            ; 4 (0x422C)
 	ld (hl),001h           ; stay in play (0 = attract/death leave-play)
 	call stage_bgm_play
 	xor a
-	ld (0c40dh),a          ; clear BGM force-replay (set on death/password)
+	ld (0c40dh),a          ; clear BGM force-replay (set on death / GM stage jump)
 l4249h:
 	ld a,020h
 l424bh:
@@ -460,10 +473,10 @@ l42abh:
 	jr l4249h
 state_game_over:               ; 7 (0x42B2)
 	djnz l42e3h
-	ld a,(0e600h)
+	ld a,(0e600h)          ; Game Master cartridge present?
 	or a
-	jr z,l42bfh
-	call sub_4314h
+	jr z,l42bfh            ; no -> plain GAME OVER, fall back to the title
+	call gm_continue_key   ; yes -> F5 continues the run
 	jr nz,l42d3h
 l42bfh:
 	ld a,(0c0a7h)
@@ -488,43 +501,43 @@ l42d3h:
 	jr l429bh
 l42e3h:
 	call sub_47c0h
-	ld hl,l4d41h
+	ld hl,l4d41h           ; "GAME  OVER"
 	call l4ad2h
-	ld a,(0e600h)
+	ld a,(0e600h)          ; Game Master cartridge present?
 	or a
 	jr z,l42f8h
-	ld hl,l4300h
+	ld hl,gm_continue_text ; yes -> add the "F5 -> CONTINUE" line
 	call l4ad2h
 l42f8h:
 	call hud_draw_all
 	ld a,078h
 	jp l41c9h
-l4300h:
-	ld d,b
-	ld l,b
-	ld (hl),025h
-	cp 064h
-	ld l,b
-	ld c,a
-	cp 070h
-	ld l,b
-	inc sp
-	ccf
-	ld a,044h
-	add hl,sp
-	ld a,045h
-	dec (hl)
-	rst 38h
-sub_4314h:
+; gm_continue_text (0x4300) - extra GAME OVER line, drawn only when a Game
+; Master cartridge was detected (see game_master_detect).  Renders as
+; "F5 <arrow> CONTINUE": glyph 0x4F is a right-pointing arrow, not "_".
+gm_continue_text:
+	defb 050h, 068h
+	vk "F5"
+	defb 0feh
+	defb 064h, 068h
+	vk "_"                     ; arrow glyph
+	defb 0feh
+	defb 070h, 068h
+	vk "CONTINUE"
+	defb 0ffh
+; gm_continue_key (0x4314) - edge-detected F5 (keyboard row 7 bit 1), latched
+; through 0xE614.  NZ on the frame F5 goes down -> state_game_over restarts the
+; run instead of dropping back to the title.
+gm_continue_key:
 	ld a,007h
 	call SNSMAT
 	cpl
-	and 002h
-	ld hl,0e614h
+	and 002h               ; row 7 bit 1 = F5
+	ld hl,0e614h           ; previous sample (edge latch)
 	ld c,(hl)
 	ld (hl),a
 	xor c
-	and (hl)
+	and (hl)               ; set only on the press edge
 	ret
 state_hub_advance:             ; 8 (0x4324): boss-clear/credits set 0xC409; hub 0xD002++ then advance_stage
 	djnz l4377h
@@ -597,7 +610,7 @@ state_stage_exit:              ; 10 (0x438E): 0xC408, spend white key, next stag
 ;  attract, states 0..2).  Same read_buttons mask as play, but input_edge
 ;  latches 0xC401 held / 0xC400 new-press (play uses C007/C006).
 ;    title (1): bits 4|5 only (SPACE/TRG1 or TRG2/kbd UP) start; else ignore.
-;      E600==0 -> intro (state 3); E600!=0 -> state_game_start (13).
+;      E600==0 -> intro (state 3); E600!=0 -> state_game_master_menu (13).
 ;    logo (0) / attract (2): any new press -> title_build.
 ;  No press: state_title counts C004 down into attract (not this routine).
 ; ===========================================================================
@@ -616,9 +629,9 @@ frontend_input:
 	ret z                   ; other key -> ignore
 	ld a,040h
 	ld (0c002h),a           ; C002 bit6: run active (score/minimap/start)
-	ld a,(0e600h)           ; slot-scan result (0xFF if slot_sig_7ffa hit)
+	ld a,(0e600h)           ; Game Master cartridge present?
 	or a
-	jr nz,frontend_game_start ; companion path -> password / new-game
+	jr nz,frontend_game_start ; yes -> the hidden Game Master menu
 	ld (hl),003h            ; else C000 = 3 (intro)
 	inc hl
 	ld (hl),b               ; C001 = 0 (djnz already counted B from 1)
@@ -629,16 +642,17 @@ frontend_to_title:
 	ld a,000h
 	call play_sound          ; request sound/music change
 	jp title_build          ; (re)build the title screen
-; frontend_game_start (0x43CB): E600 path. Seed E604-E607, C000=13.
+; frontend_game_start (0x43CB) - Game Master path off the title.  Seeds the menu
+; fields to their defaults and enters state 13 (state_game_master_menu).
 frontend_game_start:
 	xor a
-	ld (0e604h),a           ; clear a run flag
+	ld (0e604h),a           ; no fields edited yet
 	ld a,001h
-	ld (0e605h),a           ; initial lives / level counters...
-	ld (0e606h),a
+	ld (0e605h),a           ; stage 1 (BCD)...
+	ld (0e606h),a           ; ...and binary
 	ld a,003h
-	ld (0e607h),a
-	ld a,00dh               ; A = 0x0D -> state_game_start
+	ld (0e607h),a           ; 3 lives
+	ld a,00dh               ; A = 0x0D -> state_game_master_menu
 	jp l41b6h               ; enter via the state setter
 state_pause:                   ; 11 (0x43E1): F1 froze play (0xC40A); wait F1 (0xC00B bit0) to resume
 	ld a,(0c00bh)
@@ -673,67 +687,81 @@ l4411h:
 	ld (0c40ch),a          ; clear the whip-hit flag
 	call vendor_make_offer ; arm a sale (seg2 0x938E)
 	jp l41cch
-state_game_start:              ; 13 (0x441B): new-game / password (from title A=0x0D)
+; ===========================================================================
+;  state_game_master_menu - primary state 13 (0x441B), the hidden Game Master
+;  menu.  Only reachable when game_master_detect found the cartridge (0xE600),
+;  otherwise title start goes straight to the intro (state 3).  Secondary state
+;  0xC001 walks the phases backwards, as usual for these handlers:
+;    C001=2 -> draw the menu (gm_menu_draw) and clear the 0xE608-0xE615 scratch
+;    C001=1 -> number-entry phase: RETURN commits, digits feed gm_digit_entry
+;    C001=0 -> browsing: up/down moves the cursor, fire picks the item
+;  Menu RAM: 0xE60B = highlighted item 0-2, 0xE604 = bitmask of which values the
+;  player edited, 0xE605/E606 = stage (BCD / binary), 0xE607 = lives,
+;  0xE602 = where the current prompt prints its digits, 0xE615 = "value typed".
+;  Picking START GAME just sets state 3 (intro); the edited values are pushed
+;  into the run later by gm_apply_values.
+; ===========================================================================
+state_game_master_menu:
 	djnz l4453h
-	ld a,(0c006h)
+	ld a,(0c006h)          ; latched input
 	and 033h
 	ret z
-	and 003h
-	jp nz,l5e84h
-	ld a,(0e60bh)
+	and 003h               ; up/down?
+	jp nz,gm_menu_move
+	ld a,(0e60bh)          ; fire: which item is highlighted?
 	or a
-	jp nz,l4439h
-	call sub_5d04h
+	jp nz,l4439h           ; 1/2 -> a MODIFY prompt
+	call gm_menu_clear     ; 0 = START GAME
 	ld hl,00003h
-	ld (0c000h),hl
+	ld (0c000h),hl         ; -> intro (state 3), secondary 0
 	ret
 l4439h:
 	dec a
 	jr z,l4447h
-	ld hl,0b8b8h
+	ld hl,0b8b8h           ; item 2: PLAYER NUMBER digit position
 	ld (0e602h),hl
 l4442h:
-	call sub_5d89h
+	call gm_prompt_player
 	jr l4450h
 l4447h:
-	ld hl,0b0b8h
+	ld hl,0b0b8h           ; item 1: STAGE NUMBER digit position
 	ld (0e602h),hl
-	call sub_5d68h
+	call gm_prompt_stage
 l4450h:
-	jp l41cch
+	jp l41cch              ; -> number-entry phase (C001=1)
 l4453h:
 	djnz l4488h
-	call sub_5e28h
+	call gm_confirm_key    ; RETURN pressed?
 	jr nz,l445dh
-	jp l5db9h
+	jp gm_digit_entry      ; no -> keep taking digits
 l445dh:
 	ld a,(0e60bh)
 	ld b,a
 	ld hl,0e604h
 	or (hl)
-	ld (hl),a
+	ld (hl),a              ; remember that this field was edited
 	ld a,(0e615h)
 	or a
-	jr z,l447eh
+	jr z,l447eh            ; nothing typed -> just leave the prompt
 	ld a,(0e60eh)
-	ld d,a
-	ld a,(0e60fh)
+	ld d,a                 ; D = binary value
+	ld a,(0e60fh)          ; A = BCD value
 	bit 0,b
 	jr z,l4483h
-	ld (0e605h),a
+	ld (0e605h),a          ; stage: keep both forms
 	ld a,d
 	ld (0e606h),a
 l447eh:
 	xor a
-	ld (0c001h),a
+	ld (0c001h),a          ; back to browsing
 	ret
 l4483h:
-	ld (0e607h),a
+	ld (0e607h),a          ; lives
 	jr l447eh
 l4488h:
-	call sub_5cf6h
+	call gm_menu_draw
 	xor a
-	ld hl,0e608h
+	ld hl,0e608h           ; clear the menu scratch (key latches, accumulators)
 	ld de,0e609h
 	ld bc,0000eh
 	ld (hl),000h
@@ -3174,7 +3202,7 @@ credits_font_blit:
 door_blit_tiles:
 	ld (hl),001h           ; 0xC5AC := 1 (door armed / graphic on screen)
 	ld de,(0c5adh)         ; E = door Y (0xC5AD), D = door X (0xC5AE)
-	ld hl,l5428h
+	ld hl,door_tile_ptr
 	ld b,006h              ; 6 stacked 8x8 tiles
 l540eh:
 	push bc
@@ -3197,79 +3225,42 @@ l540eh:
 	pop bc
 	djnz l540eh
 	ret
-l5428h:
-	inc (hl)
-	ld d,h
-	ld d,h
-	ld d,h
-	inc (hl)
-	ld d,h
-	ld d,h
-	ld d,h
-	ld d,h
-	ld d,h
-	ld (hl),h
-	ld d,h
-	nop
-	jp 0003ch
-	nop
-	jp 0003ch
-	inc c
-	jp 0c03ch
-	inc bc
-	inc sp
-	inc sp
-	jr nc,$+5
-	inc sp
-	inc sp
-	jr nc,$+5
-	inc sp
-	inc sp
-	jr nc,l5450h
-	inc bc
-	jr nc,$+50
-l5450h:
-	nop
-	jp 0003ch
-	nop
-	jp 0003ch
-	nop
-	jp 0003ch
-	nop
-	jp 0003ch
-	nop
-	jp 0003ch
-	nop
-	jp 0003ch
-	nop
-	jp 0003ch
-	nop
-	jp 0003ch
-	nop
-	jp 0003ch
-	nop
-	jp 0003ch
-	inc c
-	jp 0c03ch
-	inc bc
-	inc sp
-	inc sp
-	jr nc,$+5
-	inc sp
-	inc sp
-	jr nc,$+5
-	inc sp
-	inc sp
-	jr nc,l548ch
-	inc bc
-	jr nc,$+50
-l548ch:
-	nop
-	jp 0003ch
-	nop
-	nop
-	nop
-	nop
+; --- door graphic (0x5428-0x5493) -------------------------------------------
+;  door_blit_tiles (0x5403) walks door_tile_ptr as 6 words, HMMC'ing each 8x8
+;  4bpp tile at (X, Y+8n): an 8x48 vertical bar, 4px wide (colour 3 with a
+;  0xC highlight down both edges), widened into a joint on three of the six
+;  tiles.  Only three distinct tiles are stored and the table repeats them.
+;  door_anim_tick (seg2 0x914E) then slides an 8x47 VRAM column to open it.
+door_tile_ptr:                 ; 0x5428 - 6 tile pointers, top to bottom
+	defw door_tile_joint, door_tile_shaft, door_tile_joint
+	defw door_tile_shaft, door_tile_shaft, door_tile_joint_end
+door_tile_joint:               ; 0x5434 - joint on rows 2-6
+	defb 000h,0c3h,03ch,000h ; ..C33C..
+	defb 000h,0c3h,03ch,000h ; ..C33C..
+	defb 00ch,0c3h,03ch,0c0h ; .CC33CC.
+	defb 003h,033h,033h,030h ; .333333.
+	defb 003h,033h,033h,030h ; .333333.
+	defb 003h,033h,033h,030h ; .333333.
+	defb 003h,003h,030h,030h ; .3.33.3.
+	defb 000h,0c3h,03ch,000h ; ..C33C..
+door_tile_shaft:               ; 0x5454 - plain shaft, all 8 rows
+	defb 000h,0c3h,03ch,000h ; ..C33C..
+	defb 000h,0c3h,03ch,000h ; ..C33C..
+	defb 000h,0c3h,03ch,000h ; ..C33C..
+	defb 000h,0c3h,03ch,000h ; ..C33C..
+	defb 000h,0c3h,03ch,000h ; ..C33C..
+	defb 000h,0c3h,03ch,000h ; ..C33C..
+	defb 000h,0c3h,03ch,000h ; ..C33C..
+	defb 000h,0c3h,03ch,000h ; ..C33C..
+door_tile_joint_end:           ; 0x5474 - joint one row up, blank last row
+	defb 000h,0c3h,03ch,000h ; ..C33C..
+	defb 00ch,0c3h,03ch,0c0h ; .CC33CC.
+	defb 003h,033h,033h,030h ; .333333.
+	defb 003h,033h,033h,030h ; .333333.
+	defb 003h,033h,033h,030h ; .333333.
+	defb 003h,003h,030h,030h ; .3.33.3.
+	defb 000h,0c3h,03ch,000h ; ..C33C..
+	defb 000h,000h,000h,000h ; ........
 	call page_title_banks
 	ld hl,bonus_hud_tiles  ; bonus ids 1-20 (16x16 4bpp)
 	ld de,0a800h           ; VRAM page 1 Y=0x50 (wraps to Y=0x60 after 16)
@@ -4498,19 +4489,28 @@ l5c63h:
 	call shot_sat_build
 	call c800_sat_emit      ; actor SAT -> 0xD638 shadow
 	jp shot_sat_emit
-; slot scan (0x5C99): walk EXPTBL; RDSLT 6 bytes at 0x7FFA vs slot_sig_7ffa.
-; Carry -> E600=0xFF (int_handler takes l40c5h first; title start skips intro).
-; No match -> E600=0 (normal standalone).
-sub_5c99h:
+; ===========================================================================
+;  Game Master detection (0x5C99) - called once from the boot path (0x40xx).
+;  Konami's Game Master (RC-735) is a cheat/companion cartridge; when it is
+;  plugged in alongside the game, Vampire Killer unlocks a hidden menu.  This
+;  routine walks EXPTBL (0xFCC1, 4 primary slots, recursing into expanded
+;  subslots via gm_scan_expanded) and RDSLTs 6 bytes at CPU 0x7FFA in each -
+;  the last 6 bytes of a 16K cartridge page - against game_master_sig.
+;    match    -> 0xE600 = 0xFF; unlocks state_game_master_menu (stage / lives
+;                select from the title) and the F5 CONTINUE option on GAME OVER,
+;                and makes int_handler take the gm_pause_check key-sampling path first.
+;    no match -> 0xE600 = 0 (plain standalone game: title start -> intro).
+; ===========================================================================
+game_master_detect:
 	ld bc,00400h
 	ld hl,0fcc1h
 l5c9fh:
 	push bc
 	push hl
 	ld a,(hl)
-	bit 7,a
-	jr nz,l5cbah
-	call sub_5cd3h
+	bit 7,a                ; slot expanded?
+	jr nz,l5cbah           ; yes -> check its subslots
+	call gm_sig_cmp
 l5ca9h:
 	pop hl
 	pop bc
@@ -4521,31 +4521,34 @@ l5ca9h:
 	xor a
 	jr l5cb6h
 l5cb4h:
-	ld a,0ffh
+	ld a,0ffh              ; signature found -> Game Master present
 l5cb6h:
 	ld (0e600h),a
 	ret
 l5cbah:
-	call sub_5cbfh
+	call gm_scan_expanded
 	jr l5ca9h
-sub_5cbfh:
+; gm_scan_expanded (0x5CBF) - slot is expanded: try all 4 subslots.
+gm_scan_expanded:
 	and 080h
 	or c
 	ld c,a
 	ld b,004h
 l5cc5h:
 	push bc
-	call sub_5cd3h
+	call gm_sig_cmp
 	pop bc
 	ret c
 	ld a,c
-	add a,004h
+	add a,004h             ; next subslot
 	ld c,a
 	djnz l5cc5h
 	and a
 	ret
-sub_5cd3h:
-	ld de,slot_sig_7ffa
+; gm_sig_cmp (0x5CD3) - RDSLT 6 bytes at 0x7FFA in slot C vs game_master_sig.
+; Carry = match.
+gm_sig_cmp:
+	ld de,game_master_sig
 	ld hl,07ffah
 	ld b,006h
 l5cdbh:
@@ -4568,18 +4571,20 @@ l5cdch:
 l5ceeh:
 	and a
 	ret
-slot_sig_7ffa:                 ; 6 bytes compared at CPU 0x7FFA via RDSLT
+game_master_sig:               ; Game Master ROM fingerprint: 6 bytes at 0x7FFA
 	defb 000h,030h,031h,013h,035h,0aah
-sub_5cf6h:
-	call sub_5d04h
-	ld c,00eh
+; gm_menu_draw (0x5CF6) - clear the menu area, frame it, then print gm_menu_text.
+gm_menu_draw:
+	call gm_menu_clear
+	ld c,00eh              ; frame ink 0x0E
 	call vdp_box
-	ld hl,l5d1dh
+	ld hl,gm_menu_text
 	jp l4ad2h
-sub_5d04h:
+; gm_menu_clear (0x5D04) - HMMV the menu rectangle at (0x20,0x98), 0xC0 x 0x38.
+gm_menu_clear:
 	ld hl,02098h
 	ld bc,0c038h
-sub_5d0ah:
+gm_box_clear:                  ; HL = (x,y), BC = (w,h): HMMV to 0, keep args
 	xor a
 	ld d,000h
 	push bc
@@ -4589,141 +4594,110 @@ sub_5d0ah:
 	pop de
 	ret
 sub_5d15h:
-	call sub_5d0ah
+	call gm_box_clear
 	ld c,00eh
 	jp vdp_box
-l5d1dh:
-	ld e,b
-	and b
-	jr nc,$+50
-	jr nc,l5d60h
-	dec (hl)
-l5d24h:
-	ld a,045h
-	jr nc,$+50
-l5d28h:
-	jr nc,l5d28h
-	jr z,l5cdch
-	ld c,a
-	cp 030h
-	or b
-	ld b,e
-	ld b,h
-	ld sp,l4442h
-	nop
-	scf
-	ld sp,0353dh
-	cp 030h
-	cp b
-	dec a
-	ccf
-	inc (hl)
-	add hl,sp
-	ld (hl),049h
-	nop
-	ld b,e
-	ld b,h
-	ld sp,03537h
-	nop
-	ld a,045h
-	dec a
-	ld (04235h),a
-	cp 030h
-	ret nz
-	dec a
-	ccf
-	inc (hl)
-	add hl,sp
-	ld (hl),049h
-	nop
-	ld b,b
-	inc a
-	ld sp,03549h
-	ld b,d
-l5d60h:
-	nop
-	ld a,045h
-	dec a
-	ld (04235h),a
-	rst 38h
-sub_5d68h:
-	ld hl,l5d79h
-	call sub_5d97h
-	ld hl,0e605h
-	ld de,0b0b8h
+; gm_menu_text (0x5D1D) - the hidden Game Master menu, decoded as code by
+; z80dasm.  Three items; the cursor row is redrawn by gm_cursor_draw.  Note the
+; HUD font's punctuation slots are not ASCII shapes: "@" (0x30) is a horizontal
+; rule and "_" (0x4F) is a right-pointing arrow, so this renders as
+;     ---MENU---
+;     > START GAME
+;       MODIFY STAGE NUMBER
+;       MODIFY PLAYER NUMBER
+gm_menu_text:
+	defb 058h, 0a0h
+	vk "@@@MENU@@@"             ; rules either side of MENU
+	defb 0feh
+	defb 028h, 0b0h
+	vk "_"                      ; cursor arrow, initially on item 0
+	defb 0feh
+	defb 030h, 0b0h
+	vk "START GAME"
+	defb 0feh
+	defb 030h, 0b8h
+	vk "MODIFY STAGE NUMBER"
+	defb 0feh
+	defb 030h, 0c0h
+	vk "MODIFY PLAYER NUMBER"
+	defb 0ffh
+; gm_prompt_stage (0x5D68) - "STAGE NUMBER=" + the 2 BCD digits at 0xE605.
+gm_prompt_stage:
+	ld hl,gm_stage_text
+	call gm_prompt_draw
+	ld hl,0e605h           ; entered stage (BCD)
+	ld de,0b0b8h           ; digits butt up against the "=" at x=0xB0
 l5d74h:
 	ld b,001h
-	jp l457fh
-l5d79h:
-	ld c,b
-	cp b
-	ld b,e
-	ld b,h
-	ld sp,03537h
-	nop
-	ld a,045h
-	dec a
-	ld (04235h),a
-	cpl
-	rst 38h
-sub_5d89h:
-	ld hl,l5d9fh
-	call sub_5d97h
-	ld hl,0e607h
+	jp l457fh              ; print B bytes as 2 BCD digits each
+; "STAGE NUMBER=" - the font's "?" slot (0x2F) is an equals sign, not a question
+; mark, so the typed digits read as a value assignment.
+gm_stage_text:
+	defb 048h, 0b8h
+	vk "STAGE NUMBER?"          ; renders "STAGE NUMBER="
+	defb 0ffh
+; gm_prompt_player (0x5D89) - "PLAYER NUMBER=" + the 2 BCD digits at 0xE607.
+gm_prompt_player:
+	ld hl,gm_player_text
+	call gm_prompt_draw
+	ld hl,0e607h           ; entered lives count (BCD)
 	ld de,0b8b8h
 	jr l5d74h
-sub_5d97h:
+; gm_prompt_draw (0x5D97) - clear the prompt strip, then print the caption.
+gm_prompt_draw:
 	push hl
-	call sub_5db0h
+	call gm_prompt_clear
 	pop hl
 	jp l4ad2h
-l5d9fh:
-	ld c,b
-	cp b
-	ld b,b
-	inc a
-	ld sp,03549h
-	ld b,d
-	nop
-	ld a,045h
-	dec a
-	ld (04235h),a
-	cpl
-	rst 38h
-sub_5db0h:
+gm_player_text:
+	defb 048h, 0b8h
+	vk "PLAYER NUMBER?"         ; renders "PLAYER NUMBER="
+	defb 0ffh
+; gm_prompt_clear (0x5DB0) - HMMV away the three item rows at (0x24,0xB0),
+; 0xB8 x 0x18, so the prompt can take their place.
+gm_prompt_clear:
 	ld hl,024b0h
 	ld bc,0b818h
-	jp sub_5d0ah
-l5db9h:
-	call sub_5deeh
-	ret z
-	ld hl,(0e608h)
+	jp gm_box_clear
+; gm_digit_entry (0x5DB9) - number entry for the two MODIFY prompts.  Reads the
+; digit keys, turns the pressed bit into a value 0-9, shifts it into the low
+; nibble of the 0xE60F BCD accumulator (RLD), reprints the two digits at the
+; position stashed in 0xE602, then re-derives the binary value.
+gm_digit_entry:
+	call gm_digit_read
+	ret z                  ; no fresh keypress this frame
+	ld hl,(0e608h)         ; L = row 0 edges ('0'-'7'), H = row 1 edges ('8','9')
 	ld d,000h
 	ld b,008h
 	ld a,l
-	call sub_5de8h
+	call gm_bit_to_digit
 	jr c,l5dd1h
 	ld a,h
 	ld b,002h
-	call sub_5de8h
-	ret nc
+	call gm_bit_to_digit
+	ret nc                 ; nothing in either row -> ignore
 l5dd1h:
 	ld hl,0e615h
-	ld (hl),0ffh
+	ld (hl),0ffh           ; mark "a value was typed"
 	ld hl,0e60fh
-	ld a,d
-	rld
-	ld de,(0e602h)
+	ld a,d                 ; A = digit 0-9
+	rld                    ; shift it into the BCD accumulator
+	ld de,(0e602h)         ; where this prompt prints its digits
 	ld b,001h
 	call l457fh
-	jp l5e0fh
-sub_5de8h:
+	jp gm_bcd_to_bin
+; gm_bit_to_digit (0x5DE8) - scan B bits of A; D counts up to the set bit's
+; index, carry set if one was found.
+gm_bit_to_digit:
 	rra
 	ret c
 	inc d
-	djnz sub_5de8h
+	djnz gm_bit_to_digit
 	ret
-sub_5deeh:
+; gm_digit_read (0x5DEE) - edge-detected digit keys: keyboard row 0 ('0'-'7')
+; latched through 0xE608, row 1 bits 0-1 ('8','9') through 0xE609.  Returns the
+; new-press masks and NZ if anything was pressed this frame.
+gm_digit_read:
 	xor a
 	call SNSMAT
 	cpl
@@ -4749,7 +4723,8 @@ sub_5deeh:
 	ld e,a
 	or d
 	ret
-l5e0fh:
+; gm_bcd_to_bin (0x5E0F) - 0xE60F (two BCD digits) -> 0xE60E as tens*10 + ones.
+gm_bcd_to_bin:
 	ld hl,0e60fh
 	ld a,(hl)
 	ld c,a
@@ -4769,25 +4744,31 @@ l5e0fh:
 	add a,b
 	ld (0e60eh),a
 	ret
-sub_5e28h:
+; gm_confirm_key (0x5E28) - edge-detected RETURN (keyboard row 7 bit 7), latched
+; through 0xE60A: commits the current menu item / typed value.
+gm_confirm_key:
 	ld a,007h
 	call SNSMAT
 	cpl
-	and 080h
+	and 080h               ; row 7 bit 7 = RETURN
 	ld hl,0e60ah
 	ld c,(hl)
 	ld (hl),a
 	xor c
 	and (hl)
 	ret
-sub_5e38h:
+; gm_apply_values (0x5E38) - push the typed numbers into the run.  Bit 0 of A:
+; apply the stage (0xE606 -> 0xD000, clamped to < 19, with 0xD002 re-derived
+; from gm_stage_hub_tbl and the room reset to 0).  Bit 1: apply the life count
+; (0xE607 -> 0xC410).
+gm_apply_values:
 	rra
 	push af
 	jr nc,l5e67h
 	ld a,(0e606h)
-	cp 013h
+	cp 013h                ; stage < 19?
 	jr c,l5e44h
-	xor a
+	xor a                  ; out of range -> stage 0
 l5e44h:
 	ld (0d000h),a
 	ld a,(0e605h)
@@ -4795,83 +4776,71 @@ l5e44h:
 	jr c,l5e4fh
 	xor a
 l5e4fh:
-	ld (0c411h),a
-	ld hl,l5e71h
+	ld (0c411h),a          ; displayed STAGE number
+	ld hl,gm_stage_hub_tbl
 	ld a,(0d000h)
 	call ADD_HL_A
 	ld a,(hl)
-	ld (0d002h),a
+	ld (0d002h),a          ; hub index for the new stage
 	xor a
-	ld (0d001h),a
+	ld (0d001h),a          ; room = 0
 	inc a
-	ld (0c40dh),a          ; password/debug: force BGM replay
+	ld (0c40dh),a          ; force the stage BGM to (re)start
 l5e67h:
 	pop af
 	rra
 	ret nc
 	ld a,(0e607h)
-	ld (0c410h),a
+	ld (0c410h),a          ; lives
 	ret
-l5e71h:
-	nop
-	nop
-	nop
-	nop
-	ld bc,00101h
-	ld (bc),a
-	ld (bc),a
-	ld (bc),a
-	inc bc
-	inc bc
-	inc bc
-	inc b
-	inc b
-	inc b
-	dec b
-	dec b
-	dec b
-l5e84h:
+; gm_stage_hub_tbl (0x5E71) - stage 0-18 -> hub index (0xD002): stages 0-3 are
+; hub 0, then three stages per hub.  Decoded as code it becomes nop/inc/dec runs.
+gm_stage_hub_tbl:
+	defb 000h,000h,000h,000h,001h,001h,001h,002h,002h,002h
+	defb 003h,003h,003h,004h,004h,004h,005h,005h,005h
+; gm_menu_move (0x5E84) - move the menu cursor.  A's bit 0 picks the direction
+; (+1 / -1), 0xE60B is the item index, wrapped to 0-2.  Erases the arrow on the
+; old row and draws it on the new one.
+gm_menu_move:
 	rra
 	ld a,001h
 	jr nc,l5e8bh
-	ld a,0ffh
+	ld a,0ffh              ; other direction -> -1
 l5e8bh:
 	ld b,a
-	ld hl,0e60bh
+	ld hl,0e60bh           ; current item index
 	add a,(hl)
 	and 003h
-	cp 003h
+	cp 003h                ; 3 -> wrapped past an end
 	jr nz,l5e9dh
 	ld a,b
 	add a,a
-	ld a,002h
+	ld a,002h              ; wrap to the last item...
 	jr c,l5e9dh
-	xor a
+	xor a                  ; ...or the first
 l5e9dh:
 	push af
 	push hl
 	ld a,(hl)
-	call sub_5ea9h
+	call gm_cursor_erase   ; blank the arrow on the old row
 	pop hl
 	pop af
 	ld (hl),a
-	jp l5eadh
-sub_5ea9h:
-	ld b,000h
-	jr l5eafh
-l5eadh:
-	ld b,04fh
-l5eafh:
-	ld hl,l5ebch
+	jp gm_cursor_draw      ; draw it on the new one
+gm_cursor_erase:
+	ld b,000h              ; glyph 0 = blank
+	jr gm_cursor_blit
+gm_cursor_draw:
+	ld b,04fh              ; glyph 0x4F = right-pointing arrow
+gm_cursor_blit:                ; A = item index 0-2
+	ld hl,gm_cursor_y
 	call ADD_HL_A
 	ld e,(hl)
-	ld d,028h
+	ld d,028h              ; cursor column
 	ld a,b
 	jp sub_4aeeh
-l5ebch:
-	or b
-	cp b
-	ret nz
+gm_cursor_y:                   ; per-item cursor row, matching gm_menu_text
+	defb 0b0h,0b8h,0c0h
 ; --- room_spawner (seg0 0x5EBF) - per-frame enemy spawner --------------------
 ; Called every frame from the actor-update loop (seg2 0x98F0) while 0xD010==0
 ; (normal play, not in a room transition/menu).  Gated by a series of early-outs;

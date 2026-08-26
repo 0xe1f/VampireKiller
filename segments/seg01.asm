@@ -1881,7 +1881,7 @@ l6b2bh:
 ;   6 simon_dying      death / respawn
 ;   7 simon_portal_wait  on-pad crouch+UP: wait 0xC42D, then C41B=0xFF warp
 simon_action_tick:
-	call 0852bh
+	call platform_stand_test  ; refresh 0xC439 (moving-platform slot)
 	ld a,(0c420h)          ; Simon action state
 	call DISPATCH_A
 simon_action_tbl:
@@ -1908,7 +1908,7 @@ l6b64h:
 l6b6eh:
 	ld a,(0c439h)
 	and a
-	call nz,sub_6bb6h
+	call nz,platform_carry_simon
 	ld a,(0c422h)
 	and a
 	ret nz
@@ -1943,33 +1943,37 @@ l6bach:
 	xor a
 	ld (0c421h),a
 	ret
-sub_6bb6h:
+; platform_carry_simon (0x6BB6): A = 0xC439 (slot id).  Slide Simon 1px in the
+; platform's travel direction, taken from the sign of the slot's step byte.
+; A wall probe in that direction cancels the ride, so a platform pushing him
+; into geometry leaves him behind instead of shoving him through it.
+platform_carry_simon:
 	dec a
 	ld a,007h
 	jr nz,l6bbch
-	xor a
+	xor a                  ; slot 1 -> offset 0, slot 2 -> offset 7
 l6bbch:
 	ld hl,0c598h
 	call ADD_HL_A
 	inc hl
 	inc hl
-	inc hl
+	inc hl                 ; -> +3 step
 	ld a,(hl)
 	rla
 	ld d,000h
-	jr c,l6bd3h
-	call sub_7bb0h
+	jr c,l6bd3h            ; negative step -> travelling left
+	call sub_7bb0h         ; wall to the right?
 	ret c
 	ld d,001h
 	jr l6bd9h
 l6bd3h:
-	call sub_7c0ch
+	call sub_7c0ch         ; wall to the left?
 	ret c
 	ld d,0ffh
 l6bd9h:
 	ld a,(0c427h)
 	add a,d
-	ld (0c427h),a
+	ld (0c427h),a          ; Simon X += travel direction
 	ret
 l6be1h:                        ; UP while grounded: try stairs
 	ex af,af'
@@ -2243,7 +2247,7 @@ simon_crouch:                  ; 2 (0x6DB0)
 l6dcfh:
 	ld a,(0c439h)
 	and a
-	call nz,sub_6bb6h
+	call nz,platform_carry_simon
 	ld a,(0c422h)
 	and a
 	ret nz
@@ -2550,7 +2554,7 @@ l701eh:
 l7024h:
 	ld a,(0c439h)
 	and a
-	call nz,sub_6bb6h
+	call nz,platform_carry_simon
 	ld hl,0c42ah           ; knockback counts down; while nonzero Simon slides
 	dec (hl)
 	ret nz

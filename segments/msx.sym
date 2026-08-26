@@ -140,6 +140,10 @@ draw_enemy_meter: equ 0x45ec	; draw ENEMY/BOSS energy meter from 0xC418
 restore_health: equ 0x460c	; 0xC415 += B, clamp to 0x20
 damage_health: equ 0x4632	; 0xC415 -= B, floor 0
 door_blit_tiles: equ 0x5403	; paint 6 stacked 8x8 door tiles at (C5AD=Y, C5AE=X); C5AC:=1
+door_tile_ptr: equ 0x5428	; 6 word pointers, top to bottom, into door_tiles
+door_tile_joint: equ 0x5434	; 8x8 4bpp door bar segment, joint on rows 2-6
+door_tile_shaft: equ 0x5454	; 8x8 4bpp door bar segment, plain shaft
+door_tile_joint_end: equ 0x5474	; 8x8 4bpp door bar segment, joint up one, last row blank
 load_weapon_sprites: equ 0x559a	; C416 2/3/4: RLE projectile patterns from seg10 to 0xF8C0
 weapon_sprite_ptr: equ 0x55de	; word[C416-2] knife/axe/cross streams
 load_vdoor_sprites: equ 0x55f3	; vertical-door extra patterns (C5AC==5) + door SAT
@@ -228,13 +232,45 @@ advance_stage: equ 0x434e	; next stage: 0xD000++ (stage), 0xD001=0 (room), bump 
 room_map_build: equ 0x4fb6	; expand a room's 8x6 metatiles (4x4 tiles ea) into the 0xD100 tile map
 frontend_input: equ 0x4398	; after logo/title/attract: SPACE/TRG start, else any press -> title
 frontend_to_title: equ 0x43c1	; logo/attract any new-press -> C000=1, title_build
-frontend_game_start: equ 0x43cb	; E600 path: seed E604-E607, C000=13 (password/new-game)
+frontend_game_start: equ 0x43cb	; Game Master path: seed E604-E607, C000=13 (menu)
 title_build: equ 0x4d4e	; build/redraw the title screen (regional JP vs export logo via 0x002B)
 title_load_tiles: equ 0x5a02	; load title glyphs into VRAM (JP kana vs VAMPIRE KILLER by 0x002B)
 title_castle: equ 0x4c3f	; title_layout: castle emblem (drawn in both regions)
 title_logo_jp: equ 0x4c5a	; title_layout: Japanese title "Akumajo Dracula"
 title_logo_intl: equ 0x4ca0	; title_layout: export title "VAMPIRE KILLER"
-slot_sig_7ffa: equ 0x5cf0	; 6-byte ROM signature compared at CPU 0x7FFA (RDSLT)
+; --- Game Master cartridge (Konami's RC-735 cheat cart): detect, pause, menu -
+game_master_detect: equ 0x5c99	; boot slot scan: E600=0xFF if a Game Master cart is present
+gm_scan_expanded: equ 0x5cbf	; expanded slot -> try all 4 subslots
+gm_sig_cmp: equ 0x5cd3	; RDSLT 6 bytes at 0x7FFA in slot C vs game_master_sig (carry = match)
+game_master_sig: equ 0x5cf0	; 6-byte Game Master fingerprint compared at CPU 0x7FFA
+gm_pause_check: equ 0x40c5	; int_handler pre-pass: STOP pauses, ';' single-steps a frame
+gm_psg_save_mute: equ 0x4107	; stash PSG volumes 8-10 in E611-E613, then silence
+gm_psg_mute: equ 0x411f	; zero PSG volume registers 8-10
+gm_psg_restore: equ 0x4132	; restore PSG volumes from E611-E613
+gm_continue_text: equ 0x4300	; extra GAME OVER line: "F5 -> CONTINUE"
+gm_continue_key: equ 0x4314	; edge-detected F5 (row 7 bit 1) via E614
+gm_menu_draw: equ 0x5cf6	; clear + frame the menu box, print gm_menu_text
+gm_menu_clear: equ 0x5d04	; HMMV the menu rectangle (0x20,0x98) 0xC0 x 0x38
+gm_box_clear: equ 0x5d0a	; HMMV HL=(x,y) BC=(w,h) to 0, preserving the args
+gm_menu_text: equ 0x5d1d	; "---MENU---" / START GAME / MODIFY STAGE / MODIFY PLAYER
+gm_prompt_stage: equ 0x5d68	; draw "STAGE NUMBER=" + the E605 digits
+gm_stage_text: equ 0x5d79	; "STAGE NUMBER=" ('?' glyph is an equals sign)
+gm_prompt_player: equ 0x5d89	; draw "PLAYER NUMBER=" + the E607 digits
+gm_prompt_draw: equ 0x5d97	; clear the item rows, then print the caption at HL
+gm_player_text: equ 0x5d9f	; "PLAYER NUMBER="
+gm_prompt_clear: equ 0x5db0	; HMMV the three item rows (0x24,0xB0) 0xB8 x 0x18
+gm_digit_entry: equ 0x5db9	; digit keys -> E60F BCD accumulator, reprint, E60E binary
+gm_bit_to_digit: equ 0x5de8	; scan B bits of A, D = index of the set bit (carry = found)
+gm_digit_read: equ 0x5dee	; edge-detected digit keys (row 0 + row 1 bits 0-1) via E608/E609
+gm_bcd_to_bin: equ 0x5e0f	; E60F two BCD digits -> E60E as tens*10 + ones
+gm_confirm_key: equ 0x5e28	; edge-detected RETURN (row 7 bit 7) via E60A
+gm_apply_values: equ 0x5e38	; push the typed stage (D000/D002/C411) and lives (C410) into the run
+gm_stage_hub_tbl: equ 0x5e71	; byte[stage 0..18] = hub index (0xD002)
+gm_menu_move: equ 0x5e84	; move the cursor: E60B +/-1 wrapped to 0-2, redraw the arrow
+gm_cursor_erase: equ 0x5ea9	; blank the arrow on item A
+gm_cursor_draw: equ 0x5ead	; draw the arrow (glyph 0x4F) on item A
+gm_cursor_blit: equ 0x5eaf	; blit glyph B at (0x28, gm_cursor_y[A])
+gm_cursor_y: equ 0x5ebc	; per-item cursor row: 0xB0, 0xB8, 0xC0
 scenery_load: equ 0x5a50	; unpack scenery_list into 0xE000, vendor index into 0xDE00
 scenery_unpack: equ 0x5a63	; expand scenery stream (0xFE/0xFF/0x00) into 0xE000
 scenery_list_lookup: equ 0x5a9f	; HL -> scenery stream for stage 0 or hub 0xD002
@@ -304,6 +340,7 @@ event_vscroll: equ 0x6848	; if CE34 set, write CE33 to VDP R23 (credits v-scroll
 player_tick: equ 0x6b06	; door + simon_action + attack + edge detector + timers
 simon_action_tick: equ 0x6b40	; Simon per-frame action-state machine (0xC420)
 simon_grounded: equ 0x6b59	; C420=0 walk/idle
+platform_carry_simon: equ 0x6bb6	; ride: Simon X += sign of the C598 slot's step
 simon_walk_left: equ 0x6c36	; face left, try -X
 simon_walk_right: equ 0x6c5a	; face right, try +X
 simon_add_x: equ 0x6c9b	; C426 += BC
@@ -425,6 +462,8 @@ hit_class_shot_tbl: equ 0x8314	; shot type-1 -> class 0..2
 overlap_simon: equ 0x8481	; DE/HL box vs Simon
 overlap_whip: equ 0x84ae	; DE/HL box vs whip
 overlap_projectile: equ 0x84f7	; DE/HL box vs C450 then C460
+platform_stand_test: equ 0x852b	; recompute 0xC439 = C598 slot Simon stands on
+platform_overlap: equ 0x8556	; one slot: 32x8 box vs Simon, -> D/E by slot id
 candle_vs_whip: equ 0x8457	; C470 slot vs whip
 overlap_shield: equ 0x8652	; yellow shield box vs shot
 actors_rearm_hittable: equ 0x99A6	; +0E bit2 -> set bit0 on C800/shot
@@ -456,8 +495,13 @@ hazard_tick: equ 0x8fd6	; 3 x C580 spike bars (hurt_simon_projectile)
 spike_bars_run: equ 0x8fd9	; walk the 3 C580 slots, stride 8
 spike_bar_slot_tick: equ 0x8ff1	; advance one bar +-4px and repaint it (32x16 HMMM)
 platform_load: equ 0x9034	; seed C598 from platform_tbl for this room
-platform_tbl: equ 0x9073	; {stage,room,n}+n×4; stages 5 and 10
+platform_tbl: equ 0x9073	; {stage,room,n}+n×{Y,X,step,span}; stages 5 and 10
 platform_tick: equ 0x90a2	; 2 x C598 moving platforms (carry Simon via C439)
+platform_move: equ 0x90bf	; advance one deck; reverse +3 at each end point
+platform_sat_build: equ 0x90df	; 4 SAT entries + per-line colours for one deck
+platform_fill16: equ 0x9112	; fill 16 colour bytes (one 16x16 sprite's lines)
+platform_sat_cells: equ 0x9119	; write the 4 SAT entries from a C598 slot
+platform_sat_ofs: equ 0x9146	; 4 x {X offset, pattern} deck cells
 vendor_tick: equ 0x91c5	; 2 x C5B5/C5C5 vendor/special-object slots
 vendor_outcome_dispatch: equ 0x92ae	; run whip-hit outcome by state 0xC70C (hearts/nothing/leave)
 vendor_outcome_tbl: equ 0x92b4	; word[C70C] -> hit/mood/hearts/leave

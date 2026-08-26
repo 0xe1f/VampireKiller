@@ -947,7 +947,7 @@ Gotcha folded into the `konami-msx-disasm` skill — re-audit after every regen.
 
 Spike bars (stage 6 room 1) identified and annotated end to end: the two seg9
 fragments once labelled `bonus_hud_9a80`/`_9a90` are `spike_bar_mount` + `spike`
-(now `data/spike_bar.asm`), staged by seg0 0x54A6 into page 1 at (0x80,0x70) and
+(now `data/spike_bar.asm`), staged by seg0 0x5494 into page 1 at (0x80,0x70) and
 drawn by `hazard_tick` -> `spike_bar_slot_tick`.  The consumer had been invisible
 because its source coordinate was disassembled as a code label (`ld hl,l8070h`,
 now `08070h`) - another instance of the immediate-operand-is-a-lie trap, this one
@@ -955,7 +955,50 @@ a real seg2 label rather than a BIOS name.  The chain above each bar is a smear,
 not artwork (16-row block, 12 rows of art, drawn at Y-4 with a 4px step).  Full
 write-up in game-notes "Spike bars".
 
-Two follow-ups left open by that pass, both worth resolving:
+Seg0 `0x5428-0x5493` converted from misdisassembled "code" (it was the source of
+13 bogus `jp 0003ch` lines) to the door graphic it really is: `door_tile_ptr`, 6
+word pointers walked by `door_blit_tiles`, into three 8x8 4bpp tiles
+(`door_tile_joint` / `_shaft` / `_joint_end`) that stack into an 8x48 vertical
+bar, 4px wide, with a widened joint on three of the six tiles.  Block map +
+`msx.sym` updated so a regen reproduces it.  This also caught a wrong address in
+the notes: the HUD/bonus loader is at **0x5494**, not 0x54A6 (the spike-bar
+staging blit inside it is 0x54AD).
+
+Moving platforms annotated end to end (seg2 0x9034-0x914D plus the Simon side).
+The 7-byte C598 layout, the reverse-at-each-end mover, the 4-cell CC sprite
+build and `platform_tbl`'s `{Y,X,step,span}` records are all in game-notes now;
+`platform_stand_test` (0x852B) was unlabelled because seg1 reaches it by a raw
+cross-bank `call 0852bh`.  New `segments/seg02.blocks` covers the SAT cell table
+at 0x9146, which z80dasm had decoded as `ret nc` / `call nc`.  Open question:
+`platform_load` never seeds +5/+6, so it depends on C598 already being clear at
+room load - the clearing site is not yet identified.
+
+**Game Master cartridge pass - done.** The `0x5D1D` menu turned out to be one of
+three hidden features unlocked by Konami's **Game Master** cheat cartridge, and
+the whole subsystem is now traced, named and documented (game-notes has a
+dedicated section).  `game_master_detect` (0x5C99) RDSLTs six bytes at CPU
+0x7FFA in every slot/subslot against `game_master_sig` and sets `0xE600`; that
+one flag gates:
+
+1. **Pause / frame advance** (`gm_pause_check`, 0x40C5, ahead of the game tick):
+   STOP pauses and mutes the PSG, `;` single-steps one frame.
+2. **Stage / lives select** (`state_game_master_menu`, state 13): the `0x5D1D`
+   menu, two-digit entry via `gm_digit_entry`, applied by `gm_apply_values`.
+3. **Continue on game over** (`gm_continue_text` / `gm_continue_key`): F5.
+
+Six data runs in seg0 were being decoded as code and now have block-map entries:
+the three text streams (0x5D1D / 0x5D79 / 0x5D9F, converted to `vk`),
+`gm_stage_hub_tbl` (0x5E71), `gm_cursor_y` (0x5EBC) and `gm_continue_text`
+(0x4300).  Two comments were wrong and are fixed: the pause key is **STOP**
+(row 7 bit 4), not SPACE, and state 13 is the Game Master menu, not a
+"new game / password" screen.
+
+Worth recording as a font gotcha: the HUD font's punctuation slots are not ASCII
+shapes, so `@` is a horizontal rule, `_` is a right-pointing arrow (the menu
+cursor) and `?` is an **equals sign** - `vk "STAGE NUMBER?"` actually renders
+`STAGE NUMBER=`.
+
+Two follow-ups left open by the spike-bar pass, both worth resolving:
 
 1. **`msx.sym` cannot name `spike_bars_restore` (0x902E).** The address is already
    taken in the flat symbol file by `sfx_0e_block_break`, a PSG stream at the same
@@ -1189,7 +1232,11 @@ Known live RAM map (runtime-confirmed this session):
          +4 tick, +5 steps per sweep, +6 step count.  Drawn as a 32x16
          background block from page 1 (0x80,0x70); see game-notes "Spike bars".
   0xC598 moving platforms: 2 x 7 bytes (`platform_tick`; table `platform_tbl`
-         stages 5 and 10). SAT at 0xD638/0xD648.
+         stages 5 and 10). SAT at 0xD638/0xD648, colours 0xD4E0/0xD520.
+         +0 slot id, +1 Y (fixed), +2 X (moves), +3 signed step, +4 span,
+         +5 free tick, +6 sweep count.  32x16 deck = 4 SAT cells, two CC pairs
+         (colours 2/4 on stage 5, 9/0xC on stage 10).  +5/+6 are NOT seeded by
+         platform_load.  See game-notes "Moving platforms".
   0xC5A6 whip-break sparks: 2 x 3 bytes (`break_spark_tick`).
   0xC800 actor slots: 7 slots, stride 0x80 (0xC800, 0xC880, ...); also used for
          the orb->item pickup.  Allocated/initialised by seg0 l5f24h (0x5F24):
@@ -1343,7 +1390,13 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   advance_stage, room_map_build, zombie_generator, merman_generator,
   merman_generator_3, hanging_bat_generator, flying_skull_generator, ghost_head_generator,
   roc_generator, door_blit_tiles, read_buttons, input_edge, play_sound,
-  frontend_input, frontend_to_title, frontend_game_start, slot_sig_7ffa,
+  frontend_input, frontend_to_title, frontend_game_start,
+  the Game Master cluster (game_master_detect/_sig, gm_scan_expanded, gm_sig_cmp,
+  gm_pause_check, gm_psg_save_mute/_mute/_restore, gm_continue_text/_key,
+  gm_menu_draw/_clear/_text/_move, gm_box_clear, gm_prompt_stage/_player/_draw/_clear,
+  gm_stage_text, gm_player_text, gm_digit_entry, gm_digit_read, gm_bit_to_digit,
+  gm_bcd_to_bin, gm_confirm_key, gm_apply_values, gm_stage_hub_tbl,
+  gm_cursor_erase/_draw/_blit/_y, state_game_master_menu),
   credits_font_load, credits_font_blit, hud_font_load, logo_font_load, load_weapon_sprites, load_vdoor_sprites,
   gfx_script_run, gfx_script_rle, gfx_script_copy, gfx_script_convert, room_gfx_load,
   load_stage_tileset, tileset_ptr, dracula_portrait_load,
@@ -1378,7 +1431,9 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   actors_tick, c800_tick, pickup_tick, vendor_tick, break_spark_tick,
   hazard_tick, spike_bars_seed_once, spike_bars_seed, spike_bar_seeds,
   spike_bars_run, spike_bar_slot_tick, spike_bars_restore,
-  platform_tick, platform_load, platform_tbl,
+  platform_tick, platform_load, platform_tbl, platform_move,
+  platform_sat_build, platform_sat_cells, platform_sat_ofs, platform_fill16,
+  platform_stand_test, platform_overlap (seg1: platform_carry_simon),
   actor_type_tick, actor_tick_tbl, vendor_outcome_tbl, vendor_hit_latch,
   vendor_leave, award_kill_score, collect_bonus_apply, inv_or_c701/c702,
   hud_weapon_icon, hud_bonus_refresh, spawn_rate_gate, spawn_pick_pos,

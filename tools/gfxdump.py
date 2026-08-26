@@ -497,6 +497,7 @@ def main():
     dump_hud_font(data)
     dump_logo_font(data)
     dump_enemy_sheet(data)
+    dump_enemy_frames(data)
     dump_hazards(data)
     dump_script_rle(data)
     dump_tilesets(data)
@@ -522,6 +523,52 @@ ENEMY_SHAPE_ID = {
     21: 0x79, 22: 0x7C,
     0x1A: 0x9B, 0x1B: 0x9B, 0x1C: 0x9B,
 }
+# actor_* stem (segments/actors.inc) for gfx/sheet_enemy_<name>_<id>.png.
+ENEMY_NAME = {
+    1: "zombie", 2: "merman_green", 3: "merman_red", 4: "hanging_bat",
+    5: "dog", 6: "pikeman", 7: "flying_skull", 8: "ghost_head",
+    9: "red_skeleton", 10: "skull_pile", 11: "white_skeleton", 12: "raven",
+    13: "hunchback", 14: "bone_dragon", 15: "roc", 16: "axe_knight",
+    17: "dracula", 18: "giant_bat", 19: "medusa", 20: "mummy",
+    21: "frankenstein", 22: "grim_reaper",
+    0x18: "igor",
+    0x1A: "blob_blue", 0x1B: "blob_red", 0x1C: "blob_white",
+}
+# Every ix+0B pose the tick actually writes.  Type 14 has no 0x644C shape
+# cycle; labels 0x80/0x70 are the SAT head patterns (idle closed / spit open).
+# Blob 0x9D-0xA2 are the same two frames retargeted to other VRAM dests, so
+# 0x9B/0x9C is the whole anim.  Roc init pose 0x67 is the hunchback sheet,
+# not roc VRAM.  Skull pile 0x04/0x05 are the FE00 facing pair (vertical
+# swap of the two 16x16s = H-flip); 0x06/0x07 are the same art at FE40
+# (s9r4) and read as blob if composited from an FE00 room.
+ENEMY_FRAMES = {
+    1: (0x3B, 0x3C, 0x3D, 0x3E),
+    2: (0x08, 0x09, 0x0B, 0x0C),
+    3: (0x0F, 0x10, 0x11, 0x12, 0x13, 0x14),
+    4: (0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20),
+    5: (0x3F, 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46),
+    6: (0x50, 0x51, 0x52, 0x53, 0x54, 0x55),
+    7: (0x16, 0x17, 0x18, 0x19),
+    8: (0x71, 0x72, 0x73, 0x74),
+    9: (0x21, 0x22, 0x23, 0x24, 0x25, 0x26),
+    10: (0x04, 0x05),
+    11: (0x47, 0x48, 0x49, 0x4A),
+    12: (0x87, 0x88, 0x89, 0x8A, 0x8B, 0x8C),
+    13: (0x67, 0x68, 0x6A, 0x6B),
+    14: (0x80, 0x70),
+    15: (0x6D, 0x6E, 0x8D),
+    16: (0x5F, 0x60, 0x61, 0x62),
+    17: (0x56, 0x57, 0x5B, 0x5C, 0x5D, 0x5E),
+    18: (0x4E, 0x4F),
+    19: (0x2B, 0x2C),
+    20: (0x33, 0x34, 0x35, 0x36, 0x37, 0x38),
+    21: (0x79, 0x7A, 0x7B),
+    22: (0x7C,),
+    0x18: (0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C),
+    0x1A: (0x9B, 0x9C), 0x1B: (0x9B, 0x9C), 0x1C: (0x9B, 0x9C),
+}
+# ROM has no gfx_script_convert facing.  Sheets append an H-flip of each cell.
+ENEMY_SYNTH_MIRROR = frozenset((14, 21))
 # room_spawner bit -> actor type (bits 0-6).
 SPAWN_BIT_TYPE = {0: 1, 1: 2, 2: 3, 3: 4, 4: 7, 5: 8, 6: 15}
 # Types with no spawn bit: rooms that actually host them (object list / boss
@@ -532,9 +579,18 @@ SPAWN_BIT_TYPE = {0: 1, 1: 2, 2: 3, 3: 4, 4: 7, 5: 8, 6: 15}
 # Boss event rooms (l6376h): s3r5 / s6r5 / s9r7 / s12r6 / s15r9 / s18r9.
 ENEMY_ROOMS = {
     5: [(1, 2), (1, 3), (1, 7)],
+    # Pikeman 0x53-55 is the FC00→FD00 convert. Stage-2 room 0 parks flying
+    # skull at FD00 and max-ink would pick that for the right-facing poses.
+    6: [(4, 0), (4, 1), (4, 2), (5, 0)],
     9: [(13, 0), (13, 4), (13, 8), (13, 9)],
+    # Full 4-sprite pile at FE00, no convert clobber of FE40. 0x07's extra
+    # cells are FE80 (blob / other) on these scripts.
+    10: [(2, 0), (2, 1), (2, 3), (3, 2), (3, 4)],
     11: [(7, 2), (7, 3), (7, 4), (8, 2), (8, 3), (13, 0)],
     12: [(7, 7), (7, 8), (8, 5), (8, 6)],
+    # Hunchback FD40→FE00 convert. 0x6B is FE40; without a pin, max-ink
+    # picks a skull-pile room that also uses those pattern numbers.
+    13: [(7, 0), (7, 4), (11, 2), (12, 6)],
     14: [(11, 5), (12, 0), (12, 4), (12, 5)],
     16: [(14, 0), (14, 1), (14, 2), (15, 1)],
     17: [(18, 9)],
@@ -543,6 +599,7 @@ ENEMY_ROOMS = {
     20: [(9, 7)],
     21: [(12, 6)],
     22: [(15, 9)],
+    0x18: [(12, 6)],
     # Blob SAT is 2 CC cells (0x81, pats D0/D8 = FE80/FEC0). Fill/outline are
     # spr_blob / spr_blob_cc (loaded on most rooms; s4 parks them at FB80 when
     # FE80 is taken). SAT 0F/08/0E are HUD-fixed blue / red / white.
@@ -551,14 +608,11 @@ ENEMY_ROOMS = {
     0x1C: [(1, 0)],
 }
 # Type 14 custom SAT (handler 0xAAD4): 4 columns of 2-plane 16x16.
-# lab25h X offsets; lab15h pattern/colour pairs.
+# lab25h X offsets; lab15h pattern/colour pairs.  spr_bone_dragon at FB80
+# is 6 sprites: 70/74 open head, 78/7C body, 80/84 closed head.
 TYPE14_DX = (0xD0, 0xE0, 0xF0, 0x00)
-TYPE14_SAT = (
-    (0x80, 0x02), (0x84, 0x4C),
-    (0x78, 0x02), (0x7C, 0x4C),
-    (0x78, 0x02), (0x7C, 0x4C),
-    (0x78, 0x02), (0x7C, 0x4C),
-)
+TYPE14_HEAD = {0x80: (0x80, 0x84), 0x70: (0x70, 0x74)}
+TYPE14_BODY = ((0x78, 0x02), (0x7C, 0x4C))
 # 0x80/0x81/0x82 offset lists at l64d4h / l64dch / l64e0h (dy, dx) pairs.
 SHAPE_OFS = {
     0x80: [(0xE0, 0xF8), (0xE0, 0xF8), (0xF0, 0xF8), (0xF0, 0xF8)],
@@ -572,6 +626,8 @@ SHAPE_OFS = {
 # at 0xB5A1 = cloak; dracula_body_open at 0xB719 = chest cavity).  The 16x16s
 # at page-1 Y=0xA0 are portrait eyes/mouth, not the figure.
 DRACULA_BODY_FILE = 13 * 0x2000 + (0xB5A1 - 0xA000)
+DRACULA_BODY_OPEN_FILE = 13 * 0x2000 + (0xB719 - 0xA000)
+DRACULA_STAND = frozenset((0x5B, 0x5C, 0x5D, 0x5E))
 
 def _s8(b):
     return b - 256 if b >= 128 else b
@@ -603,49 +659,115 @@ def dump_enemy_sheet(data):
     # Blobs 1A-1C are the last three; pack as one strip so they stay together.
     render_packed_png(os.path.join(GFX, "enemy_sheet.png"), cells, labels=labels,
                       groups=[[n - 3, n - 2, n - 1]])
-    print("enemy_sheet.png          entity types 01-16 + blob 1A-1C")
+    print("enemy_sheet.png          entity types 01-22 + blob 1A-1C")
 
-def _sat_bbox(typ, parts):
+def dump_enemy_frames(data):
+    """One packed sheet per enemy of every ix+0B pose
+    (gfx/sheet_enemy_<name>_<id>.png).  Labels are hex shape ids only.
+    Same compositor as enemy_sheet.png; the group sheet is unchanged.
+    VRAM is pinned once from the canonical pose so convert-dest frames
+    (hunchback 0x6B, pikeman 0x53-55) cannot pick a later tileset that
+    reuses those pattern numbers."""
+    types = list(range(1, 23)) + [0x18, 0x1A, 0x1B, 0x1C]
+    vram_cache = {}
+    n_sheets = 0
+    for typ in types:
+        name = ENEMY_NAME.get(typ)
+        if not name:
+            continue
+        frames = ENEMY_FRAMES.get(typ, (ENEMY_SHAPE_ID.get(typ),))
+        cells, labels, seen = [], [], set()
+        vram_info = _vram_info_for_type(data, typ, vram_cache)
+        if frames is None:
+            frames = (None,)
+        for sid in frames:
+            grid = _composite_enemy(data, typ, vram_cache, sid,
+                                    vram_info=vram_info)
+            if _cell_ink(grid) < 8:
+                continue
+            key = _cell_key(grid)
+            if key in seen:
+                continue
+            seen.add(key)
+            cells.append(grid)
+            if sid is not None:
+                labels.append(_hex_id(sid))
+        if typ in ENEMY_SYNTH_MIRROR:
+            extra_c, extra_l = [], []
+            for grid, lab in zip(cells, labels or [None] * len(cells)):
+                flipped = _hflip_grid(grid)
+                key = _cell_key(flipped)
+                if key in seen:
+                    continue
+                seen.add(key)
+                extra_c.append(flipped)
+                extra_l.append(lab)
+            cells.extend(extra_c)
+            if labels:
+                labels.extend(extra_l)
+        if not cells:
+            continue
+        fname = "sheet_enemy_%s_%02x.png" % (name, typ)
+        render_packed_png(os.path.join(GFX, fname), cells,
+                          labels=labels or None)
+        n_sheets += 1
+        print("%-28s %d frames" % (fname, len(cells)))
+    print("sheet_enemy_*.png         %d per-enemy sheets" % n_sheets)
+
+def _cell_ink(grid):
+    return sum(1 for row in grid for px in row if px != OFF)
+
+def _cell_key(grid):
+    return tuple(tuple(px for px in row) for row in grid)
+
+def _hflip_grid(grid):
+    return [list(reversed(row)) for row in grid]
+
+def _sat_bbox(typ, parts, shape_id=None):
     """Bounding box of unique 16x16 SAT cells (plus type 17's 32x32 torso)."""
     dxs = [p[1] for p in parts]
     dys = [p[0] for p in parts]
     x0, y0 = min(dxs), min(dys)
     x1, y1 = max(dxs) + 16, max(dys) + 16
-    if typ == 17:
+    if typ == 17 and (shape_id is None or shape_id in DRACULA_STAND):
         x0, y0 = min(x0, -16), min(y0, -48)
         x1, y1 = max(x1, 16), max(y1, -16)
     return x0, y0, x1 - x0, y1 - y0
 
-def _composite_enemy(data, typ, vram_cache):
+def _composite_enemy(data, typ, vram_cache, shape_id=None, vram_info=None):
     ncells = data[_cpu_file(1, 0x605E, 0x6000) + typ]
     if typ == 14:
-        parts, colors = _type14_parts()
+        parts, colors = _type14_parts(shape_id)
+        sid = shape_id
     else:
-        sid = ENEMY_SHAPE_ID.get(typ)
+        sid = ENEMY_SHAPE_ID.get(typ) if shape_id is None else shape_id
         if sid is None or not ncells:
             return [[OFF]]
         parts = _parse_shape(data, sid, ncells)
         colors = _type_colors(data, typ, ncells)
-        if typ == 17:
+        if typ == 17 and sid in DRACULA_STAND:
             # spawn table only colours 2 cells (intro 0x56). Standing 0x5B
             # fills all 8 from dracula_sat_cols (02 48 repeated).
             colors = [0x02, 0x48] * 4
     if not parts:
         return [[OFF]]
-    vram, stage, room = _vram_for_type(data, typ, parts, vram_cache)
+    if vram_info is None:
+        vram, stage, room = _vram_for_type(data, typ, parts, vram_cache)
+    else:
+        vram, stage, room = vram_info
     pal = vk_playfield_palette(data, stage, room)
     if typ == 17:
         _apply_palette_overlay(pal, load_palette_table(data, 0x15F88))
         _apply_palette_overlay(pal, load_palette_table(data, 0x15F6F))
-    x0, y0, bw, bh = _sat_bbox(typ, parts)
+    x0, y0, bw, bh = _sat_bbox(typ, parts, sid)
     # OFF fills the occupied SAT rectangle so cell bounds read like the
     # 16x16 / 8x8 sheets (empty pixels are visible, not sheet-BG).
     grid = [[OFF] * bw for _ in range(bh)]
     index = [[0] * bw for _ in range(bh)]
     ox, oy = -x0, -y0
-    if typ == 17:
+    if typ == 17 and sid in DRACULA_STAND:
         # Playfield LMMM sits behind SAT head/cape.
-        _blit_dracula_torso(data, grid, pal, ox, oy)
+        _blit_dracula_torso(data, grid, pal, ox, oy, sid)
     for i, (dy, dx, pat) in enumerate(parts):
         src = 0xF800 + (pat * 8)
         raw = bytes(vram[src + k] for k in range(32))
@@ -685,19 +807,27 @@ def _unpack_dracula_body(data, file_off):
         rows.append(bytes(n) + bytes(payload) + bytes(4))
     return rows, p
 
-def _blit_dracula_torso(data, grid, pal, ox, oy):
-    """Standing 32x32 cloak (dracula_body_closed) into the SAT gap."""
-    rows, _ = _unpack_dracula_body(data, DRACULA_BODY_FILE)
+def _blit_dracula_torso(data, grid, pal, ox, oy, shape_id=0x5B):
+    """Standing 32x32 cloak/chest into the SAT gap.  0x5B/0x5D = closed,
+    0x5C/0x5E = open; 0x5D/0x5E are the H-mirrors from dracula_body_load."""
+    fo = DRACULA_BODY_OPEN_FILE if shape_id in (0x5C, 0x5E) else DRACULA_BODY_FILE
+    rows, _ = _unpack_dracula_body(data, fo)
     h, w = len(grid), len(grid[0])
     x0, y0 = ox - 16, oy - 48
+    flip = shape_id in (0x5D, 0x5E)
     for y, row in enumerate(rows):
-        for i, b in enumerate(row):
-            for nibble, dx in ((b >> 4, i * 2), (b & 0x0F, i * 2 + 1)):
-                if not nibble:
-                    continue
-                yy, xx = y0 + y, x0 + dx
-                if 0 <= yy < h and 0 <= xx < w:
-                    grid[yy][xx] = pal[nibble]
+        pix = []
+        for b in row:
+            pix.append(b >> 4)
+            pix.append(b & 0x0F)
+        if flip:
+            pix.reverse()
+        for x, nibble in enumerate(pix):
+            if not nibble:
+                continue
+            yy, xx = y0 + y, x0 + x
+            if 0 <= yy < h and 0 <= xx < w:
+                grid[yy][xx] = pal[nibble]
 
 def _parse_shape(data, shape_id, ncells):
     tbl = _cpu_file(6, 0xB473, 0xA000)
@@ -721,13 +851,29 @@ def _parse_shape(data, shape_id, ncells):
         p += 3
     return out
 
-def _type14_parts():
+def _type14_parts(shape_id=None):
     """Type 14 bypasses 0x644C; tick 0xAAD4 writes 8 SAT cells itself."""
+    head = TYPE14_HEAD.get(shape_id, TYPE14_HEAD[0x80])
+    sat = ((head[0], 0x02), (head[1], 0x4C)) + TYPE14_BODY * 3
     parts, colors = [], []
-    for i, (pat, col) in enumerate(TYPE14_SAT):
+    for i, (pat, col) in enumerate(sat):
         parts.append((0, _s8(TYPE14_DX[i // 2]), pat))
         colors.append(col)
     return parts, colors
+
+def _vram_info_for_type(data, typ, cache):
+    """One tileset for every frame of `typ`, scored on the canonical pose."""
+    ncells = data[_cpu_file(1, 0x605E, 0x6000) + typ]
+    if typ == 14:
+        parts, _ = _type14_parts()
+    else:
+        sid = ENEMY_SHAPE_ID.get(typ)
+        if sid is None or not ncells:
+            return None
+        parts = _parse_shape(data, sid, ncells)
+        if not parts:
+            return None
+    return _vram_for_type(data, typ, parts, cache)
 
 def _type_colors(data, typ, ncells):
     # spawn_actor_init: DE=0x608B, A=type -> word table of per-cell colour bytes.
@@ -926,7 +1072,7 @@ def dump_hazards(data):
     slot, no HP, and drawn as a 4bpp *background* block rather than sprites,
     so they are absent from enemy_sheet.png.
 
-    seg0 0x54A6 assembles the picture in VRAM page 1 at (0x80, 0x70) out of two
+    seg0 0x5494 assembles the picture in VRAM page 1 at (0x80, 0x70) out of two
     seg9 fragments, and spike_bar_slot_tick (seg2 0x8FF1) HMMMs a 32x16 window
     of it into the playfield.  The top 4 rows are one chain link: the copy is
     drawn at Y-4 with a 4px step, so descending leaves a link behind each step

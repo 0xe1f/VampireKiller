@@ -65,7 +65,8 @@ ASCII while emitting the exact original bytes (space → 0x00).
 
 Graphics: uncompressed playfield tilesets are hex `defb` (one 4-byte row per
 scanline). Sprites stay RLE-packed in source (`rleenc.py` is not byte-exact).
-`make gfx` writes PNG previews from the ROM.
+`make gfx` writes PNG previews from the ROM, including `gfx/enemy_sheet.png`
+and a full-frame sheet per enemy (`gfx/sheet_enemy_zombie_01.png`, …).
 
 See `docs/` for reverse-engineering notes and `docs/progress.md` for current
 status and next steps.

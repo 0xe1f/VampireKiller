@@ -750,48 +750,58 @@ l8520h:
 	add a,c
 	cp h
 	ret
+; --- platform_stand_test (0x852B) - recompute 0xC439 ------------------------
+;  Called from simon_action_tick (seg1 0x6B47) every frame, before the action
+;  state dispatch, so 0xC439 is fresh for simon_grounded / simon_fall.
+;  Result is the slot id (1 or 2) of the moving platform Simon is standing on,
+;  or 0.  Rising through a platform is allowed: while falling (0xC420 == 4)
+;  with jump phase 0xC428 < 3 the test is skipped entirely.
+platform_stand_test:
 	ld a,(0c420h)
 	cp 004h
 	jr nz,l8538h
 	ld a,(0c428h)
 	cp 003h
-	ret c
+	ret c                  ; still rising -> don't land on anything
 l8538h:
 	ld hl,0c598h
-	ld de,00000h
+	ld de,00000h           ; D = slot 2 result, E = slot 1 result
 	ld b,002h
 l8540h:
 	ld a,(hl)
 	and a
 	push hl
 	push bc
-	call nz,sub_8556h
+	call nz,platform_overlap       ; slot in use -> test it
 	pop bc
 	pop hl
 	ld a,007h
-	call ADD_HL_A
+	call ADD_HL_A          ; next slot (stride 7)
 	djnz l8540h
 	ld a,d
 	or e
-	ld (0c439h),a
+	ld (0c439h),a          ; 0 = airborne/ground, else the slot id
 	ret
-sub_8556h:
-	ld c,(hl)
+; platform_overlap (0x8556): HL = slot.  Carry Simon only when he is within 8px
+; above the platform row and his X (+-7) lands in the 32px deck.  Writes the
+; slot id into E for slot 1 (odd) or D for slot 2, and clears it on a miss.
+platform_overlap:
+	ld c,(hl)              ; C = +0 slot id
 	inc hl
-	ld a,(0c425h)
-	sub (hl)
+	ld a,(0c425h)          ; Simon Y
+	sub (hl)               ; - platform Y (+1)
 	cp 008h
-	jr nc,l8575h
+	jr nc,l8575h           ; Y miss: not resting on the deck
 	ld b,007h
 	inc hl
-	ld a,(0c427h)
+	ld a,(0c427h)          ; Simon X
 	sub b
-	sub (hl)
+	sub (hl)               ; - platform X (+2), left foot
 	cp 020h
-	jr c,l857fh
+	jr c,l857fh            ; within the 32px deck
 	ld a,(0c427h)
 	add a,b
-	sub (hl)
+	sub (hl)               ; right foot
 	cp 020h
 	jr c,l857fh
 l8575h:
@@ -2488,7 +2498,7 @@ sub_8f9bh:
 ; spike bars of stage 6 room 1.  They are *not* actors - no C500 slot, no HP,
 ; they cannot be killed - and they are *not* hardware sprites.  Each is a
 ; 32x16 4bpp background block HMMM'd out of the page-1 staging area that seg0
-; 0x54A6 assembles at (0x80, 0x70) from spike_bar_mount + 4x spike.
+; 0x5494 assembles at (0x80, 0x70) from spike_bar_mount + 4x spike.
 ;
 ; 8-byte slot layout (only +0..+5 are seeded; +6/+7 are zeroed):
 ;   +0 state: 1 = descending (+4/step), 2 = retracting (-4/step); 0 = free.
@@ -2603,7 +2613,7 @@ l901ch:
 	sub 004h
 	ld e,a                 ; draw 4px high: block row 0 is the chain link
 	ld hl,08070h           ; SX=0x80 SY=0x70: the spike-bar staging block, page 1
-	ld bc,02010h           ; 32x16 (spike_bar_mount + 4x spike, staged by seg0 0x54A6)
+	ld bc,02010h           ; 32x16 (spike_bar_mount + 4x spike, staged by seg0 0x54AD)
 	ld a,001h
 	jp vdp_hmmm            ; src page 1 -> dest page 0 at (X, Y-4)
 ; spike_bars_restore (0x902E): repaint the bars after the F2 map screen has
@@ -2611,19 +2621,38 @@ l901ch:
 spike_bars_restore:
 	call spike_bars_seed
 	jp spike_bars_run
+; --- moving platforms (0xC598) ----------------------------------------------
+;  Two slots of 7 bytes, present only on stages 5 and 10.  A platform is a
+;  32x16 two-plane hardware-sprite deck that slides horizontally between two
+;  end points and carries Simon with it.
+;
+;  7-byte slot layout (platform_load seeds +0..+4 from platform_tbl):
+;    +0 slot id, 1 or 2; 0 = free
+;    +1 Y      fixed row (SAT Y is +1 - 1)
+;    +2 X      current position, the only thing that moves
+;    +3 step   signed px/tick, negated at each end point
+;    +4 span   ticks per sweep before reversing
+;    +5 tick   free-running counter, incremented but unread here
+;    +6 count  ticks elapsed in this sweep
+;  Note +5/+6 are NOT seeded (platform_load skips them), so they rely on 0xC598
+;  already being clear when the room loads.
+;
+;  Simon's side: platform_stand_test (0x852B) sets 0xC439 to the slot id he is
+;  standing on, and platform_carry_simon (seg1 0x6BB6) then nudges his X by the
+;  sign of +3 each frame.
 platform_load:                     ; (seg2 0x9034) seed C598 from platform_tbl
 	ld hl,0c598h
 	ld a,(hl)
 	or a
-	ret nz
+	ret nz                 ; already seeded for this room
 	ld hl,platform_tbl
 l903dh:
 	ld a,(hl)
 	inc a
-	ret z
+	ret z                  ; 0xFF terminator: no platforms in this room
 	dec a
 	push hl
-	ld de,(0d000h)
+	ld de,(0d000h)         ; E = stage (0xD000), D = room (0xD001)
 	cp e
 	jr nz,l9067h
 	inc hl
@@ -2631,19 +2660,19 @@ l903dh:
 	cp d
 	jr nz,l9067h
 	inc hl
-	ld b,(hl)
+	ld b,(hl)              ; B = platform count for this room
 	inc hl
 	ld de,0c598h
-	ld c,001h
+	ld c,001h              ; slot ids start at 1
 l9056h:
 	push bc
 	ld a,c
-	ld (de),a
+	ld (de),a              ; +0 = slot id
 	inc de
 	ld bc,00004h
-	ldir
+	ldir                   ; +1..+4 = Y, X, step, span
 	inc de
-	inc de
+	inc de                 ; leave +5/+6 alone, land on the next slot
 	pop bc
 	inc c
 	djnz l9056h
@@ -2653,26 +2682,26 @@ l9067h:
 	pop hl
 	inc hl
 	inc hl
-	ld a,(hl)
+	ld a,(hl)              ; skip this record: 3 header bytes + n*4
 	inc hl
 	add a,a
 	add a,a
 	call ADD_HL_A
 	jr l903dh
-platform_tbl:                      ; (seg2 0x9073) {stage,room,n} + n×4 bytes; 0xFF end
+platform_tbl:                      ; (seg2 0x9073) {stage,room,n} + n x {Y,X,step,span}; 0xFF end
 	defb 005h,001h,001h        ; stage 5 room 1
-	defb 05fh,060h,001h,040h
-	defb 005h,004h,002h        ; stage 5 room 4
-	defb 05fh,020h,001h,030h
-	defb 05fh,0b8h,0ffh,038h
-	defb 00ah,000h,001h        ; stage 10 rooms 0/2/3/4
-	defb 08fh,060h,001h,060h
+	defb 05fh,060h,001h,040h    ; Y=0x5F X=0x60 right, 64-tick sweep
+	defb 005h,004h,002h        ; stage 5 room 4 - a pair, moving apart
+	defb 05fh,020h,001h,030h    ; Y=0x5F X=0x20 right, 48
+	defb 05fh,0b8h,0ffh,038h    ; Y=0x5F X=0xB8 left,  56
+	defb 00ah,000h,001h        ; stage 10 rooms 0/2/3/4, one each
+	defb 08fh,060h,001h,060h    ; Y=0x8F X=0x60 right, 96
 	defb 00ah,002h,001h
-	defb 0a7h,040h,001h,080h
+	defb 0a7h,040h,001h,080h    ; Y=0xA7 X=0x40 right, 128
 	defb 00ah,003h,001h
-	defb 08fh,020h,001h,0a0h
+	defb 08fh,020h,001h,0a0h    ; Y=0x8F X=0x20 right, 160
 	defb 00ah,004h,001h
-	defb 0a7h,080h,001h,040h
+	defb 0a7h,080h,001h,040h    ; Y=0xA7 X=0x80 right, 64
 	defb 0ffh
 platform_tick:                     ; (seg2 0x90A2) 2 x C598 moving platforms
 	ld hl,0c598h
@@ -2682,127 +2711,137 @@ l90a7h:
 	push hl
 	ld a,(hl)
 	or a
-	jr z,l90b5h
+	jr z,l90b5h            ; slot free
 	push hl
-	call sub_90bfh
+	call platform_move
 	pop hl
-	call sub_90dfh
+	call platform_sat_build
 l90b5h:
 	pop hl
 	pop bc
 	ld de,00007h
-	add hl,de
+	add hl,de              ; next slot
 	inc c
 	djnz l90a7h
 	ret
-sub_90bfh:
+; platform_move (0x90BF): advance one platform.  HL = slot.  On the tick where
+; the sweep counter reaches +4 it reverses (+3 = -+3) and does NOT move, so the
+; deck pauses for a frame at each end point.
+platform_move:
 	inc hl
 	inc hl
-	ld d,(hl)
+	ld d,(hl)              ; D = +2 X
 	inc hl
-	ld e,(hl)
+	ld e,(hl)              ; E = +3 step
 	inc hl
-	ld c,(hl)
+	ld c,(hl)              ; C = +4 span
 	inc hl
-	inc (hl)
+	inc (hl)               ; ++ +5 free-running tick
 	ld a,(hl)
 	inc hl
-	inc (hl)
+	inc (hl)               ; ++ +6 sweep counter
 	ld a,c
-	sub (hl)
+	sub (hl)               ; span - count
 	jr nz,l90d0h
-	ld (hl),a
+	ld (hl),a              ; end of sweep: count = 0
 l90d0h:
 	dec hl
 	dec hl
-	dec hl
+	dec hl                 ; -> +3
 	jr nz,l90dah
 	ld a,(hl)
 	neg
-	ld (hl),a
+	ld (hl),a              ; reverse direction
 	ret
 l90dah:
-	dec hl
+	dec hl                 ; -> +2
 	ld a,d
 	add a,e
-	ld (hl),a
+	ld (hl),a              ; X += step
 	ret
-sub_90dfh:
-	ld a,(hl)
+; platform_sat_build (0x90DF): emit one platform's 4 sprite attribute entries
+; and their per-line colours.  Slot 1 uses SAT 0xD638 / colours 0xD4E0, slot 2
+; uses 0xD648 / 0xD520.  The two colours alternate per cell and the second of
+; each pair has the CC bit (0x40), so cells 0+1 and 2+3 OR together into one
+; two-colour 16x16 half each: 2/4 on stage 5, 9/0xC elsewhere.
+platform_sat_build:
+	ld a,(hl)              ; A = +0 slot id
 	push af
 l90e1h:
-	inc hl
+	inc hl                 ; -> +1 (Y), where platform_sat_cells starts reading
 	ld de,0d638h
 	dec a
 	jr z,l90ebh
 	ld de,0d648h
 l90ebh:
-	call sub_9119h
+	call platform_sat_cells
 	pop af
 	ld hl,0d4e0h
 	dec a
 	jr z,l90f8h
 	ld hl,0d520h
 l90f8h:
-	ld de,00244h
+	ld de,00244h           ; stage 5: colour 2 + colour 4 with CC
 	ld a,(0d000h)
 	cp 005h
 	jr z,l9105h
-	ld de,0094ch
+	ld de,0094ch           ; elsewhere: colour 9 + colour 0xC with CC
 l9105h:
 	ld a,d
-	call sub_9112h
+	call platform_fill16
 	ld a,e
-	call sub_9112h
+	call platform_fill16
 	ld a,d
-	call sub_9112h
-	ld a,e
-sub_9112h:
+	call platform_fill16
+	ld a,e                 ; falls through for the fourth cell
+platform_fill16:                   ; 16 colour bytes (one 16x16 sprite's lines)
 	ld b,010h
 l9114h:
 	ld (hl),a
 	inc hl
 	djnz l9114h
 	ret
-sub_9119h:
-	ld ix,l9146h
+; platform_sat_cells (0x9119): write 4 SAT entries at DE from the slot at HL.
+; Y is the fixed row minus 1; X is the slot X plus the cell's offset; the
+; pattern comes from platform_sat_ofs, shifted by 8 off stage 5 so each hub
+; gets its own deck artwork.  The colour byte is left to platform_sat_build.
+platform_sat_cells:
+	ld ix,platform_sat_ofs
 	ld b,004h
 l911fh:
 	push bc
 	push hl
-	ld a,(hl)
-l9122h:
+	ld a,(hl)              ; A = +1 platform Y
 	dec a
-	ld (de),a
+	ld (de),a              ; SAT Y
 	inc hl
 	inc de
-	ld a,(ix+000h)
-	add a,(hl)
-	ld (de),a
+	ld a,(ix+000h)         ; cell X offset (0 or 0x10)
+	add a,(hl)             ; + +2 platform X
+	ld (de),a              ; SAT X
 	inc hl
 	inc de
-	ld c,(ix+001h)
+	ld c,(ix+001h)         ; cell pattern
 	ld a,(0d000h)
 	cp 005h
 	ld a,c
 	jr z,l913ah
-	add a,008h
+	add a,008h             ; not stage 5 -> the other deck patterns
 l913ah:
-	ld (de),a
+	ld (de),a              ; SAT pattern
 	inc de
-	inc de
+	inc de                 ; skip the colour byte -> next SAT entry
 	inc ix
 	inc ix
 	pop hl
 	pop bc
 	djnz l911fh
 	ret
-l9146h:
-	nop
-	ret nc
-	nop
-	call nc,0d010h
-	djnz l9122h
+platform_sat_ofs:                  ; 4 x {X offset, pattern}: two 16x16 halves,
+	defb 000h,0d0h             ; each built from two OR'd planes (CC)
+	defb 000h,0d4h
+	defb 010h,0d0h
+	defb 010h,0d4h
 ; --- door_anim_tick (0x914E) - door-open animation driver (0xC5AC) ----------
 ;  0xC5AC is the door sub-state.  door_load_coords arms it to 0xFF (vertical
 ;  door: blit the closed graphic via door_blit_tiles) or 0x04 (courtyard).

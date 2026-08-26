@@ -180,6 +180,26 @@ of `<Game>.asm`.
 - **Packed BCD everywhere**: `add a,001h; daa` (and `daa` chains across bytes) =
   a BCD increment. Scores, heart/money counters, prices, and many on-screen numbers
   are stored packed-BCD, little-endian, often /100 (a table byte of 0x50 = "50").
+- **A boot-time slot scan is usually companion-hardware detection, not a
+  re-entrancy flag.** A routine that walks `EXPTBL` (0xFCC1), recurses into
+  expanded subslots, and `RDSLT`s a handful of bytes at a fixed address in each
+  is fingerprinting *another cartridge*. Konami's **Game Master** cheat cart
+  (RC-735) is the common one: VK compares 6 bytes at CPU 0x7FFA — the tail of a
+  16 KB page mapped at 0x4000, so an arbitrary end-of-ROM fingerprint rather than
+  a readable ID — and parks the result in a single flag (0xE600) that gates a
+  pause / frame-advance key pair in the interrupt handler, a hidden
+  stage-and-lives select menu reached from the title, and a CONTINUE option on
+  game over. If you find one flag set at boot and read
+  from unrelated places, look for the RDSLT compare before inventing a meaning
+  for it — and expect its features to sit in ROM regions z80dasm mangled, since
+  nothing in the normal flow reaches them.
+- **In-house fonts reuse ASCII slots for symbols.** VK's HUD font spans ASCII
+  `'0'`-`'_'`, but the `@`, `_` and `?` slots actually draw a horizontal rule, a
+  right-pointing cursor arrow and an equals sign. A text macro that reproduces
+  the bytes will therefore *read* as gibberish (`@@@MENU@@@`, `STAGE NUMBER?`)
+  while drawing something sensible (`---MENU---`, `STAGE NUMBER=`). Render the
+  glyph before trusting a decoded string, and comment the real shape next to the
+  macro rather than "fixing" the spelling.
 - **Subsystem state blocks**: a feature usually parks all its state in one
   contiguous RAM block (VK vendor = 0xC700..0xC70F). Find the block by F8-diffing
   while the feature is active (see `msx-runtime-tracing`), then `romscan xref` /

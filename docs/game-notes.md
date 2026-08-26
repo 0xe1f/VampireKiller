@@ -38,46 +38,46 @@ not yet confirmed in code is marked *(unconfirmed)*.
   | 5 | 15 | 9 | 22 | grim reaper |
   | 6 | 18 | 9 | (via `sub_65b7h`) | Dracula |
 
-  Frankenstein (type 21) walks with shapes `0x79/0x7A/0x7B` and is on the bar.
-  Igor (type 24, not in the 1–22 sheet) uses the same `0x67` hunchback frames as
-  type 13; the whip path treats him as 1-HP fodder, not metered. Type 18 is
-  also placed as a regular enemy on stage 16.
+  Frankenstein (`actor_frankenstein`) walks with shapes `0x79/0x7A/0x7B` and is
+  on the bar. Igor (`actor_igor`, overflow, not in the 1–22 sheet) uses the same
+  `0x67` hunchback frames as `actor_hunchback`; the whip path treats him as 1-HP
+  fodder, not metered. `actor_giant_bat` is also placed as a regular enemy on
+  stage 16.
 
 ### Enemy types 1–22 (`gfx/enemy_sheet.png`)
 
-Names from the sheet (play + SAT). Behaviour is the ROM handler, for checking
-that the picture is the right enemy. HP is `0x60E9[type]` (`ix+0D`); unshielded
-contact is **2×** the odd byte of `l81d5h`. Types **17–22** (and type 18 in a
-boss room) use the shared meter `0xC418`; the rest die when `ix+0D` hits 0.
-Leather whip subtracts 1 from fodder HP, other weapons 2.
+`actor_*` names live in `segments/actors.inc`. Pictures are from the sheet
+(play + SAT); behaviour is the ROM handler. HP is `0x60E9[type]` (`ix+0D`);
+unshielded contact is **2×** the odd byte of `l81d5h`. Types **17–22** (and
+type 18 in a boss room) use the shared meter `0xC418`; the rest die when
+`ix+0D` hits 0. Leather whip subtracts 1 from fodder HP, other weapons 2.
 
 | # | Name | In-game behaviour |
 | ---: | --- | --- |
-| 1 | Zombie | Walks in from a screen edge toward centre/Simon. 1 HP, 100 pts. Spawn bit 0. |
-| 2 | Green merman | Walk/pounce. Closed-mouth frames `0x0B`/`0x08`. 1 HP, 200 pts. Spawn bit 1. Shared handler with 3 (`enemy_merman_tick`). When `ix+1B` is set and Simon’s Y is within ±8 it writes type 3 and pose `0x12` (open mouth), then the type-3 spit path runs. |
-| 3 | Red merman | Open-mouth spit. Frames `0x12`/`0x0F`. Same walk/pounce, then state 2 hides and fires `0x9F74` kind 2 from Y−0x14 (the mouth). 2 HP. Bit 0 of the type id selects the spit countdown. Spawn bit 2 jumps out of the water (splash pair). Object-list id **0x21** is the same spit enemy already standing on the platform — stage 10 rooms 6–8, play-confirmed, no water exit. |
-| 4 | Hanging bat | Hangs (shape `0x1A`) until Simon is close (Y window `0x50`, X `0x40`), then flies at him. 1 HP, 100 pts. Spawn bit 3 flies in already moving. Object-list id **0x1F** is the same enemy already hanging — s3r2, s4r1, s4r3, play-confirmed. |
-| 5 | Sitting dog | Idles; charges when Simon is within 64 px. 1 HP, 100 pts, 6 contact unshielded. Object list. |
-| 6 | Pikeman | Walking spear knight. Turns at ledges/walls; walks toward Simon when Y overlaps. 4 HP, 200 pts. Stages 4–5 object list. No projectile. |
-| 7 | Flying skull | Homes on Simon X **and** Y from off-screen. 2 HP, 200 pts. Spawn bit 4. |
-| 8 | Ghost head | Flies across, bobbing around spawn Y. 1 HP, 200 pts. Spawn bit 5. |
-| 9 | Red skeleton | Fast walk (`0x0220`), **no** projectile. 2 HP, 200 pts. Stage 13 object list (same skeleton script as 11; SAT `02 45`). |
-| 10 | Skull pile | Stationary; faces Simon and shoots (`d700_spawn` 0x9F74, kind `0x0A`). 8 HP, 300 pts. Object list. |
-| 11 | White skeleton | Same 0x9FB2 skeleton art as 9, SAT `02 4C`. Kites Simon (walk toward if far, away if close); hops a gap (`Yvel 0xFB8F`) when the floor probe ahead is empty; throws a spinning bone (`d700_throw` 0x9F68, D700 type 4, shapes `0x4B–0x4E`). 4 HP, 200 pts. Stages 7–9, 13, 17. |
-| 12 | Raven | Flies, then stalls (Yvel→0) and hovers mid-flight; strafes when Simon’s Y is close. Not the type-8 sine bob. 1 HP, 100 pts. Object list, stages 7–8. |
-| 13 | Hunchback | Jumps toward Simon. 1 HP, 200 pts. Object list. Type 24 (Igor) reuses pose `0x67`. |
-| 14 | Bone dragon | 8 SAT cells (custom tick, skips `0x644C`). 12 HP, 1000 pts. Stages 11–12. |
-| 15 | Roc | Large 6-cell flyer (phoenix-like). Flies across, pauses to drop a type `0x23` hunchback, then continues off. 8 HP, 400 pts. Spawn bit 6. Not the small raven (12). |
-| 16 | Axe knight | Same SAT layout as 9, but stage 14+ VRAM is the knight. Throws (`d700_throw` 0x9F68). 8 HP, 300 pts, slower walk (`0x0140`). |
-| 17 | Dracula | Event 6, stage 18 room 9. 32 HP on the bar, +30000. SAT is head + cape; 32×32 torso blit is **PARKED** (sheet shows the gap). |
-| 18 | Giant bat | Event 1 boss; also a normal enemy on stage 16 when `CE00==0` (per-actor HP). 16 HP, 2000 pts. |
-| 19 | Medusa | Event 2, stage 6 room 5. 16 HP, 2000 pts. |
-| 20 | Mummy | Event 3, two of type 20 in stage 9 room 7. 16 HP, 2000 pts. Walk `0x33–0x38`. |
-| 21 | Frankenstein | Event 4 with Igor. Walk `0x79/0x7A/0x7B`. 32 HP on the bar, 3000 pts. |
-| 22 | Grim reaper | Event 5, stage 15 room 9. 32 HP, 12 cells, 7000 pts. |
+| 1 | `actor_zombie` | Walks in from a screen edge toward centre/Simon. 1 HP, 100 pts. Spawn bit 0. |
+| 2 | `actor_merman` | Walk/pounce. Closed-mouth frames `0x0B`/`0x08`. 1 HP, 200 pts. Spawn bit 1. Shared handler with 3 (`enemy_merman_tick`). When `ix+1B` is set and Simon’s Y is within ±8 it writes type 3 and pose `0x12` (open mouth), then the type-3 spit path runs. |
+| 3 | `actor_merman_red` | Open-mouth spit. Frames `0x12`/`0x0F`. Same walk/pounce, then state 2 hides and fires `0x9F74` kind 2 from Y−0x14 (the mouth). 2 HP. Bit 0 of the type id selects the spit countdown. Spawn bit 2 jumps out of the water (splash pair). Object-list id `actor_placed_merman` is the same spit enemy already standing on the platform — stage 10 rooms 6–8, play-confirmed, no water exit. |
+| 4 | `actor_hanging_bat` | Hangs (shape `0x1A`) until Simon is close (Y window `0x50`, X `0x40`), then flies at him. 1 HP, 100 pts. Spawn bit 3 flies in already moving. Object-list id `actor_placed_bat` is the same enemy already hanging — s3r2, s4r1, s4r3, play-confirmed. |
+| 5 | `actor_dog` | Idles; charges when Simon is within 64 px. 1 HP, 100 pts, 6 contact unshielded. Object list. |
+| 6 | `actor_pikeman` | Walking spear knight. Turns at ledges/walls; walks toward Simon when Y overlaps. 4 HP, 200 pts. Stages 4–5 object list. No projectile. |
+| 7 | `actor_flying_skull` | Homes on Simon X **and** Y from off-screen. 2 HP, 200 pts. Spawn bit 4. |
+| 8 | `actor_ghost_head` | Flies across, bobbing around spawn Y. 1 HP, 200 pts. Spawn bit 5. |
+| 9 | `actor_red_skeleton` | Fast walk (`0x0220`), **no** projectile. 2 HP, 200 pts. Stage 13 object list (same skeleton script as 11; SAT `02 45`). |
+| 10 | `actor_skull_pile` | Stationary; faces Simon and shoots (`d700_spawn` 0x9F74, kind `0x0A`). 8 HP, 300 pts. Object list. |
+| 11 | `actor_white_skeleton` | Same 0x9FB2 skeleton art as 9, SAT `02 4C`. Kites Simon (walk toward if far, away if close); hops a gap (`Yvel 0xFB8F`) when the floor probe ahead is empty; throws a spinning bone (`d700_throw` 0x9F68, D700 type 4, shapes `0x4B–0x4E`). 4 HP, 200 pts. Stages 7–9, 13, 17. |
+| 12 | `actor_raven` | Flies, then stalls (Yvel→0) and hovers mid-flight; strafes when Simon’s Y is close. Not the type-8 sine bob. 1 HP, 100 pts. Object list, stages 7–8. |
+| 13 | `actor_hunchback` | Jumps toward Simon. 1 HP, 200 pts. Object list. `actor_igor` reuses pose `0x67`. |
+| 14 | `actor_bone_dragon` | 8 SAT cells (custom tick, skips `0x644C`). 12 HP, 1000 pts. Stages 11–12. |
+| 15 | `actor_roc` | Large 6-cell flyer (phoenix-like). Flies across, pauses to drop `actor_roc_drop`, then continues off. 8 HP, 400 pts. Spawn bit 6. Not the small raven (`actor_raven`). |
+| 16 | `actor_axe_knight` | Same SAT layout as 9, but stage 14+ VRAM is the knight. Throws (`d700_throw` 0x9F68). 8 HP, 300 pts, slower walk (`0x0140`). |
+| 17 | `actor_dracula` | Event 6, stage 18 room 9. 32 HP on the bar, +30000. SAT is head + cape; 32×32 torso blit is **PARKED** (sheet shows the gap). |
+| 18 | `actor_giant_bat` | Event 1 boss; also a normal enemy on stage 16 when `CE00==0` (per-actor HP). 16 HP, 2000 pts. |
+| 19 | `actor_medusa` | Event 2, stage 6 room 5. 16 HP, 2000 pts. |
+| 20 | `actor_mummy` | Event 3, two of them in stage 9 room 7. 16 HP, 2000 pts. Walk `0x33–0x38`. |
+| 21 | `actor_frankenstein` | Event 4 with `actor_igor`. Walk `0x79/0x7A/0x7B`. 32 HP on the bar, 3000 pts. |
+| 22 | `actor_grim_reaper` | Event 5, stage 15 room 9. 32 HP, 12 cells, 7000 pts. |
 
-When a boss dies an **orb descends** (C800 actor type **0x22**, not
-  bonus id 22):
+When a boss dies an **orb descends** (`actor_orb`, not bonus id 22):
   - Pick it up (`0xCE11=1`) → life drip-fills (+1 HP/frame via `0x4658`)
     until full, then advance to the next level.
   - Leave it → still advance after the timer, but **life is not refilled**.
@@ -183,11 +183,12 @@ index is a RAM trio:
 - **0xD000 = stage** (0 = courtyard, 1-18 = the 18 stages).
 - **0xD001 = room** within the stage (increments walking right).
 Each hub's packed stream holds 3 stages × up to 16 room slots × up to 4 objects.
-Per object: **list-id = actor type** (`l61c2h` → `spawn_actor+2` with `C = id&0x7F`).
-Bit7 is stored then stripped; only dogs (0x05) ever set it (3 of 6; role unknown —
-not facing in the actor slot). Attr packs the in-room cell (hi nibble X, lo
-nibble Y, each ×16 px). Stage 0 (courtyard) has no object-list entries — `l61c2h`
-does `dec a; ret m`. `D000`/`D001` are stage/room **indices**,
+Per object: **list-id = actor type** (`l61c2h` → `spawn_actor+2` with
+`C = id&0x7F`; names in `segments/actors.inc`). Bit7 is stored then stripped;
+only `actor_dog` ever sets it (3 of 6; role unknown — not facing in the actor
+slot). Attr packs the in-room cell (hi nibble X, lo nibble Y, each ×16 px).
+Stage 0 (courtyard) has no object-list entries — `l61c2h` does `dec a; ret m`.
+`D000`/`D001` are stage/room **indices**,
 not map coordinates — room positions come from `minimap_room_pos` (see below).
 `tools/roomperm.py` is the map (`gfx/minimap_s<NN>.png`); its `decode_objects`
 reads this list for the `--compare-doors` overlay.
@@ -206,25 +207,27 @@ breakable block, drawn on the F2 map) or floor pickup (bits7-5 `000`); `10` =
 chest; `11` = vendor. bits4-0 = bonus id. Stage 18 room 9 (Dracula) is omitted
 and stays empty. ~620 records.
 
-Spawn-bit types (1, 2, 3, 4, 7, 8, 15) and bosses (17, 19–22) are **not** in this
+Spawn-bit types (`actor_zombie`/`actor_merman`/`actor_merman_red`/
+`actor_hanging_bat`/`actor_flying_skull`/`actor_ghost_head`/`actor_roc`) and
+bosses (`actor_dracula`, `actor_medusa`–`actor_grim_reaper`) are **not** in this
 list; they come from `room_spawner` or the event table. Two extra list-ids reuse
 those handlers with a different spawn-init (overflow of `entity_tbl` into seg1
 `data_6000`):
 
 | list-id | n | name | vs generator type |
 | ---: | ---: | --- | --- |
-| 0x05 | 6 | sitting dog | — |
-| 0x06 | 11 | pikeman | — |
-| 0x09 | 13 | red skeleton | — |
-| 0x0A | 6 | skull pile | — |
-| 0x0B | 23 | white skeleton | — |
-| 0x0C | 4 | raven | — |
-| 0x0D | 36 | hunchback | not scenery |
-| 0x0E | 8 | bone dragon | — |
-| 0x10 | 28 | axe knight | not scenery |
-| 0x12 | 6 | giant bat | regular enemy on stage 16; boss s3r5 is event-spawned |
-| 0x1F | 3 | hanging bat | Play-confirmed: hangs, then flies at Simon on approach. `enemy_placed_bat_init` 0xB0D5 skips type 4's fly-in state so it starts hanging. s3r2, s4r1, s4r3 |
-| 0x21 | 5 | placed red merman | Play-confirmed: already on the platform, does not jump out of water. `enemy_placed_merman_init` 0xA2CE skips the type-0x20 splash pair and jumps into the walk. Stage 10 rooms 6–8 |
+| 0x05 | 6 | `actor_dog` | — |
+| 0x06 | 11 | `actor_pikeman` | — |
+| 0x09 | 13 | `actor_red_skeleton` | — |
+| 0x0A | 6 | `actor_skull_pile` | — |
+| 0x0B | 23 | `actor_white_skeleton` | — |
+| 0x0C | 4 | `actor_raven` | — |
+| 0x0D | 36 | `actor_hunchback` | not scenery |
+| 0x0E | 8 | `actor_bone_dragon` | — |
+| 0x10 | 28 | `actor_axe_knight` | not scenery |
+| 0x12 | 6 | `actor_giant_bat` | regular enemy on stage 16; boss s3r5 is event-spawned |
+| 0x1F | 3 | `actor_placed_bat` | Play-confirmed: hangs, then flies at Simon on approach. `enemy_placed_bat_init` 0xB0D5 skips `actor_hanging_bat`'s fly-in state so it starts hanging. s3r2, s4r1, s4r3 |
+| 0x21 | 5 | `actor_placed_merman` | Play-confirmed: already on the platform, does not jump out of water. `enemy_placed_merman_init` 0xA2CE skips the `actor_merman_splash` pair and jumps into the walk. Stage 10 rooms 6–8 |
 
 **Not** white-key doors and **not** the vendor: display-type `0x1F` on a brazier
 (`l87f6h`) is a different field. An earlier overlay treated list-id `0x1F` as a
@@ -444,6 +447,9 @@ Weapon behaviour (ROM):
   ≥ 2 quarters the hit.
 - On death (`sub_70e3h`) `C416` is cleared to 0. Missing a cross/axe catch also
   returns to leather (`lose_weapon` 0x8E9A) without waiting for death.
+- Thrown-weapon **patterns** come from seg10 via `load_weapon_sprites` (0x559A)
+  / `weapon_sprite_ptr` (0x55DE). Sheets: `gfx/weapon_knife.png`,
+  `weapon_axe.png`, `weapon_cross.png`.
 
 Other pickups replace the weapon:
 
@@ -456,7 +462,7 @@ Sub-items / consumables:
 
 - **Map item** — picked up in-stage; sets **0xC701 bit 7** (map held) and seeds
   **0xC70F = 3** uses. Pressing **F2** toggles a whole-stage minimap on/off, spending
-  one use per open. Driven by seg2 **minimap_driver (0x955A)** off F-key edges in
+  one use per open. Driven by seg2 **minimap_driver (0x9559)** off F-key edges in
   **0xC00B** (bit 1 = F2); the map-screen state is **0xCF38** (0 = playing, 1 = build,
   2 = shown). The map layout is **hand-authored, not derived from connectivity**:
   **minimap_room_pos (0x9681)** reads a per-room *position code* from the per-stage
@@ -546,7 +552,7 @@ stage changes.
   = +8 (1/4 of the 32-point bar). **22** is a **bottle/potion** (first tile of
   `gfx/bonus_hud_items.png`; vendor price-tbl id `0x16`) that instant-fills +32. Same full-bar
   end state as picking up the boss orb, but a different graphic and collect
-  path — the descending boss orb is actor type 0x22, not this bonus id.
+  path — the descending boss orb is `actor_orb`, not this bonus id.
 - **Shields** — **3** red (`C701` bit 4): facing the hit takes table damage
   instead of 2×. **4** yellow (`C701` bit 5): absorbs D700 projectiles. Mutually
   exclusive; 16 charges in `C441`.
@@ -639,13 +645,13 @@ in these sheets.
 
   | bit | generator (seg2) | actor type | handler (seg3) | enemy |
   |-----|------------------|------------|----------------|-------|
-  | 0 | `zombie_generator` 0x9CED | 0x01 | `enemy_zombie_tick` 0xA93B | zombie (100 pts) |
-  | 1 | `merman_generator` 0x9D52 | 0x02 | `enemy_merman_tick` 0xA2E7 | green merman, 1 HP (200 pts) |
-  | 2 | `merman_generator_3` 0x9D59 | 0x03 | same 0xA2E7 | red merman, 2 HP (open-mouth spit) |
-  | 3 | `hanging_bat_generator` 0x9D9E | 0x04 | `enemy_hanging_bat_tick` 0xB0D1 | hanging bat (100 pts; generator fly-in. Placed bats that hang first are list-id 0x1F) |
-  | 4 | `flying_skull_generator` 0x9DCA | 0x07 | `enemy_flying_skull_tick` 0xB068 | flying skull (200 pts; homes on Simon X and Y) |
-  | 5 | `ghost_head_generator` 0x9DDC | 0x08 | `enemy_ghost_head_tick` 0xA502 | ghost head (200 pts; flies across, bobs around spawn Y) |
-  | 6 | `roc_generator` 0x9DEE | 0x0F | `enemy_roc_tick` 0xB19A | roc (400 pts, 8 HP; flies, pauses, drops type 0x23). Manual lists 300. The small hovering raven is type 12. |
+  | 0 | `zombie_generator` 0x9CED | `actor_zombie` | `enemy_zombie_tick` 0xA93B | zombie (100 pts) |
+  | 1 | `merman_generator` 0x9D52 | `actor_merman` | `enemy_merman_tick` 0xA2E7 | green merman, 1 HP (200 pts) |
+  | 2 | `merman_generator_3` 0x9D59 | `actor_merman_red` | same 0xA2E7 | red merman, 2 HP (open-mouth spit) |
+  | 3 | `hanging_bat_generator` 0x9D9E | `actor_hanging_bat` | `enemy_hanging_bat_tick` 0xB0D1 | hanging bat (100 pts; generator fly-in. Placed bats that hang first are `actor_placed_bat`) |
+  | 4 | `flying_skull_generator` 0x9DCA | `actor_flying_skull` | `enemy_flying_skull_tick` 0xB068 | flying skull (200 pts; homes on Simon X and Y) |
+  | 5 | `ghost_head_generator` 0x9DDC | `actor_ghost_head` | `enemy_ghost_head_tick` 0xA502 | ghost head (200 pts; flies across, bobs around spawn Y) |
+  | 6 | `roc_generator` 0x9DEE | `actor_roc` | `enemy_roc_tick` 0xB19A | roc (400 pts, 8 HP; flies, pauses, drops `actor_roc_drop`). Manual lists 300. The small hovering raven is `actor_raven`. |
 
   `spawn_actor` takes **D = X** (slot+05), **E = Y** (slot+03). Zombies typically
   enter at X=0xF0 (right edge) or 0x10 (left), Y=0xC0. Mermen spawn at Y=0xC8
@@ -661,8 +667,10 @@ in these sheets.
 - Other enemies come from the per-room **object list** (list-id = actor type;
   see "World structure" for the full catalogue). Dogs, pikemen, skeletons,
   ravens, hunchbacks, bone dragons, axe knights, and stage-16 giant bats are
-  placed. Spawn-bit types 1/2/3/4/7/8/15 are not in the list; placed bats and
-  mermen use ids **0x1F** and **0x21** instead (different spawn-init).
+  placed. Spawn-bit types (`actor_zombie`/`actor_merman`/`actor_merman_red`/
+  `actor_hanging_bat`/`actor_flying_skull`/`actor_ghost_head`/`actor_roc`) are
+  not in the list; placed bats and mermen use `actor_placed_bat` and
+  `actor_placed_merman` instead (different spawn-init).
   - NOTE: 0xC5E5/0xC5E6 (00->FF/20 at pickup) is the generic pickup-popup message +
     timer set by 0x8F2A for *every* pickup, NOT a rosary-specific state.
 - **Hearts** — currency for vendors; also power the hourglass (jump+DOWN) and
@@ -790,6 +798,24 @@ TODO (next session): add an sjasmplus macro to author these as readable ASCII
 (emit char-0x10) and convert the region to a data block byte-exactly; mark
 `l4c07h..0x4D4D` in segments/seg00.blocks as data.
 
+The 8x8 1bpp ending-credits glyphs live in seg14 `credits_font` (0x8824:
+digits 0-9 then `. ' : ,`) and `credits_font_az` (0x8894: A-Z), one
+`defb %xxxxxxxx` row per scanline. `credits_font_load` (seg0 0x53E5) is
+called from `sub_6719h` (post-Dracula script player: a message, then the
+credits) and blits them into SCREEN 5 via `l4a2eh` (ink C=0x0E). Sheet:
+`gfx/credits_font.png` (`make gfx`). HUD/title text uses a different font
+(tile base 0x10, ASCII-0x10 encoding above).
+
+### PSG driver (seg14)
+
+`int_handler` pages segs 14+15 and calls `sound_tick` (0x8964). `play_sound`
+ids: 0 stop, 1-0x1D sfx (`sfx_tbl`), 0x80-0x8F music (`music_ptr`, 3 channel
+pointers each; stage table is seg1 `stage_bgm_tbl`), 0xFB/0xFD overlays
+(hourglass freeze / death-style), 0xFC/0xFE restore, 0xFF fade. Packed
+streams stay INCBIN; several music tails continue in seg15. Channel RAM:
+C010..C016 tick pointers, 20-byte blocks at C01C/C030/C044/C058/C06C/C080,
+C097 mixer shadow, C098 overlay flags, C0A5 fade.
+
 ## Code layout & where the "main loop" is
 
 There is no classic `while(1)` loop. Boot parks the CPU in a spin (`jr $` at
@@ -808,7 +834,8 @@ During normal play the default banks (set by `sub_533dh`) are seg 1 @ 0x6000,
 seg 2 @ 0x8000, seg 3 @ 0xA000. So the substantive gameplay (movement, AI,
 collision, item logic) lives in **code segments 1/2/3** (`INCLUDE`'d, still being
 annotated).  Map tables are banks 11-12; remaining `INCBIN` banks are 4-10 and
-14-15 (scenery / object lists / sound).
+15.  Seg14 is scenery / object lists / credits font / PSG driver (sequence streams
+still sliced; music tails continue in seg15).
 
 ## Graphics format (sprite/tile hunt)
 
@@ -923,6 +950,13 @@ Catalogued so far (extend `manifest.tsv` as more sets are identified):
   0xC42E). Simon's **lower body** (legs): walk/jump/crouch/climb poses.
 - `simon_cell1` - seg13, 36 frames via pointer table 0xA2D1 (indexed by 0xC42F).
   Simon's **upper body**: torso/head/arm and the **whip** (whip-crack arcs).
+- `weapon_knife` / `weapon_axe` / `weapon_cross` - seg10 streams from
+  `weapon_sprite_ptr` (seg0 0x55DE, was l55deh). `load_weapon_sprites` (0x559A)
+  RLE-decompresses to VRAM 0xF8C0 then `sub_4745h` converts 1bpp quadrants.
+  Knife = 2 patterns (one two-plane sprite); axe/cross = 4 (two frames).
+  In-game SAT for Simon's body is `simon_sat_cell0/1` (seg1 0x798C/0x79DC).
+- `credits_font.png` - 40 x 8x8 1bpp ending-credits glyphs from seg14
+  `credits_font` (0-9 `. ' : ,` A-Z). Raw, not RLE; loaded by `sub_6719h`.
 - `enemy_sheet.png` - one labelled frame per `entity_tbl` type 1–22 (`make gfx`).
   Layout from the seg6 shape table at 0xB473 (`ix+0B`); pixels from the per-room
   gfx-script RLE into VRAM 0xF800+ (plus the 0x4745 1bpp convert). Two-plane SAT
@@ -954,10 +988,10 @@ is why legs and upper body can animate on different cadences (e.g. whipping whil
 standing still).
 
 TODO (next): map the remaining sprite/tile sets - which streams belong to each
-enemy/boss/item. Simon's two pointer tables are now resolved (0xA281 legs / 0xA2D1
-torso+whip, via load_simon_sprites 0x56E8 -> simon_cell0/1). Still to resolve:
-the per-level/per-actor tables (e.g. l55deh; the seg13 stream region 0xA319-0xBFFF
-holds more actor art beyond Simon) and the enemy sprite loaders.
+enemy/boss/item. Simon's two pointer tables are resolved (0xA281 legs / 0xA2D1
+torso+whip), and projectile weapons are `weapon_sprite_ptr` (knife/axe/cross
+in seg10). Still to resolve: per-room gfx-script streams (enemy/tileset VRAM)
+and remaining actor art in seg13 0xA319+.
 
 ## Reference: Metal Gear disassembly
 

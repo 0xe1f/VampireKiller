@@ -11,7 +11,8 @@
 ;            streams (stage 0 courtyard is scenery_list_s00, not in the table)
 ;    0x85A6  spawn_bitmask_ptr / per-stage spawn masks
 ;    0x8668  object_list_ptr / packed per-hub enemy streams
-;    0x8824  sound/VDP (tick at 0x8964; sfx tbl 0x8D8D; music 0x8DC9)
+;    0x8824  credits_font / credits_font_az (8x8 1bpp digits+punct then A-Z)
+;    0x8964  sound_tick (PSG driver; sfx_tbl 0x8D8F, music_ptr 0x8DC9)
 ; ===========================================================================
 
 ; scenery_list_ptr (seg14 0x8000): word[hub 0..5] -> packed scenery streams.
@@ -1088,331 +1089,1518 @@ spawn_mask_s18:
 ; object_list_ptr (seg14 0x8668): word[hub 0..5] -> packed object streams.
 ; sub_61a5h indexes by 0xD002. Each hub has 3 streams (0xFF-terminated) =
 ; the hub's 3 castle stages (stage 0 shares hub 0 but l61c2h skips it).
-; 0x00 advances to the next room. List-id = actor type; bit7 stripped at
-; spawn (dogs only). Attr = X<<4 | Y, cell*16 px.
+; 0x00 advances to the next room (obj_next_room). List-id = actor_* type
+; (segments/actors.inc); bit7 stripped at spawn (dogs only: actor_dog|080h).
+; Attr = X<<4 | Y, cell*16 px.
 object_list_ptr:
 	defw object_list_h0,object_list_h1,object_list_h2,object_list_h3,object_list_h4,object_list_h5
 
 ; hub 0 = stages 1-3 (0x8674)
 object_list_h0:
 	; stage 1
-	defb 000h              ; next room
-	defb 000h              ; next room
-	defb 005h,088h        ; r2 dog (8,8)
-	defb 000h              ; next room
-	defb 085h,046h        ; r3 dog bit7 (4,6)
-	defb 000h              ; next room
-	defb 000h              ; next room
-	defb 000h              ; next room
-	defb 000h              ; next room
-	defb 085h,06ch        ; r7 dog bit7 (6,12)
-	defb 0ffh              ; end stream
+	defb obj_next_room
+	defb obj_next_room
+	defb actor_dog,088h                 ; r2 (8,8)
+	defb obj_next_room
+	defb actor_dog|080h,046h            ; r3 (4,6)
+	defb obj_next_room
+	defb obj_next_room
+	defb obj_next_room
+	defb obj_next_room
+	defb actor_dog|080h,06ch            ; r7 (6,12)
+	defb obj_end_stream
 	; stage 2
-	defb 0ffh              ; end stream
+	defb obj_end_stream
 	; stage 3
-	defb 005h,087h        ; r0 dog (8,7)
-	defb 000h              ; next room
-	defb 005h,088h        ; r1 dog (8,8)
-	defb 085h,0abh        ; r1 dog bit7 (10,11)
-	defb 000h              ; next room
-	defb 01fh,067h        ; r2 hanging bat (6,7)
-	defb 0ffh              ; end stream
+	defb actor_dog,087h                 ; r0 (8,7)
+	defb obj_next_room
+	defb actor_dog,088h                 ; r1 (8,8)
+	defb actor_dog|080h,0abh            ; r1 (10,11)
+	defb obj_next_room
+	defb actor_placed_bat,067h          ; r2 (6,7)
+	defb obj_end_stream
 
 ; hub 1 = stages 4-6 (0x868E)
 object_list_h1:
 	; stage 4
-	defb 006h,0ceh        ; r0 pikeman (12,14)
-	defb 006h,069h        ; r0 pikeman (6,9)
-	defb 000h              ; next room
-	defb 006h,0c8h        ; r1 pikeman (12,8)
-	defb 006h,064h        ; r1 pikeman (6,4)
-	defb 01fh,034h        ; r1 hanging bat (3,4)
-	defb 000h              ; next room
-	defb 006h,0cbh        ; r2 pikeman (12,11)
-	defb 006h,064h        ; r2 pikeman (6,4)
-	defb 000h              ; next room
-	defb 01fh,033h        ; r3 hanging bat (3,3)
-	defb 000h              ; next room
-	defb 006h,0cah        ; r4 pikeman (12,10)
-	defb 006h,0a6h        ; r4 pikeman (10,6)
-	defb 0ffh              ; end stream
+	defb actor_pikeman,0ceh             ; r0 (12,14)
+	defb actor_pikeman,069h             ; r0 (6,9)
+	defb obj_next_room
+	defb actor_pikeman,0c8h             ; r1 (12,8)
+	defb actor_pikeman,064h             ; r1 (6,4)
+	defb actor_placed_bat,034h          ; r1 (3,4)
+	defb obj_next_room
+	defb actor_pikeman,0cbh             ; r2 (12,11)
+	defb actor_pikeman,064h             ; r2 (6,4)
+	defb obj_next_room
+	defb actor_placed_bat,033h          ; r3 (3,3)
+	defb obj_next_room
+	defb actor_pikeman,0cah             ; r4 (12,10)
+	defb actor_pikeman,0a6h             ; r4 (10,6)
+	defb obj_end_stream
 	; stage 5
-	defb 000h              ; next room
-	defb 000h              ; next room
-	defb 006h,065h        ; r2 pikeman (6,5)
-	defb 000h              ; next room
-	defb 006h,06ah        ; r3 pikeman (6,10)
-	defb 006h,0aah        ; r3 pikeman (10,10)
-	defb 0ffh              ; end stream
+	defb obj_next_room
+	defb obj_next_room
+	defb actor_pikeman,065h             ; r2 (6,5)
+	defb obj_next_room
+	defb actor_pikeman,06ah             ; r3 (6,10)
+	defb actor_pikeman,0aah             ; r3 (10,10)
+	defb obj_end_stream
 	; stage 6
-	defb 000h              ; next room
-	defb 000h              ; next room
-	defb 00ah,05ch        ; r2 skull pile (5,12)
-	defb 0ffh              ; end stream
+	defb obj_next_room
+	defb obj_next_room
+	defb actor_skull_pile,05ch          ; r2 (5,12)
+	defb obj_end_stream
 
 ; hub 2 = stages 7-9 (0x86B6)
 object_list_h2:
 	; stage 7
-	defb 000h              ; next room
-	defb 00dh,095h        ; r1 hunchback (9,5)
-	defb 00dh,09ah        ; r1 hunchback (9,10)
-	defb 000h              ; next room
-	defb 00bh,0b9h        ; r2 white skeleton (11,9)
-	defb 000h              ; next room
-	defb 00bh,0cbh        ; r3 white skeleton (12,11)
-	defb 000h              ; next room
-	defb 00bh,0cdh        ; r4 white skeleton (12,13)
-	defb 00dh,08bh        ; r4 hunchback (8,11)
-	defb 00dh,055h        ; r4 hunchback (5,5)
-	defb 000h              ; next room
-	defb 00bh,093h        ; r5 white skeleton (9,3)
-	defb 000h              ; next room
-	defb 00bh,0b9h        ; r6 white skeleton (11,9)
-	defb 000h              ; next room
-	defb 00ch,057h        ; r7 raven (5,7)
-	defb 000h              ; next room
-	defb 00ch,057h        ; r8 raven (5,7)
-	defb 0ffh              ; end stream
+	defb obj_next_room
+	defb actor_hunchback,095h           ; r1 (9,5)
+	defb actor_hunchback,09ah           ; r1 (9,10)
+	defb obj_next_room
+	defb actor_white_skeleton,0b9h      ; r2 (11,9)
+	defb obj_next_room
+	defb actor_white_skeleton,0cbh      ; r3 (12,11)
+	defb obj_next_room
+	defb actor_white_skeleton,0cdh      ; r4 (12,13)
+	defb actor_hunchback,08bh           ; r4 (8,11)
+	defb actor_hunchback,055h           ; r4 (5,5)
+	defb obj_next_room
+	defb actor_white_skeleton,093h      ; r5 (9,3)
+	defb obj_next_room
+	defb actor_white_skeleton,0b9h      ; r6 (11,9)
+	defb obj_next_room
+	defb actor_raven,057h               ; r7 (5,7)
+	defb obj_next_room
+	defb actor_raven,057h               ; r8 (5,7)
+	defb obj_end_stream
 	; stage 8
-	defb 000h              ; next room
-	defb 000h              ; next room
-	defb 00bh,05dh        ; r2 white skeleton (5,13)
-	defb 000h              ; next room
-	defb 00bh,099h        ; r3 white skeleton (9,9)
-	defb 000h              ; next room
-	defb 000h              ; next room
-	defb 00ch,055h        ; r5 raven (5,5)
-	defb 000h              ; next room
-	defb 00ah,099h        ; r6 skull pile (9,9)
-	defb 00ch,0c5h        ; r6 raven (12,5)
-	defb 000h              ; next room
-	defb 00bh,0c8h        ; r7 white skeleton (12,8)
-	defb 0ffh              ; end stream
+	defb obj_next_room
+	defb obj_next_room
+	defb actor_white_skeleton,05dh      ; r2 (5,13)
+	defb obj_next_room
+	defb actor_white_skeleton,099h      ; r3 (9,9)
+	defb obj_next_room
+	defb obj_next_room
+	defb actor_raven,055h               ; r5 (5,5)
+	defb obj_next_room
+	defb actor_skull_pile,099h          ; r6 (9,9)
+	defb actor_raven,0c5h               ; r6 (12,5)
+	defb obj_next_room
+	defb actor_white_skeleton,0c8h      ; r7 (12,8)
+	defb obj_end_stream
 	; stage 9
-	defb 000h              ; next room
-	defb 00ah,07ch        ; r1 skull pile (7,12)
-	defb 000h              ; next room
-	defb 00ah,075h        ; r2 skull pile (7,5)
-	defb 00ah,07bh        ; r2 skull pile (7,11)
-	defb 000h              ; next room
-	defb 000h              ; next room
-	defb 00ah,075h        ; r4 skull pile (7,5)
-	defb 00bh,07bh        ; r4 white skeleton (7,11)
-	defb 000h              ; next room
-	defb 00dh,075h        ; r5 hunchback (7,5)
-	defb 00dh,057h        ; r5 hunchback (5,7)
-	defb 000h              ; next room
-	defb 00bh,054h        ; r6 white skeleton (5,4)
-	defb 000h              ; next room
-	defb 000h              ; next room
-	defb 00bh,0b3h        ; r8 white skeleton (11,3)
-	defb 00dh,057h        ; r8 hunchback (5,7)
-	defb 0ffh              ; end stream
+	defb obj_next_room
+	defb actor_skull_pile,07ch          ; r1 (7,12)
+	defb obj_next_room
+	defb actor_skull_pile,075h          ; r2 (7,5)
+	defb actor_skull_pile,07bh          ; r2 (7,11)
+	defb obj_next_room
+	defb obj_next_room
+	defb actor_skull_pile,075h          ; r4 (7,5)
+	defb actor_white_skeleton,07bh      ; r4 (7,11)
+	defb obj_next_room
+	defb actor_hunchback,075h           ; r5 (7,5)
+	defb actor_hunchback,057h           ; r5 (5,7)
+	defb obj_next_room
+	defb actor_white_skeleton,054h      ; r6 (5,4)
+	defb obj_next_room
+	defb obj_next_room
+	defb actor_white_skeleton,0b3h      ; r8 (11,3)
+	defb actor_hunchback,057h           ; r8 (5,7)
+	defb obj_end_stream
 
 ; hub 3 = stages 10-12 (0x8706)
 object_list_h3:
 	; stage 10
-	defb 000h              ; next room
-	defb 000h              ; next room
-	defb 000h              ; next room
-	defb 000h              ; next room
-	defb 000h              ; next room
-	defb 000h              ; next room
-	defb 021h,0b3h        ; r6 red merman (11,3)
-	defb 021h,0bch        ; r6 red merman (11,12)
-	defb 000h              ; next room
-	defb 021h,0b8h        ; r7 red merman (11,8)
-	defb 000h              ; next room
-	defb 021h,0b3h        ; r8 red merman (11,3)
-	defb 021h,0bdh        ; r8 red merman (11,13)
-	defb 0ffh              ; end stream
+	defb obj_next_room
+	defb obj_next_room
+	defb obj_next_room
+	defb obj_next_room
+	defb obj_next_room
+	defb obj_next_room
+	defb actor_placed_merman,0b3h       ; r6 (11,3)
+	defb actor_placed_merman,0bch       ; r6 (11,12)
+	defb obj_next_room
+	defb actor_placed_merman,0b8h       ; r7 (11,8)
+	defb obj_next_room
+	defb actor_placed_merman,0b3h       ; r8 (11,3)
+	defb actor_placed_merman,0bdh       ; r8 (11,13)
+	defb obj_end_stream
 	; stage 11
-	defb 000h              ; next room
-	defb 00dh,059h        ; r1 hunchback (5,9)
-	defb 000h              ; next room
-	defb 00dh,077h        ; r2 hunchback (7,7)
-	defb 000h              ; next room
-	defb 000h              ; next room
-	defb 000h              ; next room
-	defb 00eh,07dh        ; r5 bone dragon (7,13)
-	defb 0ffh              ; end stream
+	defb obj_next_room
+	defb actor_hunchback,059h           ; r1 (5,9)
+	defb obj_next_room
+	defb actor_hunchback,077h           ; r2 (7,7)
+	defb obj_next_room
+	defb obj_next_room
+	defb obj_next_room
+	defb actor_bone_dragon,07dh         ; r5 (7,13)
+	defb obj_end_stream
 	; stage 12
-	defb 00eh,09ch        ; r0 bone dragon (9,12)
-	defb 000h              ; next room
-	defb 000h              ; next room
-	defb 000h              ; next room
-	defb 000h              ; next room
-	defb 00eh,065h        ; r4 bone dragon (6,5)
-	defb 000h              ; next room
-	defb 00eh,07dh        ; r5 bone dragon (7,13)
-	defb 000h              ; next room
-	defb 000h              ; next room
-	defb 00eh,096h        ; r7 bone dragon (9,6)
-	defb 000h              ; next room
-	defb 00eh,099h        ; r8 bone dragon (9,9)
-	defb 000h              ; next room
-	defb 000h              ; next room
-	defb 00eh,09ah        ; r10 bone dragon (9,10)
-	defb 000h              ; next room
-	defb 00eh,09eh        ; r11 bone dragon (9,14)
-	defb 0ffh              ; end stream
+	defb actor_bone_dragon,09ch         ; r0 (9,12)
+	defb obj_next_room
+	defb obj_next_room
+	defb obj_next_room
+	defb obj_next_room
+	defb actor_bone_dragon,065h         ; r4 (6,5)
+	defb obj_next_room
+	defb actor_bone_dragon,07dh         ; r5 (7,13)
+	defb obj_next_room
+	defb obj_next_room
+	defb actor_bone_dragon,096h         ; r7 (9,6)
+	defb obj_next_room
+	defb actor_bone_dragon,099h         ; r8 (9,9)
+	defb obj_next_room
+	defb obj_next_room
+	defb actor_bone_dragon,09ah         ; r10 (9,10)
+	defb obj_next_room
+	defb actor_bone_dragon,09eh         ; r11 (9,14)
+	defb obj_end_stream
 
 ; hub 4 = stages 13-15 (0x873F)
 object_list_h4:
 	; stage 13
-	defb 00bh,0bch        ; r0 white skeleton (11,12)
-	defb 009h,05ch        ; r0 red skeleton (5,12)
-	defb 000h              ; next room
-	defb 00bh,054h        ; r1 white skeleton (5,4)
-	defb 00dh,07bh        ; r1 hunchback (7,11)
-	defb 000h              ; next room
-	defb 00dh,055h        ; r2 hunchback (5,5)
-	defb 00dh,05ah        ; r2 hunchback (5,10)
-	defb 00dh,097h        ; r2 hunchback (9,7)
-	defb 00dh,0beh        ; r2 hunchback (11,14)
-	defb 000h              ; next room
-	defb 00bh,056h        ; r3 white skeleton (5,6)
-	defb 00bh,05ch        ; r3 white skeleton (5,12)
-	defb 00dh,09dh        ; r3 hunchback (9,13)
-	defb 000h              ; next room
-	defb 00bh,09ch        ; r4 white skeleton (9,12)
-	defb 009h,0b2h        ; r4 red skeleton (11,2)
-	defb 000h              ; next room
-	defb 00bh,05ch        ; r5 white skeleton (5,12)
-	defb 00bh,077h        ; r5 white skeleton (7,7)
-	defb 00dh,0b6h        ; r5 hunchback (11,6)
-	defb 00dh,0bch        ; r5 hunchback (11,12)
-	defb 000h              ; next room
-	defb 00dh,057h        ; r6 hunchback (5,7)
-	defb 000h              ; next room
-	defb 00bh,056h        ; r7 white skeleton (5,6)
-	defb 00bh,0b4h        ; r7 white skeleton (11,4)
-	defb 000h              ; next room
-	defb 009h,05bh        ; r8 red skeleton (5,11)
-	defb 009h,074h        ; r8 red skeleton (7,4)
-	defb 009h,0bah        ; r8 red skeleton (11,10)
-	defb 000h              ; next room
-	defb 009h,055h        ; r9 red skeleton (5,5)
-	defb 009h,07ch        ; r9 red skeleton (7,12)
-	defb 009h,0b4h        ; r9 red skeleton (11,4)
-	defb 009h,0b7h        ; r9 red skeleton (11,7)
-	defb 000h              ; next room
-	defb 00bh,079h        ; r10 white skeleton (7,9)
-	defb 00bh,0b4h        ; r10 white skeleton (11,4)
-	defb 000h              ; next room
-	defb 00dh,05ah        ; r11 hunchback (5,10)
-	defb 00dh,075h        ; r11 hunchback (7,5)
-	defb 00dh,0b6h        ; r11 hunchback (11,6)
-	defb 0ffh              ; end stream
+	defb actor_white_skeleton,0bch      ; r0 (11,12)
+	defb actor_red_skeleton,05ch        ; r0 (5,12)
+	defb obj_next_room
+	defb actor_white_skeleton,054h      ; r1 (5,4)
+	defb actor_hunchback,07bh           ; r1 (7,11)
+	defb obj_next_room
+	defb actor_hunchback,055h           ; r2 (5,5)
+	defb actor_hunchback,05ah           ; r2 (5,10)
+	defb actor_hunchback,097h           ; r2 (9,7)
+	defb actor_hunchback,0beh           ; r2 (11,14)
+	defb obj_next_room
+	defb actor_white_skeleton,056h      ; r3 (5,6)
+	defb actor_white_skeleton,05ch      ; r3 (5,12)
+	defb actor_hunchback,09dh           ; r3 (9,13)
+	defb obj_next_room
+	defb actor_white_skeleton,09ch      ; r4 (9,12)
+	defb actor_red_skeleton,0b2h        ; r4 (11,2)
+	defb obj_next_room
+	defb actor_white_skeleton,05ch      ; r5 (5,12)
+	defb actor_white_skeleton,077h      ; r5 (7,7)
+	defb actor_hunchback,0b6h           ; r5 (11,6)
+	defb actor_hunchback,0bch           ; r5 (11,12)
+	defb obj_next_room
+	defb actor_hunchback,057h           ; r6 (5,7)
+	defb obj_next_room
+	defb actor_white_skeleton,056h      ; r7 (5,6)
+	defb actor_white_skeleton,0b4h      ; r7 (11,4)
+	defb obj_next_room
+	defb actor_red_skeleton,05bh        ; r8 (5,11)
+	defb actor_red_skeleton,074h        ; r8 (7,4)
+	defb actor_red_skeleton,0bah        ; r8 (11,10)
+	defb obj_next_room
+	defb actor_red_skeleton,055h        ; r9 (5,5)
+	defb actor_red_skeleton,07ch        ; r9 (7,12)
+	defb actor_red_skeleton,0b4h        ; r9 (11,4)
+	defb actor_red_skeleton,0b7h        ; r9 (11,7)
+	defb obj_next_room
+	defb actor_white_skeleton,079h      ; r10 (7,9)
+	defb actor_white_skeleton,0b4h      ; r10 (11,4)
+	defb obj_next_room
+	defb actor_hunchback,05ah           ; r11 (5,10)
+	defb actor_hunchback,075h           ; r11 (7,5)
+	defb actor_hunchback,0b6h           ; r11 (11,6)
+	defb obj_end_stream
 	; stage 14
-	defb 010h,07ch        ; r0 axe knight (7,12)
-	defb 000h              ; next room
-	defb 010h,072h        ; r1 axe knight (7,2)
-	defb 010h,0bah        ; r1 axe knight (11,10)
-	defb 000h              ; next room
-	defb 010h,0b9h        ; r2 axe knight (11,9)
-	defb 000h              ; next room
-	defb 009h,056h        ; r3 red skeleton (5,6)
-	defb 009h,05ch        ; r3 red skeleton (5,12)
-	defb 009h,0b2h        ; r3 red skeleton (11,2)
-	defb 009h,0bah        ; r3 red skeleton (11,10)
-	defb 000h              ; next room
-	defb 010h,059h        ; r4 axe knight (5,9)
-	defb 010h,0b4h        ; r4 axe knight (11,4)
-	defb 000h              ; next room
-	defb 010h,0bah        ; r5 axe knight (11,10)
-	defb 000h              ; next room
-	defb 010h,074h        ; r6 axe knight (7,4)
-	defb 010h,0bch        ; r6 axe knight (11,12)
-	defb 000h              ; next room
-	defb 010h,058h        ; r7 axe knight (5,8)
-	defb 010h,0bdh        ; r7 axe knight (11,13)
-	defb 0ffh              ; end stream
+	defb actor_axe_knight,07ch          ; r0 (7,12)
+	defb obj_next_room
+	defb actor_axe_knight,072h          ; r1 (7,2)
+	defb actor_axe_knight,0bah          ; r1 (11,10)
+	defb obj_next_room
+	defb actor_axe_knight,0b9h          ; r2 (11,9)
+	defb obj_next_room
+	defb actor_red_skeleton,056h        ; r3 (5,6)
+	defb actor_red_skeleton,05ch        ; r3 (5,12)
+	defb actor_red_skeleton,0b2h        ; r3 (11,2)
+	defb actor_red_skeleton,0bah        ; r3 (11,10)
+	defb obj_next_room
+	defb actor_axe_knight,059h          ; r4 (5,9)
+	defb actor_axe_knight,0b4h          ; r4 (11,4)
+	defb obj_next_room
+	defb actor_axe_knight,0bah          ; r5 (11,10)
+	defb obj_next_room
+	defb actor_axe_knight,074h          ; r6 (7,4)
+	defb actor_axe_knight,0bch          ; r6 (11,12)
+	defb obj_next_room
+	defb actor_axe_knight,058h          ; r7 (5,8)
+	defb actor_axe_knight,0bdh          ; r7 (11,13)
+	defb obj_end_stream
 	; stage 15
-	defb 000h              ; next room
-	defb 010h,058h        ; r1 axe knight (5,8)
-	defb 010h,0b5h        ; r1 axe knight (11,5)
-	defb 000h              ; next room
-	defb 010h,055h        ; r2 axe knight (5,5)
-	defb 010h,0b5h        ; r2 axe knight (11,5)
-	defb 000h              ; next room
-	defb 010h,0bch        ; r3 axe knight (11,12)
-	defb 000h              ; next room
-	defb 010h,079h        ; r4 axe knight (7,9)
-	defb 010h,0b6h        ; r4 axe knight (11,6)
-	defb 000h              ; next room
-	defb 000h              ; next room
-	defb 010h,0bah        ; r6 axe knight (11,10)
-	defb 000h              ; next room
-	defb 010h,0bah        ; r7 axe knight (11,10)
-	defb 000h              ; next room
-	defb 010h,0bah        ; r8 axe knight (11,10)
-	defb 0ffh              ; end stream
+	defb obj_next_room
+	defb actor_axe_knight,058h          ; r1 (5,8)
+	defb actor_axe_knight,0b5h          ; r1 (11,5)
+	defb obj_next_room
+	defb actor_axe_knight,055h          ; r2 (5,5)
+	defb actor_axe_knight,0b5h          ; r2 (11,5)
+	defb obj_next_room
+	defb actor_axe_knight,0bch          ; r3 (11,12)
+	defb obj_next_room
+	defb actor_axe_knight,079h          ; r4 (7,9)
+	defb actor_axe_knight,0b6h          ; r4 (11,6)
+	defb obj_next_room
+	defb obj_next_room
+	defb actor_axe_knight,0bah          ; r6 (11,10)
+	defb obj_next_room
+	defb actor_axe_knight,0bah          ; r7 (11,10)
+	defb obj_next_room
+	defb actor_axe_knight,0bah          ; r8 (11,10)
+	defb obj_end_stream
 
 ; hub 5 = stages 16-18 (0x87CE)
 object_list_h5:
 	; stage 16
-	defb 000h              ; next room
-	defb 012h,0b8h        ; r1 giant bat (11,8)
-	defb 000h              ; next room
-	defb 012h,097h        ; r2 giant bat (9,7)
-	defb 000h              ; next room
-	defb 012h,098h        ; r3 giant bat (9,8)
-	defb 000h              ; next room
-	defb 012h,0bah        ; r4 giant bat (11,10)
-	defb 000h              ; next room
-	defb 000h              ; next room
-	defb 000h              ; next room
-	defb 012h,056h        ; r7 giant bat (5,6)
-	defb 000h              ; next room
-	defb 012h,058h        ; r8 giant bat (5,8)
-	defb 0ffh              ; end stream
+	defb obj_next_room
+	defb actor_giant_bat,0b8h           ; r1 (11,8)
+	defb obj_next_room
+	defb actor_giant_bat,097h           ; r2 (9,7)
+	defb obj_next_room
+	defb actor_giant_bat,098h           ; r3 (9,8)
+	defb obj_next_room
+	defb actor_giant_bat,0bah           ; r4 (11,10)
+	defb obj_next_room
+	defb obj_next_room
+	defb obj_next_room
+	defb actor_giant_bat,056h           ; r7 (5,6)
+	defb obj_next_room
+	defb actor_giant_bat,058h           ; r8 (5,8)
+	defb obj_end_stream
 	; stage 17
-	defb 000h              ; next room
-	defb 00bh,0b6h        ; r1 white skeleton (11,6)
-	defb 000h              ; next room
-	defb 00dh,07eh        ; r2 hunchback (7,14)
-	defb 000h              ; next room
-	defb 010h,076h        ; r3 axe knight (7,6)
-	defb 000h              ; next room
-	defb 010h,05bh        ; r4 axe knight (5,11)
-	defb 010h,0bah        ; r4 axe knight (11,10)
-	defb 000h              ; next room
-	defb 010h,053h        ; r5 axe knight (5,3)
-	defb 000h              ; next room
-	defb 00dh,079h        ; r6 hunchback (7,9)
-	defb 00dh,0b9h        ; r6 hunchback (11,9)
-	defb 000h              ; next room
-	defb 000h              ; next room
-	defb 00dh,053h        ; r8 hunchback (5,3)
-	defb 000h              ; next room
-	defb 00dh,055h        ; r9 hunchback (5,5)
-	defb 0ffh              ; end stream
+	defb obj_next_room
+	defb actor_white_skeleton,0b6h      ; r1 (11,6)
+	defb obj_next_room
+	defb actor_hunchback,07eh           ; r2 (7,14)
+	defb obj_next_room
+	defb actor_axe_knight,076h          ; r3 (7,6)
+	defb obj_next_room
+	defb actor_axe_knight,05bh          ; r4 (5,11)
+	defb actor_axe_knight,0bah          ; r4 (11,10)
+	defb obj_next_room
+	defb actor_axe_knight,053h          ; r5 (5,3)
+	defb obj_next_room
+	defb actor_hunchback,079h           ; r6 (7,9)
+	defb actor_hunchback,0b9h           ; r6 (11,9)
+	defb obj_next_room
+	defb obj_next_room
+	defb actor_hunchback,053h           ; r8 (5,3)
+	defb obj_next_room
+	defb actor_hunchback,055h           ; r9 (5,5)
+	defb obj_end_stream
 	; stage 18
-	defb 000h              ; next room
-	defb 010h,056h        ; r1 axe knight (5,6)
-	defb 000h              ; next room
-	defb 010h,095h        ; r2 axe knight (9,5)
-	defb 000h              ; next room
-	defb 00dh,07dh        ; r3 hunchback (7,13)
-	defb 00dh,077h        ; r3 hunchback (7,7)
-	defb 000h              ; next room
-	defb 00dh,077h        ; r4 hunchback (7,7)
-	defb 00dh,053h        ; r4 hunchback (5,3)
-	defb 000h              ; next room
-	defb 00dh,05ah        ; r5 hunchback (5,10)
-	defb 00dh,054h        ; r5 hunchback (5,4)
-	defb 000h              ; next room
-	defb 00dh,07bh        ; r6 hunchback (7,11)
-	defb 00dh,0b4h        ; r6 hunchback (11,4)
-	defb 000h              ; next room
-	defb 00dh,079h        ; r7 hunchback (7,9)
-	defb 00dh,055h        ; r7 hunchback (5,5)
-	defb 000h              ; next room
-	defb 010h,0b6h        ; r8 axe knight (11,6)
-	defb 0ffh              ; end stream
+	defb obj_next_room
+	defb actor_axe_knight,056h          ; r1 (5,6)
+	defb obj_next_room
+	defb actor_axe_knight,095h          ; r2 (9,5)
+	defb obj_next_room
+	defb actor_hunchback,07dh           ; r3 (7,13)
+	defb actor_hunchback,077h           ; r3 (7,7)
+	defb obj_next_room
+	defb actor_hunchback,077h           ; r4 (7,7)
+	defb actor_hunchback,053h           ; r4 (5,3)
+	defb obj_next_room
+	defb actor_hunchback,05ah           ; r5 (5,10)
+	defb actor_hunchback,054h           ; r5 (5,4)
+	defb obj_next_room
+	defb actor_hunchback,07bh           ; r6 (7,11)
+	defb actor_hunchback,0b4h           ; r6 (11,4)
+	defb obj_next_room
+	defb actor_hunchback,079h           ; r7 (7,9)
+	defb actor_hunchback,055h           ; r7 (5,5)
+	defb obj_next_room
+	defb actor_axe_knight,0b6h          ; r8 (11,6)
+	defb obj_end_stream
 
-; Sound / VDP remainder (seg14 0x8824). IRQ tick at 0x8964; play_sound
-; sfx word table 0x8D8D, music 6-byte records 0x8DC9. Not yet reversed.
-	INCBIN "seg14.bin", 0x0824, 0x17DC
+; credits_font (seg14 0x8824): 40 x 8x8 1bpp glyphs for the ending message
+; and credits.  Loaded by credits_font_load (seg0 0x53E5) from sub_6719h.
+; First 14 at VRAM dest DE=0x8040 (digits 0-9, then . ' : ,); A-Z at
+; DE=0x0848.  Each defb is one row, MSB = left pixel.
+; Preview: gfx/credits_font.png.
+credits_font:
+; '0'
+	defb %01111100
+	defb %11000100
+	defb %10000110
+	defb %10000010
+	defb %11000010
+	defb %01000110
+	defb %01111100
+	defb %00000000
 
+; '1'
+	defb %00011000
+	defb %00110000
+	defb %00010000
+	defb %00010000
+	defb %00010000
+	defb %00100000
+	defb %00111000
+	defb %00000000
+
+; '2'
+	defb %01111100
+	defb %10000010
+	defb %11000010
+	defb %00011100
+	defb %01100000
+	defb %10000010
+	defb %11111110
+	defb %00000000
+
+; '3'
+	defb %01111100
+	defb %10000010
+	defb %00000110
+	defb %00011000
+	defb %00000110
+	defb %10000010
+	defb %01111100
+	defb %00000000
+
+; '4'
+	defb %00001110
+	defb %00010010
+	defb %00100100
+	defb %01000100
+	defb %10000110
+	defb %11111010
+	defb %00000110
+	defb %00000000
+
+; '5'
+	defb %11111110
+	defb %01000000
+	defb %01111000
+	defb %11000110
+	defb %00000010
+	defb %11000010
+	defb %00111100
+	defb %00000000
+
+; '6'
+	defb %00111100
+	defb %01000000
+	defb %10111100
+	defb %11000110
+	defb %10000010
+	defb %10000110
+	defb %01111100
+	defb %00000000
+
+; '7'
+	defb %11111110
+	defb %10000010
+	defb %01000100
+	defb %00001000
+	defb %00001000
+	defb %00010000
+	defb %00011000
+	defb %00000000
+
+; '8'
+	defb %01111100
+	defb %10000110
+	defb %10000010
+	defb %01111100
+	defb %10000010
+	defb %11000010
+	defb %01111100
+	defb %00000000
+
+; '9'
+	defb %01111100
+	defb %11000010
+	defb %10000010
+	defb %11000110
+	defb %01111010
+	defb %00000100
+	defb %01111000
+	defb %00000000
+
+; '.'
+	defb %00000000
+	defb %00000000
+	defb %00000000
+	defb %00000000
+	defb %00000000
+	defb %01100000
+	defb %01100000
+	defb %00000000
+
+; "'"
+	defb %01100000
+	defb %01100000
+	defb %00100000
+	defb %01000000
+	defb %00000000
+	defb %00000000
+	defb %00000000
+	defb %00000000
+
+; ':'
+	defb %00000000
+	defb %00011000
+	defb %00011000
+	defb %00000000
+	defb %00011000
+	defb %00011000
+	defb %00000000
+	defb %00000000
+
+; ','
+	defb %00000000
+	defb %00000000
+	defb %00000000
+	defb %00000000
+	defb %00110000
+	defb %00110000
+	defb %00010000
+	defb %00100000
+
+; A-Z (seg14 0x8894)
+credits_font_az:
+; 'A'
+	defb %00111000
+	defb %01000100
+	defb %01000100
+	defb %10000010
+	defb %11100010
+	defb %10011110
+	defb %11000110
+	defb %00000000
+
+; 'B'
+	defb %11111100
+	defb %10000010
+	defb %01000100
+	defb %01111000
+	defb %01000100
+	defb %10000010
+	defb %11111100
+	defb %00000000
+
+; 'C'
+	defb %00111100
+	defb %01000110
+	defb %10000000
+	defb %10000000
+	defb %10000000
+	defb %01000110
+	defb %00111100
+	defb %00000000
+
+; 'D'
+	defb %11111000
+	defb %10000100
+	defb %01000010
+	defb %01000010
+	defb %01000010
+	defb %10000100
+	defb %11111000
+	defb %00000000
+
+; 'E'
+	defb %11111100
+	defb %10000110
+	defb %01000000
+	defb %01111000
+	defb %01000000
+	defb %10000110
+	defb %11111100
+	defb %00000000
+
+; 'F'
+	defb %11111100
+	defb %10000110
+	defb %01000000
+	defb %01111000
+	defb %01000000
+	defb %10000000
+	defb %11000000
+	defb %00000000
+
+; 'G'
+	defb %00111100
+	defb %01000110
+	defb %10000000
+	defb %10001110
+	defb %10000010
+	defb %01000110
+	defb %00111100
+	defb %00000000
+
+; 'H'
+	defb %11000110
+	defb %10000010
+	defb %01000100
+	defb %01111100
+	defb %01000100
+	defb %10000010
+	defb %11000110
+	defb %00000000
+
+; 'I'
+	defb %00111000
+	defb %00100000
+	defb %00010000
+	defb %00010000
+	defb %00010000
+	defb %00001000
+	defb %00111000
+	defb %00000000
+
+; 'J'
+	defb %00001110
+	defb %00000010
+	defb %00000100
+	defb %10000100
+	defb %10000100
+	defb %11001100
+	defb %01111000
+	defb %00000000
+
+; 'K'
+	defb %11000110
+	defb %10001100
+	defb %01010000
+	defb %01100000
+	defb %01010000
+	defb %10010000
+	defb %11001110
+	defb %00000000
+
+; 'L'
+	defb %11000000
+	defb %10000000
+	defb %01000000
+	defb %01000000
+	defb %01000010
+	defb %10000110
+	defb %11111100
+	defb %00000000
+
+; 'M'
+	defb %11000110
+	defb %01000100
+	defb %01101100
+	defb %01010100
+	defb %01010100
+	defb %10000010
+	defb %11000110
+	defb %00000000
+
+; 'N'
+	defb %11000110
+	defb %01000010
+	defb %01100100
+	defb %01010100
+	defb %01001100
+	defb %10000100
+	defb %11000110
+	defb %00000000
+
+; 'O'
+	defb %00111100
+	defb %01000110
+	defb %11000010
+	defb %10000010
+	defb %10000110
+	defb %11000100
+	defb %01111000
+	defb %00000000
+
+; 'P'
+	defb %11111100
+	defb %10000110
+	defb %01000010
+	defb %01000110
+	defb %01111100
+	defb %10000000
+	defb %11000000
+	defb %00000000
+
+; 'Q'
+	defb %00111100
+	defb %01000110
+	defb %11000010
+	defb %10000010
+	defb %10011110
+	defb %11000100
+	defb %01111110
+	defb %00000000
+
+; 'R'
+	defb %11111100
+	defb %10000010
+	defb %01000010
+	defb %01111100
+	defb %01001000
+	defb %10001000
+	defb %11000110
+	defb %00000000
+
+; 'S'
+	defb %01111100
+	defb %10000110
+	defb %11000000
+	defb %01111100
+	defb %00000110
+	defb %11000010
+	defb %01111100
+	defb %00000000
+
+; 'T'
+	defb %01111100
+	defb %10010010
+	defb %00010000
+	defb %00010000
+	defb %00010000
+	defb %00001000
+	defb %00111000
+	defb %00000000
+
+; 'U'
+	defb %11000110
+	defb %10000010
+	defb %01000100
+	defb %10000010
+	defb %10000010
+	defb %11000110
+	defb %01111100
+	defb %00000000
+
+; 'V'
+	defb %11000110
+	defb %10000010
+	defb %01000100
+	defb %01000100
+	defb %01101100
+	defb %00101000
+	defb %00111000
+	defb %00000000
+
+; 'W'
+	defb %11000110
+	defb %10010010
+	defb %01010100
+	defb %01010100
+	defb %01101100
+	defb %11000110
+	defb %10000010
+	defb %00000000
+
+; 'X'
+	defb %11000110
+	defb %10000010
+	defb %01000100
+	defb %00111000
+	defb %01000100
+	defb %10000010
+	defb %11000110
+	defb %00000000
+
+; 'Y'
+	defb %11000110
+	defb %10000010
+	defb %01000100
+	defb %00101000
+	defb %00010000
+	defb %00001000
+	defb %00111000
+	defb %00000000
+
+; 'Z'
+	defb %11111110
+	defb %10000010
+	defb %00011100
+	defb %00010000
+	defb %01110000
+	defb %10000010
+	defb %11111110
+	defb %00000000
+
+; ---------------------------------------------------------------------------
+;  PSG driver.  play_sound (seg0) queues ids; this tick writes the AY.
+;  Channel state is 20 bytes (template at seg0 0x515D).  Music bytecode
+;  and sfx streams live at 0x8E2B+ (tails in seg15).
+; ---------------------------------------------------------------------------
+
+; sound_tick (seg14 0x8964): per-frame PSG driver.  int_handler pages
+; segs 14+15 then calls here.  C010/C012/C014/C016 are channel ticks
+; (music A/B/C + sfx); C018/C01A are the 0xFB/0xFD overlays.
+; C097 = AY mixer shadow (reg 7); C098 bit0=FD, bit1=FB.
+; C0A5/C0A6 = fade timer used by play_sound 0xFF.
+sound_tick:
+	ld a,(0c097h)                   ; AY mixer shadow
+	ld e,a
+	ld a,007h                       ; PSG reg 7 (mixer)
+	call WRTPSG
+	ld a,(0c098h)
+	bit 0,a                         ; 0xFD overlay active?
+	jp nz,sound_fd_tick
+	bit 1,a                         ; 0xFB overlay active?
+	jp nz,sound_fb_tick
+	ld a,(0c0a5h)                   ; fade / 0xFF timer (lo)
+	dec a
+	jp m,snd_89a5
+	jp nz,snd_89a2
+	ld a,(0c0a6h)                   ; fade / 0xFF timer (hi-ish)
+	dec a
+	ld (0c0a6h),a
+	cp 0f0h
+	jp nz,snd_89a0
+	ld hl,sound_idle
+	ld (0c010h),hl
+	ld (0c012h),hl
+	ld (0c014h),hl
+	xor a
+	jp snd_89a2
+snd_89a0:
+	ld a,03ah
+snd_89a2:
+	ld (0c0a5h),a
+snd_89a5:
+	xor a
+	ld b,a
+	ld hl,(0c010h)                  ; channel A tick
+	call sound_ch_go
+	ld a,001h
+	ld b,a
+	ld hl,(0c012h)                  ; channel B tick
+	call sound_ch_go
+	ld a,002h
+	ld b,a
+	ld hl,(0c014h)                  ; channel C tick
+sound_ch_dispatch:
+	call sound_ch_go
+	ld a,002h
+	ld b,003h
+	ld hl,(0c016h)                  ; sfx tick (slot 3)
+
+; sound_ch_go (0x89C6): A = PSG channel 0..2 (or 0 for sfx slot),
+; B = slot id 0..3 (C095), HL = tick.  jp (HL).
+sound_ch_go:
+	ld (0c094h),a                   ; current PSG channel 0..2
+	ld a,b
+	ld (0c095h),a                   ; current slot 0..3
+	jp (hl)                         ; run this channel's tick
+
+; sound_idle (0x89CE): silent tick.  On the sfx slot (C095==3) it
+; also clears current sfx id C096.  Replaces this slot's pointer
+; with a one-shot ret and writes volume 0.
+sound_idle:
+	ld a,(0c095h)
+	cp 003h
+	jp nz,snd_89dd
+	xor a
+	ld (0c096h),a                   ; clear current sfx id
+	ld a,(0c095h)
+snd_89dd:
+	rlca                            ; *2 -> word slot in C010..C016
+	ld hl,0c010h
+	add a,l
+	ld l,a
+	jr nc,snd_89e6
+	inc h
+snd_89e6:
+	ld de,snd_89f1
+	ld (hl),e
+	inc hl
+	ld (hl),d
+	ld e,000h                       ; volume 0 / period 0
+	jp sound_psg_vol
+snd_89f1:
+	ret
+
+; play_sound 0xFD overlay (C098 bit0): jp (C01A) — usually sound_ch_fd.
+sound_fd_tick:
+	ld hl,(0c01ah)                  ; 0xFD tick pointer
+	jp (hl)
+
+; play_sound 0xFB overlay (C098 bit1): run C018 as slot 4.
+sound_fb_tick:
+	xor a
+	ld b,004h
+	ld hl,(0c018h)                  ; 0xFB tick pointer
+	jp sound_ch_dispatch
+
+; write 12-bit period DE to AY: fine = C094*2, coarse = fine+1.
+sound_psg_period:
+	ld a,(0c094h)
+	rlca
+	call WRTPSG
+	inc a
+	ld e,d
+	jp WRTPSG
+
+; write E to AY amplitude register 8+C094 (channels A/B/C).
+sound_psg_vol:
+	ld a,(0c094h)
+	add a,008h                      ; amplitude regs 8/9/10
+	jp WRTPSG
+
+; mixer helpers: pick a 6-byte AND/OR table, index by C094, write AY 7.
+sound_mix_mute:
+	push hl
+	ld hl,sound_mix_mute_tbl
+	jp sound_mix_apply
+sound_mix_both:
+	push hl
+	ld hl,sound_mix_both_tbl
+	jp sound_mix_apply
+sound_mix_noise:
+	push hl
+	ld hl,sound_mix_noise_tbl
+	jp sound_mix_apply
+sound_mix_tone:
+	push hl
+	ld hl,sound_mix_tone_tbl
+sound_mix_apply:
+	ld a,(0c094h)
+	rlca
+	add a,l
+	ld l,a
+	jr nc,snd_8a35
+	inc h
+snd_8a35:
+	ld a,(0c097h)
+	and (hl)               ; enable bits
+	inc hl
+	or (hl)                ; disable bits
+	ld (0c097h),a
+	pop hl
+	ld e,a
+	ld a,007h              ; AY mixer
+	jp WRTPSG
+
+; 3 x (AND, OR) for AY mixer reg 7.  0 = enable, 1 = disable.
+; tone = enable tone / disable noise; noise = the inverse; both =
+; enable both; mute = disable both.  Indexed by C094 (0=A,1=B,2=C).
+sound_mix_tone_tbl:
+	defb 0feh,008h         ; A enable tone, disable noise
+	defb 0fdh,010h         ; B
+	defb 0fbh,020h         ; C
+sound_mix_noise_tbl:
+	defb 0f7h,001h         ; A enable noise, disable tone
+	defb 0efh,002h         ; B
+	defb 0dfh,004h         ; C
+sound_mix_both_tbl:
+	defb 0f6h,000h         ; A tone+noise
+	defb 0edh,000h         ; B
+	defb 0dbh,000h         ; C
+sound_mix_mute_tbl:
+	defb 0ffh,009h         ; A mute
+	defb 0ffh,012h         ; B
+	defb 0ffh,024h         ; C
+
+; Channel entry stubs.  20-byte state at IX; music uses C01C/C030/C044,
+; sfx C058, 0xFB uses C06C, 0xFD uses C080.  +0/+1 = stream ptr,
+; +2 flags, +3 duration scale, +7 octave (SRL count), +9 duration.
+sound_ch_fd:
+	ld ix,0c080h                    ; 0xFD state block
+	jp sound_ch_tick
+sound_ch_a:
+	ld ix,0c01ch                    ; music A
+	jp sound_ch_tick
+sound_ch_b:
+	ld ix,0c030h                    ; music B
+	jp sound_ch_tick
+sound_ch_c:
+	ld ix,0c044h                    ; music C
+
+; Common music tick.  Duration at IX+9; on expiry fetch next byte.
+; Bit0 of IX+2 = tone note (vs rest/env).  If sfx id C096 is live on
+; channel C, set IX+2 bit5 so music C yields the PSG to sfx.
+sound_ch_tick:
+	ld a,(0c095h)
+	cp 002h                ; music C?
+	jp nz,snd_8a89
+	ld a,(0c096h)
+	or a
+	jp z,snd_8a89
+	set 5,(ix+002h)        ; sfx live: yield PSG C
+snd_8a89:
+	dec (ix+009h)          ; duration
+	jp z,snd_8aca          ; expired -> fetch next bytecode
+	bit 0,(ix+002h)        ; 1 = pitched note
+	jp z,snd_8ab3
+	ld a,(ix+009h)
+	cp (ix+00bh)           ; still in attack (before decay start)?
+	jp nc,snd_8aa3
+	cp (ix+006h)           ; past decay end -> hold volume
+	ret nc
+snd_8aa3:
+	ld e,(ix+00ah)         ; current volume
+	dec e                  ; decay 1 per tick
+	ret m                  ; already 0
+	ld (ix+00ah),e
+	bit 5,(ix+002h)        ; sfx owns PSG C?
+	ret nz
+	jp sound_psg_vol
+snd_8ab3:
+	bit 5,(ix+002h)        ; sfx owns PSG C?
+	ret nz
+	bit 7,(ix+002h)        ; env already finished?
+	ret nz
+	call sound_sfx_fetch   ; rest/env: sfx-style period stream
+	ret nc                 ; NC = still holding
+	set 7,(ix+002h)        ; done: mute
+	ld e,000h
+	jp sound_psg_vol
+snd_8aca:
+	ld l,(ix+000h)         ; stream ptr
+	ld h,(ix+001h)
+
+; Music bytecode at (HL).  <0xC0 = note (hi nibble = index into the
+; period table, lo = duration count * IX+3).  0xC0..CF = rest.
+; >=0xD0 = command (see sound_cmd).
+sound_fetch:
+	ld a,(hl)
+	inc hl
+	ld c,a
+	cp 0d0h                         ; >= 0xD0 -> command
+	jp nc,sound_cmd
+	ld (ix+000h),l
+	ld (ix+001h),h
+	cp 0c0h                         ; >= 0xC0 -> rest
+	jp nc,sound_rest                ; rest, not a pitched note
+	and 00fh               ; lo nibble = duration count
+	inc a
+	ld b,a
+	ld e,(ix+003h)         ; duration scale (cmd 0xD0)
+	xor a
+snd_8aeb:
+	add a,e                ; duration = (lo+1) * scale
+	djnz snd_8aeb
+	ld (ix+009h),a
+	ld a,(0c095h)
+	cp 002h                ; music C?
+	jp nz,snd_8b04
+	ld a,(0c096h)
+	or a                   ; sfx live?
+	jp nz,snd_8b04
+	res 5,(ix+002h)        ; reclaim PSG C
+snd_8b04:
+	bit 0,(ix+002h)        ; 1 = pitched tone
+	jp z,snd_8b53
+	ld a,(ix+009h)
+	sub (ix+005h)          ; decay-start offset
+	ld (ix+00bh),a
+	bit 5,(ix+002h)        ; sfx owns PSG C?
+	ret nz
+	ld a,c
+	and 0f0h               ; hi nibble = note index
+	rrca
+	rrca
+	rrca                   ; *2 -> word offset
+	ld hl,sound_note_tbl
+	add a,l
+	ld l,a
+	jr nc,snd_8b27
+	inc h
+snd_8b27:
+	ld e,(hl)              ; period lo
+	inc hl
+	ld d,(hl)              ; period hi
+	ld b,(ix+007h)         ; extra SRL = drop octaves
+snd_8b2d:
+	srl d
+	rr e
+	djnz snd_8b2d
+	bit 6,(ix+002h)        ; detune?
+	jp z,snd_8b3c
+	inc de                 ; +2 period
+	inc de
+snd_8b3c:
+	call sound_psg_period
+	ld a,(0c0a6h)          ; fade offset
+	add a,(ix+004h)        ; + base volume
+	jp p,snd_8b49
+	xor a                  ; clamp 0
+snd_8b49:
+	ld (ix+00ah),a         ; current volume
+	ld e,a
+	call sound_psg_vol
+	jp sound_mix_tone
+snd_8b53:
+	bit 2,(ix+002h)        ; alt env table?
+	jp nz,snd_8b7b
+	ld hl,0aad6h                    ; seg15 env/period table
+snd_8b5d:
+	ld a,c
+	and 0f0h               ; hi nibble = env index
+	rrca
+	rrca
+	rrca                   ; *2 -> word offset
+	add a,l
+	ld l,a
+	jr nc,snd_8b68
+	inc h
+snd_8b68:
+	ld a,(hl)
+	ld (ix+00ch),a         ; env stream ptr lo
+	inc hl
+	ld a,(hl)
+	ld (ix+00dh),a         ; env stream ptr hi
+	res 7,(ix+002h)        ; not finished
+	ld a,001h
+	ld (ix+00eh),a         ; duration 1 -> fetch next tick
+	ret
+snd_8b7b:
+	ld hl,0aaeeh                    ; seg15 alt env/period table
+	jp snd_8b5d
+; One octave of AY periods (little-endian, 12 notes).  Hi nibble of a
+; note byte * 2 indexes this; IX+7 extra SRL steps drop octaves.
+; Noise/env notes instead use the seg15 tables at 0xAAD6 / 0xAAEE.
+sound_note_tbl:
+	defw 01ab8h,01938h,017d0h,01678h
+	defw 01534h,01404h,012e4h,011d4h
+	defw 010d4h,00fe4h,00f00h,00e28h
+
+; Rest (bytecode 0xC0..CF): duration only, force period 0.
+sound_rest:
+	and 00fh               ; lo nibble = duration count
+	inc a
+	ld b,a
+	ld e,(ix+003h)         ; duration scale
+	xor a
+snd_8ba1:
+	add a,e                ; duration = (lo+1) * scale
+	djnz snd_8ba1
+	ld (ix+009h),a
+	bit 5,(ix+002h)        ; sfx owns PSG C?
+	ret nz
+	ld e,000h
+	ld (ix+00ah),e         ; volume 0
+	jp sound_psg_vol
+
+; Commands: hi nibble D = set duration scale (lo nibble -> IX+3);
+; E = extended (lo selects octave / lock / jump / call / return);
+; lo=0xE = loop (count, addr); lo=0xF = end channel (clear C0A7 bit).
+; Other lo nibbles load envelope (IX+4/+5/+6).
+sound_cmd:
+	and 0f0h
+	cp 0d0h                         ; 0xD0 | scale
+	jp z,snd_8c06
+	cp 0e0h                         ; 0xE0 | sub-op
+	jp z,snd_8c0f
+	ld a,c
+	and 00fh
+	cp 00fh
+	jp z,snd_8c80
+	cp 00eh
+	jp nz,snd_8bed         ; other lo = envelope params
+	ld a,(ix+010h)
+	dec a
+	jp z,snd_8be4          ; loop count done -> skip addr
+	jp p,snd_8bd9
+	ld a,(hl)
+	dec a
+snd_8bd9:
+	inc hl
+	ld (ix+010h),a         ; loop count
+	ld a,(hl)
+	inc hl
+	ld h,(hl)
+	ld l,a                 ; jump to loop addr
+	jp sound_fetch
+snd_8be4:
+	ld (ix+010h),a
+	inc hl
+	inc hl
+	inc hl                 ; skip count + addr
+	jp sound_fetch
+snd_8bed:
+	inc a
+	ld (ix+004h),a         ; base volume
+	ld a,(hl)
+	rrca
+	rrca
+	rrca
+	rrca
+	and 00fh
+	dec a
+	ld (ix+005h),a         ; decay start
+	ld a,(hl)
+	inc hl
+	and 00fh
+	ld (ix+006h),a         ; decay end
+	jp sound_fetch
+snd_8c06:
+	ld a,c
+	and 00fh
+	ld (ix+003h),a         ; duration scale
+	jp sound_fetch
+snd_8c0f:
+	ld a,c
+	and 00fh
+	cp 006h
+	jp c,snd_8c42
+	jp z,snd_8c4c
+	cp 007h
+	jp z,snd_8c5b
+	cp 00ah
+	jp z,snd_8c62
+	cp 00bh
+	jp z,snd_8c54
+	cp 00dh
+	jp z,snd_8c69
+	cp 00eh
+	jp z,snd_8c77
+	and 007h
+	ld b,a
+	ld a,(ix+002h)
+	and 0f8h
+	or b                   ; E0 | 0..5 / 8 / 9 / C: store lo into flags
+	ld (ix+002h),a
+	jp sound_fetch
+snd_8c42:
+	neg
+	add a,006h
+	ld (ix+007h),a         ; octave = 6 - lo_nibble (SRL count)
+	jp sound_fetch
+snd_8c4c:
+	ld a,001h
+	ld (0c0a8h),a          ; lock (block new sfx)
+	jp sound_fetch
+snd_8c54:
+	xor a
+	ld (0c0a8h),a          ; unlock
+	jp sound_fetch
+snd_8c5b:
+	set 6,(ix+002h)        ; detune (+2 period)
+	jp sound_fetch
+snd_8c62:
+	ld a,(hl)
+	inc hl
+	ld h,(hl)
+	ld l,a                 ; jump to addr
+	jp sound_fetch
+snd_8c69:
+	ld e,(hl)
+	inc hl
+	ld d,(hl)
+	inc hl
+	ld (ix+012h),l         ; call: save return
+	ld (ix+013h),h
+	ex de,hl
+	jp sound_fetch
+snd_8c77:
+	ld l,(ix+012h)         ; return
+	ld h,(ix+013h)
+	jp sound_fetch
+snd_8c80:
+	ld a,(0c095h)
+	inc a
+	ld b,a
+	ld a,07fh
+snd_8c87:
+	rlca                   ; bit mask for this slot
+	djnz snd_8c87
+	ld b,a
+	ld a,(0c0a7h)
+	and b
+	ld (0c0a7h),a          ; clear this channel's live bit
+	jp sound_idle
+
+; SFX / 0xFB channel.  Stream ptr at IX+0C; duration IX+0E/+0F.
+; Byte 0xFF ends (CY -> idle); 0xFE = loop; 0x1x = noise period;
+; 0x2x = mixer; else volume nibble + period byte.
+sound_ch_fb:
+	ld ix,0c06ch                    ; 0xFB state block
+	jp sound_sfx_go
+sound_sfx:
+	ld ix,0c058h                    ; sfx state block
+sound_sfx_go:
+	call sound_sfx_fetch
+	ret nc
+	jp sound_idle
+sound_sfx_fetch:
+	dec (ix+00eh)
+	jp nz,sound_sfx_hold
+	ld a,(ix+00fh)
+	ld (ix+00eh),a
+	ld l,(ix+00ch)
+	ld h,(ix+00dh)
+snd_8cb9:
+	ld a,(hl)
+	cp 0ffh                         ; 0xFF = end of sfx
+	jp z,sfx_ptr                    ; CY = finished
+	inc hl
+	ld c,a
+	cp 0feh                         ; 0xFE = sfx loop
+	jp z,snd_8d18
+	and 0f0h
+	cp 020h
+	jp z,snd_8d38
+	cp 010h
+	jp nz,snd_8ce1
+	ld a,c
+	and 00fh
+	rlca
+	ld e,a
+	ld a,006h              ; AY noise period
+	call WRTPSG
+	ld a,(hl)
+	inc hl
+	ld c,a
+	and 0f0h
+snd_8ce1:
+	rrca
+	rrca
+	rrca
+	rrca
+	ld e,a
+	bit 4,(ix+00ah)
+	jp z,snd_8cf5
+	ld a,00dh              ; AY envelope shape
+	call WRTPSG
+	jp snd_8d09
+snd_8cf5:
+	ld a,(0c095h)
+	cp 003h
+	jp nc,snd_8d06
+	ld a,(0c0a6h)
+	add a,e
+	jp p,snd_8d05
+	xor a
+snd_8d05:
+	ld e,a
+snd_8d06:
+	call sound_psg_vol
+snd_8d09:
+	ld a,c
+	and 00fh
+	ld d,a
+	ld e,(hl)
+	inc hl
+	ld (ix+00ch),l
+	ld (ix+00dh),h
+	jp sound_psg_period
+snd_8d18:
+	ld a,(ix+011h)         ; 0xFE loop count
+	dec a
+	jp z,snd_8d2f          ; count done -> skip addr
+	jp p,snd_8d24
+	ld a,(hl)
+	dec a
+snd_8d24:
+	inc hl
+	ld (ix+011h),a
+	ld a,(hl)
+	inc hl
+	ld h,(hl)
+	ld l,a                 ; jump to loop addr
+	jp snd_8cb9
+snd_8d2f:
+	ld (ix+011h),a
+	inc hl
+	inc hl
+	inc hl                 ; skip count + addr
+	jp snd_8cb9
+snd_8d38:
+	bit 0,c
+	jp nz,snd_8d4e
+	bit 1,c
+	jp nz,snd_8d48
+	call sound_mix_mute    ; 0x20: mute
+	jp snd_8d5c
+snd_8d48:
+	call sound_mix_tone    ; 0x22: tone
+	jp snd_8d5c
+snd_8d4e:
+	bit 1,c
+	jp nz,snd_8d59
+	call sound_mix_noise   ; 0x21: noise
+	jp snd_8d5c
+snd_8d59:
+	call sound_mix_both    ; 0x23: tone+noise
+snd_8d5c:
+	ld a,c
+	rlca
+	and 010h
+	ld (ix+00ah),a
+	ld e,a
+	call sound_psg_vol
+	ld a,(hl)
+	inc hl
+	ld (ix+00eh),a
+	ld (ix+00fh),a
+	ld a,c
+	cp 020h
+	jp z,sound_sfx_hold
+	cp 028h
+	jp c,snd_8cb9
+	ld e,(hl)
+	inc hl
+	ld a,00ch              ; AY envelope period coarse
+	call WRTPSG
+	ld e,(hl)
+	inc hl
+	ld a,00bh              ; AY envelope period fine
+	call WRTPSG
+	jp snd_8cb9
+
+; NC = keep this sfx tick; CY (sfx_ptr) = finished -> idle.
+sound_sfx_hold:
+	or a
+	ret
+sfx_ptr:
+	scf
+	ret
+
+; sfx_tbl (seg14 0x8D8F): word[id 1..0x1D].  play_sound does rlca
+; (id*2) from sfx_ptr=0x8D8D, so id 0 would hit the `scf` byte.
+sfx_tbl:
+	defw sfx_01           ; 01 placed-enemy / grunt
+	defw sfx_02           ; 02 vendor offer withdrawn
+	defw sfx_03           ; 03 projectile tick
+	defw sfx_04           ; 04 axe throw
+	defw sfx_05           ; 05 whip
+	defw sfx_06           ; 06 axe fly
+	defw sfx_07           ; 07 jump
+	defw sfx_08           ; 08
+	defw sfx_09           ; 09 door / stair
+	defw sfx_0a           ; 0A
+	defw sfx_0b           ; 0B Simon hurt
+	defw sfx_0c           ; 0C hit
+	defw sfx_0d           ; 0D kill
+	defw sfx_0e           ; 0E
+	defw sfx_0f           ; 0F heart
+	defw sfx_10           ; 10 vendor leave / money bag
+	defw sfx_11           ; 11
+	defw sfx_12           ; 12 collect / purchase
+	defw sfx_13           ; 13
+	defw sfx_14           ; 14 yellow key
+	defw sfx_15           ; 15 portal flash
+	defw sfx_16           ; 16 blue gem
+	defw sfx_17           ; 17
+	defw sfx_18           ; 18 stair / land
+	defw sfx_19           ; 19 vendor offer
+	defw sfx_1a           ; 1A
+	defw sfx_1b           ; 1B white cross
+	defw sfx_1c           ; 1C
+	defw sfx_1d           ; 1D vendor take hearts
+
+; music_ptr (seg14 0x8DC9): 16 records of 3 channel pointers (A,B,C).
+; Index = (id & 0x7F)*6.  Ids 0x80..0x8F; several tails live in seg15.
+music_ptr:
+	defw music_80a,music_80b,music_80c  ; 80 stages 0-3
+	defw music_81a,music_81b,music_81c  ; 81 stages 4-6 and 11-12
+	defw music_82a,music_82b,music_82c  ; 82 stages 7-9
+	defw music_83a,music_83b,music_83c  ; 83 stages 16-17
+	defw music_84a,music_84b,music_84c  ; 84 stages 13-15
+	defw music_85a,music_85b,0a051h  ; 85 stages 10 and 18
+	defw 0a157h,0a217h,0a1b9h  ; 86 stage-18 room transition
+	defw 0a2c5h,0a303h,0a35bh  ; 87 room transition
+	defw 0a39eh,0a3e4h,0a43ch  ; 88 event (CE01=4)
+	defw 0a49bh,0a4b0h,0a4c4h  ; 89 death (simon_dying)
+	defw 0a4d1h,0a506h,0a51dh  ; 8A title / demo
+	defw 0a54eh,0a573h,0a5a5h  ; 8B title variant
+	defw 0a5dfh,0a5fdh,0a621h  ; 8C boss
+	defw 0a671h,0a68fh,0a6aah  ; 8D cutscene
+	defw 0a6c4h,0a764h,0a7feh  ; 8E cutscene 2
+	defw 0a81fh,0a81fh,0a81fh  ; 8F dummy silence (0xA81F x3, in seg15)
+
+; Packed PSG streams (sfx, 0xFB/0xFD specials, music that still fits).
+; Remaining music channel tails are in seg15 (0xA000+).
+	INCBIN "seg14.bin", 0x0E29, 0x0002  ; unused 1F A8 (= 0xA81F dummy)
+sfx_01:
+	INCBIN "seg14.bin", 0x0E2B, 0x002D
+sfx_02:
+	INCBIN "seg14.bin", 0x0E58, 0x0011
+sfx_1d:
+	INCBIN "seg14.bin", 0x0E69, 0x0021
+sfx_03:
+	INCBIN "seg14.bin", 0x0E8A, 0x000F
+sfx_04:
+	INCBIN "seg14.bin", 0x0E99, 0x0015
+sfx_05:
+	INCBIN "seg14.bin", 0x0EAE, 0x001D
+sfx_06:
+	INCBIN "seg14.bin", 0x0ECB, 0x0019
+sfx_07:
+	INCBIN "seg14.bin", 0x0EE4, 0x000F
+sfx_08:
+	INCBIN "seg14.bin", 0x0EF3, 0x0032
+sfx_09:
+	INCBIN "seg14.bin", 0x0F25, 0x0031
+sfx_0a:
+	INCBIN "seg14.bin", 0x0F56, 0x001F
+sfx_0b:
+	INCBIN "seg14.bin", 0x0F75, 0x0044
+sfx_0c:
+	INCBIN "seg14.bin", 0x0FB9, 0x0024
+sfx_0d:
+	INCBIN "seg14.bin", 0x0FDD, 0x0051
+sfx_0e:
+	INCBIN "seg14.bin", 0x102E, 0x0037
+sfx_0f:
+	INCBIN "seg14.bin", 0x1065, 0x0035
+sfx_10:
+	INCBIN "seg14.bin", 0x109A, 0x002D
+sfx_11:
+	INCBIN "seg14.bin", 0x10C7, 0x001F
+sfx_12:
+	INCBIN "seg14.bin", 0x10E6, 0x0051
+sfx_13:
+	INCBIN "seg14.bin", 0x1137, 0x001B
+sfx_14:
+	INCBIN "seg14.bin", 0x1152, 0x0027
+sfx_15:
+	INCBIN "seg14.bin", 0x1179, 0x0099
+sfx_16:
+	INCBIN "seg14.bin", 0x1212, 0x0063
+sfx_17:
+	INCBIN "seg14.bin", 0x1275, 0x0063
+sfx_18:
+	INCBIN "seg14.bin", 0x12D8, 0x0042
+sfx_1a:
+	INCBIN "seg14.bin", 0x131A, 0x0085
+sfx_1c:
+	INCBIN "seg14.bin", 0x139F, 0x002B
+sfx_1b:
+	INCBIN "seg14.bin", 0x13CA, 0x0099
+snd_fd_seq:
+	INCBIN "seg14.bin", 0x1463, 0x000D
+sfx_19:
+	INCBIN "seg14.bin", 0x1470, 0x001B
+snd_fb_seq:
+	INCBIN "seg14.bin", 0x148B, 0x0010
+music_80a:
+	INCBIN "seg14.bin", 0x149B, 0x0066
+music_80b:
+	INCBIN "seg14.bin", 0x1501, 0x0097
+music_80c:
+	INCBIN "seg14.bin", 0x1598, 0x00D1
+music_81a:
+	INCBIN "seg14.bin", 0x1669, 0x005E
+music_81b:
+	INCBIN "seg14.bin", 0x16C7, 0x00A6
+music_81c:
+	INCBIN "seg14.bin", 0x176D, 0x006D
+music_82a:
+	INCBIN "seg14.bin", 0x17DA, 0x00B7
+music_82b:
+	INCBIN "seg14.bin", 0x1891, 0x00AC
+music_82c:
+	INCBIN "seg14.bin", 0x193D, 0x011B
+music_83a:
+	INCBIN "seg14.bin", 0x1A58, 0x0060
+music_83b:
+	INCBIN "seg14.bin", 0x1AB8, 0x00B2
+music_83c:
+	INCBIN "seg14.bin", 0x1B6A, 0x00AB
+music_84a:
+	INCBIN "seg14.bin", 0x1C15, 0x00C6
+music_84b:
+	INCBIN "seg14.bin", 0x1CDB, 0x011D
+music_84c:
+	INCBIN "seg14.bin", 0x1DF8, 0x00C9
+music_85a:
+	INCBIN "seg14.bin", 0x1EC1, 0x00C8
+music_85b:
+	INCBIN "seg14.bin", 0x1F89, 0x0077

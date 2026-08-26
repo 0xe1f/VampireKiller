@@ -1512,6 +1512,7 @@ l88d4h:
 	ld c,084h
 	djnz l88d4h
 	ret
+break_spark_tick:                  ; (seg2 0x88DF) two C5A6 whip-break sparks
 	ld b,002h
 	ld hl,0c5a6h
 l88e4h:
@@ -1688,7 +1689,7 @@ sub_89c6h:
 	ld a,b
 	cp 001h
 	jr nz,l89dbh
-	ld c,01eh
+	ld c,actor_flame
 	jr l89ddh
 l89dbh:
 	ld c,026h
@@ -1774,7 +1775,8 @@ l8a44h:
 l8a4fh:
 	pop bc
 	ret
-	call sub_8f5ch
+pickup_tick:                       ; (seg2 0x8A51) 8 x C500 floor items/chests
+	call sub_8f5ch             ; pickup-popup timer
 	ld bc,00800h
 	ld hl,0c500h
 l8a5ah:
@@ -2612,17 +2614,11 @@ l8fb6h:
 	pop bc
 	djnz l8fb6h
 	ret
-l8fc4h:
-	ld bc,03c60h
-	nop
-	nop
-	dec bc
-	ld bc,07c60h
-	nop
-	ld bc,0010ah
-	ld h,b
-	cp h
-	ld bc,00b02h
+l8fc4h:                            ; 3 x 6-byte C580 seeds (stage 6 room 1)
+	defb 001h,060h,03ch,000h,000h,00bh
+	defb 001h,060h,07ch,000h,001h,00ah
+	defb 001h,060h,0bch,001h,002h,00bh
+hazard_tick:                       ; (seg2 0x8FD6) 3 x C580 hazard slots
 	call sub_8fa1h
 l8fd9h:
 	ld hl,0c580h
@@ -2689,11 +2685,12 @@ l901ch:
 sub_902eh:
 	call sub_8fa6h
 	jp l8fd9h
+platform_load:                     ; (seg2 0x9034) seed C598 from platform_tbl
 	ld hl,0c598h
 	ld a,(hl)
 	or a
 	ret nz
-	ld hl,l9073h
+	ld hl,platform_tbl
 l903dh:
 	ld a,(hl)
 	inc a
@@ -2736,31 +2733,22 @@ l9067h:
 	add a,a
 	call ADD_HL_A
 	jr l903dh
-l9073h:
-	dec b
-	ld bc,05f01h
-	ld h,b
-	ld bc,00540h
-	inc b
-	ld (bc),a
-	ld e,a
-	jr nz,$+3
-	jr nc,l90e1h
-	cp b
-	rst 38h
-	jr c,$+12
-	nop
-	ld bc,0608fh
-	ld bc,00a60h
-	ld (bc),a
-	ld bc,040a7h
-	ld bc,00a80h
-	inc bc
-	ld bc,0208fh
-	ld bc,00aa0h
-	inc b
-	ld bc,080a7h
-	ld bc,0ff40h
+platform_tbl:                      ; (seg2 0x9073) {stage,room,n} + n×4 bytes; 0xFF end
+	defb 005h,001h,001h        ; stage 5 room 1
+	defb 05fh,060h,001h,040h
+	defb 005h,004h,002h        ; stage 5 room 4
+	defb 05fh,020h,001h,030h
+	defb 05fh,0b8h,0ffh,038h
+	defb 00ah,000h,001h        ; stage 10 rooms 0/2/3/4
+	defb 08fh,060h,001h,060h
+	defb 00ah,002h,001h
+	defb 0a7h,040h,001h,080h
+	defb 00ah,003h,001h
+	defb 08fh,020h,001h,0a0h
+	defb 00ah,004h,001h
+	defb 0a7h,080h,001h,040h
+	defb 0ffh
+platform_tick:                     ; (seg2 0x90A2) 2 x C598 moving platforms
 	ld hl,0c598h
 	ld b,002h
 l90a7h:
@@ -2987,6 +2975,7 @@ l91c2h:
 	ld a,b
 	exx
 	ret
+vendor_tick:                       ; (seg2 0x91C5) 2 x C5B5/C5C5 vendor slots
 	ld hl,0c5b5h
 	ld bc,00200h
 l91cbh:
@@ -3599,7 +3588,7 @@ read_kbd_matrix_bit:                     ; read one keyboard-matrix bit (row in 
 	cpl
 	and 001h
 	ret
-; --- minimap_driver (0x955A) - the F2 "world map" feature.  Called every frame;
+; --- minimap_driver (0x9559) - the F2 "world map" feature.  Called every frame;
 ;     0xCF38 is the map-screen state (0 = playing, 1 = build, 2 = displayed).
 ;     The map item (picked up in-stage) sets 0xC701 bit7 and 0xC70F = 3 uses;
 ;     each F2 press while displayed<->hidden consumes one use.  F-key edges come
@@ -4246,11 +4235,13 @@ l98b3h:
 	ld bc,02550h
 	ld bc,0253ah
 	ld bc,06543h
-	ld bc,0103ah
-	ret nc
-	and a                  ; (real intent: ld a,(0d010h)/and a - 0==normal play)
+	defb 001h
+actors_tick:                       ; (seg2 0x98EC) room_spawner + C800 if D010==0
+	ld a,(0d010h)
+	and a                  ; 0==normal play
 	call z,room_spawner    ; per-frame enemy spawner (seg0 0x5EBF), skipped mid-transition
-	ld ix,0c800h           ; then tick all 7 actor slots
+c800_tick:                         ; (seg2 0x98F3) tick all 7 C800 actor slots
+	ld ix,0c800h
 	ld b,007h
 l98f9h:
 	ld a,(ix+000h)
@@ -4269,16 +4260,18 @@ l990fh:
 	add ix,de
 	djnz l98f9h
 	ret
+d700_sat_build:                    ; (seg2 0x9917) D700 shape streams -> actor SAT
 	ld ix,0d700h
 	ld b,008h
 	jr l9925h
+c800_sat_build:                    ; (seg2 0x991F) C800 shape streams -> actor SAT
 	ld ix,0c800h
 	ld b,007h
 l9925h:
 	push bc
 	ld a,(ix+000h)
 	and a
-	call nz,0644ch
+	call nz,actor_sat_build
 	ld de,00080h
 	add ix,de
 	pop bc
@@ -4504,7 +4497,7 @@ sub_9a51h:
 	ret c
 	call sub_9b29h
 sub_9a5fh:
-	ld c,01eh
+	ld c,actor_flame
 	push ix
 	push bc
 	call spawn_actor
@@ -4712,7 +4705,7 @@ l9b88h:
 	ld a,(ix+01fh)
 	and a
 	ret z                   ; +0x1F drop gate clear -> no pickup
-	ld c,024h               ; drop = pickup item type 0x24
+	ld c,actor_pickup       ; drop = settled pickup at the flame spot
 	ld e,(ix+003h)          ; DE = flame position (+0x03 / +0x05)
 	ld d,(ix+005h)
 	jp spawn_actor          ; spawn the settled pickup at that spot
@@ -4875,8 +4868,8 @@ l9ce9h:
 ; --- zombie_generator (0x9ced) - continuous zombie spawner (room_spawner bit0) -
 ;  Rate-gated by sub_9ccah (0xCF00 counter, threshold table l9d4ah scaled by the
 ;  0xD012 difficulty/mood).  When it fires, sub_9d03h picks the spawn position
-;  (hardcoded per stage/room - NOT read from the tile map), then spawns actor
-;  type 01 (zombie).  Typical: X = 0xF0 (right edge) or 0x10 (left), Y = 0xC0.
+;  (hardcoded per stage/room - NOT read from the tile map), then spawns
+;  actor_zombie.  Typical: X = 0xF0 (right edge) or 0x10 (left), Y = 0xC0.
 zombie_generator:
 	ld hl,0cf00h
 	ld de,l9d4ah
@@ -4885,7 +4878,7 @@ zombie_generator:
 	call sub_9d03h         ; DE = spawn position (D=X, E=Y)
 	call sub_9e1dh
 	ret c                  ; bail if the slot area / cap says no
-	ld c,001h              ; actor type 01 = zombie
+	ld c,actor_zombie
 	jp spawn_actor
 ; --- sub_9d03h - pick a ground-enemy spawn position by stage/room -------------
 ;  Out: D = X, E = Y.  D flips 0xF0 <-> 0x10 = right/left edge by a per-actor
@@ -4941,13 +4934,13 @@ l9d3fh:
 	ret
 l9d4ah:                        ; zombie spawn-rate thresholds (8 bytes)
 	defb 00ch,012h,00ch,00ch,00ch,012h,00ch,00ch
-merman_generator:           ; (0x9D52) bit1, type 02 green merman (1 HP)
+merman_generator:           ; (0x9D52) bit1, actor_merman (green, 1 HP)
 	ld hl,0cf02h
-	ld c,002h
+	ld c,actor_merman
 	jr merman_spawn
-merman_generator_3:         ; (0x9D59) bit2, type 03 red merman (spit, 2 HP)
+merman_generator_3:         ; (0x9D59) bit2, actor_merman_red (spit, 2 HP)
 	ld hl,0cf02h
-	ld c,003h
+	ld c,actor_merman_red
 merman_spawn:
 	ld de,l9d96h
 	push bc
@@ -4978,10 +4971,10 @@ l9d8eh:                        ; merman spawn X candidates
 	defb 060h,0d0h,030h,090h,0a0h,040h,060h,0b0h
 l9d96h:                        ; merman spawn-rate thresholds
 	defb 001h,018h,018h,018h,018h,018h,018h,018h
-hanging_bat_generator:         ; (0x9D9E) bit3, type 04 hanging bat
+hanging_bat_generator:         ; (0x9D9E) bit3, actor_hanging_bat
 	ld hl,0cf06h
 	ld de,l9dc2h
-	ld c,004h
+	ld c,actor_hanging_bat
 flyer_spawn:                   ; bats / ghosts / medusa heads: edge X, Y=SimonY-8
 	push bc
 	call sub_9ccah
@@ -5001,21 +4994,21 @@ l9db6h:
 	jp spawn_actor
 l9dc2h:                        ; bat spawn-rate thresholds
 	defb 014h,014h,014h,028h,014h,014h,014h,028h
-flying_skull_generator:        ; (0x9DCA) bit4, type 07 flying skull
+flying_skull_generator:        ; (0x9DCA) bit4, actor_flying_skull
 	ld hl,0cf08h
 	ld de,l9dd4h
-	ld c,007h
+	ld c,actor_flying_skull
 	jr flyer_spawn
 l9dd4h:                        ; ghost spawn-rate thresholds
 	defb 01ch,01ch,01ch,048h,01ch,01ch,01ch,048h
-ghost_head_generator:          ; (0x9DDC) bit5, type 08 ghost head
+ghost_head_generator:          ; (0x9DDC) bit5, actor_ghost_head
 	ld hl,0cf0ah
 	ld de,l9de6h
-	ld c,008h
+	ld c,actor_ghost_head
 	jr flyer_spawn
 l9de6h:                        ; medusa-head spawn-rate thresholds
 	defb 00ch,00ch,00ch,018h,00ch,00ch,00ch,018h
-roc_generator:                 ; (0x9DEE) bit6, type 0x0F roc
+roc_generator:                 ; (0x9DEE) bit6, actor_roc
 	ld hl,0cf0ch
 	ld de,l9e15h
 	call sub_9ccah
@@ -5033,7 +5026,7 @@ l9e05h:
 	jr c,l9e10h
 	ld e,040h              ; or Y=0x40
 l9e10h:
-	ld c,00fh
+	ld c,actor_roc
 	jp spawn_actor
 l9e15h:                        ; skull-cannon spawn-rate thresholds
 	defb 018h,018h,018h,018h,018h,018h,018h,018h
@@ -5061,6 +5054,7 @@ l9e33h:
 l9e35h:
 	ld d,010h
 	ret
+d700_tick:                         ; (seg2 0x9E38) 8 x D700 projectile/sub-actor slots
 	ld ix,0d700h
 	ld b,008h
 l9e3eh:
@@ -5073,7 +5067,7 @@ l9e3eh:
 	call sub_9e5fh
 	call sub_99c0h
 l9e50h:
-	call 0644ch
+	call actor_sat_build
 	call actor_cull_offscreen
 	pop bc
 l9e57h:

@@ -166,20 +166,23 @@ def combine_planes(grids, planes):
         cells.append(cell)
     return cells
 
-def render_png(path, cells, palette, cols=8, labels=None, lab_scale=2, size=16):
+def render_png(path, cells, palette, cols=8, labels=None, lab_scale=2, size=16,
+               scale=None):
     """Write a scaled contact sheet.  `labels` (optional) adds a dark band
     above each tile with a 3x5 bitmap id, same treatment as the minimap
     renderer in roomperm.py (`contact_sheet`).  `size` is the tile edge in
-    source pixels (16 for HUD tiles, 64 for enemy composites)."""
+    source pixels (16 for HUD tiles, 64 for enemy composites).  `scale`
+    defaults to SCALE (6); 8x8 glyphs use 12 so cells match 16x16 HUD tiles."""
     if not cells:
         return
+    scale = SCALE if scale is None else scale
     if labels:
         from roomperm import draw_text, LABEL_RGB
         lab_h = 5 * lab_scale + 4      # digit height + padding
     else:
         lab_h = 0
     rows_of = (len(cells) + cols - 1) // cols
-    tile_s = size * SCALE
+    tile_s = size * scale
     cell_w = tile_s
     cell_h = lab_h + tile_s
     W = cols * cell_w + (cols + 1) * GAP
@@ -204,9 +207,9 @@ def render_png(path, cells, palette, cols=8, labels=None, lab_scale=2, size=16):
             for x in range(w):
                 pix = grid[y][x]
                 rgb = pix if isinstance(pix, tuple) else palette[pix]
-                for dy in range(SCALE):
-                    for dx in range(SCALE):
-                        put(x0 + x * SCALE + dx, ty + y * SCALE + dy, rgb)
+                for dy in range(scale):
+                    for dx in range(scale):
+                        put(x0 + x * scale + dx, ty + y * scale + dy, rgb)
     pngwrite.write_rgb(path, W, H, bytes(buf))
 
 def render_sheet(buf, kind, cols=8):
@@ -281,6 +284,7 @@ def main():
                     % (name, name, name, sources, dest, kind, planes, comp, raw, notes))
 
     dump_bonus_hud(data)
+    dump_credits_font(data)
     dump_enemy_sheet(data)
 
 # First *recognisable* pose (ix+0B) for entity_tbl types 1-22.
@@ -619,6 +623,25 @@ def dump_bonus_hud(data):
                labels=[str(i) for i in range(22, 31)])
     print("bonus_hud_sheet.png      ids 1-20")
     print("bonus_hud_items.png      ids 22-30")
+
+# seg14 credits_font @ CPU 0x8824 (file 0x1C824): 40 x 8x8 1bpp, MSB = left.
+# Order: 0-9 . ' : , then A-Z.  Colour 0x0E is the C register
+# credits_font_load passes (SCREEN 5 ink).  Loaded by sub_6719h for the
+# ending message + credits, not the in-game HUD.
+CREDITS_FONT_FILE = 14 * 0x2000 + 0x0824
+CREDITS_FONT_CHARS = "0123456789.':," + "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+def dump_credits_font(data):
+    """Uncompressed 8x8 1bpp ending-credits font (not in manifest.tsv — raw, not RLE)."""
+    pal = vk_play_palette(data)
+    raw = data[CREDITS_FONT_FILE:CREDITS_FONT_FILE + 40 * 8]
+    cells = []
+    for i in range(40):
+        glyph = raw[i * 8:(i + 1) * 8]
+        cells.append([[(row >> (7 - x)) & 1 for x in range(8)] for row in glyph])
+    render_png(os.path.join(GFX, "credits_font.png"), cells, [OFF, pal[14]],
+               cols=10, size=8, scale=12, labels=list(CREDITS_FONT_CHARS))
+    print("credits_font.png         40 x 8x8 1bpp (0-9 . ' : , A-Z)")
 
 if __name__ == "__main__":
     main()

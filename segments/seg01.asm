@@ -397,7 +397,7 @@ l61b7h:
 ; --- l61c2h - spawn actors from the visible room's object list ---------------
 ;  Walks 4 slots of the 0xDB00 list at the current room and, for each live
 ;  slot, unpacks its byte-packed X/Y and calls spawn_actor+2 (0x5F26) with
-;  C = id&0x7F (the actor type). Stage 0 returns immediately (dec a; ret m).
+;  C = id&0x7F (the actor_* type). Stage 0 returns immediately (dec a; ret m).
 l61c2h:
 	ld a,(0d002h)          ; A = level index
 	ld c,a
@@ -638,9 +638,9 @@ l62eah:
 	call 047dbh
 	call sub_633ah         ; set the current cell's event type (0xCE00)
 	call 04f98h
-	call 091c5h            ; seg2 helpers (tile/screen drawing)
+	call vendor_tick       ; C5B5/C5C5 special objects (seg2 0x91C5)
 	call brazier_tick_all  ; tick braziers/candles (seg2 0x8678)
-	call 0914eh
+	call door_anim_tick
 	call 08eedh
 	ld a,(0ce00h)          ; event code for this cell
 	cp 006h
@@ -714,7 +714,7 @@ l6376h:
 ; --- sub_6389h - reset the big object/actor state area and its sub-systems ---
 ;  Clears 0xC470..0xC6FF (0x290 bytes) to 0, then calls the per-subsystem reset
 ;  helpers (seg0 0x5B22 instantiate current-room scenery into C470, door_load_paged,
-;  conn_load_permits_paged, seg2 0x9034/0x90A2, whip_slots_clear), then zeroes two
+;  conn_load_permits_paged, platform_load/platform_tick, whip_slots_clear), then zeroes two
 ;  strided tables: 7 entries 0x80 apart from 0xC800, and 8 entries 0x80 apart
 ;  from 0xD700.
 sub_6389h:
@@ -725,8 +725,8 @@ sub_6389h:
 	ldir
 	call 05b22h
 	call door_load_paged
-	call 09034h
-	call 090a2h
+	call platform_load
+	call platform_tick
 	call conn_load_permits_paged
 	call whip_slots_clear
 	ld hl,0c800h           ; zero 7 entries, 0x80 apart, from 0xC800
@@ -840,13 +840,14 @@ l6426h:
 	ret pe
 	or c
 	ret pe
-; --- 0x644C - build an actor's hardware sprites from its seg6 shape table ----
+; --- actor_sat_build (seg1 0x644C) - one actor's SAT from its seg6 shape ----
 ;  Input: IX -> actor struct.  Skips object types 0x0E and 0x17.  Pages seg 6
 ;  into page 2b (0xA000), looks up the actor's shape stream by (ix+0x0B) in the
 ;  word table at 0xB473, then writes sprite-attribute entries into the actor's
 ;  0x20-offset block, adding the actor position (ix+3 = X, ix+5 = Y).  A leading
 ;  stream code 0x80/0x81/0x82 selects a fixed (dx,dy) offset list for multi-part
 ;  sprites; otherwise the stream carries explicit offsets.  Restores seg 3.
+actor_sat_build:
 	ld a,(ix+000h)         ; object type
 	cp 00eh
 	ret z                  ; type 0x0E: no sprites
@@ -968,32 +969,34 @@ l64e0h:
 	pop af
 	ret m
 
-; --- 0x64EC / 0x64F3 - render every active actor in a list ------------------
+; --- d700_sat_emit (0x64EC) / c800_sat_emit (0x64F3) -------------------------
 ;  Two entry points over the two actor arrays (stride 0x80 per actor):
-;    0x64EC: 8 actors at 0xD700    0x64F3: 7 actors at 0xC800
-;  Each non-empty slot (byte 0 != 0) is turned into sprites by sub_6508h.
-	ld hl,0d700h           ; 0x64EC: 8 actors from 0xD700
+;    d700_sat_emit: 8 actors at 0xD700    c800_sat_emit: 7 actors at 0xC800
+;  Each non-empty slot (byte 0 != 0) is turned into sprites by actor_sat_emit.
+d700_sat_emit:
+	ld hl,0d700h           ; 8 actors from 0xD700
 	ld b,008h
 	jr l64f8h
-	ld hl,0c800h           ; 0x64F3: 7 actors from 0xC800
+c800_sat_emit:
+	ld hl,0c800h           ; 7 actors from 0xC800
 	ld b,007h
 l64f8h:
 	push bc
 	push hl
 	ld a,(hl)              ; slot occupied?
 	and a
-	call nz,sub_6508h      ; yes -> emit its sprites
+	call nz,actor_sat_emit ; yes -> emit its sprites
 	pop hl
 	pop bc
 	ld de,00080h
 	add hl,de              ; next actor (0x80 apart)
 	djnz l64f8h
 	ret
-; --- sub_6508h - emit one actor's sprite-attribute entries ------------------
+; --- actor_sat_emit (seg1 0x6508) - one actor's SAT block -> 0xD638 shadow --
 ;  HL -> actor slot.  Reads the sprite count from the 0x20-offset sub-block,
 ;  then for each sprite copies Y/X/pattern into the VDP sprite-attribute shadow
 ;  at 0xD638 + id*4 and fills the 0x10-byte pattern from the l6a70h table.
-sub_6508h:
+actor_sat_emit:
 	set 5,l                ; HL -> sprite sub-block (slot | 0x20)
 	ld b,(hl)              ; B = sprite count
 	ld a,b
@@ -1059,11 +1062,12 @@ lookup_word_tbl:
 	inc hl
 	ld d,(hl)               ;      (hi)
 	ret
-; --- 0x6552 - refresh the on-screen sprite/pattern data in VRAM ------------
+; --- frame_vram_refresh (seg1 0x6552) - re-upload animated patterns ---------
 ;  When nothing special is going on (event 0xCE00 != 5, sub-state 0xC5AC != 5,
 ;  flag 0xCE0C == 0) this animates: it advances the phase in 0xC00F (cycles
 ;  0..0x78 in steps of 0x68 &0x78), then re-uploads the animated pattern tables
 ;  to VRAM.  Otherwise it falls back to the plain shadow blit at l65abh.
+frame_vram_refresh:
 	ld a,(0ce0ch)
 	or a
 	jp nz,l65abh           ; effect flag set -> plain blit
@@ -1308,9 +1312,9 @@ l6712h:
 	ld b,000h
 	ld c,017h              ; VDP register 23 (R23 = vertical scroll)
 	jp WRTVDP
-; --- sub_6719h - reset the cutscene script-player state --------------------
+; --- sub_6719h - reset the ending-credits script-player state --------------
 sub_6719h:
-	call 053e5h
+	call credits_font_load
 	xor a
 	ld (0ce30h),a          ; clear the script cursors/counters ...
 	ld (0ce33h),a          ; 0xCE33 = per-step tick
@@ -1517,12 +1521,16 @@ l6831h:
 	ld bc,00080h
 	xor a
 	jp FILVRM
+; event_vscroll (seg1 0x6848): if 0xCE34 is set, write 0xCE33 to VDP R23
+; (vertical offset).  First call in the play tick; the cutscene player
+; animates CE33.
+event_vscroll:
 	ld a,(0ce34h)
 	and a
 	ret z
 	ld a,(0ce33h)
 	ld b,a
-	ld c,017h
+	ld c,017h              ; VDP R23
 	jp WRTVDP
 sub_6856h:
 	ld b,006h
@@ -1857,12 +1865,16 @@ l6adbh:
 sub_6b00h:
 	ld a,(ix+011h)
 	jp 0b164h
-	ld a,(0ce11h)
+; player_tick (seg1 0x6B06): per-frame player update during play.
+; 0xCE11 (boss-orb collected) freezes input; then door, Simon action, attack
+; (skipped while the door anims 2/3/5), edge detector, and the timer bank.
+player_tick:
+	ld a,(0ce11h)          ; boss-orb collected: freeze controls
 	and a
 	jr z,l6b13h
 	xor a
-	ld (0c007h),a
-	ld (0c006h),a
+	ld (0c007h),a          ; held
+	ld (0c006h),a          ; new-press
 l6b13h:
 	call door_interact
 	call simon_action_tick
@@ -2844,7 +2856,7 @@ l7224h:
 	call play_sound
 	jr l7242h
 l7231h:
-	call 0559ah
+	call load_weapon_sprites
 	ld a,00ch
 	ld (0c42fh),a
 	call simon_mirror_frames
@@ -2863,7 +2875,7 @@ l7247h:
 	ld a,(0c436h)
 	cp 002h
 	ret c
-	jp 0559ah
+	jp load_weapon_sprites
 l7257h:
 	ld a,(0c436h)
 	cp 002h
@@ -3564,8 +3576,7 @@ l7714h:                        ; right edge
 	ld (hl),004h           ; pending dir = 4 (right)
 	ret
 ; door_interact (seg1 0x771f): white-key door tick, dispatched by 0xC5AC
-; through an inline word table (the bytes below DISPATCH_A up to "ld de,0c425h"
-; are that dw table, mis-shown as opcodes).  Placement is NOT a 0x1F object:
+; through door_state_tbl.  Placement is NOT a 0x1F object:
 ; seg13 door_load_coords copies door_tbl[stage] into 0xC5AD=Y / 0xC5AE=X when
 ; 0xD001 matches the record's room nibble.  This handler proximity-tests Simon
 ; (0xC425=Y, 0xC427=X) against those coords via door_proximity; on overlap it
@@ -3576,14 +3587,14 @@ l7714h:                        ; right edge
 door_interact:
 	ld a,(0c5ach)          ; door sub-state (armed=1, open=3, ...)
 	call DISPATCH_A
-	inc c
-	ld a,b
-	ld sp,00c77h
-	ld a,b
-	sub c
-	ld (hl),a
-	ld sp,09177h
-	ld (hl),a
+door_state_tbl:
+	defw door_idle         ; 0
+	defw door_try_open     ; 1 armed
+	defw door_idle         ; 2
+	defw door_open_walk    ; 3 open
+	defw door_try_open     ; 4
+	defw door_open_walk    ; 5 vertical
+door_try_open:
 	ld de,0c425h           ; de -> Simon Y
 	ld a,(de)
 	ld b,a                 ; B = Y
@@ -3610,7 +3621,7 @@ l774ah:
 	ld hl,0c5ach
 	inc (hl)
 	ld a,(0d000h)
-	ld de,l777eh
+	ld de,stage_bgm_change
 	call ADD_DE_A
 	ld a,(de)
 	and a
@@ -3626,19 +3637,23 @@ l776fh:
 l7779h:
 	ld a,015h
 	jp play_sound
-l777eh:
-	nop
-	nop
-	nop
-	ld bc,CHKRAM
-	ld bc,CHKRAM
-	ld bc,00001h
-	ld bc,CHKRAM
-	ld bc,00100h
-	ld bc,0ac3ah
-	push bc
+; stage_bgm_change (seg1 0x777E): byte[stage 0..18].  1 = BGM changes
+; leaving this stage (door_interact fades) / entering the next
+; (stage_bgm_play indexes [stage-1]).
+stage_bgm_change:
+	defb 000h,000h,000h        ; 0-2 (courtyard..s2 share 0x80)
+	defb 001h,000h,000h        ; 3-5 (s3 door -> 0x81)
+	defb 001h,000h,000h        ; 6-8
+	defb 001h,001h,000h        ; 9-11
+	defb 001h,000h,000h        ; 12-14
+	defb 001h,000h,001h        ; 15-17
+	defb 001h                  ; 18
+; door_open_walk (seg1 0x7791): C5AC 3/5.  Vertical door loads extra sprites,
+; then if Simon is grounded auto-walk through the opening.
+door_open_walk:
+	ld a,(0c5ach)
 	cp 005h
-	call z,055f3h
+	call z,load_vdoor_sprites
 	ld a,(0c420h)
 	and a
 	ret nz
@@ -3711,6 +3726,7 @@ l7804h:
 set_stage_boundary:
 	ld a,001h
 	ld (0c408h),a          ; stage-boundary flag -> advance_stage
+door_idle:
 	ret
 sub_780dh:
 	ld ix,0c800h
@@ -3738,6 +3754,10 @@ l782dh:
 	add ix,de
 	djnz l782dh
 	ret
+; simon_sat_build (seg1 0x783E): emit Simon's hardware-sprite SAT from
+; 0xC42E/0xC42F via simon_sat_cell0/1.  Hides unused slots (Y=0xE0);
+; sub_7913h applies gem/ring flash colours.
+simon_sat_build:
 	call sub_7913h
 	ld a,(0c5ach)
 	cp 005h
@@ -3760,7 +3780,7 @@ l7858h:
 l785fh:
 	ld a,(0c42eh)
 	add a,a
-	ld hl,l798ch
+	ld hl,simon_sat_cell0
 	call ADD_HL_A
 	ld e,(hl)
 	inc hl
@@ -3778,7 +3798,7 @@ l787ch:
 	call sub_78a0h
 	ld a,(0c42fh)
 	add a,a
-	ld hl,l79dch
+	ld hl,simon_sat_cell1
 	call ADD_HL_A
 	ld e,(hl)
 	inc hl
@@ -3915,329 +3935,281 @@ l7951h:
 	inc hl
 	djnz l792bh
 	ret
-	ld a,(0c40dh)
+; stage_bgm_play (seg1 0x7956): queue this stage's BGM.  Stage 0 always
+; plays; otherwise stage_bgm_change[stage-1] must be nonzero.  0xC40D
+; (set on death-respawn) forces a replay.
+stage_bgm_play:
+	ld a,(0c40dh)          ; force replay (death -> state_stage_bridge)
 	and a
 	jr nz,l796ch
 	ld a,(0d000h)
 	and a
-	jr z,l796ch
+	jr z,l796ch            ; courtyard always starts 0x80
 	dec a
-	ld hl,l777eh
+	ld hl,stage_bgm_change
 	call ADD_HL_A
 	ld a,(hl)
 	and a
-	ret z
+	ret z                  ; same track as previous stage
 l796ch:
 	ld a,(0d000h)
-	ld hl,l7979h
+	ld hl,stage_bgm_tbl
 	call ADD_HL_A
 	ld a,(hl)
 	jp play_sound
-l7979h:
-	add a,b
-	add a,b
-	add a,b
-	add a,b
-	add a,c
-	add a,c
-	add a,c
-	add a,d
-	add a,d
-	add a,d
-	add a,l
-	add a,c
-	add a,c
-	add a,h
-	add a,h
-	add a,h
-	add a,e
-	add a,e
-	add a,l
-l798ch:
-	inc h
-	ld a,d
-	inc h
-	ld a,d
-	inc h
-	ld a,d
-	inc h
-	ld a,d
-	inc h
-	ld a,d
-	inc h
-	ld a,d
-	add hl,hl
-	ld a,d
-	ld l,07ah
-	ld l,07ah
-	inc sp
-	ld a,d
-	jr c,l7a1ch
-	jr c,l7a1eh
-	jr c,l7a20h
-	jr c,l7a22h
-	jr c,l7a24h
-	jr c,$+124
-	dec a
-	ld a,d
-	ld b,d
-	ld a,d
-	ld b,d
-	ld a,d
-	ld b,a
-	ld a,d
-	inc h
-	ld a,d
-	inc h
-	ld a,d
-	inc h
-	ld a,d
-	inc h
-	ld a,d
-	inc h
-	ld a,d
-	inc h
-	ld a,d
-	add hl,hl
-	ld a,d
-	ld l,07ah
-	ld l,07ah
-	inc sp
-	ld a,d
-	jr c,l7a44h
-	jr c,l7a46h
-	jr c,l7a48h
-	jr c,$+124
-	jr c,l7a4ch
-	jr c,$+124
-	dec a
-	ld a,d
-	ld b,d
-	ld a,d
-	ld b,d
-	ld a,d
-	ld b,a
-	ld a,d
-l79dch:
-	ld c,h
-	ld a,d
-	ld c,h
-	ld a,d
-	ld c,h
-	ld a,d
-	ld d,(hl)
-	ld a,d
-	ld d,(hl)
-	ld a,d
-	ld e,e
-	ld a,d
-	ld h,b
-	ld a,d
-	ld l,l
-	ld a,d
-	halt
-	ld a,d
-	ld h,b
-	ld a,d
-	ld l,l
-	ld a,d
-	halt
-	ld a,d
-	add a,e
-	ld a,d
-	add a,e
-	ld a,d
-	adc a,b
-	ld a,d
-	sub c
-	ld a,d
-	sub c
-	ld a,d
-	sub c
-	ld a,d
-	sbc a,e
-	ld a,d
-	sbc a,e
-	ld a,d
-	and b
-	ld a,d
-	and l
-	ld a,d
-	or d
-	ld a,d
-	cp e
-	ld a,d
-	and l
-	ld a,d
-	or d
-	ld a,d
-	cp e
-	ld a,d
-	ret z
-	ld a,d
-	ret z
-	ld a,d
-	call 04c7ah
-	ld a,d
-	ld c,h
-	ld a,d
-l7a1ch:
-	ld c,h
-	ld a,d
-l7a1eh:
-	sub c
-	ld a,d
-l7a20h:
-	sub c
-	ld a,d
-l7a22h:
-	sub c
-	ld a,d
-l7a24h:
-	ld (bc),a
-	jp p,0f2f8h
-	ret m
-	ld (bc),a
-	ret m
-	ret m
-	ret m
-	ret m
-	ld (bc),a
-	pop af
-	ret m
-	pop af
-	ret m
-	ld (bc),a
-	pop af
-	ret p
-	pop af
-	ret p
-	ld (bc),a
-	jp p,0f2f9h
-	ld sp,hl
-	ld (bc),a
-	ret m
-	ld sp,hl
-	ret m
-	ld sp,hl
-	ld (bc),a
-	pop af
-l7a44h:
-	ld sp,hl
-	pop af
-l7a46h:
-	ld sp,hl
-	ld (bc),a
-l7a48h:
-	pop af
-	ld bc,001f1h
-l7a4ch:
-	ld (bc),a
-	jp po,0e2f8h
-	ret m
-	ld (bc),a
-	ret pe
-	ret m
-	ret pe
-	ret m
-	ld (bc),a
-	pop hl
-	ret m
-	pop hl
-	ret m
-	ld (bc),a
-	pop af
-	nop
-	pop af
-	nop
-l7a60h:
-	ld b,0e2h
-l7a62h:
-	ret p
-	jp po,0e2f0h
-	ret po
-	jp po,0f2e0h
-	ret po
-	jp p,004e0h
-	jp po,0e2f0h
-	ret p
-	jp (hl)
-	ret po
-	jp (hl)
-	ret po
-	ld b,0e2h
-	ret m
-	jp po,0e2f8h
-	jr l7a60h
-	jr l7a62h
-	ex af,af'
-	jp po,00208h
-	jp po,0e2f0h
-	ret p
-	inc b
-	jp po,0e2f8h
-	ret m
-	jp po,0e208h
-	ex af,af'
-	ld (bc),a
-	jp po,0e2f9h
-	ld sp,hl
-	ld (bc),a
-	ret pe
-	ld sp,hl
-	ret pe
-	ld sp,hl
-	ld (bc),a
-	pop hl
-	ld sp,hl
-	pop hl
-	ld sp,hl
-	ld (bc),a
-	pop af
-	pop af
-	pop af
-	pop af
-	ld b,0e2h
-	ld bc,001e2h
-	jp po,0e211h
-	ld de,011f2h
-	jp p,00411h
-	jp po,0e201h
-	ld bc,011e9h
-	jp (hl)
-	ld de,0e206h
-	ld sp,hl
-	jp po,0e2f9h
-	exx
-	jp po,0e2d9h
-	jp (hl)
-	jp po,002e9h
-	jp po,0e201h
-	ld bc,0e204h
-	ld sp,hl
-	jp po,0e2f9h
-	jp (hl)
-	jp po,01ee9h
-	djnz $+64
-	ld (bc),a
+; stage_bgm_tbl (seg1 0x7979): music id per stage 0..18 (play_sound 0x80..).
+stage_bgm_tbl:
+	defb 080h,080h,080h,080h  ; stages 0-3
+	defb 081h,081h,081h        ; 4-6
+	defb 082h,082h,082h        ; 7-9
+	defb 085h                  ; 10
+	defb 081h,081h              ; 11-12
+	defb 084h,084h,084h        ; 13-15
+	defb 083h,083h              ; 16-17
+	defb 085h                  ; 18
+; simon_sat_cell0 (seg1 0x798C): word[0xC42E] -> SAT record (count, dy,dx...).
+; 40 frames; indices 0x0A+ are the facing-left copies of 0-9.
+simon_sat_cell0:
+	defw simon_sat_7a24          ; 0
+	defw simon_sat_7a24          ; 1
+	defw simon_sat_7a24          ; 2
+	defw simon_sat_7a24          ; 3
+	defw simon_sat_7a24          ; 4
+	defw simon_sat_7a24          ; 5
+	defw simon_sat_7a29          ; 6
+	defw simon_sat_7a2e          ; 7
+	defw simon_sat_7a2e          ; 8
+	defw simon_sat_7a33          ; 9
+	defw simon_sat_7a38          ; 10
+	defw simon_sat_7a38          ; 11
+	defw simon_sat_7a38          ; 12
+	defw simon_sat_7a38          ; 13
+	defw simon_sat_7a38          ; 14
+	defw simon_sat_7a38          ; 15
+	defw simon_sat_7a3d          ; 16
+	defw simon_sat_7a42          ; 17
+	defw simon_sat_7a42          ; 18
+	defw simon_sat_7a47          ; 19
+	defw simon_sat_7a24          ; 20
+	defw simon_sat_7a24          ; 21
+	defw simon_sat_7a24          ; 22
+	defw simon_sat_7a24          ; 23
+	defw simon_sat_7a24          ; 24
+	defw simon_sat_7a24          ; 25
+	defw simon_sat_7a29          ; 26
+	defw simon_sat_7a2e          ; 27
+	defw simon_sat_7a2e          ; 28
+	defw simon_sat_7a33          ; 29
+	defw simon_sat_7a38          ; 30
+	defw simon_sat_7a38          ; 31
+	defw simon_sat_7a38          ; 32
+	defw simon_sat_7a38          ; 33
+	defw simon_sat_7a38          ; 34
+	defw simon_sat_7a38          ; 35
+	defw simon_sat_7a3d          ; 36
+	defw simon_sat_7a42          ; 37
+	defw simon_sat_7a42          ; 38
+	defw simon_sat_7a47          ; 39
+
+; simon_sat_cell1 (seg1 0x79DC): word[0xC42F] -> torso/whip SAT. 36 frames;
+; indices 0x0F+ are the facing-left copies.
+simon_sat_cell1:
+	defw simon_sat_7a4c          ; 0
+	defw simon_sat_7a4c          ; 1
+	defw simon_sat_7a4c          ; 2
+	defw simon_sat_7a56          ; 3
+	defw simon_sat_7a56          ; 4
+	defw simon_sat_7a5b          ; 5
+	defw simon_sat_7a60          ; 6
+	defw simon_sat_7a6d          ; 7
+	defw simon_sat_7a76          ; 8
+	defw simon_sat_7a60          ; 9
+	defw simon_sat_7a6d          ; 10
+	defw simon_sat_7a76          ; 11
+	defw simon_sat_7a83          ; 12
+	defw simon_sat_7a83          ; 13
+	defw simon_sat_7a88          ; 14
+	defw simon_sat_7a91          ; 15
+	defw simon_sat_7a91          ; 16
+	defw simon_sat_7a91          ; 17
+	defw simon_sat_7a9b          ; 18
+	defw simon_sat_7a9b          ; 19
+	defw simon_sat_7aa0          ; 20
+	defw simon_sat_7aa5          ; 21
+	defw simon_sat_7ab2          ; 22
+	defw simon_sat_7abb          ; 23
+	defw simon_sat_7aa5          ; 24
+	defw simon_sat_7ab2          ; 25
+	defw simon_sat_7abb          ; 26
+	defw simon_sat_7ac8          ; 27
+	defw simon_sat_7ac8          ; 28
+	defw simon_sat_7acd          ; 29
+	defw simon_sat_7a4c          ; 30
+	defw simon_sat_7a4c          ; 31
+	defw simon_sat_7a4c          ; 32
+	defw simon_sat_7a91          ; 33
+	defw simon_sat_7a91          ; 34
+	defw simon_sat_7a91          ; 35
+
+simon_sat_7a24:
+	defb 002h              ; 2 sprite(s)
+	defb 0f2h, 0f8h
+	defb 0f2h, 0f8h
+simon_sat_7a29:
+	defb 002h              ; 2 sprite(s)
+	defb 0f8h, 0f8h
+	defb 0f8h, 0f8h
+simon_sat_7a2e:
+	defb 002h              ; 2 sprite(s)
+	defb 0f1h, 0f8h
+	defb 0f1h, 0f8h
+simon_sat_7a33:
+	defb 002h              ; 2 sprite(s)
+	defb 0f1h, 0f0h
+	defb 0f1h, 0f0h
+simon_sat_7a38:
+	defb 002h              ; 2 sprite(s)
+	defb 0f2h, 0f9h
+	defb 0f2h, 0f9h
+simon_sat_7a3d:
+	defb 002h              ; 2 sprite(s)
+	defb 0f8h, 0f9h
+	defb 0f8h, 0f9h
+simon_sat_7a42:
+	defb 002h              ; 2 sprite(s)
+	defb 0f1h, 0f9h
+	defb 0f1h, 0f9h
+simon_sat_7a47:
+	defb 002h              ; 2 sprite(s)
+	defb 0f1h, 001h
+	defb 0f1h, 001h
+simon_sat_7a4c:
+	defb 002h              ; 2 sprite(s)
+	defb 0e2h, 0f8h
+	defb 0e2h, 0f8h
+                          ; 0x7a51 not in pointer tables
+	defb 002h              ; 2 sprite(s)
+	defb 0e8h, 0f8h
+	defb 0e8h, 0f8h
+simon_sat_7a56:
+	defb 002h              ; 2 sprite(s)
+	defb 0e1h, 0f8h
+	defb 0e1h, 0f8h
+simon_sat_7a5b:
+	defb 002h              ; 2 sprite(s)
+	defb 0f1h, 000h
+	defb 0f1h, 000h
+simon_sat_7a60:
+	defb 006h              ; 6 sprite(s)
+	defb 0e2h, 0f0h
+	defb 0e2h, 0f0h
+	defb 0e2h, 0e0h
+	defb 0e2h, 0e0h
+	defb 0f2h, 0e0h
+	defb 0f2h, 0e0h
+simon_sat_7a6d:
+	defb 004h              ; 4 sprite(s)
+	defb 0e2h, 0f0h
+	defb 0e2h, 0f0h
+	defb 0e9h, 0e0h
+	defb 0e9h, 0e0h
+simon_sat_7a76:
+	defb 006h              ; 6 sprite(s)
+	defb 0e2h, 0f8h
+	defb 0e2h, 0f8h
+	defb 0e2h, 018h
+	defb 0e2h, 018h
+	defb 0e2h, 008h
+	defb 0e2h, 008h
+simon_sat_7a83:
+	defb 002h              ; 2 sprite(s)
+	defb 0e2h, 0f0h
+	defb 0e2h, 0f0h
+simon_sat_7a88:
+	defb 004h              ; 4 sprite(s)
+	defb 0e2h, 0f8h
+	defb 0e2h, 0f8h
+	defb 0e2h, 008h
+	defb 0e2h, 008h
+simon_sat_7a91:
+	defb 002h              ; 2 sprite(s)
+	defb 0e2h, 0f9h
+	defb 0e2h, 0f9h
+                          ; 0x7a96 not in pointer tables
+	defb 002h              ; 2 sprite(s)
+	defb 0e8h, 0f9h
+	defb 0e8h, 0f9h
+simon_sat_7a9b:
+	defb 002h              ; 2 sprite(s)
+	defb 0e1h, 0f9h
+	defb 0e1h, 0f9h
+simon_sat_7aa0:
+	defb 002h              ; 2 sprite(s)
+	defb 0f1h, 0f1h
+	defb 0f1h, 0f1h
+simon_sat_7aa5:
+	defb 006h              ; 6 sprite(s)
+	defb 0e2h, 001h
+	defb 0e2h, 001h
+	defb 0e2h, 011h
+	defb 0e2h, 011h
+	defb 0f2h, 011h
+	defb 0f2h, 011h
+simon_sat_7ab2:
+	defb 004h              ; 4 sprite(s)
+	defb 0e2h, 001h
+	defb 0e2h, 001h
+	defb 0e9h, 011h
+	defb 0e9h, 011h
+simon_sat_7abb:
+	defb 006h              ; 6 sprite(s)
+	defb 0e2h, 0f9h
+	defb 0e2h, 0f9h
+	defb 0e2h, 0d9h
+	defb 0e2h, 0d9h
+	defb 0e2h, 0e9h
+	defb 0e2h, 0e9h
+simon_sat_7ac8:
+	defb 002h              ; 2 sprite(s)
+	defb 0e2h, 001h
+	defb 0e2h, 001h
+simon_sat_7acd:
+	defb 004h              ; 4 sprite(s)
+	defb 0e2h, 0f9h
+	defb 0e2h, 0f9h
+	defb 0e2h, 0e9h
+	defb 0e2h, 0e9h
+; title_fill_strips (seg1 0x7AD6): HMMV-fill 16 strips (colour 2,
+; NX=7 NY=9) via l4911h, stepping HL.Y by 0x10.  Caller sets HL dest
+; (title uses 0x0516 and 0x0569).
+title_fill_strips:
+	ld e,010h              ; 16 strips
+title_fill_loop:
+	ld a,002h              ; fill colour
 	ld d,000h
-	ld bc,00709h
+	ld bc,00709h           ; NX=7, NY=9
 	push hl
 	push de
-	call 04911h
+	call 04911h            ; VDP HMMV
 	pop de
 	pop hl
 	ld a,010h
 	add a,h
-	ld h,a
+	ld h,a                 ; next strip
 	dec e
-	jr nz,$-19
+	jr nz,title_fill_loop
 	ret
+; title_set_color2 (seg1 0x7AEE): palette index 2 = (rb=0x11, g=0x01).
+; Called when leaving the title screen.
+title_set_color2:
 	ld a,002h
 	ld de,01101h
-	jp 0481bh
+	jp 0481bh              ; sub_481bh write one palette entry
+; title_sat_init (seg1 0x7AF6): seed SAT shadow 0xD600 from
+; title_sat_tmpl (11 two-byte Y,X pairs) and colour rows, then blit.
+title_sat_init:
 	ld de,0d600h
-	ld hl,l7b59h
+	ld hl,title_sat_tmpl
 	ld b,00bh
 	ld a,0fch
 l7b00h:
@@ -4307,26 +4279,19 @@ l7b4eh:
 l7b57h:
 	pop de
 	ret
-l7b59h:
-	daa
-	jr c,$+41
-	ld c,h
-	daa
-	ld h,b
-	ccf
-	jr nc,$+65
-	ld b,b
-	ld c,a
-	jr nc,$+81
-	ld b,b
-	ccf
-	ld (hl),b
-	ccf
-	add a,b
-	ld c,a
-	ld (hl),b
-	ld c,a
-	add a,b
+; title_sat_tmpl (seg1 0x7B59): 11 (Y,X) pairs copied into the SAT shadow.
+title_sat_tmpl:
+	defb 027h,038h
+	defb 027h,04ch
+	defb 027h,060h
+	defb 03fh,030h
+	defb 03fh,040h
+	defb 04fh,030h
+	defb 04fh,040h
+	defb 03fh,070h
+	defb 03fh,080h
+	defb 04fh,070h
+	defb 04fh,080h
 sub_7b6fh:
 	ld a,(0c425h)
 	add a,007h
@@ -4679,22 +4644,26 @@ l7d6ch:
 l7d6dh:
 	pop de
 	ret
+; combat_tick (seg1 0x7D6F): per-frame hits.  Skipped while a room-exit is
+; pending (0xC41B).  Whip (C416<2) vs projectile (C416>=2), then
+; projectile_hit_actors and yellow_shield_tick.
+combat_tick:
 	ld a,(0c41bh)
 	and a
 	ret nz
 	call sub_7e6eh
 	call sub_7eebh
 	call sub_7fe9h
-	call 085adh
+	call hurt_simon_projectile
 	ld a,(0c416h)
 	cp 002h
-	jr nc,l7d92h
-	call sub_7db4h
+	jr nc,l7d92h           ; C416>=2: projectile weapons
+	call sub_7db4h         ; whip vs C800 actors (phase 3)
 	call sub_7f50h
 	call sub_7fbeh
 	jr l7d95h
 l7d92h:
-	call sub_7da7h
+	call sub_7da7h         ; busy-wait pad (projectile path)
 l7d95h:
 	call projectile_hit_actors
 	call sub_7f80h

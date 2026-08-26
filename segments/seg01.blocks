@@ -58,3 +58,15 @@ cross_state_tbl: start 0x7306 end 0x730e type worddata
 axe_state_tbl: start 0x74a4 end 0x74ac type worddata
 ; HP-bar damage vs types 0x11..0x17: leather/knife then chain/axe/cross.
 weapon_dmg_tbl: start 0x7e60 end 0x7e6e type bytedata
+; Per-stage BGM id (play_sound 0x80..) indexed by 0xD000.
+stage_bgm_tbl: start 0x7979 end 0x798c type bytedata
+; door_interact DISPATCH_A by 0xC5AC.
+door_state_tbl: start 0x7725 end 0x7731 type worddata
+; 1 = BGM changes leaving this stage / entering the next.
+stage_bgm_change: start 0x777E end 0x7791 type bytedata
+; Simon SAT layout pointer tables + (count, dy,dx) records.
+simon_sat_cell0: start 0x798C end 0x79DC type worddata
+simon_sat_cell1: start 0x79DC end 0x7A24 type worddata
+simon_sat_recs: start 0x7A24 end 0x7AD6 type bytedata
+; Title SAT (Y,X) template.
+title_sat_tmpl: start 0x7B59 end 0x7B6F type bytedata

@@ -469,11 +469,11 @@ enemy_merman_tick:
 	call sub_a4efh
 	ld e,(ix+003h)
 	ld d,(ix+005h)
-	ld c,020h
+	ld c,actor_merman_splash
 	push de
 	call spawn_actor
 	pop de
-	ld c,020h
+	ld c,actor_merman_splash
 	jp spawn_actor
 	inc (ix+01dh)
 	ld a,(ix+001h)
@@ -529,11 +529,11 @@ la387h:
 	call 099fdh
 	ld e,(ix+003h)
 	ld d,(ix+005h)
-	ld c,020h
+	ld c,actor_merman_splash
 	push de
 	call spawn_actor
 	pop de
-	ld c,020h
+	ld c,actor_merman_splash
 	jp spawn_actor
 la3a7h:                         ; state 1: walk
 	bit 0,(ix+01bh)
@@ -2309,14 +2309,14 @@ lb186h:
 	ld de,0ffe7h
 lb197h:
 	jp actor_add_yvel
-; enemy_roc_tick (seg3 0xB19A) - type 15. 6-cell flyer; init reuses
+; enemy_roc_tick (seg3 0xB19A) - actor_roc. 6-cell flyer; init reuses
 ; enemy_hunchback_tick (RNG timer + pose 0x67, skipped type-13 hide), then
-; spawn_actor type 0x23. Per-frame flaps 0x6D/0x6E/0x8D; pauses 8 frames
-; when Simon X is within 0x38, then continues off. 8 HP, 400 pts.
+; spawn_actor actor_roc_drop. Per-frame flaps 0x6D/0x6E/0x8D; pauses 8
+; frames when Simon X is within 0x38, then continues off. 8 HP, 400 pts.
 enemy_roc_tick:
 	call enemy_hunchback_tick
 	ld (ix+011h),000h
-	ld c,023h
+	ld c,actor_roc_drop
 	ld a,(ix+003h)
 	add a,00ch
 	ld e,a
@@ -2957,6 +2957,11 @@ lb6aeh:
 	ld b,h
 	ld b,h
 	ld b,h
+; --- room_event_tick (seg3 0xB6B2) - per-frame CE00 room-event dispatcher ----
+;  CE00==0 -> ret.  Else DISPATCH_A on (CE00-1).  Event 6 is the shared
+;  CE01 cutscene machine (sub_65b7h).  When CE0B is set, tick CE10 instead
+;  (boss-clear: orb spawn, HP refill, then C409).
+room_event_tick:
 	ld a,(0ce0bh)
 	or a
 	jr nz,lb6cch
@@ -2964,14 +2969,12 @@ lb6aeh:
 	dec a
 	ret m
 	call DISPATCH_A
-	ld (0e2beh),a
-	cp h
-	ld e,(hl)
-	cp b
-	dec l
-	cp d
-	jp m,lb7bbh
-	ld h,l
+	defw 0be32h            ; 1
+	defw 0bce2h            ; 2
+	defw 0b85eh            ; 3
+	defw 0ba2dh            ; 4
+	defw 0bbfah            ; 5
+	defw sub_65b7h         ; 6 CE01 cutscene/boss machine
 lb6cch:
 	ld a,(0ce10h)
 	call DISPATCH_A
@@ -2986,7 +2989,7 @@ lb6d3h:
 	or a
 	ld e,b
 	or a
-	call 0780dh
+	call sub_780dh
 	ld a,03ch
 	ld (0ce02h),a
 	jr lb6efh
@@ -3001,7 +3004,7 @@ lb6efh:
 	xor a
 	ld (0ce11h),a
 	ld (0ce14h),a
-	ld c,022h              ; boss-clear orb (descends; touch -> 0xCE11)
+	ld c,actor_orb          ; boss-clear orb (descends; touch -> 0xCE11)
 	ld de,07840h
 	call spawn_actor
 	ld a,0b4h
@@ -3189,10 +3192,10 @@ lb85ah:
 	cp b
 	ld a,e
 	cp b
-	ld c,014h
+	ld c,actor_mummy
 	ld de,030c5h
 	call spawn_actor
-	ld c,014h
+	ld c,actor_mummy
 	ld de,0d0c5h
 	call spawn_actor
 	jp lbe44h
@@ -3395,10 +3398,10 @@ lba2ah:
 	cp d
 	xor a
 	ld (0ce07h),a
-	ld c,015h
+	ld c,actor_frankenstein
 	ld de,0d0c0h
 	call spawn_actor
-	ld c,018h
+	ld c,actor_igor
 	ld de,0d0a0h
 	call spawn_actor
 	jp lbe44h
@@ -3613,7 +3616,7 @@ lbbf6h:
 	rra
 	cp h
 	ld de,0a090h
-	ld c,016h
+	ld c,actor_grim_reaper
 	call spawn_actor
 	call sub_bc30h
 	call sub_bc30h
@@ -3738,7 +3741,7 @@ sub_bcd9h:
 	ret nz
 	jp lbe44h
 	ld de,09090h
-	ld c,013h
+	ld c,actor_medusa
 	call spawn_actor
 	ld hl,08070h
 	ld bc,02020h
@@ -3883,7 +3886,7 @@ sub_be14h:
 	cp (hl)
 	ld c,c
 	cp (hl)
-	ld c,012h
+	ld c,actor_giant_bat
 	ld de,07040h
 	call spawn_actor
 lbe44h:

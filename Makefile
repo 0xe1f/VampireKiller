@@ -11,7 +11,12 @@
 #   - references/VampireKiller.rom : an original ROM (the reference), used to
 #     (re)create the segment binaries and to verify the build is byte-identical.
 
-ASM      := tools/sjasmplus
+# --longptr: no device is set, so let the program counter run past 0x10000.
+# The build is a single flat 128 KiB image (16 x 8 KiB segments concatenated),
+# which is larger than the Z80's 64 KiB address space; without this flag
+# sjasmplus prints harmless "RAM limit exceeded" warnings as the output pointer
+# crosses 0x10000.  Output stays byte-exact (see `make verify`).
+ASM      := tools/sjasmplus --longptr
 SRC      := VampireKiller.asm
 OUT      := VampireKiller.rom
 ORIGINAL := references/VampireKiller.rom

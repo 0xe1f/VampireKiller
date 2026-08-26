@@ -138,6 +138,9 @@ draw_enemy_meter: equ 0x45ec	; draw ENEMY/BOSS energy meter from 0xC418
 restore_health: equ 0x460c	; 0xC415 += B, clamp to 0x20
 damage_health: equ 0x4632	; 0xC415 -= B, floor 0
 door_blit_tiles: equ 0x5403	; paint 6 stacked 8x8 door tiles at (C5AD=Y, C5AE=X); C5AC:=1
+load_weapon_sprites: equ 0x559a	; C416 2/3/4: RLE projectile patterns from seg10 to 0xF8C0
+weapon_sprite_ptr: equ 0x55de	; word[C416-2] knife/axe/cross streams
+load_vdoor_sprites: equ 0x55f3	; vertical-door extra patterns (C5AC==5) + door SAT
 load_simon_sprites: equ 0x56e8	; refresh Simon's 2 sprite cells (legs 0xA281/C42E, torso+whip 0xA2D1/C42F)
 add_score: equ 0x44f5	; add C:D:E (BCD hi:mid:lo) to the 3-byte score at 0xC405-0xC407
 damage_enemy: equ 0x4643	; 0xC418 enemy/boss energy -= B (floored at 0)
@@ -157,7 +160,9 @@ scenery_list_lookup: equ 0x5a9f	; HL -> scenery stream for stage 0 or hub 0xD002
 read_buttons: equ 0x4bc2	; joystick|kbd row 8 -> A; play latches C007 held / C006 new-press
 input_edge: equ 0x4bbb	; A=sample, (HL)=held, (HL-1)=rising-edge bits
 read_fkeys: equ 0x4bfb	; sample kbd row 6 -> bit0=F1,bit1=F2,bit2=F3 (edge-detected into 0xC00B)
-play_sound: equ 0x50a6	; A=id: 0=stop, 1-7F sfx, 80-FA music, FB-FF special
+play_sound: equ 0x50a6	; A=id: 0=stop, 1-7F sfx, 80-8F music, FB-FF special
+credits_font_load: equ 0x53e5	; page seg14/15 and blit ending credits_font + _az
+credits_font_blit: equ 0x53e8	; blit only (banks already paged)
 room_spawner: equ 0x5ebf	; per-frame enemy spawner; spawn_bitmask_ptr[stage][room]
 zombie_generator: equ 0x9ced	; room_spawner bit0: rate-gated zombie (actor type 01) spawner
 merman_generator: equ 0x9d52	; room_spawner bit1: green merman type 02 (1 HP)
@@ -172,7 +177,14 @@ spawn_actor_init: equ 0x5f7e	; init tail of spawn_actor
 ; ---- Vampire Killer banked routines (segment 1 @ 0x6000) -----------------
 konami_logo_draw: equ 0x6209	; draw Konami logo + seed the top-to-bottom wipe
 konami_logo_step: equ 0x6253	; reveal one more row of the logo (poll 0xC422)
+actor_sat_build: equ 0x644c	; one actor: seg6 shape stream -> SAT block at slot|0x20
+d700_sat_emit: equ 0x64ec	; 8 x D700 SAT blocks -> 0xD638 hardware shadow
+c800_sat_emit: equ 0x64f3	; 7 x C800 SAT blocks -> 0xD638 hardware shadow
+actor_sat_emit: equ 0x6508	; one actor SAT block -> 0xD638
 lookup_word_tbl: equ 0x6549	; DE = ((word*)DE)[A]  (generic word-table lookup)
+frame_vram_refresh: equ 0x6552	; per-frame pattern upload (or l65abh shadow blit)
+event_vscroll: equ 0x6848	; if CE34 set, write CE33 to VDP R23 (cutscene v-offset)
+player_tick: equ 0x6b06	; door + simon_action + attack + edge detector + timers
 simon_action_tick: equ 0x6b40	; Simon per-frame action-state machine (0xC420)
 simon_grounded: equ 0x6b59	; C420=0 walk/idle
 simon_walk_left: equ 0x6c36	; face left, try -X
@@ -218,7 +230,22 @@ tile_is_solid: equ 0x7c65	; carry=solid iff (tile-1) < row_solid_thresh[0xD000]
 row_solid_thresh: equ 0x7c7f	; per-world-row solidity threshold byte table
 map_cell_at: equ 0x7d36	; A = room tile id under pixel (D=X,E=Y) from the 0xD100 map
 door_interact: equ 0x771f	; white-key door tick: proximity vs C5AD/Y,C5AE/X; spend 0xC701 bit0
+door_state_tbl: equ 0x7725	; C5AC DISPATCH_A: idle / try_open / open_walk
+door_try_open: equ 0x7731	; armed: proximity + spend key
+door_open_walk: equ 0x7791	; C5AC 3/5: auto-walk through the open door
+stage_bgm_change: equ 0x777e	; byte[stage 0..18]: 1 = BGM changes leaving this stage
 set_stage_boundary: equ 0x7807	; blocked horizontal edge walk-off -> set 0xC408 (advance_stage)
+door_idle: equ 0x780c	; ret; door_state_tbl 0/2
+simon_sat_build: equ 0x783e	; emit Simon SAT from C42E/C42F via simon_sat_cell0/1
+stage_bgm_play: equ 0x7956	; play_sound stage_bgm_tbl[D000] unless same track as previous
+stage_bgm_tbl: equ 0x7979	; byte[stage 0..18] = play_sound music id
+simon_sat_cell0: equ 0x798c	; word[C42E] -> legs SAT record
+simon_sat_cell1: equ 0x79dc	; word[C42F] -> torso/whip SAT record
+title_fill_strips: equ 0x7ad6	; HMMV-fill 16 colour-2 strips; HL = dest
+title_set_color2: equ 0x7aee	; palette index 2 = (0x11, 0x01); leaving title
+title_sat_init: equ 0x7af6	; seed SAT shadow from title_sat_tmpl
+title_sat_tmpl: equ 0x7b59	; 11 (Y,X) pairs
+combat_tick: equ 0x7d6f	; per-frame whip/projectile hits + yellow_shield_tick
 
 ; ---- Vampire Killer banked routines (segment 2 @ 0x8000) -----------------
 door_proximity: equ 0x8587	; carry if Simon (B=Y,C=X) overlaps door at C5AD=Y / C5AE=X
@@ -261,6 +288,13 @@ hourglass_use: equ 0x7166	; jump+DOWN + 5 hearts -> C43B / D010 freeze
 brazier_tick_all: equ 0x8678	; per-frame update of the 8 brazier/candle slots (0xC470)
 brazier_tick: equ 0x8693	; update one brazier/candle (flame anim + hit test)
 brazier_destroyed: equ 0x87c1	; brazier/candle hit: clear it + run item drop
+break_spark_tick: equ 0x88df	; 2 x C5A6 whip-break sparks
+pickup_tick: equ 0x8a51	; 8 x C500 floor items/chests
+hazard_tick: equ 0x8fd6	; 3 x C580 hazard slots (hurt_simon_projectile)
+platform_load: equ 0x9034	; seed C598 from platform_tbl for this room
+platform_tbl: equ 0x9073	; {stage,room,n}+n×4; stages 5 and 10
+platform_tick: equ 0x90a2	; 2 x C598 moving platforms (carry Simon via C439)
+vendor_tick: equ 0x91c5	; 2 x C5B5/C5C5 vendor/special-object slots
 vendor_outcome_dispatch: equ 0x92ae	; run whip-hit outcome by state 0xC70C (hearts/nothing/leave)
 vendor_pick_outcome: equ 0x92c2	; advance vendor state machine (transition tbl + R-reg RNG)
 vendor_transition_tbl: equ 0x9307	; 8-byte rows -> next 0xC70C state (>=7 = RNG coin-flip)
@@ -273,7 +307,7 @@ vendor_offer_pending: equ 0x950a	; no button this frame: ret 0xFF (keep offer op
 vendor_purchase_tick: equ 0x94be	; offer loop: tick timer 0xC706, poll buy/refuse, buy item
 vendor_read_buttons: equ 0x9526	; edge-detected confirm(SPACE)/refuse(SHIFT)+triggers -> A
 read_kbd_matrix_bit: equ 0x9552	; read one keyboard-matrix bit (row in A) -> 0/1
-minimap_driver: equ 0x955a	; F2 world-map driver: state 0xCF38 (0 play/1 build/2 shown); needs map item 0xC701 bit7 + uses 0xC70F
+minimap_driver: equ 0x9559	; F2 world-map driver: state 0xCF38 (0 play/1 build/2 shown); needs map item 0xC701 bit7 + uses 0xC70F
 minimap_build: equ 0x95d7	; draw whole minimap: loop rooms 0..minimap_room_count[stage]-1
 minimap_room_pos: equ 0x9681	; AUTHORITATIVE room position: stage tbl 0x969c -> per-room code -> coord tbl 0x975e -> 0xCFF2
 minimap_stage_ptr: equ 0x969c	; word[stage] -> per-room minimap position-code array
@@ -281,9 +315,14 @@ minimap_coord_tbl: equ 0x975e	; word[code] -> packed minimap coord (hi=X 0x20+0x
 minimap_room_count: equ 0x95fd	; byte[stage] = room count (incl. stage 18/Dracula = 10)
 flame_init: equ 0x9b67	; seed a destruction-flame effect (frame 0x85, timer 0x10)
 flame_tick: equ 0x9b78	; flame flicker 0x85/0x86; on expiry spawn 0x24 pickup
+actors_tick: equ 0x98ec	; if D010==0: room_spawner then c800_tick
+c800_tick: equ 0x98f3	; tick all 7 C800 actor slots
+d700_sat_build: equ 0x9917	; 8 x D700 shape streams -> actor SAT
+c800_sat_build: equ 0x991f	; 7 x C800 shape streams -> actor SAT
 actor_integrate: equ 0x99c0	; add velocity (+0x07/08 Y, +0x09/0A X) to position
 actor_cull_offscreen: equ 0x99ec	; free actor if pixel pos left the play area
 actor_free: equ 0x99fd	; clear actor slot (+0x00/+0x0E) and any linked sub-slot
+d700_tick: equ 0x9e38	; 8 x D700 projectile/sub-actor slots
 d700_bone_tick: equ 0x9f0e	; D700 type 4: spinning bone (shapes 0x4B-0x4E) + gravity
 d700_throw: equ 0x9f68	; spawn D700 from current actor (kind=type, pos X/Y-16, vel HL/DE)
 d700_spawn: equ 0x9f74	; spawn D700: A=kind, BC=pos, HL=yvel, DE=xvel
@@ -329,6 +368,7 @@ mtile_defs_s16: equ 0x9651	; stages 16-17
 mtile_defs_s18: equ 0x9AC1	; stage 18 (tail in seg13 0xA000-0xA040)
 
 ; ---- Vampire Killer banked routines (segment 3 @ 0xA000) -----------------
+room_event_tick: equ 0xb6b2	; CE00 room-event dispatcher; event 6 -> sub_65b7h
 enemy_skull_pile_tick: equ 0xa229	; entity type 10 (skull pile, shoots)
 enemy_placed_merman_init: equ 0xa2ce	; object-list id 0x21 (placed red merman)
 enemy_merman_tick: equ 0xa2e7	; entity types 2/3 (green/red merman)
@@ -368,3 +408,41 @@ scenery_list_ptr: equ 0x8000	; word[hub] -> packed scenery streams
 scenery_list_s00: equ 0x800c	; stage 0 courtyard scenery stream
 spawn_bitmask_ptr: equ 0x85a6	; word[stage] -> per-room spawn bitmask
 object_list_ptr: equ 0x8668	; word[hub] -> packed object streams
+credits_font: equ 0x8824		; 14 x 8x8 1bpp ending-credits glyphs (0-9 . ' : ,)
+credits_font_az: equ 0x8894		; 26 x 8x8 1bpp glyphs A-Z
+sound_tick: equ 0x8964		; IRQ PSG tick (int_handler, segs 14+15 paged)
+sound_ch_dispatch: equ 0x89bc	; call sound_ch_go then the C016 (sfx) slot
+sound_ch_go: equ 0x89c6		; C094=A channel, C095=B slot, jp (HL)
+sound_idle: equ 0x89ce		; silent-channel tick (all C010..C016 on stop)
+sound_fd_tick: equ 0x89f2	; C098 bit0: jp (C01A)  (play_sound 0xFD)
+sound_fb_tick: equ 0x89f6	; C098 bit1: run C018 as slot 4
+sound_psg_period: equ 0x89ff	; write 12-bit period DE to PSG (fine=C094*2)
+sound_psg_vol: equ 0x8a0b	; write E to PSG amp (reg 8+C094)
+sound_mix_mute: equ 0x8a13	; mixer: mute this channel
+sound_mix_both: equ 0x8a1a	; mixer: tone + noise
+sound_mix_noise: equ 0x8a21	; mixer: noise only
+sound_mix_tone: equ 0x8a28	; mixer: tone only
+sound_mix_apply: equ 0x8a2c	; apply AND/OR pair from (HL)[C094] to C097 + PSG 7
+sound_mix_tone_tbl: equ 0x8a45	; 3 x (AND,OR) enable tone, disable noise
+sound_mix_noise_tbl: equ 0x8a4b
+sound_mix_both_tbl: equ 0x8a51
+sound_mix_mute_tbl: equ 0x8a57
+sound_ch_fd: equ 0x8a5d		; play_sound 0xFD channel (IX=0xC080)
+sound_ch_a: equ 0x8a64		; music channel A (IX=0xC01C)
+sound_ch_b: equ 0x8a6b		; music channel B (IX=0xC030)
+sound_ch_c: equ 0x8a72		; music channel C (IX=0xC044)
+sound_ch_tick: equ 0x8a76	; common music-channel bytecode tick
+sound_fetch: equ 0x8ad0		; next music bytecode at (HL)
+sound_note_tbl: equ 0x8b81	; 12 PSG periods, one octave (hi nibble of note)
+sound_rest: equ 0x8b99		; 0xC0..CF rest: duration only, period 0
+sound_cmd: equ 0x8bb4		; music command (byte >= 0xD0)
+sound_ch_fb: equ 0x8c95		; play_sound 0xFB channel (IX=0xC06C)
+sound_sfx: equ 0x8c9c		; sfx channel tick (IX=0xC058)
+sound_sfx_go: equ 0x8ca0	; shared FB/sfx: fetch, idle when done
+sound_sfx_fetch: equ 0x8ca7	; sfx bytecode; NC=hold, CY=finished
+sound_sfx_hold: equ 0x8d8b	; or a / ret (NC, still playing)
+sfx_ptr: equ 0x8d8d		; scf/ret (CY, done); play_sound indexes id*2 from here
+sfx_tbl: equ 0x8d8f		; word[id 1..0x1D] -> sfx streams
+music_ptr: equ 0x8dc9		; 6-byte records, 3 channel ptrs, id 0x80..0x8F
+snd_fd_seq: equ 0x9463		; play_sound 0xFD overlay stream
+snd_fb_seq: equ 0x948b		; play_sound 0xFB overlay stream

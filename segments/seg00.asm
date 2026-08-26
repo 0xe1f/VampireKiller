@@ -64,7 +64,7 @@ data_4010_start:
 data_4010_end:
 ; ===========================================================================
 ;  int_handler - timer interrupt (H.TIMI hook, installed by init at 0xFD9F).
-;  Runs once per VDP frame: per-frame sound/VDP work out of segs 14/15, then
+;  Runs once per VDP frame: PSG tick (`sound_tick` in segs 14/15), then
 ;  the game tick.  Two guards keep a slow tick from re-entering itself.
 ; ===========================================================================
 int_handler:
@@ -78,7 +78,7 @@ l4030h:
 	ld (08000h),a           ; ...into 0x8000-0x9FFF
 	ld a,00fh               ; page segment 15...
 	ld (0a000h),a           ; ...into 0xA000-0xBFFF
-	call 08964h             ; per-frame work in seg 14/15 (sound/VDP)
+	call sound_tick         ; per-frame PSG driver (seg14; segs 14+15 paged)
 	di
 	ld a,(0f0f2h)           ; restore game's page-2 segment...
 	ld (08000h),a           ; ...(0f0f2 = current seg at 0x8000)
@@ -313,7 +313,7 @@ state_title:                   ; 1 (0x41A0)
 	ld hl,0c004h
 	dec (hl)
 	ret nz
-	call 07aeeh
+	call title_set_color2
 	jp l4249h
 state_attract:                 ; 2 (0x41AB)
 	djnz l41c1h
@@ -396,7 +396,7 @@ state_stage_bridge:            ; 4 (0x422C)
 	call 062edh
 	ld hl,0c413h
 	ld (hl),001h
-	call 07956h
+	call stage_bgm_play
 	xor a
 	ld (0c40dh),a
 l4249h:
@@ -2062,7 +2062,7 @@ read_buttons:
 ; read_fkeys (0x4BFB) - sample keyboard matrix row 6 (F1=bit5, F2=bit6, F3=bit7),
 ; return them right-justified: bit0=F1, bit1=F2, bit2=F3.  The caller input_edge's
 ; into 0xC00B (newly-pressed).  F2 drives the world-map feature (seg2 minimap_driver
-; 0x955A); F1 is handled in seg0 (0x43E1 / 0x5C48).
+; 0x9559); F1 is handled in seg0 (0x43E1 / 0x5C48).
 read_fkeys:
 sub_4bfbh:
 	ld a,006h              ; keyboard matrix row 6 = function keys...
@@ -2177,9 +2177,9 @@ l4d6dh:
 	ld d,000h
 	call l4911h
 	ld hl,00516h
-	call 07ad6h
+	call title_fill_strips
 	ld hl,00569h
-	call 07ad6h
+	call title_fill_strips
 	ld a,(0002bh)          ; MSX BIOS ID byte 0x002B...
 	and 00fh               ; ...low nibble = character set (0 = Japanese)
 	jr nz,l4dc3h           ; non-zero -> international title (VAMPIRE KILLER)
@@ -2189,7 +2189,7 @@ l4d6dh:
 	ld de,0a038h           ; ...+ "Akumajo Dracula" kana
 	ld hl,title_logo_jp
 	call tile_layout_draw
-	call 07af6h
+	call title_sat_init
 	jr l4dd5h
 l4dc3h:                        ; international/other machine
 	ld de,03828h           ; "VAMPIRE KILLER" logo...
@@ -2317,10 +2317,10 @@ l4e82h:
 	ld c,h
 	ld hl,0ff01h
 sub_4e9ah:
-	call 098f3h
-	call 0991fh
-	call 064f3h
-	jp 065abh
+	call c800_tick
+	call c800_sat_build
+	call c800_sat_emit
+	jp l65abh
 	ld c,027h
 	ld de,0e048h
 	jp spawn_actor
@@ -2601,7 +2601,7 @@ sub_508ch:
 	ld (0c096h),a
 	ld (0c098h),a
 	ld (0c0a8h),a
-	ld hl,089ceh
+	ld hl,sound_idle
 	ld (0c010h),hl
 	ld (0c012h),hl
 	ld (0c014h),hl
@@ -2610,9 +2610,11 @@ l50a5h:
 	ret
 ; play_sound (seg0 0x50A6): queue a sound.  A = id.
 ;   0         stop
-;   1..0x7F   sfx (word table at 0x8D8D; portal flash = 0x15)
-;   0x80..FA  music (6-byte records at 0x8DC9)
-;   0xFB..FF  special (F1 uses 0xFE; script-end uses 0xFF)
+;   1..0x7F   sfx (sfx_ptr/sfx_tbl; portal flash = 0x15)
+;   0x80..8F  music (music_ptr 6-byte records, 3 channel ptrs)
+;   0xFB      overlay (sound_ch_fb / snd_fb_seq); 0xFC restores
+;   0xFD      overlay (sound_ch_fd / snd_fd_seq); 0xFE restores
+;   0xFF      fade timer C0A5=0x3A
 ; Pages banks 0x0E/0x0F into 0x8000/0xA000, then restores 1/2/3.
 play_sound:
 	push hl
@@ -2652,7 +2654,7 @@ play_sound:
 	ld e,a
 	rlca
 	add a,e
-	ld hl,08dc9h
+	ld hl,music_ptr
 	add a,l
 	ld l,a
 	jr nc,l50f6h
@@ -2672,11 +2674,11 @@ l50f6h:
 	inc hl
 	ld d,(hl)
 	ld (0c044h),de
-	ld hl,08a64h
+	ld hl,sound_ch_a
 	ld (0c010h),hl
-	ld hl,08a6bh
+	ld hl,sound_ch_b
 	ld (0c012h),hl
-	ld hl,08a72h
+	ld hl,sound_ch_c
 	ld (0c014h),hl
 	xor a
 	ld (0c096h),a
@@ -2745,7 +2747,7 @@ l5183h:
 	ld bc,WRSLT
 	ldir
 	rlca
-	ld hl,08d8dh
+	ld hl,sfx_ptr
 	add a,l
 	ld l,a
 	jr nc,l519bh
@@ -2755,7 +2757,7 @@ l519bh:
 	inc hl
 	ld d,(hl)
 	ld (0c064h),de
-	ld hl,08c9ch
+	ld hl,sound_sfx
 	ld (0c016h),hl
 	jp l5140h
 l51abh:
@@ -2803,13 +2805,13 @@ l51cbh:
 	ld (0c094h),a
 	ld a,005h
 	ld (0c095h),a
-	ld hl,08a5dh
+	ld hl,sound_ch_fd
 	ld (0c01ah),hl
 	ld de,0c080h
 	ld hl,l515dh
 	ld bc,WRSLT
 	ldir
-	ld hl,09463h
+	ld hl,snd_fd_seq
 	ld (0c080h),hl
 	jp l5131h
 l5234h:
@@ -2868,13 +2870,13 @@ l529ch:
 	ld a,008h
 	call RDPSG
 	ld (0c0a4h),a
-	ld hl,08c95h
+	ld hl,sound_ch_fb
 	ld (0c018h),hl
 	ld de,0c06ch
 	ld hl,l515dh
 	ld bc,WRSLT
 	ldir
-	ld hl,0948bh
+	ld hl,snd_fb_seq
 	ld (0c078h),hl
 	jp l5140h
 l52d0h:
@@ -3038,14 +3040,20 @@ sub_53bdh:
 	ld b,001h
 	call l4a6dh
 	jp sub_533dh
-	call sub_5357h
+; credits_font_load (seg0 0x53E5): page segs 14/15 and blit the 8x8 1bpp
+; ending-credits font (digits+punct, then A-Z) into SCREEN 5 via l4a2eh.
+; Called from sub_6719h (post-Dracula script player). credits_font_blit
+; (0x53E8) skips the pager when those banks are already in.
+credits_font_load:
+	call sub_5357h         ; page seg14/15
+credits_font_blit:
 	ld de,08040h
-	ld hl,08824h
-	ld bc,00e0eh
+	ld hl,credits_font
+	ld bc,00e0eh           ; B=14 glyphs 0-9 . ' : ,
 	call l4a2eh
 	ld de,00848h
-	ld hl,08894h
-	ld bc,01a0eh
+	ld hl,credits_font_az
+	ld bc,01a0eh           ; B=26 glyphs A-Z
 	call l4a2eh
 	jp sub_533dh
 ; door_blit_tiles (0x5403): paint the 6-tile door graphic.  HL is 0xC5AC on
@@ -3314,24 +3322,26 @@ l5575h:
 	nop
 	jp (hl)
 l5595h:
-	inc bc
-	ex af,af'
-	ld (bc),a
-	ld c,00fh
-	call sub_5381h
+	defb 003h,008h,002h,00eh,00fh
+; load_weapon_sprites (seg0 0x559A): RLE-decompress the equipped projectile
+; (C416 2=knife / 3=axe / 4=cross) from seg10 into sprite gen 0xF8C0, then
+; sub_4745h converts 1bpp quadrants.  Leather/chain (0/1) and 5 skip.
+; Catalogued as gfx/weapon_knife, weapon_axe, weapon_cross.
+load_weapon_sprites:
+	call sub_5381h          ; page seg 9/10 (front-end gfx)
 	ld a,(0c416h)
 	cp 005h
 	jr z,l55dbh
 	dec a
-	jr z,l55dbh
+	jr z,l55dbh            ; chain whip: Simon's own cell, not this table
 	dec a
-	add a,a
-	ld hl,l55deh
+	add a,a                 ; word[C416-2]
+	ld hl,weapon_sprite_ptr
 	call ADD_HL_A
 	ld e,(hl)
 	inc hl
-	ld d,(hl)
-	ld hl,0f8c0h
+	ld d,(hl)               ; DE = RLE stream in seg10
+	ld hl,0f8c0h            ; sprite patterns after Simon's two cells
 	call sub_46f8h
 	ld a,(0c416h)
 	cp 004h
@@ -3340,43 +3350,31 @@ l5595h:
 	jr z,l55cfh
 	cp 002h
 	jr nz,l55dbh
-	ld hl,l55eeh
+	ld hl,weapon_cvt_knife
 	call sub_4745h
 	jr l55dbh
 l55cfh:
-	ld hl,l55e4h
+	ld hl,weapon_cvt_boomerang
 	call sub_4745h
-	ld hl,l55e9h
+	ld hl,weapon_cvt_boomerang2
 	call sub_4745h
 l55dbh:
-	jp sub_533dh
-l55deh:
-	ld c,(hl)
-	and d
-	ret
-	and h
-	ld (hl),d
-	and d
-l55e4h:
-	ret nz
-	ret m
-	ld (bc),a
-	add a,b
-	ld sp,hl
-l55e9h:
-	nop
-	ld sp,hl
-	ld (bc),a
-	ld b,b
-	ld sp,hl
-l55eeh:
-	ret nz
-	ret m
-	ld (bc),a
-	nop
-	ld sp,hl
+	jp sub_533dh            ; restore default game banks
+weapon_sprite_ptr:             ; (seg0 0x55DE) word[C416-2] -> seg10 RLE
+	defw 0a24eh            ; 2 knife  (file 0x1424E)
+	defw 0a4c9h            ; 3 axe    (file 0x144C9)
+	defw 0a272h            ; 4 cross  (file 0x14272)
+weapon_cvt_boomerang:          ; axe/cross: F8C0 x2 -> F980
+	defb 0c0h,0f8h,002h,080h,0f9h
+weapon_cvt_boomerang2:         ; axe/cross: F900 x2 -> F940
+	defb 000h,0f9h,002h,040h,0f9h
+weapon_cvt_knife:              ; knife: F8C0 x2 -> F900
+	defb 0c0h,0f8h,002h,000h,0f9h
+; load_vdoor_sprites (seg0 0x55F3): extra patterns for a vertical door
+; (C5AC==5), then fall through into the door SAT at 0xD600.
+load_vdoor_sprites:
 	call sub_5381h
-	ld de,0a0eah
+	ld de,0a0eah            ; seg10 stream (file 0x140EA)
 	ld hl,0f900h
 	call sub_46f8h
 	call sub_533dh
@@ -4310,12 +4308,12 @@ sub_5c1dh:
 	inc hl
 	ret
 sub_5c2ch:
-	call 06848h
-	call 06552h
+	call event_vscroll
+	call frame_vram_refresh
 	ld a,(0ce40h)
 	and a
 	jp nz,066c1h
-	call 09559h
+	call minimap_driver
 	ld a,(0cf38h)
 	and a
 	ret nz
@@ -4337,23 +4335,23 @@ l5c44h:
 	jp play_sound
 l5c63h:
 	call load_simon_sprites
-	call 06b06h
-	call 0783eh
-	call 0b6b2h
-	call 098ech
-	call 09e38h
-	call 07d6fh
-	call brazier_tick_all   ; tick braziers/candles (seg2 0x8678)
-	call 091c5h
-	call 08a51h
-	call 088dfh
-	call 08fd6h
-	call 090a2h
-	call 0914eh
-	call 0991fh
-	call 09917h
-	call 064f3h
-	jp 064ech
+	call player_tick
+	call simon_sat_build
+	call room_event_tick    ; CE00 boss/event (seg3 0xB6B2)
+	call actors_tick        ; room_spawner + C800 (seg2 0x98EC)
+	call d700_tick          ; D700 projectiles (seg2 0x9E38)
+	call combat_tick
+	call brazier_tick_all   ; C470 candles (seg2 0x8678)
+	call vendor_tick        ; C5B5/C5C5 (seg2 0x91C5)
+	call pickup_tick        ; C500 floor items (seg2 0x8A51)
+	call break_spark_tick   ; C5A6 whip sparks (seg2 0x88DF)
+	call hazard_tick        ; C580 (seg2 0x8FD6)
+	call platform_tick      ; C598 moving platforms (seg2 0x90A2)
+	call door_anim_tick
+	call c800_sat_build     ; shape streams -> actor SAT
+	call d700_sat_build
+	call c800_sat_emit      ; actor SAT -> 0xD638 shadow
+	jp d700_sat_emit
 sub_5c99h:
 	ld bc,00400h
 	ld hl,0fcc1h
@@ -4776,37 +4774,37 @@ room_spawner:
 	pop af
 	rra
 	push af
-	call c,zombie_generator ; bit0 -> type 01 zombie
+	call c,zombie_generator ; bit0 -> actor_zombie
 	pop af
 	rra
 	push af
-	call c,merman_generator ; bit1 -> type 02 green merman (1 HP)
+	call c,merman_generator ; bit1 -> actor_merman
 	pop af
 	rra
 	push af
-	call c,merman_generator_3 ; bit2 -> type 03 red merman (spit, 2 HP)
+	call c,merman_generator_3 ; bit2 -> actor_merman_red
 	pop af
 	rra
 	push af
-	call c,hanging_bat_generator ; bit3 -> type 04 hanging bat
+	call c,hanging_bat_generator ; bit3 -> actor_hanging_bat
 	pop af
 	rra
 	push af
-	call c,flying_skull_generator ; bit4 -> type 07 flying skull
+	call c,flying_skull_generator ; bit4 -> actor_flying_skull
 	pop af
 	rra
 	push af
-	call c,ghost_head_generator ; bit5 -> type 08 ghost head
+	call c,ghost_head_generator ; bit5 -> actor_ghost_head
 	pop af
 	rra
-	jp c,roc_generator     ; bit6 -> type 0x0F roc
+	jp c,roc_generator     ; bit6 -> actor_roc
 	ret
 ; --- spawn_actor (seg0 0x5F24) - spawn an actor into a free slot ----------------
-; Entry: C = actor type id (>0), DE = spawn position (D = X, E = Y -> slot+05/+03).
-; Actors live in 7 slots at 0xC800 with stride 0x80 (0xC800,0xC880,...,0xCB80);
-; slot+0 holds the type (0 = free).  Runtime-confirmed types: 1 = walking zombie,
-; 0x1E = the death-effect actor a killed enemy is converted into (plays a dissolve
-; anim in the same slot, +0C counting 0x10->0, then the slot frees back to 0).
+; Entry: C = actor type id (`actor_*` in segments/actors.inc), DE = spawn
+; position (D = X, E = Y -> slot+05/+03).  Actors live in 7 slots at 0xC800
+; with stride 0x80 (0xC800,0xC880,...,0xCB80); slot+0 holds the type (0 = free).
+; A killed enemy is converted in-place to actor_flame (dissolve anim, +0C
+; counting 0x10->0, then the slot frees back to 0).
 ; Returns with the new slot initialised and its per-type handler dispatched.
 spawn_actor:
 	xor a
@@ -4903,33 +4901,35 @@ spawn_actor_init:
 ; entity_tbl - per-object spawn-init handlers, indexed by entity type-1.
 ; Targets are all in 0xA000-0xBFFF, i.e. code in whichever segment is currently
 ; paged into page 2b - so these are addresses in banked ROM, not local labels.
-; 22 entries for types 1-22; the trailing 0x5FFF byte is padding. Types 23+
-; overflow into page 1b (seg1 `data_6000`, odd-aligned from 0x6001) — confirmed
-; 0x1E=flame_init, 0x1F=enemy_placed_bat_init, 0x21=enemy_placed_merman_init,
-; 0x22=orb, 0x23=enemy_hunchback_tick, 0x24=heart, 0x18=Igor. Per-frame tick
-; is a separate table (`sub_9942h` in seg2).
+; 22 entries for actor_zombie..actor_grim_reaper; the trailing 0x5FFF byte is
+; padding. Types past the table overflow into page 1b (seg1 `data_6000`,
+; odd-aligned from 0x6001) — confirmed actor_flame=flame_init,
+; actor_placed_bat=enemy_placed_bat_init, actor_placed_merman=
+; enemy_placed_merman_init, actor_orb, actor_roc_drop=enemy_hunchback_tick,
+; actor_pickup, actor_igor. Per-frame tick is a separate table (`sub_9942h`
+; in seg2). Names live in segments/actors.inc.
 entity_tbl:
-	defw enemy_zombie_tick  ; 1 walking zombie
-	defw enemy_merman_tick  ; 2 green merman (1 HP, closed mouth)
-	defw enemy_merman_tick  ; 3 red merman (2 HP, open-mouth spit)
-	defw enemy_hanging_bat_tick ; 4 hanging bat
-	defw enemy_dog_tick     ; 5 sitting dog
-	defw enemy_pikeman_tick ; 6 pikeman
-	defw enemy_flying_skull_tick ; 7 flying skull
-	defw enemy_ghost_head_tick ; 8 ghost head
-	defw enemy_red_skeleton_tick ; 9 red skeleton (fast, no throw)
-	defw enemy_skull_pile_tick ; 10 skull pile (shoots)
-	defw enemy_white_skeleton_tick ; 11 white skeleton (ledge hop + bone)
-	defw enemy_raven_tick   ; 12 raven (hover-flight)
-	defw enemy_hunchback_tick ; 13 hunchback (also Igor type 24 pose)
-	defw enemy_bone_dragon_tick ; 14 bone dragon (custom SAT)
-	defw enemy_roc_tick     ; 15 roc (drops type 0x23)
-	defw enemy_axe_knight_tick ; 16 axe knight
-	defw enemy_dracula_tick ; 17 Dracula
-	defw enemy_giant_bat_tick ; 18 giant bat
-	defw enemy_medusa_tick  ; 19 Medusa
-	defw enemy_mummy_tick   ; 20 mummy
-	defw enemy_frankenstein_tick ; 21 Frankenstein
-	defw enemy_grim_reaper_tick ; 22 grim reaper
+	defw enemy_zombie_tick  ; actor_zombie
+	defw enemy_merman_tick  ; actor_merman (green, 1 HP)
+	defw enemy_merman_tick  ; actor_merman_red (2 HP, spit)
+	defw enemy_hanging_bat_tick ; actor_hanging_bat
+	defw enemy_dog_tick     ; actor_dog
+	defw enemy_pikeman_tick ; actor_pikeman
+	defw enemy_flying_skull_tick ; actor_flying_skull
+	defw enemy_ghost_head_tick ; actor_ghost_head
+	defw enemy_red_skeleton_tick ; actor_red_skeleton
+	defw enemy_skull_pile_tick ; actor_skull_pile
+	defw enemy_white_skeleton_tick ; actor_white_skeleton
+	defw enemy_raven_tick   ; actor_raven
+	defw enemy_hunchback_tick ; actor_hunchback (also actor_igor pose)
+	defw enemy_bone_dragon_tick ; actor_bone_dragon
+	defw enemy_roc_tick     ; actor_roc (drops actor_roc_drop)
+	defw enemy_axe_knight_tick ; actor_axe_knight
+	defw enemy_dracula_tick ; actor_dracula
+	defw enemy_giant_bat_tick ; actor_giant_bat
+	defw enemy_medusa_tick  ; actor_medusa
+	defw enemy_mummy_tick   ; actor_mummy
+	defw enemy_frankenstein_tick ; actor_frankenstein
+	defw enemy_grim_reaper_tick ; actor_grim_reaper
 	defb 047h
 entity_tbl_end:

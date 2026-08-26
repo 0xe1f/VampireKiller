@@ -11,6 +11,11 @@ main_state_tbl: start 0x4161 end 0x417d type worddata
 ; Title-screen tile-layout streams (0xFF=end, 0xFE=next row).
 title_layout: start 0x4c3f end 0x4d0f type bytedata
 
+; HUD SAT colour/count record consumed by sub_54f7h (IX).
+data_5595: start 0x5595 end 0x559A type bytedata
+; Projectile weapon RLE pointers + sub_4745h convert records.
+weapon_sprite_ptr: start 0x55DE end 0x55F3 type bytedata
+
 ; Entity-behaviour jump table: DISPATCH_A at 0x5fd0 indexes this by object
 ; type (ix+0)-1.  Targets live in the banked 0xA000 ROM, so they can't be
 ; local labels.  Runs to the end of the segment.

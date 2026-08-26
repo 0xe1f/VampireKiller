@@ -1,0 +1,32 @@
+; z80dasm block map for segment 14 (bank 0x0E, paged at 0x8000).
+; Shares the CPU window with seg02, so regenerated labels must be renamed
+; (snd_* / credits_font / etc.) before folding — z80dasm lxxxh would collide.
+
+; Packed scenery / spawn-mask / object-list tables (already annotated).
+data_lists: start 0x8000 end 0x8824 type bytedata
+
+; Ending-credits 8x8 1bpp font: 14 glyphs (0-9 . ' : ,) then 26 letters A-Z.
+data_font: start 0x8824 end 0x8964 type bytedata
+
+; sound_tick through the mixer helpers; mixer AND/OR masks follow.
+; 0x8964-0x8A45 left as code.
+
+; AY mixer AND/OR pairs (3 channels x 2 bytes) for tone / noise / both / mute.
+; Labels sound_mix_tone_tbl / _noise_tbl / _both_tbl / _mute_tbl live here.
+data_mixer: start 0x8A45 end 0x8A5D type bytedata
+
+; Channel ticks + bytecode interpreter; 12-word PSG period octave at 0x8B81.
+; 0x8A5D-0x8B81 left as code.
+data_notes: start 0x8B81 end 0x8B99 type worddata
+
+; Interpreter remainder through `or a; ret` / `scf; ret` at 0x8D8B/0x8D8D.
+; 0x8B99-0x8D8F left as code.
+
+; sfx word table, indexed by id*2 from base 0x8D8D (id 0 unused).
+data_sfx: start 0x8D8F end 0x8DC9 type worddata
+
+; Music 6-byte records: 3 channel pointers per id 0x80..0x8F.
+data_music: start 0x8DC9 end 0x8E29 type bytedata
+
+; Packed sfx / special / music streams (some music tails live in seg15).
+data_seq: start 0x8E29 end 0xA000 type bytedata

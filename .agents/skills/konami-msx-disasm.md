@@ -33,8 +33,10 @@ Paths below are relative to this repo root.
   `README.md`, `.gitignore` (ignore `generated/`, built ROM, segment bins).
 - `segments/` — per-segment `.asm` (disassembled) + `.bin` (not-yet-reversed);
   all hand-authored disassembly metadata lives here: `bios.inc` (MSX BIOS entry
-  names), `msx.sym` (routine/label names for z80dasm regen), `seg*.blocks`
-  (code/data split maps). Anything needed to reassemble or regenerate belongs here.
+  names), `actors.inc` (spawn/object-list type `equ`s — small numeric ids, **not**
+  in `msx.sym` or z80dasm rewrites every `0x01`), `msx.sym` (routine/label names
+  for z80dasm regen), `seg*.blocks` (code/data split maps). Anything needed to
+  reassemble or regenerate belongs here.
 - `docs/` — `progress.md` (checklist + RAM map + working notes), `game-notes.md`
   (detailed findings).
 - `tools/` — `regen-seg.sh`, `split-rom.sh`, `strip-listing.py`, `romscan.py`
@@ -83,7 +85,8 @@ of `<Game>.asm`.
   reference code only by embedded address bytes, so nothing to change there);
   `make verify` catches inconsistencies. Casing: `UPPER_SNAKE` only for MSX BIOS
   and macro-like pseudo-instruction helpers (e.g. `DISPATCH_A`); `lower_snake` for
-  all game code/data.
+  all game code/data. Small numeric type `equ`s (`actor_zombie: equ 0x01`) live in
+  an `INCLUDE`d `.inc`, never `msx.sym`.
 - **Text**: MSX games often store text as `(ASCII - offset)` because the font is
   loaded at a nonzero tile base. Crack the offset, then use an sjasmplus `LUA
   ALLPASS`/`ENDLUA` helper (see `vk()` in `VampireKiller.asm`) to

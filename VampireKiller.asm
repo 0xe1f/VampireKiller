@@ -34,6 +34,8 @@
 
 ; Shared MSX/MSX2 BIOS entry-point names (readability only; not emitted).
     INCLUDE "segments/bios.inc"
+; Actor type ids (spawn_actor C / object-list id).  Readability only.
+    INCLUDE "segments/actors.inc"
 
 ; --- vk() text helper -------------------------------------------------------
 ;  The game's font is loaded into VRAM starting at tile 0x10, so on-screen text
@@ -74,10 +76,10 @@
     DEPHASE
 
 ; --- segments 4..10 : paged in on demand (still INCBIN) ---------------------
-; Included verbatim and emitted contiguously.  sjasmplus prints one harmless
-; "RAM limit exceeded 0x10000" warning here because a single 128 KiB image is
-; larger than the Z80's 64 KiB address space; the output file is still exact
-; (verified by `make verify`).
+; Included verbatim and emitted contiguously.  The full image is 128 KiB, larger
+; than the Z80's 64 KiB address space, so the output pointer runs past 0x10000
+; here; the Makefile passes `--longptr` to allow that.  The output file is still
+; exact (verified by `make verify`).
     INCBIN "segments/seg04.bin"
     INCBIN "segments/seg05.bin"
     INCBIN "segments/seg06.bin"
@@ -101,7 +103,7 @@
     INCLUDE "segments/seg13.asm"
     DEPHASE
 
-; --- segment 14 : bank 0x0E @ 0x8000 (object lists + spawn masks + sound) ---
+; --- segment 14 : bank 0x0E @ 0x8000 (object lists + credits font + PSG) ---
     PHASE 0x8000
     INCLUDE "segments/seg14.asm"
     DEPHASE

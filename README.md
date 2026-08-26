@@ -14,8 +14,9 @@ ROM exactly, so the game can be understood and modified.
 ```
 VampireKiller.asm   master file: stitches the 16 segments into the ROM image
 segments/           one file per 8 KiB segment
-  seg00.asm         segment 0 (resident bank) — disassembled & annotated
-  seg01..15         included as binary (regenerated from the ROM; not committed)
+  seg00..03.asm     code banks — INCLUDE'd, being annotated
+  seg11..14.asm     map / scenery / credits font / PSG — INCLUDE'd
+  seg04..10, 15     still INCBIN (binaries gitignored)
 tools/              helper scripts + symbol/block files (see below)
 docs/               notes (game behaviour, text encoding, sprites) + progress
 gfx/                readable graphics catalogue (manifest committed; dumps regen)

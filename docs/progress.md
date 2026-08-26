@@ -15,7 +15,8 @@ or extracted data assets (graphics/tables) as it's understood, always keeping
 `make verify` byte-exact. Postponed for now - we reverse segments incrementally
 (seg0 done, seg1 largely done, seg2/seg3/seg13 imported as disassembly and being
 annotated; seg11/12 graduated as map-data source; seg14 graduated as scenery /
-object-list / spawn-mask source, sound still INCBIN; seg4-10 and seg15 still
+object-list / spawn-mask / credits-font / PSG-driver source (sequence streams still
+sliced INCBIN; tails in seg15); seg4-10 and seg15 still
 INCBIN) rather
 than mass-converting bins to
 opaque `db` dumps.
@@ -81,16 +82,19 @@ opaque `db` dumps.
     - `sub_6409h` (0x6409): set screen position 0xC425/0xC427/flag 0xC42C from
       per-row table l6426h (2 bytes/row).
   - Actor->sprite rendering (annotated):
-    - 0x644c: build one actor's hardware sprites from its shape stream; pages
-      seg 6 (sprite shapes) into 0xA000, looks shape up in word table 0xB473 by
-      (ix+0x0B), writes sprite attrs at (ix|0x20) offset by actor X/Y (ix+3/+5);
-      stream codes 0x80/81/82 pick fixed (dx,dy) offset lists; restores seg 3.
-    - 0x64ec / 0x64f3: render every active actor in a list (8 @ 0xD700 / 7 @
-      0xC800, stride 0x80) via `sub_6508h`, which copies Y/X/pattern into the
-      0xD638 sprite-attr shadow and fills the pattern from the l6a70h table.
-    - 0x6552: per-frame VRAM refresh - re-uploads the animated tile/sprite
-      patterns each frame; animation phase in 0xC00F. Falls back to the plain
-      shadow blit l65abh (copy 0xD400 -> VRAM 0xF400) when idle.
+    - `actor_sat_build` (0x644C): one actor's hardware sprites from its shape
+      stream; pages seg 6 (sprite shapes) into 0xA000, looks shape up in word
+      table 0xB473 by (ix+0x0B), writes sprite attrs at (ix|0x20) offset by
+      actor X/Y (ix+3/+5); stream codes 0x80/81/82 pick fixed (dx,dy) offset
+      lists; restores seg 3.
+    - `d700_sat_emit` (0x64EC) / `c800_sat_emit` (0x64F3): render every active
+      actor in a list (8 @ 0xD700 / 7 @ 0xC800, stride 0x80) via
+      `actor_sat_emit` (0x6508), which copies Y/X/pattern into the 0xD638
+      sprite-attr shadow and fills the pattern from the l6a70h table.
+    - `frame_vram_refresh` (0x6552): per-frame VRAM refresh - re-uploads the
+      animated tile/sprite patterns each frame; animation phase in 0xC00F.
+      Falls back to the plain shadow blit l65abh (copy 0xD400 -> VRAM 0xF400)
+      when idle.
   - Data tables marked in seg01.blocks this pass: logo layout 0x6296-0x62d6,
     event table 0x6376-0x6388, per-row pos table 0x6426-0x644b, sprite offset
     lists 0x64d4-0x64eb.
@@ -111,10 +115,17 @@ opaque `db` dumps.
       Ramp table l6804h (triangle, 19 entries) animates via sub_67ebh/0x481b.
   - Data tables marked in seg01.blocks this session: the two event dispatch
     tables (0x65bd, 0x66c8), script_ptr_6795 (0x6795-0x67ea), ramp_tbl_6804.
-  - Remaining seg1 routines still to map; seg0-reachable entry points next:
-    0x6848, 0x6b06, 0x783e, 0x7956, 0x7ad6, 0x7aee, 0x7b39, 0x7d6f. The event
-    machinery above wants a targeted trace (trigger a boss/death/transition) to
-    confirm its purpose and get real names.
+  - Remaining seg1 play-tick callees named: `event_vscroll` (0x6848),
+    `player_tick` (0x6B06), `simon_sat_build` (0x783E), `stage_bgm_play`
+    (0x7956), `title_fill_strips` (0x7AD6), `title_set_color2` (0x7AEE),
+    `tile_layout_draw` (0x7B39, already named), `combat_tick` (0x7D6F).
+    Play-loop tail in `sub_5c2ch` also named: `room_event_tick` (0xB6B2,
+    CE00; event 6 = sub_65b7h), `actors_tick` (0x98EC), `d700_tick`
+    (0x9E38), `vendor_tick` (0x91C5), `pickup_tick` (0x8A51),
+    `break_spark_tick` (0x88DF), `hazard_tick` (0x8FD6), `platform_tick`
+    (0x90A2), `c800_sat_build`/`d700_sat_build`, `c800_sat_emit`/`d700_sat_emit`,
+    `frame_vram_refresh`.  Event machinery (0x65b7) still wants a boss/death
+    trace.
 
 - Runtime tracer (CocoaMSX) wired up and used for the first time:
   - `tools/CocoaMSX` submodule (branch `disasm-tracing`) builds with the opt-in
@@ -129,7 +140,7 @@ opaque `db` dumps.
     `trace-run.sh` unless `SOFTGL=0`). Also bumped `MACOSX_DEPLOYMENT_TARGET` to 11.0
     for the arm64 build. Slower but stable; the tracer is display-independent.
   - First traced session (logo -> title -> attract -> stage 1) confirmed:
-    * 0x6552 is frame code (runs every frame); 0xC00F cycles the 16 phase values
+    * 0x6552 (`frame_vram_refresh`) is frame code (runs every frame); 0xC00F cycles the 16 phase values
       {00,08,..,78} in the exact scrambled order the `add 0x68 / and 0x78` step
       produces - validates that routine down to the arithmetic.
     * 0x644c really pages seg 6 for sprite shapes (page 2b showed seg 06).
@@ -635,7 +646,7 @@ opaque `db` dumps.
       BFS layout mis-placed rooms in stages 13/15, the user pointed at the in-game F2
       "world map" item. Followed F2: seg0 **read_fkeys (0x4BFB)** samples kbd row 6
       (F1/F2/F3 -> bits 0/1/2), edge-detected into **0xC00B**. seg2 **minimap_driver
-      (0x955A)** dispatches on map-screen state **0xCF38**; F2 needs the map item
+      (0x9559)** dispatches on map-screen state **0xCF38**; F2 needs the map item
       (**0xC701 bit7**) and spends one of **0xC70F** uses (seeded to 3).
     * **minimap_room_pos (seg2 0x9681)** is authoritative geography: per stage 0xD000
       it indexes **0x969C** -> a per-room array of one-byte POSITION CODES, then maps
@@ -905,9 +916,11 @@ opaque `db` dumps.
 
 ## In progress / next
 
-1. Sprites/graphics: resolve the per-level/per-actor pointer tables (l55deh,
-   0xA281+A, 0xA2D1+A, ...) to map the remaining streams to Simon / enemies /
-   bosses / items / tiles, and add them to `gfx/manifest.tsv`.
+1. Sprites/graphics: `weapon_sprite_ptr` (seg0 0x55DE, was l55deh) and
+   Simon's SAT layouts (`simon_sat_cell0/1`) converted from fake instructions.
+   Projectile streams catalogued as `gfx/weapon_knife` / `_axe` / `_cross`.
+   Still to map: per-room gfx-script streams (enemy/tileset VRAM) and remaining
+   actor art in seg13 0xA319+.
 2. Convert the tile-layout block `0x4C3F-0x4D0E` in seg00 from misdisassembled
    "code" to `db` data - DONE (`l4c3fh` / `l4c5ah` / `l4ca0h` + `tile_layout_draw`).
 3. Annotate the in-game state handlers in `sub_414dh`: 0-5 named; 6=`state_death`,
@@ -917,6 +930,9 @@ opaque `db` dumps.
 4. Annotate the seg1 player routines the movement trace located - DONE:
    `simon_walk_left/right`, `simon_add_x`, `simon_jump_*`, `simon_mirror_frames`,
    `whip_tick` / `simon_attack_tick`, action-state handlers 0-6 named.
+   Play-loop tail in `sub_5c2ch` named: `room_event_tick`, `actors_tick`,
+   `d700_tick`, `vendor_tick`, `pickup_tick`, `break_spark_tick`,
+   `hazard_tick`, `platform_tick`, SAT build/emit, `frame_vram_refresh`.
 5. Continue disassembling segments 1-15.
 6. Room-map renderer (`tools/roomperm.py`) per-stage tile-semantics cleanup.
    Tile-name id meaning is PER-STAGE (each stage's tileset reuses ids), so the
@@ -954,8 +970,10 @@ opaque `db` dumps.
    - Tile-class errata for the permeability sheets are settled (01-04 body
      adjacency + 0c/0d stairs).  Seg14 list-ids named and the spawn-mask /
      object-list tables graduated from INCBIN (`scenery_list_ptr`,
-     `spawn_bitmask_ptr`, `object_list_ptr` in `segments/seg14.asm`). Sound/VDP
-     at 0x8824 still INCBIN.  `collect_bonus_tbl` ids are annotated in seg02.
+     `spawn_bitmask_ptr`, `object_list_ptr` in `segments/seg14.asm`). The rest of
+     the bank is now source too: `credits_font` / `sound_tick` / `sfx_tbl` /
+     `music_ptr`, with packed PSG streams still INCBIN slices (some music tails
+     in seg15).  `collect_bonus_tbl` ids are annotated in seg02.
 
 ## Next tracing session (resume plan)
 
@@ -1013,6 +1031,11 @@ After that, trigger the still-dark machinery:
 
 Known live RAM map (runtime-confirmed this session):
   0xC000 primary state  0xC001 sub-state  0xC003 frame ctr  0xC004 phase timer
+  0xC010..C016 music A/B/C + sfx tick pointers (word); 0xC018/C01A = 0xFB/0xFD
+         overlays.  20-byte channel blocks: C01C/C030/C044 music, C058 sfx,
+         C06C 0xFB, C080 0xFD.  C094 = current PSG ch, C095 = slot, C096 =
+         current sfx id, C097 = AY mixer shadow, C098 bit0=FD / bit1=FB,
+         C0A5/C0A6 fade (play_sound 0xFF), C0A7 live-channel bits, C0A8 sfx lock.
   0xC411 stage/area number (0=courtyard, 1=castle; set with 0xD000/0xC413 at
          seg0 0x2286)
   0xC415 HEALTH / energy bar (full 0x20=32; zombie hit = -2; draw seg0 l45d8h
@@ -1036,6 +1059,8 @@ Known live RAM map (runtime-confirmed this session):
   0xC007 held buttons: bit0=UP bit1=DOWN bit2=LEFT bit3=RIGHT (read_buttons).
   0xC41B pending room-exit: 1=up 2=down 3=left 4=right, or 0xFF = spot warp.
   0xC425 Simon Y  0xC426/27 Simon X  0xC42C facing(0=R/1=L)  0xC428 jump phase
+  0xC439 standing-on-moving-platform (nonzero = C598 slot id; `platform_tick`
+         / `simon_grounded` carry Simon's X).
   0xC5AC door sub-state: loader 0xFF (vertical: blit closed graphic) or 0x04
          (courtyard); then 1 = armed, 3 = open.  0xC5AD = door pixel Y, 0xC5AE =
          door pixel X (from door_tbl; confirmed vs Simon Y/X and VDP SAT order).
@@ -1062,6 +1087,12 @@ Known live RAM map (runtime-confirmed this session):
          contact frame, candle 0xC470 likewise; unwhipped candles stayed 0x02.
          (Writer PC not yet captured - WATCH this block next run to name the
          candle-hit routine.)
+  0xC500 floor pickups/chests: 8 slots, stride 0x10 (`pickup_tick`).
+  0xC580 hazard/projectile slots: 3 x 8 bytes (`hazard_tick`;
+         `hurt_simon_projectile` overlap). Seeded on stage 6 room 1.
+  0xC598 moving platforms: 2 x 7 bytes (`platform_tick`; table `platform_tbl`
+         stages 5 and 10). SAT at 0xD638/0xD648.
+  0xC5A6 whip-break sparks: 2 x 3 bytes (`break_spark_tick`).
   0xC800 actor slots: 7 slots, stride 0x80 (0xC800, 0xC880, ...); also used for
          the orb->item pickup.  Allocated/initialised by seg0 l5f24h (0x5F24):
          scans the 7 slots for slot+0==0, fills the struct, then DISPATCH_A's the
@@ -1157,14 +1188,17 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   noise but keeps hand-written `; ...` comments and re-aligns them).
 - Data regions go in a `.blocks` file (see `segments/seg00.blocks`, `segments/seg01.blocks`);
   a `.blocks` file only changes code-vs-data rendering, never the emitted bytes.
-  BIOS names live once in `segments/bios.inc`; routine names go in `segments/msx.sym`.
+  BIOS names live once in `segments/bios.inc`; actor type ids in
+  `segments/actors.inc`; routine names go in `segments/msx.sym`.
 - File placement (STANDING PRACTICE): all hand-authored disassembly metadata lives
-  in `segments/` (`bios.inc`, `msx.sym`, `seg*.blocks`) - anything needed to
-  reassemble or to regenerate the disassembly faithfully. `tools/` is executable
-  tooling only; `generated/` is gitignored derived scratch (never author there).
-  How they're consumed: `bios.inc` is `INCLUDE`d by the build (symbol equates, not
-  emitted); `msx.sym` (z80dasm `-S`) and `seg*.blocks` (z80dasm `-b`) are read only
-  by `regen-seg.sh`. `bios.inc` and `msx.sym` overlap - keep them in sync.
+  in `segments/` (`bios.inc`, `actors.inc`, `msx.sym`, `seg*.blocks`) - anything
+  needed to reassemble or to regenerate the disassembly faithfully. `tools/` is
+  executable tooling only; `generated/` is gitignored derived scratch (never author
+  there). How they're consumed: `bios.inc` and `actors.inc` are `INCLUDE`d by the
+  build (symbol equates, not emitted); `msx.sym` (z80dasm `-S`) and `seg*.blocks`
+  (z80dasm `-b`) are read only by `regen-seg.sh`. `bios.inc` and `msx.sym` overlap
+  - keep them in sync.  Do **not** put small numeric `equ`s (`actor_zombie: equ
+  0x01` and friends) in `msx.sym` — z80dasm would rewrite every `0x01` in listings.
 - Naming (STANDING PRACTICE): as soon as we have enough context to be confident of
   a routine's (or label's) purpose, rename it - proactively, without being asked.
   Do NOT rename speculatively: keep the `z80dasm` name until the purpose is actually
@@ -1193,16 +1227,24 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   draw_enemy_meter, restore_health/damage_health/spawn_actor(+_init),
   advance_stage, room_map_build, zombie_generator, merman_generator,
   merman_generator_3, hanging_bat_generator, flying_skull_generator, ghost_head_generator,
-  roc_generator, door_blit_tiles,
-  read_buttons, input_edge, play_sound;
+  roc_generator, door_blit_tiles, read_buttons, input_edge, play_sound,
+  credits_font_load, credits_font_blit, load_weapon_sprites, load_vdoor_sprites;
   seg1: simon_action_tick, simon_walk_left/right, simon_jump_tick, simon_mirror_frames,
-  whip_tick, projectile_tick, knife_tick, cross_tick, axe_tick, tile_layout_draw, holy_water_use, holy_water_tick, map_cell_at, tile_is_solid,
-  row_solid_thresh, set_stage_boundary, door_interact, simon_portal_wait,
-  hourglass_use;
+  simon_crouch, simon_stairs, simon_fall, simon_hurt, simon_dying,
+  simon_portal_wait, simon_attack_tick, whip_tick, projectile_tick,
+  knife_tick, cross_tick, axe_tick, tile_layout_draw, holy_water_use,
+  holy_water_tick, map_cell_at, tile_is_solid, row_solid_thresh,
+  set_stage_boundary, door_interact, door_try_open, door_open_walk,
+  hourglass_use, stage_bgm_tbl, stage_bgm_play, stage_bgm_change,
+  event_vscroll, player_tick, simon_sat_build, simon_sat_cell0/1, combat_tick,
+  title_fill_strips, title_set_color2, title_sat_init, actor_sat_build,
+  actor_sat_emit, c800_sat_build/emit, d700_sat_build/emit, frame_vram_refresh;
   seg2: door_proximity, door_anim_tick, door_begin_open, spot_proximity,
   collect_bonus_tbl, bonus_holy_water, yellow_shield_tick, projectile_hit_actors,
-  lose_weapon, d700_throw, d700_spawn, d700_alloc, d700_bone_tick;
-  seg3: enemy_zombie_tick, enemy_dog_tick, enemy_merman_tick,
+  lose_weapon, d700_throw, d700_spawn, d700_alloc, d700_bone_tick, d700_tick,
+  actors_tick, c800_tick, pickup_tick, vendor_tick, break_spark_tick,
+  hazard_tick, platform_tick, platform_load, platform_tbl;
+  seg3: room_event_tick, enemy_zombie_tick, enemy_dog_tick, enemy_merman_tick,
   enemy_hanging_bat_tick, enemy_flying_skull_tick, enemy_ghost_head_tick,
   enemy_roc_tick, enemy_pikeman_tick, enemy_raven_tick, enemy_skull_pile_tick,
   enemy_hunchback_tick, enemy_bone_dragon_tick, enemy_red_skeleton_tick,
@@ -1218,7 +1260,11 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   mtile_defbase, mtile_defs_s00..s18, mtile_def_c41a.
   seg14: scenery_list_ptr, scenery_list_s00, scenery_list_h0..h5,
   spawn_bitmask_ptr, spawn_mask_s00..s18, object_list_ptr,
-  object_list_h0..h5.
+  object_list_h0..h5, credits_font, credits_font_az, sound_tick, sound_idle,
+  sound_ch_a/b/c, sound_sfx, sfx_ptr, sfx_tbl, music_ptr.
+  Actor type `equ`s: `segments/actors.inc` (`actor_zombie`..`actor_pickup`,
+  `obj_next_room`/`obj_end_stream`); used in the packed object list and confirmed
+  `spawn_actor` `ld c` sites.
 - Every `vk()`-emitting Lua block MUST use `LUA ALLPASS` — plain `LUA` emits only
   on the final pass and drifts all later labels.
 - After any edit, run `make verify` before moving on.

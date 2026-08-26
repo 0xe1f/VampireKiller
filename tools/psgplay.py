@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
-"""Render Vampire Killer BGM from the ROM's packed PSG bytecode.
+"""Render Vampire Killer BGM and SFX from the ROM's packed PSG bytecode.
 
-Reimplements sound_tick / sound_fetch (seg14) against an AY-3-8910 model.
-Reads the same bytes the assemble uses (references/VampireKiller.rom, or
-the rebuilt VampireKiller.rom).  Writes 16-bit mono WAVs into music/.
+Reimplements sound_tick / sound_fetch / sound_sfx_fetch (seg14) against an
+AY-3-8910 model.  Reads the same bytes the assemble uses
+(references/VampireKiller.rom, or the rebuilt VampireKiller.rom).
+Writes 16-bit mono WAVs into music/ (BGM) or sfx/ (ids 1-0x1D).
 
-The output is recognizable but not a complete match to a real MSX (software
-AY, loop/fade heuristics).  Fine for catalogue listening; accuracy later.
+AY timing matches the AY-3-8910 (fmaster/8 generators, 16-step envelope
+with period*2).  Still not analog-accurate (no speaker filter; loop/fade
+heuristics on BGM).
 
 Usage (from repo root):
-  python3 tools/psgplay.py              # all ids 0x80-0x8E
+  python3 tools/psgplay.py              # all ids 0x80-0x8E -> music/
   python3 tools/psgplay.py --id 0x80
-  python3 tools/psgplay.py --loops 2 --seconds 90
+  python3 tools/psgplay.py --sfx         # all sfx 0x01-0x1D -> sfx/
+  python3 tools/psgplay.py --sfx --id 5
 """
 from __future__ import annotations
 
@@ -23,8 +26,10 @@ import wave
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MUSIC = os.path.join(ROOT, "music")
+SFX_DIR = os.path.join(ROOT, "sfx")
 
 MUSIC_PTR = 0x8DC9
+SFX_PTR = 0x8D8D  # play_sound indexes id*2 from here; id 1 -> sfx_tbl
 ENV_PTR = 0xAAD6
 ENV_PTR_ALT = 0xAAEE
 NOTE_TBL = 0x8B81  # sound_note_tbl (odd-aligned; add nibble*2 to L)
@@ -58,9 +63,42 @@ AY_VOL = [
     0x2B34, 0x43A5, 0x5F2C, 0x7DC9, 0xA199, 0xC8D2, 0xF477, 0xFFFF,
 ]
 
+# Call-site names (play_sound).  Every 1..0x1D is used.
+SFX = {
+    0x01: "01_boss_heal",
+    0x02: "02_vendor_withdraw",
+    0x03: "03_cross_fly",
+    0x04: "04_knife_throw",
+    0x05: "05_whip",
+    0x06: "06_axe_fly",
+    0x07: "07_land",
+    0x08: "08_merman_out",
+    0x09: "09_water_in",
+    0x0A: "0A_mummy_shot",
+    0x0B: "0B_shield_block",
+    0x0C: "0C_hit",
+    0x0D: "0D_ring_kill",
+    0x0E: "0E_block_break",
+    0x0F: "0F_heart",
+    0x10: "10_money_bag",
+    0x11: "11_chest",
+    0x12: "12_collect",
+    0x13: "13_simon_hurt",
+    0x14: "14_key",
+    0x15: "15_portal",
+    0x16: "16_blue_gem",
+    0x17: "17_gem_warn",
+    0x18: "18_holy_water",
+    0x19: "19_vendor_offer",
+    0x1A: "1A_door",
+    0x1B: "1B_white_cross",
+    0x1C: "1C_boss_clear",
+    0x1D: "1D_vendor_hearts",
+}
+
 TRACKS = {
     0x80: "80_bgm_s00-03",
-    0x81: "81_bgm_s04_06_11_12",
+    0x81: "81_bgm_s04-06_11_12",
     0x82: "82_bgm_s07-09",
     0x83: "83_bgm_s16-17",
     0x84: "84_bgm_s13-15",
@@ -68,7 +106,7 @@ TRACKS = {
     0x86: "86_bgm_boss_dracula",
     0x87: "87_bgm_boss",
     0x88: "88_bgm_boss_dracula_portrait",
-    0x89: "89_game_over",
+    0x89: "89_simon_death",
     0x8A: "8A_enter_castle",
     0x8B: "8B_game_over",
     0x8C: "8C_boss_defeated",
@@ -103,7 +141,16 @@ def cpu_off(cpu: int) -> int:
 
 
 class AY:
-    """Minimal AY-3-8910: tone + noise + mixer + 4-bit volume (no HW envelope)."""
+    """AY-3-8910 (MAME timing): generators run at fmaster/8.
+
+    Tone freq = fmaster / (16 * period).  Envelope is 16 steps with the
+    period doubled (YM2149 uses 32 steps at twice the clock — same sweep
+    rate, finer levels).  SFX 02/envelope streams are unusable if this
+    clock is off (old code ticked at fmaster/16 and env at fmaster/256).
+    """
+
+    ENV_MASK = 0x0F
+    ENV_MUL = 2  # AY: period * 2 vs YM2149's 32-step /1
 
     def __init__(self, sample_rate: int):
         self.sr = sample_rate
@@ -111,13 +158,63 @@ class AY:
         self.tone_cnt = [0, 0, 0]
         self.tone_bit = [0, 0, 0]
         self.noise_cnt = 0
+        self.noise_prescale = 0
         self.noise_lfsr = 1
         self.noise_bit = 0
         self.sub = 0.0
-        self.step = (PSG_HZ / 16.0) / sample_rate
+        self.step = (PSG_HZ / 8.0) / sample_rate
+        self.env_cnt = 0
+        self.env_step = self.ENV_MASK
+        self.env_vol = 0
+        self.env_holding = False
+        self.env_attack = 0
+        self.env_alt = 0
+        self.env_hold = 0
 
     def write(self, r: int, v: int) -> None:
-        self.reg[r & 15] = v & 0xFF
+        r &= 15
+        self.reg[r] = v & 0xFF
+        if r == 13:
+            self._env_reset()
+
+    def _env_reset(self) -> None:
+        # MAME ay8910_device::envelope_t::set_shape (AY 16-step).
+        shape = self.reg[13] & 0x0F
+        mask = self.ENV_MASK
+        self.env_attack = mask if (shape & 0x04) else 0
+        if (shape & 0x08) == 0:
+            self.env_hold = 1
+            self.env_alt = self.env_attack
+        else:
+            self.env_hold = shape & 1
+            self.env_alt = shape & 2
+        self.env_step = mask
+        self.env_holding = False
+        self.env_cnt = 0
+        self.env_vol = self.env_step ^ self.env_attack
+
+    def _env_tick(self) -> None:
+        if self.env_holding:
+            return
+        period = (self.reg[11] | (self.reg[12] << 8)) * self.ENV_MUL
+        if period == 0:
+            period = self.ENV_MUL
+        self.env_cnt += 1
+        if self.env_cnt < period:
+            return
+        self.env_cnt = 0
+        self.env_step -= 1
+        if self.env_step < 0:
+            if self.env_hold:
+                if self.env_alt:
+                    self.env_attack ^= self.ENV_MASK
+                self.env_holding = True
+                self.env_step = 0
+            else:
+                if self.env_alt and (self.env_step & (self.ENV_MASK + 1)):
+                    self.env_attack ^= self.ENV_MASK
+                self.env_step &= self.ENV_MASK
+        self.env_vol = self.env_step ^ self.env_attack
 
     def _period(self, ch: int) -> int:
         p = self.reg[ch * 2] | ((self.reg[ch * 2 + 1] & 0x0F) << 8)
@@ -130,8 +227,9 @@ class AY:
         for _ in range(ticks):
             for ch in range(3):
                 self.tone_cnt[ch] += 1
-                if self.tone_cnt[ch] >= self._period(ch):
-                    self.tone_cnt[ch] = 0
+                p = self._period(ch)
+                while self.tone_cnt[ch] >= p:
+                    self.tone_cnt[ch] -= p
                     self.tone_bit[ch] ^= 1
             np = self.reg[6] & 0x1F
             if np == 0:
@@ -139,12 +237,13 @@ class AY:
             self.noise_cnt += 1
             if self.noise_cnt >= np:
                 self.noise_cnt = 0
-                bit0 = self.noise_lfsr & 1
-                # AY 17-bit LFSR: xor bits 0 and 3.
-                self.noise_lfsr >>= 1
-                if bit0:
-                    self.noise_lfsr ^= 0x10004
-                self.noise_bit = bit0
+                self.noise_prescale ^= 1
+                if not self.noise_prescale:
+                    bit0 = self.noise_lfsr & 1
+                    bit3 = (self.noise_lfsr >> 3) & 1
+                    self.noise_lfsr = (self.noise_lfsr >> 1) | ((bit0 ^ bit3) << 16)
+                    self.noise_bit = bit0
+            self._env_tick()
         mix = self.reg[7]
         acc = 0
         for ch in range(3):
@@ -155,7 +254,8 @@ class AY:
             )
             if not audible:
                 continue
-            vol = self.reg[8 + ch] & 0x0F
+            amp = self.reg[8 + ch]
+            vol = self.env_vol if (amp & 0x10) else (amp & 0x0F)
             acc += AY_VOL[vol]
         acc //= 4
         if acc > 32767:
@@ -210,7 +310,7 @@ class Driver:
         self.wr(ch.psg_ch * 2 + 1, (period >> 8) & 0x0F)
 
     def wr_vol(self, ch: Channel, vol: int) -> None:
-        self.wr(8 + ch.psg_ch, vol & 0x0F)
+        self.wr(8 + ch.psg_ch, vol & 0x1F)
 
     def mix_apply(self, ch: Channel, table: list[tuple[int, int]]) -> None:
         a, o = table[ch.psg_ch]
@@ -257,6 +357,41 @@ class Driver:
                 s = int(self.ay.sample() * gain)
                 pcm.extend(struct.pack("<h", s))
         return bytes(pcm), ptrs
+
+    def play_sfx(self, sid: int, sample_rate: int, max_seconds: float):
+        """Solo sfx on PSG C (slot 3), matching play_sound 1..0x1D."""
+        ptr = self.peek16(SFX_PTR + sid * 2)
+        self.ay = AY(sample_rate)
+        self.mixer = 0xBF  # all muted; sfx mixer ops enable C
+        self.fade = 0
+        self.wr(7, self.mixer)
+        ch = Channel(3, 2, 0)
+        ch.st[12] = ptr & 0xFF
+        ch.st[13] = ptr >> 8
+
+        spf = int(round(sample_rate / FRAME_HZ))
+        max_frames = int(max_seconds * FRAME_HZ)
+        fade_frames = max(1, int(0.12 * FRAME_HZ))
+        pcm = bytearray()
+        stop_at = None  # type: int | None
+
+        for frame in range(max_frames + fade_frames + 1):
+            self.wr(7, self.mixer)
+            if stop_at is None:
+                if self.sfx_fetch(ch) or frame >= max_frames:
+                    self.wr_vol(ch, 0)
+                    stop_at = frame + fade_frames
+            gain = 1.0
+            if stop_at is not None:
+                left = stop_at - frame
+                if left <= 0:
+                    break
+                if left < fade_frames:
+                    gain = left / fade_frames
+            for _ in range(spf):
+                s = int(self.ay.sample() * gain)
+                pcm.extend(struct.pack("<h", s))
+        return bytes(pcm), ptr
 
     def tick(self, ch: Channel) -> None:
         st = ch.st
@@ -440,9 +575,10 @@ class Driver:
                 hi = c & 0xF0
             if hi == 0x20:
                 self._sfx_mix(ch, c)
-                vol_bit = (c << 1) & 0x10
-                st[10] = vol_bit
-                self.wr_vol(ch, 0 if not vol_bit else 0x0F)
+                env_bit = (c << 1) & 0x10
+                st[10] = env_bit
+                # AY amp bit4 = use hardware envelope (not volume 0x0F).
+                self.wr_vol(ch, env_bit)
                 reload = self.peek(cpu)
                 cpu = (cpu + 1) & 0xFFFF
                 st[14] = reload
@@ -461,8 +597,11 @@ class Driver:
                 self.wr(11, fine)
                 continue
             vol = c >> 4
-            st[10] = vol
-            self.wr_vol(ch, vol)
+            if st[10] & 0x10:
+                self.wr(13, vol)  # envelope shape
+            else:
+                st[10] = vol
+                self.wr_vol(ch, vol)
             period_hi = c & 0x0F
             period_lo = self.peek(cpu)
             cpu = (cpu + 1) & 0xFFFF
@@ -514,28 +653,47 @@ def verify_tables(rom: bytes) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--id", type=lambda s: int(s, 0), help="single id 0x80-0x8E")
-    ap.add_argument("--loops", type=int, default=2, help="EA-loop repeats before fade")
+    ap.add_argument("--sfx", action="store_true", help="render sfx ids 0x01-0x1D into sfx/")
+    ap.add_argument("--id", type=lambda s: int(s, 0), help="single id (0x80-0x8E, or 1-0x1D with --sfx)")
+    ap.add_argument("--loops", type=int, default=2, help="EA-loop repeats before fade (BGM)")
     ap.add_argument("--min-seconds", type=float, default=20.0, help="play at least this long if the track loops")
-    ap.add_argument("--seconds", type=float, default=90.0, help="hard cap")
+    ap.add_argument("--seconds", type=float, default=None, help="hard cap (default 90 BGM / 4 sfx)")
     ap.add_argument("--rate", type=int, default=22050)
-    ap.add_argument("-o", "--out", default=MUSIC)
+    ap.add_argument("-o", "--out", default=None)
     args = ap.parse_args()
 
     rom = load_rom()
     verify_tables(rom)
+    if args.sfx:
+        out = args.out or SFX_DIR
+        cap = 4.0 if args.seconds is None else args.seconds
+        ids = [args.id] if args.id is not None else list(range(1, 0x1E))
+        for i in ids:
+            if not 1 <= i <= 0x1D:
+                sys.exit("sfx id 0x%02X out of range 0x01-0x1D" % i)
+            drv = Driver(rom)
+            pcm, ptr = drv.play_sfx(i, args.rate, cap)
+            name = SFX.get(i, "%02X" % i)
+            path = os.path.join(out, name + ".wav")
+            write_wav(path, args.rate, pcm)
+            sec = len(pcm) / (2 * args.rate)
+            print("0x%02X  %s  ptr=%04X  %.2fs  %s" % (i, name, ptr, sec, path))
+        return
+
+    out = args.out or MUSIC
+    cap = 90.0 if args.seconds is None else args.seconds
     ids = [args.id] if args.id is not None else sorted(TRACKS)
     for i in ids:
         if i == 0x8F:
             continue
         if i not in TRACKS:
-            sys.exit("unknown id 0x%02X (want 0x80-0x8E)" % i)
+            sys.exit("unknown id 0x%02X (want 0x80-0x8E, or --sfx)" % i)
         drv = Driver(rom)
         pcm, ptrs = drv.play(
-            i, args.rate, max(1, args.loops), args.seconds, args.min_seconds
+            i, args.rate, max(1, args.loops), cap, args.min_seconds
         )
         name = TRACKS[i]
-        path = os.path.join(args.out, name + ".wav")
+        path = os.path.join(out, name + ".wav")
         write_wav(path, args.rate, pcm)
         sec = len(pcm) / (2 * args.rate)
         print(

@@ -23,6 +23,7 @@ docs/               notes (game behaviour, text encoding, sprites) + progress
 gfx/                readable graphics catalogue (PNG sheets committed; `make gfx`)
 music/              BGM catalogue (WAV; `make music` from the ROM bytecode;
                     recognizable, not fully hardware-accurate yet)
+sfx/                SFX catalogue (WAV; `make sfx`; `05_whip.wav`, etc.)
 Makefile            build / verify
 ```
 

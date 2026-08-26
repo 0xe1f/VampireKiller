@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Re-pack a flat byte buffer into a Vampire Killer RLE stream (the inverse of
-tools/rledec.py / the game's decompressor sub_46f8h).
+tools/rledec.py / the game's decompressor rle_dec).
 
 Grammar emitted:
   0x01..0x7F  N   RUN     : next single byte repeated N times

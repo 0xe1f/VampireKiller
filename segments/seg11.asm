@@ -1,5 +1,5 @@
 ; ===========================================================================
-;  SEGMENT 11 - bank 0x0B, paged at 0x6000-0x7FFF (page 1b) by sub_5369h /
+;  SEGMENT 11 - bank 0x0B, paged at 0x6000-0x7FFF (page 1b) by page_map_banks /
 ;  room_map_build.  Room-map tables + packed metatile streams.  Origin is set
 ;  by PHASE 0x6000 in VampireKiller.asm.
 ;

@@ -1,4 +1,4 @@
-; Packed 1bpp sprite RLE (sub_46f8h), CPU 0xA319-0xB5A1.
+; Packed 1bpp sprite RLE (rle_dec), CPU 0xA319-0xB5A1.
 ; Pixel bytes are defb %xxxxxxxx (MSB=left, one 8px row of an 8x8
 ; cell; VRAM order TL/BL/TR/BR per 16x16).  Run/literal counts stay
 ; hex so the packed stream is byte-exact.

@@ -73,7 +73,7 @@ are schematic maps at gfx/minimap_s<NN>.png (optional _coll/_vis suffix).
 --pixels is the assembled playfield (not a minimap) at gfx/stage_s<NN>.png.
 For all 19 stages 0..18.  Rooms are
 placed SPATIALLY using the GAME'S OWN hand-authored F2-minimap position table
-(layout(), seg2 sub_9681h) - the authoritative in-ROM geography.  (The room
+(layout(), seg2 minimap_room_pos) - the authoritative in-ROM geography.  (The room
 connectivity graph is navigation-only: it has wrap/portal edges on both axes and is
 used solely for --compare-doors edge mode, not for placement.)  Each cell is
 labelled with its room number in a dark-gray band.  Stage 18 room 9 (Dracula)
@@ -228,7 +228,7 @@ def door_rects(grid, row, conn_room):
                 out.append((x0, s, DOOR_W, e - s))
     # up only: horizontal opening at the top edge row.  (DOWN is deliberately
     # excluded: falling off the bottom is a DEATH PIT, not a door - the engine's
-    # sub_7682h has a separate bottomless-pit path.  E.g. stage 15 room 6's bottom
+    # room_edge_detect has a separate bottomless-pit path.  E.g. stage 15 room 6's bottom
     # gap is death, not an exit.)
     for side, er in (("up", PLAY_TOP),):
         if conn_room[side] != 0xf:
@@ -662,7 +662,7 @@ def spot_table_rects(spots, stage, room, grid, mode="perm"):
     return out
 
 # --- Minimap layout table: the GAME'S OWN authored room positions -------------
-# The in-game F2 minimap (seg2 sub_9681h, 0x9681) draws each room at a HAND-
+# The in-game F2 minimap (seg2 minimap_room_pos, 0x9681) draws each room at a HAND-
 # AUTHORED cell.  Per stage it looks up a pointer (MINIMAP_PTR table, indexed by
 # stage 0xD000) to a per-room array of one-byte POSITION CODES, then maps each code
 # -> a packed screen coord via MINIMAP_COORD: high byte = X (0x20 + 0x20*col, 6
@@ -700,7 +700,7 @@ def minimap_stages(rom):
 
 def layout(rom, stage, n):
     """Room index -> (grid_x, grid_y) from the GAME'S OWN F2-minimap position table
-    (seg2 sub_9681h): each room's authored position code -> a 6x5 grid cell via
+    (seg2 minimap_room_pos): each room's authored position code -> a 6x5 grid cell via
     MINIMAP_COORD (hi byte=X 0x20+0x20*col, lo byte=Y 0x38+0x15*row).  Returns
     (pos, grid_w, grid_h), normalized so the top-left occupied cell is 0,0.  This is
     the game's authoritative geography; the room-connectivity graph is navigation-only

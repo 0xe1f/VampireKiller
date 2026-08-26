@@ -1,5 +1,5 @@
-; Stage palette pointer table (seg10 0xBEA7) + l4845h tables.
-; sub_572eh loads hud_fixed_palette; title extras at 0xBF6F.
+; Stage palette pointer table (seg10 0xBEA7) + palette_apply tables.
+; palette_hud_load loads hud_fixed_palette; title extras at 0xBF6F.
 stage_palette_ptr:
 	defw pal_becd  ; stage 0
 	defw pal_bee3  ; stage 1

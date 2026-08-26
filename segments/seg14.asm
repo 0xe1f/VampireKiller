@@ -1,6 +1,6 @@
 ; ===========================================================================
 ;  SEGMENT 14 - bank 0x0E, paged at 0x8000-0x9FFF (page 2a) by room_spawner,
-;  sub_615bh, scenery_load, play_sound, and int_handler (with seg15 at 0xA000).
+;  object_list_load, scenery_load, play_sound, and int_handler (with seg15 at 0xA000).
 ;  Origin is set by PHASE 0x8000 in VampireKiller.asm.
 ;
 ;  Shares the CPU window with seg02; labels here are unique names (not
@@ -1090,7 +1090,7 @@ spawn_mask_s18:
 	defb 000h              ; r9 none
 
 ; object_list_ptr (seg14 0x8668): word[hub 0..5] -> packed object streams.
-; sub_61a5h indexes by 0xD002. Each hub has 3 streams (0xFF-terminated) =
+; object_list_lookup indexes by 0xD002. Each hub has 3 streams (0xFF-terminated) =
 ; the hub's 3 castle stages (stage 0 shares hub 0 but l61c2h skips it).
 ; 0x00 advances to the next room (obj_next_room). List-id = actor_* type
 ; (segments/actors.inc); bit7 stripped at spawn (dogs only: actor_dog|080h).
@@ -2458,55 +2458,55 @@ sfx_ptr:
 ; sfx_tbl (seg14 0x8D8F): word[id 1..0x1D].  play_sound does rlca
 ; (id*2) from sfx_ptr=0x8D8D, so id 0 would hit the `scf` byte.
 sfx_tbl:
-	defw sfx_01           ; 01 placed-enemy / grunt
-	defw sfx_02           ; 02 vendor offer withdrawn
-	defw sfx_03           ; 03 projectile tick
-	defw sfx_04           ; 04 axe throw
-	defw sfx_05           ; 05 whip
-	defw sfx_06           ; 06 axe fly
-	defw sfx_07           ; 07 jump
-	defw sfx_08           ; 08
-	defw sfx_09           ; 09 door / stair
-	defw sfx_0a           ; 0A
-	defw sfx_0b           ; 0B Simon hurt
-	defw sfx_0c           ; 0C hit
-	defw sfx_0d           ; 0D kill
-	defw sfx_0e           ; 0E
-	defw sfx_0f           ; 0F heart
-	defw sfx_10           ; 10 vendor leave / money bag
-	defw sfx_11           ; 11
-	defw sfx_12           ; 12 collect / purchase
-	defw sfx_13           ; 13
-	defw sfx_14           ; 14 yellow key
-	defw sfx_15           ; 15 portal flash
-	defw sfx_16           ; 16 blue gem
-	defw sfx_17           ; 17
-	defw sfx_18           ; 18 stair / land
-	defw sfx_19           ; 19 vendor offer
-	defw sfx_1a           ; 1A
-	defw sfx_1b           ; 1B white cross
-	defw sfx_1c           ; 1C
-	defw sfx_1d           ; 1D vendor take hearts
+	defw sfx_01_boss_heal          ; boss_clear_heal HP drip
+	defw sfx_02_vendor_withdraw
+	defw sfx_03_cross_fly
+	defw sfx_04_knife_throw
+	defw sfx_05_whip
+	defw sfx_06_axe_fly
+	defw sfx_07_land               ; also merman land on solid
+	defw sfx_08_merman_out
+	defw sfx_09_water_in           ; merman dive; Simon pit s2/s10
+	defw sfx_0a_mummy_shot
+	defw sfx_0b_shield_block
+	defw sfx_0c_hit                ; whip/weapon vs actor, candle, shot
+	defw sfx_0d_ring_kill
+	defw sfx_0e_block_break
+	defw sfx_0f_heart              ; also staff pickup, vendor +5
+	defw sfx_10_money_bag          ; also vendor leave +5000
+	defw sfx_11_chest
+	defw sfx_12_collect            ; default pickup / purchase
+	defw sfx_13_simon_hurt
+	defw sfx_14_key
+	defw sfx_15_portal             ; also vertical door
+	defw sfx_16_blue_gem
+	defw sfx_17_gem_warn           ; C43A countdown to 0x10
+	defw sfx_18_holy_water
+	defw sfx_19_vendor_offer
+	defw sfx_1a_door
+	defw sfx_1b_white_cross
+	defw sfx_1c_boss_clear         ; HP-bar enemy death; same clear as 1B
+	defw sfx_1d_vendor_hearts
 
 ; music_ptr (seg14 0x8DC9): 16 records of 3 channel pointers (A,B,C).
 ; Index = (id & 0x7F)*6.  Ids 0x80..0x8F; 85c and 86-8F live in seg15.
 music_ptr:
-	defw music_80a,music_80b,music_80c  ; 80 bgm stages 0-3
-	defw music_81a,music_81b,music_81c  ; 81 bgm stages 4-6 and 11-12
-	defw music_82a,music_82b,music_82c  ; 82 bgm stages 7-9
-	defw music_83a,music_83b,music_83c  ; 83 bgm stages 16-17
-	defw music_84a,music_84b,music_84c  ; 84 bgm stages 13-15
-	defw music_85a,music_85b,music_85c  ; 85 bgm stages 10 and 18
-	defw music_86a,music_86b,music_86c  ; 86 Dracula boss
-	defw music_87a,music_87b,music_87c  ; 87 boss
-	defw music_88a,music_88b,music_88c  ; 88 Dracula portrait (CE01=4)
-	defw music_89a,music_89b,music_89c  ; 89 game over (simon_dying)
-	defw music_8aa,music_8ab,music_8ac  ; 8A enter castle
-	defw music_8ba,music_8bb,music_8bc  ; 8B game over
-	defw music_8ca,music_8cb,music_8cc  ; 8C boss defeated
-	defw music_8da,music_8db,music_8dc  ; 8D Dracula defeated
-	defw music_8ea,music_8eb,music_8ec  ; 8E credits
-	defw music_8f,music_8f,music_8f  ; 8F dummy silence
+	defw music_80_bgm_s00_03_a,music_80_bgm_s00_03_b,music_80_bgm_s00_03_c  ; 80 bgm stages 0-3
+	defw music_81_bgm_s04_06_11_12_a,music_81_bgm_s04_06_11_12_b,music_81_bgm_s04_06_11_12_c  ; 81 bgm stages 4-6 and 11-12
+	defw music_82_bgm_s07_09_a,music_82_bgm_s07_09_b,music_82_bgm_s07_09_c  ; 82 bgm stages 7-9
+	defw music_83_bgm_s16_17_a,music_83_bgm_s16_17_b,music_83_bgm_s16_17_c  ; 83 bgm stages 16-17
+	defw music_84_bgm_s13_15_a,music_84_bgm_s13_15_b,music_84_bgm_s13_15_c  ; 84 bgm stages 13-15
+	defw music_85_bgm_s10_18_a,music_85_bgm_s10_18_b,music_85_bgm_s10_18_c  ; 85 bgm stages 10 and 18
+	defw music_86_bgm_boss_dracula_a,music_86_bgm_boss_dracula_b,music_86_bgm_boss_dracula_c  ; 86 Dracula boss
+	defw music_87_bgm_boss_a,music_87_bgm_boss_b,music_87_bgm_boss_c  ; 87 boss
+	defw music_88_bgm_boss_dracula_portrait_a,music_88_bgm_boss_dracula_portrait_b,music_88_bgm_boss_dracula_portrait_c  ; 88 Dracula portrait (CE01=4)
+	defw music_89_simon_death_a,music_89_simon_death_b,music_89_simon_death_c  ; 89 Simon death
+	defw music_8a_enter_castle_a,music_8a_enter_castle_b,music_8a_enter_castle_c  ; 8A enter castle
+	defw music_8b_game_over_a,music_8b_game_over_b,music_8b_game_over_c  ; 8B game over
+	defw music_8c_boss_defeated_a,music_8c_boss_defeated_b,music_8c_boss_defeated_c  ; 8C boss defeated
+	defw music_8d_dracula_defeated_a,music_8d_dracula_defeated_b,music_8d_dracula_defeated_c  ; 8D Dracula defeated
+	defw music_8e_credits_a,music_8e_credits_b,music_8e_credits_c  ; 8E credits
+	defw music_8f_silence,music_8f_silence,music_8f_silence  ; 8F dummy silence
 
 ; Packed PSG streams (sfx, 0xFB/0xFD specials, music that still fits).
 ; Tails 85b_cont / 85c / 86-8F are data/psg_seg15.asm (seg15).

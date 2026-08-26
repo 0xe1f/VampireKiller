@@ -1,5 +1,5 @@
 ; Room palettes continued from pal_9ffe (seg9 0x9FFE).
-; l4845h tables: (index, rb, g)+ 0xFF.  Ends where gfx RLE starts (0xA066).
+; palette_apply tables: (index, rb, g)+ 0xFF.  Ends where gfx RLE starts (0xA066).
 ; pal_9ffe continued (idx 4 already emitted in seg9)
 	defb 0x01,0x06,0x75,0x06,0xff  ; 0xA000
 pal_a005:  ; 0xA005

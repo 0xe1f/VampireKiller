@@ -114,7 +114,7 @@ When a boss dies an **orb descends** (`actor_orb`, not bonus id 22):
 
 Beating **event 6** (Dracula, stage 18 room 9) is the only path into the
 credits. `room_event_tick` runs `event_dracula` (the CE01 machine); the last
-handler clears `CE00` and raises **`CE40=1`**. The play tick (`sub_5c2ch`)
+handler clears `CE00` and raises **`CE40=1`**. The play tick (`play_tick`)
 then calls `credits_tick` (seg1 0x66C1) instead of the normal loop:
 
 1. **CE40=1** `credits_start` — `play_sound 0x8E` (ending theme), `credits_init`
@@ -383,7 +383,7 @@ transition graph is a per-stage table in seg13 (`segments/seg13.asm`): `conn_ptr
 record = **4 nibbles: up, down, left, right** = the DESTINATION room index for
 that exit (`0xF` = blocked). On an edge/stair transition the engine looks this up
 (seg13 0xB963/0xB9BD) and writes the result to 0xD001 (**seg13 0xB987**); the
-per-frame edge/stair detector `sub_7682h` (seg1 0x7682) sets the pending-exit
+per-frame edge/stair detector `room_edge_detect` (seg1 0x7682) sets the pending-exit
 direction in 0xC41B (1=up,2=down,3=left,4=right; **0xFF** = spot/portal warp), and the four RAM permit bytes
 0xC41C-0xC41F are loaded from the same nibbles (seg13 0xB99A). Stage advance
 (0xD000++, 0xD001=0) is separate: `advance_stage` (seg0 0x434E), reached via the
@@ -704,7 +704,7 @@ stage changes.
       pickup path (`l8d77h`, bonus >= 0x1A) falls straight through into this same
       code, so grabbing a whip upgrade also arms a short no-spawn window.
     - 0xC440 is a per-frame countdown: `sub_75c7h` (seg1) decrements it each frame in
-      the timer bank (`sub_7682h/75c7/75e9/...`).
+      the timer bank (`room_edge_detect/75c7/75e9/...`).
     - The enemy spawner (seg0 **room_spawner @0x5EBF**) is called every frame from the
       actor-update loop (seg2 0x98F0) whenever 0xD010==0 (normal play). Its first act
       is `ld a,(0c440h) / and a / ret nz` -> while the rosary timer is nonzero it
@@ -733,7 +733,7 @@ in this 1–25 table; `l8d77h` takes `id - 0x19 == 5` to `bonus_holy_water`.
 
 ### HUD bonus tiles (uncompressed 16×16 4bpp)
 
-Pickup popup (`l8eadh`) and the equipped-weapon icon (`sub_8ea1h`) HMMM these
+Pickup popup (`l8eadh`) and the equipped-weapon icon (`hud_weapon_icon`) HMMM these
 tiles from VRAM page 1. Loaded at the HUD init copy (seg0 ~0x548C):
 
 | ids | CPU source | ROM file | VRAM dest | dump |
@@ -741,15 +741,15 @@ tiles from VRAM page 1. Loaded at the HUD init copy (seg0 ~0x548C):
 | 1–20 | seg9 `0x9000` | `0x13000` | Y=`0x50`, then Y=`0x60` X=0..48 | `gfx/bonus_hud_sheet.png` |
 | 21 (slime) | — | — | no dedicated tile | — |
 | 22 (potion) | seg9 `0x9A00` | `0x13A00` | Y=`0x60` X=80 | `gfx/bonus_hud_items.png` (3×3) |
-| 23–30 | seg6 `0xB9C8` (after `sub_53a5h`) | `0xD9C8` | Y=`0x60` X=96..208 | same grid, tiles 1–8 |
+| 23–30 | seg6 `0xB9C8` (after `page_tileset_banks`) | `0xD9C8` | Y=`0x60` X=96..208 | same grid, tiles 1–8 |
 
 `bonus_hud_sheet.png` is ids `01`–`14` in order (5×4). `bonus_hud_items.png` is a 3×3
 of ids **`16`–`1E`**: potion, yellow key, white key, chest, chain whip, knife, **axe**,
 **cross**, holy water. Each cell is labelled with its bonus id in hex
 (same 3×5 glyphs as the minimap renderer).
 
-**Palette.** `sub_481bh` writes one MSX2 entry (A=index, D=`0rrr0bbb`, E=`00000ggg`);
-`l4845h` walks an (index, rb, g)+ table ending in `0xFF`. `sub_572eh` loads the
+**Palette.** `palette_set` writes one MSX2 entry (A=index, D=`0rrr0bbb`, E=`00000ggg`);
+`palette_apply` walks an (index, rb, g)+ table ending in `0xFF`. `palette_hud_load` loads the
 **8 fixed HUD/sprite colours** from seg10 `0xBF88` (file `0x15F88`):
 
 | idx | 3-bit RGB | role |
@@ -768,7 +768,7 @@ Stage palettes (pointer table seg10 `0xBEA7`) only overlay indices
 table from `9AB0[stage-1][room].palette` — typically 4+6 or 5+7 — so leftover
 BIOS values for 4/6 do not survive into play. HUD bonus tiles never use those
 slots, so they look the same in every stage. Dumps use `gfxdump.vk_play_palette`
-(0xBF6F extras then 0xBF88 fixed). `sub_8ea1h` maps `C416` 1–4 → bonus
+(0xBF6F extras then 0xBF88 fixed). `hud_weapon_icon` maps `C416` 1–4 → bonus
 `0x1A`–`0x1D`. Leather (`C416=0`) is a separate tile at VRAM `(80, 0x70)`, not
 in these sheets.
 
@@ -794,7 +794,7 @@ in these sheets.
   with X from table `l9d8eh`. Hanging bats / flying skulls / ghost heads share `flyer_spawn`: X at
   the screen edge, Y = SimonY−8. The roc is fixed at X=0xE0, Y=0x30 or 0x40,
   and skips the spawn if Simon X ≥ 0xC0.
-- Each generator is rate-gated by `sub_9ccah` (per-generator 0xCF00+ counter vs a
+- Each generator is rate-gated by `spawn_rate_gate` (per-generator 0xCF00+ counter vs a
   threshold table, scaled by the 0xD012 difficulty/mood). The spawn **position is
   hardcoded** — it is **NOT** read from the tile map. This is why the small 08/05
   tile pair (see "Room geometry") is *not* a generator: its positions don't line
@@ -873,7 +873,7 @@ column from the 0xC702 bible flags:
 | 0x1D (cross)    | 20     | 10              | 80               |
 | 0x1B (knife)    | 50     | 30              | 90               |
 
-While an offer is on screen, `vendor_purchase_tick` (0x94BE) counts the 0xC706
+While an offer is on screen, `vendor_purchase_tick` (0x94C1) counts the 0xC706
 timer down and polls the controls via `vendor_read_buttons` (0x9526, joystick
 triggers + keyboard **SPACE row 8 = confirm**, **SHIFT row 6 = refuse**,
 edge-detected through 0xC709):
@@ -893,7 +893,7 @@ in seg00 are converted. `title_layout` 0x4C3F-0x4D0E is `defb`.
 
 ## Sprites (format understood; data still in banked ROM)
 
-- VK uses MSX2 hardware sprites; seg00 sets VDP regs (see `sub_47d6`/`sub_481bh`)
+- VK uses MSX2 hardware sprites; seg00 sets VDP regs (see `sub_47d6`/`palette_set`)
   and the title builder loads graphics from pointers into the 0x8000-0xBFFF banks
   (e.g. `ld hl,0x930b` / `0xb70b` at 0x4557/0x4562) - so sprite/tile BITMAPS live
   in the graphics segments (4-15), not seg00.
@@ -946,11 +946,15 @@ different font (tile base 0x10, ASCII-0x10 encoding above).
 ids: 0 stop, 1-0x1D sfx (`sfx_tbl`), 0x80-0x8F music (`music_ptr`, 3 channel
 pointers each; stage table is seg1 `stage_bgm_tbl`), 0xFB/0xFD overlays
 (hourglass freeze / death-style), 0xFC/0xFE restore, 0xFF fade. Packed
-streams are labeled hex (`data/psg_streams.asm` / `data/psg_seg15.asm`).
-`tools/psgplay.py` (`make music`) runs the same bytecode through an AY model
-and writes `music/*.wav` (ids `0x80`–`0x8E`; `0x8F` is silence). The WAVs are
-recognizable but **not a complete match** to hardware (software AY, loop/fade
-heuristics); accuracy is later work. Channel RAM:
+streams (`data/psg_streams.asm` / `data/psg_seg15.asm`) use the WAV
+catalogue names: `sfx_{id}_{name}` and `music_{id}_{name}_{a,b,c}`
+(hyphens in stems become `_`). Id 0x89 is Simon death; 0x8B is GAME OVER.
+`tools/psgplay.py` (`make music` / `make sfx`) runs the same bytecode through
+an AY model and writes `music/*.wav` (ids `0x80`–`0x8E`; `0x8F` is silence)
+and `sfx/*.wav` (play_sound 1–0x1D; `{id}_{name}` like BGM). SFX ids are
+named from call sites in `sfx_tbl`. The renderer uses AY-3-8910 timing
+(fmaster/8, 16-step hardware envelope); still no speaker filter, and BGM
+loop/fade is heuristic. Channel RAM:
 C010..C016 tick pointers, 20-byte blocks at C01C/C030/C044/C058/C06C/C080,
 C097 mixer shadow, C098 overlay flags, C0A5 fade.
 
@@ -958,7 +962,7 @@ C097 mixer shadow, C098 overlay flags, C0A5 fade.
 
 There is no classic `while(1)` loop. Boot parks the CPU in a spin (`jr $` at
 0x40C3); everything runs off the 60 Hz timer interrupt `H.TIMI` -> `int_handler`
-(0x4028), which each frame calls the game tick `sub_414dh`. That tick is the
+(0x4028), which each frame calls the game tick `main_tick`. That tick is the
 master state machine (primary state 0xC000 -> `main_state_tbl`).
 
 Segment 0 is the resident **kernel/orchestrator** only: interrupt handler, frame
@@ -971,7 +975,7 @@ entity-dispatch shell at 0x5FD0. All 14 `main_state_tbl` handlers live in seg0
   (seg2 0x9942; most entries skip the spawn-init/splash). Boss-clear after
   `CE0B` is `room_event_ce10` (`DISPATCH_A` on `CE10`: cull, orb, heal, done).
 
-During normal play the default banks (set by `sub_533dh`) are seg 1 @ 0x6000,
+During normal play the default banks (set by `page_play_banks`) are seg 1 @ 0x6000,
 seg 2 @ 0x8000, seg 3 @ 0xA000. So the substantive gameplay (movement, AI,
 collision, item logic) lives in **code segments 1/2/3** (`INCLUDE`'d, still being
 annotated).  Map tables are banks 11-12; tileset banks 4-8 are labeled source.
@@ -981,7 +985,7 @@ labeled gfx-script / palette / enemy+weapon RLE source.
 ## Graphics format (sprite/tile hunt)
 
 Video mode is **SCREEN 5** (VDP mode G4: 256x212, 16 colours, 4 bits/pixel
-bitmap). Set in `sub_4b60h`: `ld a,5 / call CHGMOD (0x005f)`. Consequences:
+bitmap). Set in `video_init`: `ld a,5 / call CHGMOD (0x005f)`. Consequences:
 
 - Backgrounds/tiles/logos are stored as **4bpp bitmap data** (high nibble = left
   pixel, colour index 0-15, colour 0 = transparent/background). They are copied
@@ -1000,8 +1004,8 @@ bitmap). Set in `sub_4b60h`: `ld a,5 / call CHGMOD (0x005f)`. Consequences:
   catalogue's `planes` column composites planes in the `.png` preview while the
   `.txt`/`.bin` keep each plane separate for editing.
 
-The 16-colour VDP palette is programmed by `sub_481bh` / `l4845h`. Eight indices
-(0, 1, 2, 3, 8, 12, 14, 15) are fixed by `sub_572eh` (seg10 `0xBF88`) and never
+The 16-colour VDP palette is programmed by `palette_set` / `palette_apply`. Eight indices
+(0, 1, 2, 3, 8, 12, 14, 15) are fixed by `palette_hud_load` (seg10 `0xBF88`) and never
 changed by stage palettes — HUD bonus tiles use only those. See *HUD bonus tiles*.
 
 Bank classification (by entropy / zero-fill, `tools/gfxview.py` + a quick scan):
@@ -1018,8 +1022,8 @@ ROM `0x7F0B`, `0x930B`, `0xB70B` (banked pages 1b/2a/2b) to VRAM `0x1212`,
 ### Graphics are RLE-compressed (format cracked)
 
 Graphics ROM data is **not** raw pixels - it is packed with a small RLE scheme
-and unpacked straight into VRAM by the decompressor `sub_46f8h` / `l46f2h`
-(0x46F2). `sub_46b6h` sets the VRAM write pointer from HL; the stream is then
+and unpacked straight into VRAM by the decompressor `rle_dec` / `rle_dec_addr`
+(0x46F2). `vdp_set_write` sets the VRAM write pointer from HL; the stream is then
 streamed to data port 0x98. Control-byte grammar:
 
 | byte        | meaning                                        |
@@ -1032,9 +1036,9 @@ streamed to data port 0x98. Control-byte grammar:
 Callers pass `HL` = VRAM dest, `DE` = ROM source, e.g. (segment 0, ~0x5688):
 
 ```
-call sub_5369h            ; page seg 13 into 0xA000-0xBFFF
-ld hl,0f800h ; ld de,0a319h ; call sub_46f8h   ; -> sprite pattern gen table
-ld hl,0f840h ; ld de,0a351h ; call sub_46f8h   ; next 2 sprites ...
+call page_map_banks            ; page seg 13 into 0xA000-0xBFFF
+ld hl,0f800h ; ld de,0a319h ; call rle_dec   ; -> sprite pattern gen table
+ld hl,0f840h ; ld de,0a351h ; call rle_dec   ; next 2 sprites ...
 ```
 
 `0xF800` = VRAM page 1, offset `0x7800` = the **sprite pattern generator table**
@@ -1048,26 +1052,26 @@ walking-creature frames.
 Konami mapper windows: writes to `0x6000`/`0x8000`/`0xA000` select the segment
 paged into page 1b / 2a / 2b. Helper routines (each also shadows the value at
 0xF0F1-0xF0F3 for int_handler to restore):
-- `sub_5369h` -> seg 11 @ 0x6000, seg 12 @ 0x8000, seg 13 @ 0xA000  (level/sprite gfx)
-- `sub_5381h` -> seg  9 @ 0x8000, seg 10 @ 0xA000                   (front-end/title gfx)
-- `sub_53a5h` -> seg  4 @ 0x6000, seg  5 @ 0x8000, seg  6 @ 0xA000  (tileset banks; HUD keys/weapons at 0xB9C8)
-- `sub_533dh` -> seg  1 @ 0x6000, seg  2 @ 0x8000, seg  3 @ 0xA000  (default/game banks)
+- `page_map_banks` -> seg 11 @ 0x6000, seg 12 @ 0x8000, seg 13 @ 0xA000  (level/sprite gfx)
+- `page_title_banks` -> seg  9 @ 0x8000, seg 10 @ 0xA000                   (front-end/title gfx)
+- `page_tileset_banks` -> seg  4 @ 0x6000, seg  5 @ 0x8000, seg  6 @ 0xA000  (tileset banks; HUD keys/weapons at 0xB9C8)
+- `page_play_banks` -> seg  1 @ 0x6000, seg  2 @ 0x8000, seg  3 @ 0xA000  (default/game banks)
 
-So a page-2b source `0xAxxx` read right after `sub_5369h` maps to file offset
+So a page-2b source `0xAxxx` read right after `page_map_banks` maps to file offset
 `13*0x2000 + (addr-0xA000)` (e.g. 0xA319 -> file 0x1A319).
 
 ### Per-room gfx scripts (enemy sprite VRAM)
 
 `room_gfx_load` (seg0 0x5787), called from the screen builder, pages seg9/10
 then indexes `room_gfx_ptr` (`9AB0[D000-1]`) + `4*D001`. Four bytes per room:
-script word, then palette table (fed to `l4845h`). Stage 0 skips. The script
+script word, then palette table (fed to `palette_apply`). Stage 0 skips. The script
 is walked by `gfx_script_run` (0x471B):
 
 | cmd | payload | handler |
 |-----|---------|---------|
 | `0xFF` | — | end |
-| `0` | src word, VRAM dest word | `gfx_script_rle` → `sub_46f8h` (seg9 if src `0x8000-9FFF`, seg10 if `0xA000-BFFF`) |
-| `1` | src, count, dest | `sub_4745h` 1bpp quadrant convert |
+| `0` | src word, VRAM dest word | `gfx_script_rle` → `rle_dec` (seg9 if src `0x8000-9FFF`, seg10 if `0xA000-BFFF`) |
+| `1` | src, count, dest | `gfx_script_convert` 1bpp quadrant convert |
 | else | 6 bytes | `gfx_script_copy` VRAM blit — unused by the 21 room scripts |
 
 There are **24 back-to-back scripts** at `0x9D38-0x9FFE` (21 used by rooms,
@@ -1077,14 +1081,14 @@ sources** plus weapons/vdoor/orphans live in `data/enemy_sprite_rle.asm`
 counts stay hex). Every dest is sprite-generator VRAM (`FA00`, `FB80`, `FBC0`, `FC00`,
 `FC80`, `FD00`, `FD40`, `FE00`, `FE40`, `FE80`, `FEC0`) — not Simon (`F800`) or
 projectile weapons (`F8C0`). Playfield tilesets are a separate load (seg4-6 via
-`sub_53a5h`), not these scripts. `make gfx` writes `gfx/script_rle.png` (up to
+`page_tileset_banks`), not these scripts. `make gfx` writes `gfx/script_rle.png` (up to
 four 16×16 cells per unique stream, labelled by dest). Seg13 `0xA319+` is
 `intro_simon` then the `simon_cell0/1` streams, not leftover enemy art.
 
 ### Playfield tilesets
 
 `load_stage_tileset` (seg0 0x5653), first call in the screen builder, pages
-seg 4/5/6 (`sub_53a5h`; stage ≥ 13 overlays seg 7/8 via `sub_5393h`) and blits
+seg 4/5/6 (`page_tileset_banks`; stage ≥ 13 overlays seg 7/8 via `page_tileset_late`) and blits
 **0xBF uncompressed 8×8 4bpp** tiles from `tileset_ptr[D000]` into SCREEN 5
 VRAM starting `0x8004` (`l4a6dh` / `sub_4a58h`, 32 bytes/tile). That dest is
 X=8 on page 1, so nametable id 0 samples unloaded VRAM (blank / colour 0) and
@@ -1139,7 +1143,7 @@ Catalogued so far (extend `manifest.tsv` as more sets are identified):
   Simon's **upper body**: torso/head/arm and the **whip** (whip-crack arcs).
 - `weapon_knife` / `weapon_axe` / `weapon_cross` - seg10 streams from
   `weapon_sprite_ptr` (seg0 0x55DE, was l55deh). `load_weapon_sprites` (0x559A)
-  RLE-decompresses to VRAM 0xF8C0 then `sub_4745h` converts 1bpp quadrants.
+  RLE-decompresses to VRAM 0xF8C0 then `gfx_script_convert` converts 1bpp quadrants.
   Knife = 2 patterns (one two-plane sprite); axe/cross = 4 (two frames).
   In-game SAT for Simon's body is `simon_sat_cell0/1` (seg1 0x798C/0x79DC).
 - `credits_font.png` - 40 x 8x8 1bpp ending-credits glyphs from seg14
@@ -1152,7 +1156,7 @@ Catalogued so far (extend `manifest.tsv` as more sets are identified):
   Layout from the seg6 shape table at 0xB473 (`ix+0B`); pixels from the per-room
   gfx-script RLE into VRAM 0xF800+ (plus the 0x4745 1bpp convert). Two-plane SAT
   colours with CC (`0x40`) OR the colour indices (2+4→6). Palette is the
-  playfield sequence: HUD-fixed (`sub_572eh`) + `0xBEA7[stage]` + the per-room
+  playfield sequence: HUD-fixed (`palette_hud_load`) + `0xBEA7[stage]` + the per-room
   overlay at `9AB0[stage][room]` (same room that supplied the sprite VRAM).
   Types 7/10 only use HUD-fixed 2/12/14, so they ignore the overlay. Type **9**
   is the red skeleton (stage 13; SAT `02 45`; faster walk, no projectile). Type

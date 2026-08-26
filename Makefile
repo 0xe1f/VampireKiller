@@ -5,6 +5,7 @@
 #   make verify     assemble, then byte-compare against the original ROM
 #   make gfx        (re)build the readable graphics catalogue in gfx/
 #   make music      render BGM WAVs from the ROM PSG bytecode (music/)
+#   make sfx        render sfx ids 0x01-0x1D into sfx/
 #   make clean      remove build output
 #
 # Prerequisites (not committed, both gitignored - see README):
@@ -22,7 +23,7 @@ SRC      := VampireKiller.asm
 OUT      := VampireKiller.rom
 ORIGINAL := references/VampireKiller.rom
 
-.PHONY: all verify segments gfx music clean
+.PHONY: all verify segments gfx music sfx clean
 
 all: $(SRC)
 	$(ASM) $(SRC)
@@ -39,6 +40,9 @@ gfx:
 
 music:
 	python3 tools/psgplay.py
+
+sfx:
+	python3 tools/psgplay.py --sfx
 
 verify: all
 	@cmp $(OUT) $(ORIGINAL) && echo "OK: $(OUT) is byte-identical to $(ORIGINAL)"

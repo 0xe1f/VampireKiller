@@ -1,5 +1,5 @@
 ; ===========================================================================
-;  SEGMENT 10 - front-end gfx bank, paged at 0xA000 by sub_5381h.
+;  SEGMENT 10 - front-end gfx bank, paged at 0xA000 by page_title_banks.
 ;  Room palettes, enemy/weapon RLE, stage palettes.
 ; ===========================================================================
 

@@ -25,7 +25,7 @@ Fully migrated banks (0-15) have no `.bin`.
   confirms the rebuilt ROM is byte-identical to the original.
 - Segment 0 (resident bank) disassembled with MSX/MSX2 BIOS symbol names.
   Annotated: cartridge header, `init`, `int_handler` (H.TIMI), the dispatch
-  helpers (`ADD_HL_A`, `ADD_DE_A`, `DISPATCH_A`), the main tick `sub_414dh`
+  helpers (`ADD_HL_A`, `ADD_DE_A`, `DISPATCH_A`), the main tick `main_tick`
   (two-level state machine + `main_state_tbl`), the front-end transition
   `frontend_input` (0x4398), and the entity dispatch/`entity_tbl` at `0x5FD0`.
 - Text: encoding cracked (`ASCII - 0x10` for HUD/title via the `vk` macro). Ending
@@ -33,12 +33,16 @@ Fully migrated banks (0-15) have no `.bin`.
   live in `segments/credits_ending.asm` / `credits_staff.asm`.
 - Reference: Metal Gear disassembly used to confirm the text scheme and the
   Konami actor/OBJ struct (cloned locally to `references/`, not committed).
-- Graphics: identified video mode as **SCREEN 5** (4bpp bitmap) in `sub_4b60h`;
+- Graphics: identified video mode as **SCREEN 5** (4bpp bitmap) in `video_init`;
   classified the banks (code = seg 0-3, graphics = seg 4-15). Added
   `tools/gfxview.py` (1bpp/4bpp ASCII-art viewer).
-- Graphics format **cracked**: RLE decompressor `sub_46f8h`/`l46f2h` (grammar:
+- PSG catalogue: `make music` / `make sfx` (`tools/psgplay.py`) render BGM and
+  sfx ids 1–0x1D to `music/` and `sfx/` (`{id}_{name}.wav`). Stream labels in
+  `data/psg_streams.asm` / `psg_seg15.asm` use those stems (`sfx_*`,
+  `music_*_{a,b,c}`); 0x89 is Simon death, 0x8B is GAME OVER.
+- Graphics format **cracked**: RLE decompressor `rle_dec`/`rle_dec_addr` (grammar:
   end / set-addr / run / literal) unpacks all bitmaps + sprite patterns to VRAM.
-  Bank switchers `sub_5369h`/`sub_5381h`/`sub_533dh` decoded. Added
+  Bank switchers `page_map_banks`/`page_title_banks`/`page_play_banks` decoded. Added
   `tools/rledec.py`; extracted + rendered a 16-frame 16x16 sprite set from
   seg 13 (source 0xA319) into the sprite pattern generator table (0xF800).
 
@@ -59,10 +63,10 @@ Fully migrated banks (0-15) have no `.bin`.
   in `segments/seg01.blocks` (tables at 0x6000-0x602f, 0x605f-0x615a incl. a word
   table at 0x608d). Annotated so far:
   - `konami_logo_draw`/`konami_logo_step` (0x6209/0x6253): logo screen + the
-    top-to-bottom wipe (confirmed by the author); `sub_6276h` tile-string interp.
-  - Object-list loader cluster 0x615b-0x6208: `sub_615bh` unpacks the current
+    top-to-bottom wipe (confirmed by the author); `tile_string_draw` tile-string interp.
+  - Object-list loader cluster 0x615b-0x6208: `object_list_load` unpacks the current
     cell's object list from seg 14 into the 4-byte-slot tables at 0xDB00/DC00/DD00
-    (`sub_6188h` unpacker, `sub_61a5h` per-level pointer, `sub_61b0h` clear,
+    (`object_list_unpack` unpacker, `object_list_lookup` per-level pointer, `object_list_clear` clear,
     (`l61c2h` spawns actors via seg0 0x5F26). RAM: 0xD000 = stage (0=court-
     yard, 1-18), 0xD001 = room within stage, 0xD002 = hub / seg14 scenery+object
     datasets (6 hubs of 3 stages; row->hub table at seg0 0x5E71). See "Eighth session".
@@ -71,14 +75,14 @@ Fully migrated banks (0-15) have no `.bin`.
     - 0x62d7: arms mode bytes 0xC415=0x20/0xC418=0x80, then jp seg0 0x53BD.
     - 0x62ed: full screen builder - clears state, paints tiles (seg2 helpers),
       sets cell event, unpacks scenery (scenery_load), loads object list
-      (sub_615bh) + spawns actors (l61c2h).
+      (object_list_load) + spawns actors (l61c2h).
     - 0x63da: centre view (0xC425/0xC427 = 0x80), hide sprites, redraw chain.
-    - `sub_633ah` (0x633a): set current cell event 0xCE00 from l6376h[row]
+    - `cell_event_set` (0x633a): set current cell event 0xCE00 from l6376h[row]
       (byte = column<<4 | event; event 6 has an immediate handler).
-    - `sub_6389h` (0x6389): reset object/actor state (clears 0xC470..0xC6FF +
-      subsystems); `sub_63beh` clears 0xC420..0xC46F; `sub_63cch` hides all 32
-      sprites (Y=0xE0 in 0xD600 shadow); `sub_63b8h` strided memory clear.
-    - `sub_6409h` (0x6409): set screen position 0xC425/0xC427/flag 0xC42C from
+    - `actor_state_reset` (0x6389): reset object/actor state (clears 0xC470..0xC6FF +
+      subsystems); `simon_block_clear` clears 0xC420..0xC46F; `sprites_hide` hides all 32
+      sprites (Y=0xE0 in 0xD600 shadow); `mem_clear_stride` strided memory clear.
+    - `simon_spawn_pos` (0x6409): set screen position 0xC425/0xC427/flag 0xC42C from
       per-row table l6426h (2 bytes/row).
   - Actor->sprite rendering (annotated):
     - `actor_sat_build` (0x644C): one actor's hardware sprites from its shape
@@ -92,7 +96,7 @@ Fully migrated banks (0-15) have no `.bin`.
       sprite-attr shadow and fills the pattern from the l6a70h table.
     - `frame_vram_refresh` (0x6552): per-frame VRAM refresh - re-uploads the
       animated tile/sprite patterns each frame; animation phase in 0xC00F.
-      Falls back to the plain shadow blit l65abh (copy 0xD400 -> VRAM 0xF400)
+      Falls back to the plain shadow blit pattern_shadow_blit (copy 0xD400 -> VRAM 0xF400)
       when idle.
   - Data tables marked in seg01.blocks this pass: logo layout 0x6296-0x62d6,
     event table 0x6376-0x6388, per-row pos table 0x6426-0x644b, sprite offset
@@ -118,7 +122,7 @@ Fully migrated banks (0-15) have no `.bin`.
     `player_tick` (0x6B06), `simon_sat_build` (0x783E), `stage_bgm_play`
     (0x7956), `title_fill_strips` (0x7AD6), `title_set_color2` (0x7AEE),
     `tile_layout_draw` (0x7B39, already named), `combat_tick` (0x7D6F).
-    Play-loop tail in `sub_5c2ch` also named: `room_event_tick` (0xB6B2,
+    Play-loop tail in `play_tick` also named: `room_event_tick` (0xB6B2,
     CE00; event 6 = event_dracula), `actors_tick` (0x98EC), `shot_tick`
     (0x9E38), `vendor_tick` (0x91C5), `pickup_tick` (0x8A51),
     `break_spark_tick` (0x88DF), `hazard_tick` (0x8FD6), `platform_tick`
@@ -150,7 +154,7 @@ Fully migrated banks (0-15) have no `.bin`.
     transition - TBD), NOT the intro cutscene. Left unlabelled pending a capture.
   - Second traced session (fresh start: logo -> title -> intro -> courtyard),
     watching 0xC000-0xC004 + 0xCE00-0xCE4F + 0xD000-0xD02F, pinned the top-level
-    state machine (sub_414dh):
+    state machine (main_tick):
     * 0xC000 primary state walked 1 (title) -> 3 -> 4 -> 5.  State 3 = the intro
       cutscene (Simon nears the castle), a *timed* animation: its handler at
       0x41d1 steps sub-state 0xC001 0->4 and drives the 0xC004 phase counter
@@ -160,7 +164,7 @@ Fully migrated banks (0-15) have no `.bin`.
     * On game start the intro handler calls reset_run_state (sub_44cdh, writer
       0x44da): a single ldir zero-fills the whole run work block 0xC405..0xDFFF
       (event state 0xCE00+, actor arrays 0xD000+), then seeds 0xC410..0xC412 and
-      view defaults 0xC415=0x20 / 0xC418=0x80.  seg1 sub_6389h (0x633e-0x634a)
+      view defaults 0xC415=0x20 / 0xC418=0x80.  seg1 actor_state_reset (0x633e-0x634a)
       then re-clears 0xCE00/08/0B/15/40, exactly as read statically.
     * Entering the stage ran the full seg1 build+render pipeline in order:
       62d7 -> 62ed (build) -> 633a -> 6389 -> 63cc (hide sprites) -> 63da -> 6409
@@ -183,7 +187,7 @@ Fully migrated banks (0-15) have no `.bin`.
     CORRECTION: 0xC425/0xC427/0xC42C were previously guessed (statically) to be
     a "view/camera position + flag".  They are Simon's Y / X / facing - there is
     no camera (room-based, non-scrolling).  Fixed the labels in seg01.asm at the
-    0x63DA redraw and sub_6409h (per-room spawn Y/X/facing from l6426h).
+    0x63DA redraw and simon_spawn_pos (per-room spawn Y/X/facing from l6426h).
   - Fourth/fifth sessions (whip braziers, collect pickups, change rooms):
     * 0xD001 = current room/screen index.  Walking into the next room bumped it
       0 -> 1 -> 2, always written by seg13 (0x0D) at 0xB98A, so seg13 owns room
@@ -285,8 +289,8 @@ Fully migrated banks (0-15) have no `.bin`.
     * **0xC411 = stage/area label** (HUD "STAGE" value): 0 courtyard -> 1 castle at
       f585. Clamp range differs from D000 (C411 < 0x19, D000 < 0x13) so it is a
       separate counter, not identical to the stage number - exact relation TBD.
-    * Data path (static): seg1 `sub_615bh` unpacks hub D002's data into 0xDB00/DC00/
-      DD00 (3 streams = the hub's 3 stages); `sub_6188h` grammar = (id,attr) pairs,
+    * Data path (static): seg1 `object_list_load` unpacks hub D002's data into 0xDB00/DC00/
+      DD00 (3 streams = the hub's 3 stages); `object_list_unpack` grammar = (id,attr) pairs,
       0x00 = next room cell (0x10 apart), 0xFF = end. Per object: list-id =
       actor type (`and 0x7F` at spawn); bit7 stripped (dogs only; unknown).
       Attr hi nibble = X cell, lo nibble = Y cell (x/y * 16 px).
@@ -438,7 +442,7 @@ Fully migrated banks (0-15) have no `.bin`.
       `vendor_select_price` (0x941F) uses 0xC702 bit7 (white bible = halve) / bit6
       (black bible = double). Knife = 50 / 30 / 90 -> the "50 hearts" offer is the
       normal price (neither bible active, as the player noted).
-    * **Buy/refuse**: `vendor_purchase_tick` (0x94BE) ticks 0xC706 and polls
+    * **Buy/refuse**: `vendor_purchase_tick` (0x94C1) ticks 0xC706 and polls
       `vendor_read_buttons` (0x9526): joystick triggers + **SPACE (kbd row 8) =
       confirm**, **SHIFT (row 6) = refuse**, edge-detected via 0xC709. Confirm +
       hearts>=price -> spend_hearts + collect_bonus(item), sfx 0x12; refuse /
@@ -721,7 +725,7 @@ Fully migrated banks (0-15) have no `.bin`.
       gap) is NOT a blocked edge (room 8 left → room 9), so A can't see it; it stays
       pinned in `DOOR_OVERRIDE`. Mechanism still open - user wants to discuss later.
     * **DOWN edges are NOT doors (fixed).** Falling off a bottom edge is a DEATH PIT
-      (engine's sub_7682h bottomless-pit path), not an exit - so `door_rects()` now
+      (engine's room_edge_detect bottomless-pit path), not an exit - so `door_rects()` now
       checks left/right/up only, never down (stage 15 room 6's bottom gap is death).
     * **Layout: vertical-first placement (fixed circular rows).** Horizontal links can
       loop, making L/R ambiguous; vertical (up/down) links never loop. `layout()` now
@@ -749,7 +753,7 @@ Fully migrated banks (0-15) have no `.bin`.
       in index order anchored at room 0 (start room), keeping each segment contiguous.
     * **Door mechanism (confirmed).** A stage exit fires when Simon walks/climbs off a
       connectivity-blocked edge (nibble 0xF) → boundary flag **0xC408** → white-key
-      check → `advance_stage` (0x434E). Routed through the seg13 brain (`sub_5a35h`
+      check → `advance_stage` (0x434E). Routed through the seg13 brain (`conn_lookup_paged`
       seg0 0x5A35 → 0xB963), so it is **direction-agnostic**: stage 1's door is a
       horizontal walk-off (room 7 right); **stage 15's door is an UP exit** (room 8
       up=0xF) into a mid-room framed door. White-key check/consume: seg0 0x438B
@@ -782,9 +786,9 @@ Fully migrated banks (0-15) have no `.bin`.
       source (feeds 0xC5AD/0xC5AE) for principled detection.
     * **Source annotated** (seg0/seg1, all in-source; `make verify` byte-identical):
       seg1 room-edge crossing handler l77d8h (+ renamed `set_stage_boundary` 0x7807),
-      the edge/stair detector `sub_7682h` (sets pending dir 0xC41B by direction, with
+      the edge/stair detector `room_edge_detect` (sets pending dir 0xC41B by direction, with
       the up/down/left/right cases + bottomless-pit path), the white-key door check
-      `sub_771fh`, and seg0 `sub_5a35h` (the seg13-paged transition-brain wrappers:
+      `sub_771fh`, and seg0 `conn_lookup_paged` (the seg13-paged transition-brain wrappers:
       0xB963 lookup, 0xB99A permit load).
     * **Door-detection lead (NEW, changes the approach).** `sub_771fh` loads Simon's
       position (0xC425 Y, 0xC427 X) and calls **0x8587**, which is NOT a tile lookup -
@@ -803,7 +807,7 @@ Fully migrated banks (0-15) have no `.bin`.
       (18 entries by 0xD000) -> a per-room 2-byte record = **4 nibbles up/down/left/
       right = destination room index** (0xF = blocked). Engine reads it at seg13
       0xB963/0xB9BD and writes the result to 0xD001 at **seg13 0xB987**. Edge/stair
-      detector `sub_7682h` (seg1 0x7682) sets pending dir in 0xC41B (1=up 2=down
+      detector `room_edge_detect` (seg1 0x7682) sets pending dir in 0xC41B (1=up 2=down
       3=left 4=right); permit bytes 0xC41C-0xC41F come from the same nibbles (seg13
       0xB99A). Stage advance (0xD000++) is separate (`advance_stage` 0x434E via the
       0xC408 boundary flag / white-key door). 0xD000 is never touched by the graph.
@@ -832,9 +836,9 @@ Fully migrated banks (0-15) have no `.bin`.
       bit2 0x9D59 -> type 03; bit3 0x9D9E -> type 04 (bat: vertical undulation, one
       horizontal way); bits 4-6 0x9DCA/0x9DDC/0x9DEE (types unconfirmed). Stage 1
       confirmed: rooms 0/1/5/6 spawn zombies, room 4 spawns bats.
-    * Each generator is rate-gated by `sub_9ccah` (per-generator 0xCF00+ counter vs
+    * Each generator is rate-gated by `spawn_rate_gate` (per-generator 0xCF00+ counter vs
       a threshold table scaled by 0xD012 difficulty). **Spawn position is hardcoded
-      per stage/room** in `sub_9d03h` (annotated) - NOT read from the tile map
+      per stage/room** in `spawn_pick_pos` (annotated) - NOT read from the tile map
       (stage-1 room-0 zombies enter at X=0xC0). Renamed `zombie_generator`
       (seg0 call site + msx.sym); `make verify` byte-identical.
     * **The 08/05 "artifacts" are inert background art, NOT generators.** Ruled out
@@ -845,7 +849,7 @@ Fully migrated banks (0-15) have no `.bin`.
       background tileset isn't in the gfx catalogue yet (only sprites are).
       Per-room gfx scripts (`room_gfx_load` / `gfx_script_run`) load enemy
       **sprite** VRAM (`FA00+`), not the 4bpp playfield; tilesets still come
-      from seg4-6 (`sub_53a5h`).
+      from seg4-6 (`page_tileset_banks`).
     * **`roomperm.py` upgrades:** room-number labels drawn in a widened dark-gray
       band per cell (3x5 bitmap font); stopped writing per-room PNGs (one contact
       sheet per stage only); **`--all`** renders every stage - world rows **0..17**
@@ -917,6 +921,12 @@ Fully migrated banks (0-15) have no `.bin`.
 
 ## In progress / next
 
+Half-renames (comment/`msx.sym` name, still `sub_XXXXh` in source) folded in for
+the graphics kernel, bank switchers, object-list loader, minimap, and the
+confirmed gameplay helpers (`award_kill_score`, `collect_bonus_apply`, etc.).
+`minimap_room_count` is `defb`. `vendor_purchase_tick` is labeled at 0x94C1
+(the 0x94BE comment was the tail of `sub_94b6h`).
+
 Parked: none (fodder `ix+1` machines named: raven wait/coast/hover/pick/strafe,
 dog idle/run/air, bone dragon form/idle/spit, red skeleton wake/walk/pause,
 hunchback wait/drop/crouch/jump/hide, blob hatch/fall/pause/hop, plus
@@ -958,7 +968,7 @@ use `room_event_ce10` → C409.
    mid-entries (spawn stays `enemy_*_tick`). `vendor_outcome_tbl` converted.
 2. Convert the tile-layout block `0x4C3F-0x4D0E` in seg00 from misdisassembled
    "code" to `db` data - DONE (`l4c3fh` / `l4c5ah` / `l4ca0h` + `tile_layout_draw`).
-3. Annotate the in-game state handlers in `sub_414dh`: 0-13 named.  8 =
+3. Annotate the in-game state handlers in `main_tick`: 0-13 named.  8 =
    `state_hub_advance` (0xC409 from boss-clear / credits: 0xD002++ then
    `advance_stage`; hub wrap is game-complete / second loop).  11 =
    `state_pause` (F1 sets 0xC40A; play tick freezes; F1 resumes).
@@ -967,7 +977,7 @@ use `room_event_ce10` → C409.
 4. Annotate the seg1 player routines the movement trace located - DONE:
    `simon_walk_left/right`, `simon_add_x`, `simon_jump_*`, `simon_mirror_frames`,
    `whip_tick` / `simon_attack_tick`, action-state handlers 0-6 named.
-   Play-loop tail in `sub_5c2ch` named: `room_event_tick`, `actors_tick`,
+   Play-loop tail in `play_tick` named: `room_event_tick`, `actors_tick`,
    `shot_tick`, `vendor_tick`, `pickup_tick`, `break_spark_tick`,
    `hazard_tick`, `platform_tick`, SAT build/emit, `frame_vram_refresh`.
 5. Continue disassembling segments 1-15.
@@ -1276,9 +1286,12 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   roc_generator, door_blit_tiles, read_buttons, input_edge, play_sound,
   frontend_input, frontend_to_title, frontend_game_start, slot_sig_7ffa,
   credits_font_load, credits_font_blit, load_weapon_sprites, load_vdoor_sprites,
-  gfx_script_run, gfx_script_rle, gfx_script_copy, room_gfx_load,
+  gfx_script_run, gfx_script_rle, gfx_script_copy, gfx_script_convert, room_gfx_load,
   load_stage_tileset, tileset_ptr, dracula_portrait_load,
-  dracula_portrait_palette;
+  dracula_portrait_palette, main_tick, play_tick, rle_dec, rle_dec_addr,
+  vram_write, vdp_set_write, vdp_set_read, palette_set, palette_apply,
+  video_init, page_play_banks, page_map_banks, page_title_banks,
+  page_tileset_banks, page_tileset_late, page_sound_banks, palette_hud_load;
   seg1: simon_action_tick, simon_walk_left/right, simon_jump_tick, simon_mirror_frames,
   simon_crouch, simon_stairs, simon_fall, simon_hurt, simon_dying,
   simon_portal_wait, simon_attack_tick, whip_tick, projectile_tick,
@@ -1289,7 +1302,10 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   event_vscroll, credits_tick, credits_init, credits_frame, credits_clock,
   credits_keyframe, credits_script_ptr, credits_wipe, player_tick, simon_sat_build, simon_sat_cell0/1, combat_tick,
   title_fill_strips, title_set_color2, title_sat_init, actor_sat_build,
-  actor_sat_emit, c800_sat_build/emit, shot_sat_build/emit, frame_vram_refresh;
+  actor_sat_emit, c800_sat_build/emit, shot_sat_build/emit, frame_vram_refresh,
+  object_list_load/unpack/lookup/clear, tile_string_draw, cell_event_set,
+  actor_state_reset, mem_clear_stride, simon_block_clear, sprites_hide,
+  simon_spawn_pos, pattern_phase_upload, pattern_shadow_blit, room_edge_detect;
   seg2: door_proximity, door_anim_tick, door_begin_open, spot_proximity,
   collect_bonus_tbl, bonus_holy_water, yellow_shield_tick, projectile_hit_actors,
   actor_vs_whip/simon/proj, shot_vs_simon/proj/shield/whip, overlap_simon/whip/projectile/shield,
@@ -1298,7 +1314,9 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   actors_tick, c800_tick, pickup_tick, vendor_tick, break_spark_tick,
   hazard_tick, platform_tick, platform_load, platform_tbl,
   actor_type_tick, actor_tick_tbl, vendor_outcome_tbl, vendor_hit_latch,
-  vendor_leave;
+  vendor_leave, award_kill_score, collect_bonus_apply, inv_or_c701/c702,
+  hud_weapon_icon, hud_bonus_refresh, spawn_rate_gate, spawn_pick_pos,
+  minimap_build, minimap_room_pos, minimap_stage_ptr, minimap_room_count;
   seg3: room_event_tick, shot_kind_type, mummy_bandage_init, shot_sickle_init, shot_axe_init,
   enemy_zombie_tick, enemy_dog_tick, enemy_merman_tick,
   enemy_hanging_bat_tick, enemy_flying_skull_tick, enemy_ghost_head_tick,

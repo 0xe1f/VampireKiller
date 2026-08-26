@@ -1,5 +1,5 @@
 ; ===========================================================================
-;  SEGMENT 6 - tileset bank, paged at 0xA000 by sub_53a5h (page 2b).
+;  SEGMENT 6 - tileset bank, paged at 0xA000 by page_tileset_banks (page 2b).
 ;  s10 tail, then HUD weapon/key tiles at 0xB9C8.
 ; ===========================================================================
 

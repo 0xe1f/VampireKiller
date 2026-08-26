@@ -166,10 +166,28 @@ dracula_body_load: equ 0x57e6	; event-6: unpack figure 32x32 cloak/chest to page
 dracula_body_vram: equ 0x5816	; 32x32 from 0xE800 to VRAM DE
 dracula_body_unpack: equ 0x5834	; packed 4bpp rows (N zeros + 12-N + 4 zeros) -> 0xE800
 dracula_body_hflip: equ 0x5858	; H-mirror the 32x32 at 0xE800
-gfx_script_run: equ 0x471b	; gfx-script walk: 0=RLE, 1=sub_4745h convert, 2+=copy, FF=end
-gfx_script_rle: equ 0x4735	; cmd 0: src word, VRAM dest word -> sub_46f8h
-gfx_script_copy: equ 0x4772	; cmd 2+: 6-byte VRAM blit (sub_467ch)
-room_gfx_load: equ 0x5787	; 9AB0[D000-1][D001]: gfx_script_run then l4845h palette
+main_tick: equ 0x414d	; top-level per-frame state machine (from int_handler)
+vram_write: equ 0x467c	; CPU RAM -> VRAM via OTIR (HL dest, DE src after ex)
+vdp_set_write: equ 0x46b6	; set VDP VRAM write pointer from HL (R14 + bit6)
+vdp_set_read: equ 0x46d5	; set VDP VRAM read pointer from HL (R14, no bit6)
+rle_dec_addr: equ 0x46f2	; RLE unpack; dest word taken from the stream
+rle_dec: equ 0x46f8	; RLE unpack DE -> VRAM HL (0 / 80-addr / run / literal)
+gfx_script_run: equ 0x471b	; gfx-script walk: 0=RLE, 1=gfx_script_convert, 2+=copy, FF=end
+gfx_script_convert: equ 0x4745	; cmd 1: 1bpp sprite convert via 0xE800 then vram_write
+gfx_script_rle: equ 0x4735	; cmd 0: src word, VRAM dest word -> rle_dec
+gfx_script_copy: equ 0x4772	; cmd 2+: 6-byte VRAM blit (vram_write)
+palette_set: equ 0x481b	; write one MSX2 palette entry A=index, D=0rrr0bbb, E=g
+palette_apply: equ 0x4845	; apply (index,rb,g)+ table at HL, 0xFF-terminated
+video_init: equ 0x4b60	; SCREEN 5 + clear VRAM pages 0/1
+page_play_banks: equ 0x533d	; restore play banks: seg1/2/3 at 6000/8000/A000
+page_sound_banks: equ 0x5357	; page seg14/15 at 8000/A000
+page_map_banks: equ 0x5369	; page seg11/12/13 (map + Simon RLE)
+page_title_banks: equ 0x5381	; page seg9/10 at 8000/A000
+page_tileset_late: equ 0x5393	; page seg7/8 (stage >= 13 tilesets)
+page_tileset_banks: equ 0x53a5	; page seg4/5/6 (early-stage tilesets)
+palette_hud_load: equ 0x572e	; load the 8 fixed HUD/sprite colours from hud_fixed_palette
+play_tick: equ 0x5c2c	; in-stage play loop: events, actors, SAT, pause, credits
+room_gfx_load: equ 0x5787	; 9AB0[D000-1][D001]: gfx_script_run then palette_apply
 vdp_hmmm: equ 0x494d	; V9938 HMMM: HL=SX,SY DE=DX,DY BC=NX,NY; A=pages
 vdp_lmmm: equ 0x49e2	; V9938 LMMM (colour-0 skip); A packed pages+logic
 add_score: equ 0x44f5	; add C:D:E (BCD hi:mid:lo) to the 3-byte score at 0xC405-0xC407
@@ -218,12 +236,26 @@ spawn_actor_init: equ 0x5f7e	; init tail of spawn_actor
 ; ---- Vampire Killer banked routines (segment 1 @ 0x6000) -----------------
 konami_logo_draw: equ 0x6209	; draw Konami logo + seed the top-to-bottom wipe
 konami_logo_step: equ 0x6253	; reveal one more row of the logo (poll 0xC422)
+object_list_load: equ 0x615b	; page seg14, unpack 3 streams into DB00/DC00/DD00
+object_list_unpack: equ 0x6188	; expand (id,attr) stream into 4-byte slots
+object_list_lookup: equ 0x61a5	; HL -> this stage's packed object data in seg14
+object_list_clear: equ 0x61b0	; clear the 0xDB00 object list
+tile_string_draw: equ 0x6276	; tile-id stream at HL to screen pos DE (FF/FE)
+cell_event_set: equ 0x633a	; CE00 from l6376h[stage] if column matches
+actor_state_reset: equ 0x6389	; clear C470-C6FF + actor/shot lists, reload room
+mem_clear_stride: equ 0x63b8	; zero B entries at HL, stride DE
+simon_block_clear: equ 0x63be	; clear 0xC420..0xC46F
+sprites_hide: equ 0x63cc	; hide all 32 hardware sprites (Y=0xE0)
+simon_spawn_pos: equ 0x6409	; Simon Y/X/facing from l6426h[stage]
+pattern_phase_upload: equ 0x6591	; phase-selected pattern rows to VRAM 0xF400
+pattern_shadow_blit: equ 0x65ab	; copy 0xD400 shadow (0x280 bytes) to VRAM 0xF400
+room_edge_detect: equ 0x7682	; set C41B pending exit from Simon vs screen edges
 actor_sat_build: equ 0x644c	; one actor: seg6 shape stream -> SAT block at slot|0x20
 shot_sat_emit: equ 0x64ec	; 8 x shot SAT blocks -> 0xD638 hardware shadow
 c800_sat_emit: equ 0x64f3	; 7 x C800 SAT blocks -> 0xD638 hardware shadow
 actor_sat_emit: equ 0x6508	; one actor SAT block -> 0xD638
 lookup_word_tbl: equ 0x6549	; DE = ((word*)DE)[A]  (generic word-table lookup)
-frame_vram_refresh: equ 0x6552	; per-frame pattern upload (or l65abh shadow blit)
+frame_vram_refresh: equ 0x6552	; per-frame pattern upload (or pattern_shadow_blit)
 credits_tick: equ 0x66c1	; ending credits (CE40 after event 6); 4-step machine
 credits_start: equ 0x66d0	; BGM 0x8E + credits_init
 credits_next: equ 0x66d8	; CE40++
@@ -307,10 +339,12 @@ title_sat_tmpl: equ 0x7b59	; 11 (Y,X) pairs
 combat_tick: equ 0x7d6f	; per-frame whip/projectile hits + yellow_shield_tick
 
 ; ---- Vampire Killer banked routines (segment 2 @ 0x8000) -----------------
+award_kill_score: equ 0x81b2	; add_score from l81d5h[type] (C:D:E BCD)
 door_proximity: equ 0x8587	; carry if Simon (B=Y,C=X) overlaps door at C5AD=Y / C5AE=X
 door_anim_tick: equ 0x914e	; 0xC5AC door state: 0xFF -> door_blit_tiles; 3 = opening frames
 door_begin_open: equ 0x9175	; if C5AC==1, set 0xFF and jp door_anim_tick (start opening)
 collect_bonus: equ 0x8d33	; apply picked-up bonus id A (latch 0xC419, table @ 0x8D45)
+collect_bonus_apply: equ 0x8d37	; collect_bonus without queuing play_sound
 collect_bonus_tbl: equ 0x8D45	; word[id-1] handlers; id>=0x1A weapon except 0x1E holy water
 bonus_red_shield: equ 0x8D9F	; id 3: C701 bit4, face-on contact uses table dmg
 bonus_yellow_shield: equ 0x8DA8	; id 4: C701 bit5, absorb enemy shots
@@ -340,6 +374,10 @@ bonus_white_key: equ 0x8E67	; id 24: C701 bit0
 bonus_staff: equ 0x8E80		; id 18: C700=3, C701 bit2; drops yellow key
 bonus_potion: equ 0x8E14	; id 22: bottle, +32 HP; vendor 0x16 (not boss orb)
 lose_weapon: equ 0x8E9A		; missed catch: C416=0, refresh HUD
+inv_or_c701: equ 0x8e74	; OR B into inventory bitfield 0xC701
+inv_or_c702: equ 0x8e79	; OR B into bible/candle flags 0xC702
+hud_weapon_icon: equ 0x8ea1	; draw equipped-weapon HUD icon from C416
+hud_bonus_refresh: equ 0x8eed	; redraw C701 bonus icons (map/hourglass/shields/holy)
 projectile_hit_actors: equ 0x8025	; C450/C460 vs C800
 add_score_100: equ 0x8231	; +100 for destroying a shot
 pickup_vs_simon: equ 0x8237	; C500 slot vs Simon
@@ -400,7 +438,7 @@ vendor_select_price: equ 0x941f	; 0xC702 bible flags pick normal/half/double pri
 vendor_price_tbl: equ 0x942f	; 9 x {item id, normal, half(white bible), double(black bible)}
 vendor_offer_withdraw: equ 0x9503	; offer declined/expired/unaffordable: sfx 0x02, ret 0
 vendor_offer_pending: equ 0x950a	; no button this frame: ret 0xFF (keep offer open)
-vendor_purchase_tick: equ 0x94be	; offer loop: tick timer 0xC706, poll buy/refuse, buy item
+vendor_purchase_tick: equ 0x94c1	; offer loop: tick timer 0xC706, poll buy/refuse, buy item
 vendor_read_buttons: equ 0x9526	; edge-detected confirm(SPACE)/refuse(SHIFT)+triggers -> A
 read_kbd_matrix_bit: equ 0x9552	; read one keyboard-matrix bit (row in A) -> 0/1
 minimap_driver: equ 0x9559	; F2 world-map driver: state 0xCF38 (0 play/1 build/2 shown); needs map item 0xC701 bit7 + uses 0xC70F
@@ -420,6 +458,8 @@ actor_tick_tbl: equ 0x9949	; word[type-1] -> tick; 1-22 plus overflow 0x18-0x24
 actor_integrate: equ 0x99c0	; add velocity (+0x07/08 Y, +0x09/0A X) to position
 actor_cull_offscreen: equ 0x99ec	; free actor if pixel pos left the play area
 actor_free: equ 0x99fd	; clear actor slot (+0x00/+0x0E) and any linked sub-slot
+spawn_rate_gate: equ 0x9cca	; CF00 counter vs difficulty-scaled threshold
+spawn_pick_pos: equ 0x9d03	; hardcoded ground-enemy spawn X/Y from stage/room
 shot_tick: equ 0x9e38	; 8 shot slots at 0xD700
 shot_type_tick: equ 0x9e5f	; DISPATCH_A on shot type-1
 fireball: equ 0x9e7e	; types 1-3,5,10: shared fireball (pose 3, SAT pat 0xF0)
@@ -474,7 +514,7 @@ mtile_defs_s18: equ 0x9AC1	; stage 18 (tail in seg13 0xA000-0xA040)
 
 ; ---- Vampire Killer gfx-script bank (segment 9 @ 0x8000 / 10 @ 0xA000) --
 room_gfx_ptr: equ 0x9AB0	; word[stage-1] -> 4 bytes/room {script, palette}
-stage_palette_ptr: equ 0xBEA7	; word[stage 0..18] -> l4845h table
+stage_palette_ptr: equ 0xBEA7	; word[stage 0..18] -> palette_apply table
 hud_fixed_palette: equ 0xBF88	; indices 0,1,2,3,8,12,14,15
 title_extra_palette: equ 0xBF6F	; title extras (dracula_portrait_palette)
 weapon_knife: equ 0xA24E	; thrown knife RLE (load_weapon_sprites)
@@ -648,3 +688,81 @@ sfx_tbl: equ 0x8d8f		; word[id 1..0x1D] -> sfx streams
 music_ptr: equ 0x8dc9		; 6-byte records, 3 channel ptrs, id 0x80..0x8F
 snd_fd_seq: equ 0x9463		; play_sound 0xFD overlay stream
 snd_fb_seq: equ 0x948b		; play_sound 0xFB overlay stream
+; Packed PSG streams — labels match music/ sfx/ WAV stems (hyphen -> _;
+; music channels get _a/_b/_c).  0x89 = Simon death; 0x8B = GAME OVER.
+sfx_01_boss_heal: equ 0x8e2b
+sfx_02_vendor_withdraw: equ 0x8e58
+sfx_1d_vendor_hearts: equ 0x8e69
+sfx_03_cross_fly: equ 0x8e8a
+sfx_04_knife_throw: equ 0x8e99
+sfx_05_whip: equ 0x8eae
+sfx_06_axe_fly: equ 0x8ecb
+sfx_07_land: equ 0x8ee4
+sfx_08_merman_out: equ 0x8ef3
+sfx_09_water_in: equ 0x8f25
+sfx_0a_mummy_shot: equ 0x8f56
+sfx_0b_shield_block: equ 0x8f75
+sfx_0c_hit: equ 0x8fb9
+sfx_0d_ring_kill: equ 0x8fdd
+sfx_0e_block_break: equ 0x902e
+sfx_0f_heart: equ 0x9065
+sfx_10_money_bag: equ 0x909a
+sfx_11_chest: equ 0x90c7
+sfx_12_collect: equ 0x90e6
+sfx_13_simon_hurt: equ 0x9137
+sfx_14_key: equ 0x9152
+sfx_15_portal: equ 0x9179
+sfx_16_blue_gem: equ 0x9212
+sfx_17_gem_warn: equ 0x9275
+sfx_18_holy_water: equ 0x92d8
+sfx_1a_door: equ 0x931a
+sfx_1c_boss_clear: equ 0x939f
+sfx_1b_white_cross: equ 0x93ca
+sfx_19_vendor_offer: equ 0x9470
+music_80_bgm_s00_03_a: equ 0x949b
+music_80_bgm_s00_03_b: equ 0x9501
+music_80_bgm_s00_03_c: equ 0x9598
+music_81_bgm_s04_06_11_12_a: equ 0x9669
+music_81_bgm_s04_06_11_12_b: equ 0x96c7
+music_81_bgm_s04_06_11_12_c: equ 0x976d
+music_82_bgm_s07_09_a: equ 0x97da
+music_82_bgm_s07_09_b: equ 0x9891
+music_82_bgm_s07_09_c: equ 0x993d
+music_83_bgm_s16_17_a: equ 0x9a58
+music_83_bgm_s16_17_b: equ 0x9ab8
+music_83_bgm_s16_17_c: equ 0x9b6a
+music_84_bgm_s13_15_a: equ 0x9c15
+music_84_bgm_s13_15_b: equ 0x9cdb
+music_84_bgm_s13_15_c: equ 0x9df8
+music_85_bgm_s10_18_a: equ 0x9ec1
+music_85_bgm_s10_18_b: equ 0x9f89
+music_85_bgm_s10_18_b_cont: equ 0xa000
+music_85_bgm_s10_18_c: equ 0xa051
+music_86_bgm_boss_dracula_a: equ 0xa157
+music_86_bgm_boss_dracula_c: equ 0xa1b9
+music_86_bgm_boss_dracula_b: equ 0xa217
+music_87_bgm_boss_a: equ 0xa2c5
+music_87_bgm_boss_b: equ 0xa303
+music_87_bgm_boss_c: equ 0xa35b
+music_88_bgm_boss_dracula_portrait_a: equ 0xa39e
+music_88_bgm_boss_dracula_portrait_b: equ 0xa3e4
+music_88_bgm_boss_dracula_portrait_c: equ 0xa43c
+music_89_simon_death_a: equ 0xa49b
+music_89_simon_death_b: equ 0xa4b0
+music_89_simon_death_c: equ 0xa4c4
+music_8a_enter_castle_a: equ 0xa4d1
+music_8a_enter_castle_b: equ 0xa506
+music_8a_enter_castle_c: equ 0xa51d
+music_8b_game_over_a: equ 0xa54e
+music_8b_game_over_b: equ 0xa573
+music_8b_game_over_c: equ 0xa5a5
+music_8c_boss_defeated_a: equ 0xa5df
+music_8c_boss_defeated_b: equ 0xa5fd
+music_8c_boss_defeated_c: equ 0xa621
+music_8d_dracula_defeated_a: equ 0xa671
+music_8d_dracula_defeated_b: equ 0xa68f
+music_8d_dracula_defeated_c: equ 0xa6aa
+music_8e_credits_a: equ 0xa6c4
+music_8e_credits_b: equ 0xa764
+music_8e_credits_c: equ 0xa7fe
+music_8f_silence: equ 0xa81f

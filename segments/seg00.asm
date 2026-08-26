@@ -92,7 +92,7 @@ l4030h:
 	inc (hl)                ; mark tick in progress
 	ei
 	call 04ba4h             ; input / timers update
-	call sub_414dh          ; MAIN TICK (top-level state machine)
+	call main_tick          ; MAIN TICK (top-level state machine)
 	xor a
 	ld (0c005h),a           ; clear tick-in-progress flag
 l405fh:
@@ -158,10 +158,10 @@ init:
 	ld bc,030efh            ; length 0x30EF
 	ld (hl),000h
 	ldir                    ; (hl)=0 then propagate via LDIR
-	call sub_533dh          ; init subsystem
+	call page_play_banks          ; init subsystem
 	call sub_5c99h          ; slot scan: E600=0xFF if 0x7FFA matches slot_sig_7ffa
-	call sub_533dh
-	call sub_4b60h          ; init subsystem
+	call page_play_banks
+	call video_init          ; init subsystem
 	di
 	ld a,0c3h               ; opcode for JP
 	ld (0fd9fh),a           ; install timer-interrupt hook (H.TIMI)...
@@ -249,7 +249,7 @@ sub_4132h:
 	ld a,00ah
 	jp WRTPSG
 ; ===========================================================================
-;  sub_414dh - MAIN TICK / top-level game state machine.  Called once per
+;  main_tick - MAIN TICK / top-level game state machine.  Called once per
 ;  frame from int_handler.  Two-level state:
 ;     0xC000 = primary state  (C) -> selects a handler from main_state_tbl
 ;     0xC001 = secondary state (B) -> sub-phase, read by the `djnz` ladders
@@ -260,7 +260,7 @@ sub_4132h:
 ;  runs after the handler: any press on logo/attract returns to the title;
 ;  SPACE/TRG1 or TRG2/UP on the title starts the game (or password if E600).
 ; ===========================================================================
-sub_414dh:
+main_tick:
 	ld hl,0c003h            ; frame counter...
 	inc (hl)                ; ...++
 	ld bc,(0c000h)          ; C=primary state, B=secondary state
@@ -286,7 +286,7 @@ main_state_tbl:
 	defw state_death            ; 6  lives left -> respawn (state 4); else game-over
 	defw state_game_over        ; 7  draw GAME OVER (l4d41h)
 	defw state_hub_advance      ; 8  from 0xC409 (boss-clear / credits): hub++ then advance_stage
-	defw state_room_trans       ; 9  pending exit 0xC41B: sub_5a35h then back to play
+	defw state_room_trans       ; 9  pending exit 0xC41B: conn_lookup_paged then back to play
 	defw state_stage_exit       ; 10 from 0xC408: spend white key, advance_stage
 	defw state_pause            ; 11 from 0xC40A: F1 freeze; F1 again resumes play
 	defw state_vendor           ; 12 from 0xC40C: vendor offer / purchase
@@ -413,7 +413,7 @@ l4252h:
 	ld (0c001h),a
 	ret
 state_play:                    ; 5 (0x4257)
-	call sub_5c2ch
+	call play_tick
 	ld a,(0c40ch)
 	or a
 	ld a,00ch
@@ -580,7 +580,7 @@ l4377h:
 	xor a
 	jp l41c9h
 state_room_trans:              ; 9 (0x437E): 0xC41B pending exit
-	call sub_5a35h
+	call conn_lookup_paged
 	ld a,006h
 	jp nc,l41b6h           ; failed transition -> death
 	call 062fch
@@ -653,7 +653,7 @@ state_pause:                   ; 11 (0x43E1): F1 froze play (0xC40A); wait F1 (0
 	jp l41b6h              ; back to play
 state_vendor:                  ; 12 (0x43F7): 0xC40C whip-hit vendor
 	djnz l4402h
-	call 094c1h             ; vendor_purchase_tick body (seg2): poll buy/refuse
+	call vendor_purchase_tick  ; poll buy/refuse (seg2)
 	ret nz
 	ld a,00fh
 	jp l41c9h
@@ -834,9 +834,9 @@ sub_451ah:
 	call draw_lives_hud
 	call sub_45b7h
 	call sub_454ch
-	call 08ea1h
+	call hud_weapon_icon
 	call 08ebbh
-	call 08eedh
+	call hud_bonus_refresh
 l4538h:
 	ld hl,0c407h
 	ld de,03800h
@@ -1038,7 +1038,7 @@ l464bh:
 	ld b,001h
 	jr damage_enemy
 sub_4661h:
-	call sub_46d5h
+	call vdp_set_read
 	call sub_4674h
 	ex af,af'
 	ld a,(00006h)
@@ -1059,9 +1059,9 @@ sub_4674h:
 	ret z
 	inc a
 	ret
-sub_467ch:
+vram_write:
 	ex de,hl
-	call sub_46b6h
+	call vdp_set_write
 	call sub_4674h
 	ex af,af'
 	ld a,(00007h)
@@ -1075,7 +1075,7 @@ l4689h:
 sub_468fh:
 	push de
 	push af
-	call sub_46b6h
+	call vdp_set_write
 	ld d,c
 	ld a,c
 	or a
@@ -1094,18 +1094,18 @@ l469fh:
 	ret
 	push bc
 	push af
-	call sub_46b6h
+	call vdp_set_write
 	ld a,(00007h)
 	ld c,a
 	pop af
 	out (c),a
 	pop bc
 	ret
-; --- sub_46b6h - set the VDP VRAM write pointer to the 16-bit address in HL.
+; --- vdp_set_write - set the VDP VRAM write pointer to the 16-bit address in HL.
 ;     Programs R14 (A14-A16 = top 2 bits of H) then the auto-increment address
 ;     low/high via port 0x99, with bit6 set to select "write" mode.  Used before
 ;     streaming pixel data to the data port 0x98.
-sub_46b6h:
+vdp_set_write:
 	push bc
 	ld a,(00007h)           ; c = VDP addr/ctrl port (0x99)
 	inc a
@@ -1127,7 +1127,7 @@ sub_46b6h:
 	pop bc
 	ei
 	ret
-sub_46d5h:
+vdp_set_read:
 	push bc
 	ld a,(00007h)
 	inc a
@@ -1151,25 +1151,25 @@ sub_46d5h:
 ; --- RLE graphics decompressor -> VRAM.  This is how ALL SCREEN 5 bitmaps and
 ;     the hardware-sprite patterns are unpacked from the banked graphics ROM.
 ;     Entry:  DE = compressed source stream, HL = initial VRAM dest address.
-;       l46f2h : variant that first reads the 2-byte dest address FROM the
+;       rle_dec_addr : variant that first reads the 2-byte dest address FROM the
 ;                stream (used when the caller doesn't set HL itself).
-;       sub_46f8h : standard entry (HL already holds the dest address).
+;       rle_dec : standard entry (HL already holds the dest address).
 ;     Control-byte grammar (source read linearly; output goes to the VRAM
-;     write pointer set via sub_46b6h, streamed to data port 0x98):
+;     write pointer set via vdp_set_write, streamed to data port 0x98):
 ;       0x00           -> end of stream (ret)
-;       0x80  lo hi    -> set VRAM write pointer = hi<<8 | lo  (jump to l46f2h)
+;       0x80  lo hi    -> set VRAM write pointer = hi<<8 | lo  (jump to rle_dec_addr)
 ;       0x01..0x7F  N  -> RUN     : next single byte repeated N times
 ;       0x81..0xFF  N  -> LITERAL : copy (N & 0x7F) bytes verbatim via OTIR
 ;     Tools: tools/rledec.py replays this exact grammar to extract graphics.
-l46f2h:
+rle_dec_addr:
 	ex de,hl                ; read a fresh 2-byte dest address...
 	ld e,(hl)               ; ...from the source stream (0x80 command)
 	inc hl
 	ld d,(hl)
 	inc hl
 	ex de,hl
-sub_46f8h:
-	call sub_46b6h          ; point VDP at dest VRAM address (HL)
+rle_dec:
+	call vdp_set_write          ; point VDP at dest VRAM address (HL)
 	ld a,(00007h)           ; c = VDP data port (0x98)
 	ld c,a
 l46ffh:
@@ -1182,7 +1182,7 @@ l46ffh:
 	cp b                    ; bit7 clear (b <= 0x7F) -> RUN
 	jr z,l4713h
 	and a                   ; b == 0x80 -> set new dest address
-	jr z,l46f2h
+	jr z,rle_dec_addr
 	ex de,hl                ; else LITERAL: copy (b & 0x7F) bytes
 	ld b,a
 	otir                    ; stream b bytes -> VRAM data port
@@ -1198,7 +1198,7 @@ l4715h:
 ; ---------------------------------------------------------------------------
 ;  gfx_script_run (seg0 0x471B) - interpret a per-room gfx script (HL).
 ;  Cmd 0xFF ends; 0 = gfx_script_rle (src word, VRAM dest word);
-;  1 = sub_4745h sprite convert; else gfx_script_copy (6-byte VRAM blit).
+;  1 = gfx_script_convert sprite convert; else gfx_script_copy (6-byte VRAM blit).
 ; ---------------------------------------------------------------------------
 gfx_script_run:
 	ld a,(hl)
@@ -1216,7 +1216,7 @@ l472bh:
 	call gfx_script_rle
 	jr gfx_script_run
 l4730h:
-	call sub_4745h
+	call gfx_script_convert
 	jr gfx_script_run
 gfx_script_rle:
 	ld e,(hl)
@@ -1230,10 +1230,10 @@ gfx_script_rle:
 	push hl
 	ld l,a
 	ld h,b
-	call sub_46f8h
+	call rle_dec
 	pop hl
 	ret
-sub_4745h:
+gfx_script_convert:
 	ld e,(hl)
 	inc hl
 	ld d,(hl)
@@ -1265,7 +1265,7 @@ sub_4745h:
 	inc hl
 	push hl
 	ld hl,0ec00h
-	call sub_467ch
+	call vram_write
 	pop hl
 	ret
 gfx_script_copy:
@@ -1283,7 +1283,7 @@ gfx_script_copy:
 	ld h,(hl)
 	ld l,a
 	ex de,hl
-	call sub_467ch
+	call vram_write
 	pop hl
 	inc hl
 	ret
@@ -1360,7 +1360,7 @@ sub_47f7h:
 	ld a,0e0h
 	ld bc,00080h
 	call sub_468fh
-	jp 063cch
+	jp sprites_hide
 l4805h:
 	ld a,(0ffe7h)
 	or 002h
@@ -1373,10 +1373,10 @@ l4810h:
 	ld b,a
 	ld c,008h
 	jp WRTVDP
-; --- sub_481bh - write one MSX2 palette entry.  A = index 0-15, D = 0rrr0bbb,
+; --- palette_set - write one MSX2 palette entry.  A = index 0-15, D = 0rrr0bbb,
 ;     E = 00000ggg (3-bit R/B then G).  Programs R16 then ports 0x9A; also
 ;     shadows the pair at VRAM 0xF680+A*2.
-sub_481bh:
+palette_set:
 	push bc
 	push hl
 	ld b,a
@@ -1398,7 +1398,7 @@ sub_481bh:
 	add a,a
 	add a,l
 	ld l,a
-	call sub_46b6h
+	call vdp_set_write
 	dec c
 	out (c),d
 	out (c),e
@@ -1406,8 +1406,8 @@ sub_481bh:
 	pop bc
 	ei
 	ret
-; --- l4845h - apply a palette table: records (index, rb, g)+ , 0xFF-terminated.
-l4845h:
+; --- palette_apply - apply a palette table: records (index, rb, g)+ , 0xFF-terminated.
+palette_apply:
 	ld a,(hl)
 	inc hl
 	inc a
@@ -1417,8 +1417,8 @@ l4845h:
 	inc hl
 	ld e,(hl)
 	inc hl
-	call sub_481bh
-	jr l4845h
+	call palette_set
+	jr palette_apply
 l4853h:
 	ld a,002h
 	call sub_485ch
@@ -1776,7 +1776,7 @@ sub_4a58h:
 l4a5bh:
 	push bc
 	ld bc,00004h
-	call sub_467ch
+	call vram_write
 	ex de,hl
 	ld bc,00080h
 	add hl,bc
@@ -1807,7 +1807,7 @@ sub_4a82h:
 l4a85h:
 	push bc
 	ld bc,SYNCHR
-	call sub_467ch
+	call vram_write
 	ex de,hl
 	ld bc,00080h
 	add hl,bc
@@ -1968,13 +1968,13 @@ sub_4b56h:
 	add a,008h
 	ld e,a
 	ret
-; --- sub_4b60h - video subsystem init.  Selects SCREEN 5 (VDP mode G4:
+; --- video_init - video subsystem init.  Selects SCREEN 5 (VDP mode G4:
 ;     256x212, 16 colours, 4 bits/pixel bitmap).  This is why the graphics
 ;     banks (seg 4-9, 15) hold 4bpp bitmap data blitted to VRAM with the VDP
 ;     command engine (see sub_48e3h / l4911h), rather than 1bpp tile patterns.
 ;     Actors are drawn with hardware sprites (mode 2, 16x16).  After the mode
 ;     switch it clears VRAM page 0/1 via the block-fill helper l4911h.
-sub_4b60h:
+video_init:
 	call sub_507dh
 	call l4805h
 	ld a,005h               ; SCREEN 5 (G4, 256x212, 16 colours, 4bpp)
@@ -2083,7 +2083,6 @@ read_buttons:
 ; into 0xC00B (newly-pressed).  F2 drives the world-map feature (seg2 minimap_driver
 ; 0x9559); F1 is handled in seg0 (0x43E1 / 0x5C48).
 read_fkeys:
-sub_4bfbh:
 	ld a,006h              ; keyboard matrix row 6 = function keys...
 	call SNSMAT
 	cpl                    ; active-high
@@ -2173,12 +2172,12 @@ title_build:
 	call sub_47dbh
 	call sub_4de2h
 	call l4853h
-	call sub_572eh
+	call palette_hud_load
 	ld b,003h
 	ld de,06606h
 l4d5fh:
 	ld a,00fh
-	call sub_481bh
+	call palette_set
 	dec e
 	dec e
 	ld a,d
@@ -2196,7 +2195,7 @@ l4d6dh:
 	call WRTVDP
 	ld a,00fh
 	ld de,00700h
-	call sub_481bh
+	call palette_set
 	call sub_47f7h
 	call sub_53bdh
 	call title_load_tiles  ; load region-specific title glyphs into VRAM
@@ -2264,11 +2263,11 @@ sub_4deeh:
 	call 062edh
 	jp sub_451ah
 sub_4e27h:
-	call sub_5c2ch
+	call play_tick
 	ld a,(0c41bh)
 	and a
 	ret z
-	call sub_5a35h
+	call conn_lookup_paged
 	jp 062fch
 l4e35h:
 	ld hl,0cf3ah
@@ -2349,7 +2348,7 @@ sub_4e9ah:
 	call c800_tick
 	call c800_sat_build
 	call c800_sat_emit
-	jp l65abh
+	jp pattern_shadow_blit
 	ld c,027h
 	ld de,0e048h
 	jp spawn_actor
@@ -2942,7 +2941,7 @@ l52f0h:
 	ld a,(0c0a6h)
 	cp 0f8h
 	ret
-	call sub_5369h
+	call page_map_banks
 	ld hl,0be59h
 	ld de,00800h
 	ld bc,00d01h
@@ -2955,10 +2954,10 @@ l52f0h:
 	ld de,0d800h
 	ld bc,01a03h
 	call l4a2eh
-; --- sub_533dh - restore the default bank set after a graphics load: seg 1 @
+; --- page_play_banks - restore the default bank set after a graphics load: seg 1 @
 ;     0x6000 (page 1b), seg 2 @ 0x8000 (page 2a), seg 3 @ 0xA000 (page 2b).
 ;     These are the banks the running game code normally expects paged in.
-sub_533dh:
+page_play_banks:
 	di
 	push hl
 	ld hl,0f0f1h
@@ -2976,7 +2975,7 @@ sub_533dh:
 	pop hl
 	ei
 	ret
-sub_5357h:
+page_sound_banks:
 	di
 	ld hl,0f0f2h
 	ld a,00eh
@@ -2988,11 +2987,11 @@ sub_5357h:
 	ld (hl),a
 	ei
 	ret
-; --- sub_5369h - page in the "level/sprite graphics" bank set: seg 11 @ 0x6000
+; --- page_map_banks - page in the "level/sprite graphics" bank set: seg 11 @ 0x6000
 ;     (page 1b), seg 12 @ 0x8000 (page 2a), seg 13 @ 0xA000 (page 2b).  Shadow
 ;     copies kept at 0xF0F1-0xF0F3 so int_handler can restore them.  Sources
 ;     like 0xA319 read after this call therefore live in segment 13.
-sub_5369h:
+page_map_banks:
 	di
 	ld hl,0f0f1h
 	ld a,00bh               ; seg 11 -> page 1b (0x6000)
@@ -3008,10 +3007,10 @@ sub_5369h:
 	ld (hl),a
 	ei
 	ret
-; --- sub_5381h - page in the front-end/title graphics bank set: seg 9 @ 0x8000
+; --- page_title_banks - page in the front-end/title graphics bank set: seg 9 @ 0x8000
 ;     (page 2a), seg 10 @ 0xA000 (page 2b).  Page 1b is left untouched.  Sources
 ;     like 0xA0EA read after this call live in segment 10.
-sub_5381h:
+page_title_banks:
 	di
 	ld hl,0f0f2h
 	ld a,009h               ; seg 9 -> page 2a (0x8000)
@@ -3023,7 +3022,7 @@ sub_5381h:
 	ld (hl),a
 	ei
 	ret
-sub_5393h:
+page_tileset_late:
 	di
 	ld hl,0f0f2h
 	ld a,007h
@@ -3035,10 +3034,10 @@ sub_5393h:
 	ld (hl),a
 	ei
 	ret
-; --- sub_53a5h - page in the level-tileset banks: seg 4 @ 0x6000 (page 1b),
+; --- page_tileset_banks - page in the level-tileset banks: seg 4 @ 0x6000 (page 1b),
 ;     seg 5 @ 0x8000 (page 2a), seg 6 @ 0xA000 (page 2b).  The HUD weapon/key
 ;     tiles at CPU 0xB9C8 are read from segment 6 after this call.
-sub_53a5h:
+page_tileset_banks:
 	di
 	ld hl,0f0f1h
 	ld a,004h               ; seg 4 -> page 1b (0x6000)
@@ -3055,7 +3054,7 @@ sub_53a5h:
 	ei
 	ret
 sub_53bdh:
-	call sub_5393h
+	call page_tileset_late
 	ld de,CHKRAM
 	ld c,000h
 	ld hl,0bed8h
@@ -3068,13 +3067,13 @@ sub_53bdh:
 	ld de,0a440h
 	ld b,001h
 	call l4a6dh
-	jp sub_533dh
+	jp page_play_banks
 ; credits_font_load (seg0 0x53E5): page segs 14/15 and blit the 8x8 1bpp
 ; ending-credits font (digits+punct, then A-Z) into SCREEN 5 via l4a2eh.
 ; Called from credits_init (post-Dracula script player). credits_font_blit
 ; (0x53E8) skips the pager when those banks are already in.
 credits_font_load:
-	call sub_5357h         ; page seg14/15
+	call page_sound_banks         ; page seg14/15
 credits_font_blit:
 	ld de,08040h
 	ld hl,credits_font
@@ -3084,7 +3083,7 @@ credits_font_blit:
 	ld hl,credits_font_az
 	ld bc,01a0eh           ; B=26 glyphs A-Z
 	call l4a2eh
-	jp sub_533dh
+	jp page_play_banks
 ; door_blit_tiles (0x5403): paint the 6-tile door graphic.  HL is 0xC5AC on
 ; entry (from door_anim_tick when it was 0xFF).  ld de,(0xC5AD) loads E=Y
 ; (0xC5AD) and D=X (0xC5AE); E+=8 walks DOWN the door.  Source of those
@@ -3188,7 +3187,7 @@ l548ch:
 	nop
 	nop
 	nop
-	call sub_5381h
+	call page_title_banks
 	ld hl,bonus_hud_tiles  ; bonus ids 1-20 (16x16 4bpp)
 	ld de,0a800h           ; VRAM page 1 Y=0x50 (wraps to Y=0x60 after 16)
 	ld b,014h
@@ -3217,7 +3216,7 @@ l54c0h:
 	add a,008h
 	ld d,a
 	djnz l54c0h
-	call sub_53a5h         ; seg 6 @ 0xA000 for the next copy
+	call page_tileset_banks         ; seg 6 @ 0xA000 for the next copy
 	ld hl,0b9c8h           ; ids 23-30: keys, chest, chain, knife, axe, cross, holy
 	ld de,0b030h           ; VRAM page 1 Y=0x60 X=96 (file 0xD9C8)
 	ld b,008h
@@ -3226,9 +3225,9 @@ l54c0h:
 	ld de,0b800h
 	ld b,005h
 	call l4a97h
-	call sub_5381h
+	call page_title_banks
 	call sub_54f7h
-	jp sub_533dh
+	jp page_play_banks
 sub_54f7h:
 	ld ix,l5595h
 	ld de,0d000h
@@ -3354,10 +3353,10 @@ l5595h:
 	defb 003h,008h,002h,00eh,00fh
 ; load_weapon_sprites (seg0 0x559A): RLE-decompress the equipped projectile
 ; (C416 2=knife / 3=axe / 4=cross) from seg10 into sprite gen 0xF8C0, then
-; sub_4745h converts 1bpp quadrants.  Leather/chain (0/1) and 5 skip.
+; gfx_script_convert converts 1bpp quadrants.  Leather/chain (0/1) and 5 skip.
 ; Catalogued as gfx/weapon_knife, weapon_axe, weapon_cross.
 load_weapon_sprites:
-	call sub_5381h          ; page seg 9/10 (front-end gfx)
+	call page_title_banks          ; page seg 9/10 (front-end gfx)
 	ld a,(0c416h)
 	cp 005h
 	jr z,l55dbh
@@ -3371,7 +3370,7 @@ load_weapon_sprites:
 	inc hl
 	ld d,(hl)               ; DE = RLE stream in seg10
 	ld hl,0f8c0h            ; sprite patterns after Simon's two cells
-	call sub_46f8h
+	call rle_dec
 	ld a,(0c416h)
 	cp 004h
 	jr z,l55cfh
@@ -3380,15 +3379,15 @@ load_weapon_sprites:
 	cp 002h
 	jr nz,l55dbh
 	ld hl,weapon_cvt_knife
-	call sub_4745h
+	call gfx_script_convert
 	jr l55dbh
 l55cfh:
 	ld hl,weapon_cvt_boomerang
-	call sub_4745h
+	call gfx_script_convert
 	ld hl,weapon_cvt_boomerang2
-	call sub_4745h
+	call gfx_script_convert
 l55dbh:
-	jp sub_533dh            ; restore default game banks
+	jp page_play_banks            ; restore default game banks
 weapon_sprite_ptr:             ; (seg0 0x55DE) word[C416-2] -> seg10 RLE
 	defw weapon_knife      ; 2 knife
 	defw weapon_axe        ; 3 axe
@@ -3402,11 +3401,11 @@ weapon_cvt_knife:              ; knife: F8C0 x2 -> F900
 ; load_vdoor_sprites (seg0 0x55F3): extra patterns for a vertical door
 ; (C5AC==5), then fall through into the door SAT at 0xD600.
 load_vdoor_sprites:
-	call sub_5381h
+	call page_title_banks
 	ld de,vdoor_rle         ; seg10 stream
 	ld hl,0f900h
-	call sub_46f8h
-	call sub_533dh
+	call rle_dec
+	call page_play_banks
 	ld hl,0d600h
 	ld bc,00808h
 l5608h:
@@ -3461,13 +3460,13 @@ l564bh:
 ; ---------------------------------------------------------------------------
 ;  load_stage_tileset (seg0 0x5653) - page tileset banks and blit 0xBF 8x8
 ;  4bpp tiles from tileset_ptr[D000] into SCREEN 5 VRAM starting 0x8004.
-;  Stages 0-12: seg 4/5/6. Stage >= 13: sub_5393h overlays seg 7/8 on 8000/A000.
+;  Stages 0-12: seg 4/5/6. Stage >= 13: page_tileset_late overlays seg 7/8 on 8000/A000.
 ; ---------------------------------------------------------------------------
 load_stage_tileset:
-	call sub_53a5h
+	call page_tileset_banks
 	ld a,(0d000h)
 	cp 00dh
-	call nc,sub_5393h
+	call nc,page_tileset_late
 	ld a,(0d000h)
 	add a,a
 	ld hl,tileset_ptr
@@ -3480,45 +3479,45 @@ tileset_blit:
 	ld de,08004h
 	ld b,0bfh
 	call l4a6dh
-	jp sub_533dh
-	call sub_5381h
+	jp page_play_banks
+	call page_title_banks
 	ld hl,frontend_tiles
 	jr tileset_blit
-	call sub_5369h
+	call page_map_banks
 	ld hl,0f800h
 	ld de,0a319h
-	call sub_46f8h
+	call rle_dec
 	ld hl,0f840h
 	ld de,0a351h
-	call sub_46f8h
+	call rle_dec
 	ld hl,0f880h
 	ld de,0a38ch
-	call sub_46f8h
+	call rle_dec
 	ld hl,0f8c0h
 	ld de,0a3cah
-	call sub_46f8h
+	call rle_dec
 	ld hl,0f900h
 	ld de,0a40bh
-	call sub_46f8h
+	call rle_dec
 	ld hl,0f940h
 	ld de,0a447h
-	call sub_46f8h
+	call rle_dec
 	ld hl,0f980h
 	ld de,0a480h
-	call sub_46f8h
+	call rle_dec
 	ld hl,0f9c0h
 	ld de,0a4bch
-	call sub_46f8h
+	call rle_dec
 	ld de,0b895h
 	ld hl,0fa00h
-	call sub_46f8h
-	jp sub_533dh
-	call sub_5369h
+	call rle_dec
+	jp page_play_banks
+	call page_map_banks
 	ld de,0f880h
 	ld hl,0ac93h
 	ld bc,00180h
-	call sub_467ch
-	jp sub_533dh
+	call vram_write
+	jp page_play_banks
 ; ---------------------------------------------------------------------------
 ;  load_simon_sprites (seg0 0x56E8) - refresh Simon's two hardware-sprite cells
 ;  from the current animation frame.  Simon is drawn as two stacked 16x16 cells,
@@ -3529,7 +3528,7 @@ tileset_blit:
 ;  Catalogued as gfx/simon_cell0 + gfx/simon_cell1.
 ; ---------------------------------------------------------------------------
 load_simon_sprites:
-	call sub_5369h          ; page seg 11/12/13 (sprite gfx) in
+	call page_map_banks          ; page seg 11/12/13 (sprite gfx) in
 	ld a,(0c42eh)           ; legs frame index
 	add a,a                 ; *2 (word table)
 	ld hl,simon_cell0_ptr   ; seg13 leg-cell pointer table
@@ -3538,7 +3537,7 @@ load_simon_sprites:
 	inc hl
 	ld d,(hl)               ; DE = leg stream source
 	ld hl,0f800h            ; sprite cell 0 (legs)
-	call sub_46f8h          ; decompress into VRAM
+	call rle_dec          ; decompress into VRAM
 	ld a,(0c42fh)           ; torso/whip frame index
 	add a,a
 	ld hl,simon_cell1_ptr   ; seg13 torso-cell pointer table
@@ -3547,10 +3546,10 @@ load_simon_sprites:
 	inc hl
 	ld d,(hl)               ; DE = torso stream source
 	ld hl,0f840h            ; sprite cell 1 (torso + whip)
-	call sub_46f8h
-	jp sub_533dh            ; restore default game banks
-	call sub_572eh
-	call sub_5381h
+	call rle_dec
+	jp page_play_banks            ; restore default game banks
+	call palette_hud_load
+	call page_title_banks
 	ld hl,stage_palette_ptr
 	ld a,(0d000h)
 	add a,a
@@ -3559,21 +3558,21 @@ load_simon_sprites:
 	inc hl
 	ld d,(hl)
 	ex de,hl
-	call l4845h
-	jp sub_533dh
-; --- sub_572eh - load the 8 fixed HUD/sprite colours (0,1,2,3,8,12,14,15)
+	call palette_apply
+	jp page_play_banks
+; --- palette_hud_load - load the 8 fixed HUD/sprite colours (0,1,2,3,8,12,14,15)
 ;     from hud_fixed_palette (seg10 0xBF88).  Stage palettes (stage_palette_ptr)
 ;     never overwrite these.
-sub_572eh:
-	call sub_5381h
+palette_hud_load:
+	call page_title_banks
 	ld hl,hud_fixed_palette
-	call l4845h
-	jp sub_533dh
-	call sub_572eh
-	call sub_5381h
+	call palette_apply
+	jp page_play_banks
+	call palette_hud_load
+	call page_title_banks
 	ld hl,pal_bfa1
-	call l4845h
-	jp sub_533dh
+	call palette_apply
+	jp page_play_banks
 ; tileset_ptr (seg0 0x5749): word[stage 0..18] -> uncompressed 8x8 4bpp
 ; source in the tileset banks. 0xBF tiles blit to VRAM 0x8004.
 tileset_ptr:
@@ -3590,28 +3589,28 @@ tileset_ptr:
 	defw 09e73h            ; 10-12 (seg5)
 	defw 09e73h
 	defw 09e73h
-	defw 08000h            ; 13-15 (seg7 after sub_5393h)
+	defw 08000h            ; 13-15 (seg7 after page_tileset_late)
 	defw 08000h
 	defw 08000h
 	defw 09640h            ; 16-17 (seg7)
 	defw 09640h
 	defw 0a4c0h            ; 18 (seg8)
-	call sub_5381h
+	call page_title_banks
 	ld hl,0ff00h           ; shared sprites; fireball at +0x80 (SAT pat 0xF0)
 	ld de,gfx_rle_a185
-	call sub_46f8h
+	call rle_dec
 	ld de,gfx_rle_a147
 	ld hl,0f9c0h
-	call sub_46f8h
-	jp sub_533dh
+	call rle_dec
+	jp page_play_banks
 ; ---------------------------------------------------------------------------
 ;  room_gfx_load (seg0 0x5787) - page seg9/10, then 9AB0[D000-1] + 4*D001:
-;  word 0 = gfx script (gfx_script_run), word 1 = palette table (l4845h).
+;  word 0 = gfx script (gfx_script_run), word 1 = palette table (palette_apply).
 ;  Stage 0 (D000==0) skips. Called from the screen builder (seg1 0x62ED).
 ; ---------------------------------------------------------------------------
 room_gfx_load:
 	call l4805h
-	call sub_5381h
+	call page_title_banks
 	ld hl,room_gfx_ptr      ; word[stage-1] -> {script, pal}
 	ld a,(0d000h)
 	or a
@@ -3639,35 +3638,35 @@ room_gfx_load:
 	inc hl
 	ld h,(hl)
 	ld l,a
-	call l4845h
+	call palette_apply
 l57b8h:
-	jp sub_533dh
-	call sub_5381h
+	jp page_play_banks
+	call page_title_banks
 	ld hl,gfx_script_9fed
 l57c1h:
 	call gfx_script_run
-	jp sub_533dh
-	call sub_5381h
+	jp page_play_banks
+	call page_title_banks
 	ld hl,0fa00h
 	ld de,gfx_rle_b0aa
-	call sub_46f8h
+	call rle_dec
 	ld a,(0d000h)
 	sub 003h
 	ld hl,0a01ah
 	jr z,l57e0h
 	ld hl,0a021h
 l57e0h:
-	call l4845h
-	jp sub_533dh
+	call palette_apply
+	jp page_play_banks
 ; dracula_body_load (seg0 0x57E6) - event-6 figure Dracula 32x32 frames.
 ; Pages seg11-13, unpacks dracula_body_closed / dracula_body_open (seg13
 ; 0xB5A1 / 0xB719) and HMMCs each 32x32 to page-1 Y=0x80: closed at X=0
 ; plus H-mirror at X=0x40, open at X=0x20 plus H-mirror at X=0x60.
-; Called from sub_633ah after dracula_portrait_load.  dracula_blit_torso
+; Called from cell_event_set after dracula_portrait_load.  dracula_blit_torso
 ; LMMMs slot CE0E-1 onto the playfield (0x5B=closed, 0x5C=chest-open,
 ; 0x5D/0x5E = facing mirrors).
 dracula_body_load:
-	call sub_5369h
+	call page_map_banks
 	ld hl,dracula_body_closed
 	call dracula_body_unpack
 	ld de,0c000h
@@ -3682,7 +3681,7 @@ dracula_body_load:
 	call dracula_body_hflip
 	ld de,0c030h
 	call dracula_body_vram
-	jp sub_533dh
+	jp page_play_banks
 ; dracula_body_vram (0x5816): 32 rows x 16 bytes (32px 4bpp) from 0xE800
 ; to VRAM DE (SCREEN 5 linear: 0xC000 = page-1 Y=0x80 X=0).
 dracula_body_vram:
@@ -3693,7 +3692,7 @@ l581bh:
 	push de
 	push hl
 	ld bc,CHRGTR
-	call sub_467ch
+	call vram_write
 	pop hl
 	pop de
 	pop bc
@@ -3777,17 +3776,17 @@ sub_5873h:
 ;  from seg15 into the page-1 tile atlas, then H-mirrors the face (ids
 ;  0x1E-0x89 -> 0x8A-0xF5) and V-mirrors the frame (top -> bottom).  Also
 ;  loads 8 x 16x16 eye/mouth tiles (`dracula_portrait_parts`) to page-1
-;  Y=0xA0.  Called from sub_633ah when CE00==6, after
+;  Y=0xA0.  Called from cell_event_set when CE00==6, after
 ;  dracula_portrait_palette; figure body frames follow via dracula_body_load.
 ; ---------------------------------------------------------------------------
 dracula_portrait_load:
-	call sub_5357h
+	call page_sound_banks
 	call sub_589ch
 	call sub_58d3h
 	call sub_5931h
 	call dracula_portrait_parts_load
 	call dracula_portrait_parts_mirror
-	jp sub_533dh
+	jp page_play_banks
 sub_589ch:
 	ld hl,dracula_frame_abf8
 	ld b,008h
@@ -3970,23 +3969,23 @@ l59e0h:
 	ret
 ; ---------------------------------------------------------------------------
 ;  dracula_portrait_palette (seg0 0x59F3) - event-6 palette.  HUD-fixed
-;  (sub_572eh / 0xBF88) then the title extras at 0xBF6F (pink/flesh; replaces
-;  stage 18's purple overlay on indices 4-7).  Called from sub_633ah with
+;  (palette_hud_load / 0xBF88) then the title extras at 0xBF6F (pink/flesh; replaces
+;  stage 18's purple overlay on indices 4-7).  Called from cell_event_set with
 ;  dracula_portrait_load.
 ; ---------------------------------------------------------------------------
 dracula_portrait_palette:
-	call sub_572eh
-	call sub_5381h
+	call palette_hud_load
+	call page_title_banks
 	ld hl,title_extra_palette
-	call l4845h
-	jp sub_533dh
+	call palette_apply
+	jp page_play_banks
 ; title_load_tiles (0x5A02) - load the title-screen tile bitmaps into VRAM.
 ; The 0x11 shared glyphs (castle) load unconditionally; the region then selects
 ; the logo glyphs by the same 0x002B character-set nibble as title_build:
 ;   nibble 0 (Japanese)     -> 0x1E "Akumajo Dracula" kana glyphs (seg8 0xAEA0)
 ;   nibble != 0 (intl/other)-> 0x59 "VAMPIRE KILLER" glyphs       (seg8 0xB260)
 title_load_tiles:
-	call sub_5393h         ; page in the title graphics banks (seg7/seg8)
+	call page_tileset_late         ; page in the title graphics banks (seg7/seg8)
 	ld hl,0ac80h           ; 0x11 shared castle glyphs (seg8 0xAC80)...
 	ld de,08004h           ; ...to VRAM 0x8004
 	ld b,011h
@@ -3997,38 +3996,37 @@ title_load_tiles:
 	ld hl,0aea0h           ; Japanese: 0x1E "Akumajo Dracula" kana glyphs
 	ld b,01eh
 	call l4a6dh
-	call sub_5369h
+	call page_map_banks
 	ld de,0bbf6h
-	call l46f2h
+	call rle_dec_addr
 	jr l5a32h
 l5a2ah:                        ; international/other machine
 	ld hl,0b260h           ; 0x59 "VAMPIRE KILLER" glyphs (seg8 0xB260)
 	ld b,059h
 	call l4a6dh
 l5a32h:
-	jp sub_533dh           ; restore default banks
-; Paged-call wrappers into seg13 (bank 0x0d @ 0xA000).  sub_5369h pages it in,
-; sub_533dh restores the banks.  Three sibling entry points:
+	jp page_play_banks           ; restore default banks
+; Paged-call wrappers into seg13 (bank 0x0d @ 0xA000).  page_map_banks pages it in,
+; page_play_banks restores the banks.  Three sibling entry points:
 ;   0x5A35 conn_lookup_paged      -> conn_lookup
 ;   0x5A3E conn_load_permits_paged -> conn_load_permits
 ;   0x5A47 door_load_paged        -> door_load (door_tbl + spot_tbl)
-sub_5a35h:                     ; 0x5A35
-conn_lookup_paged:
-	call sub_5369h         ; page in seg13 (bank 0x0d)
+conn_lookup_paged:             ; 0x5A35
+	call page_map_banks         ; page in seg13 (bank 0x0d)
 	call conn_lookup
-	jp sub_533dh           ; restore banks
+	jp page_play_banks           ; restore banks
 conn_load_permits_paged:       ; 0x5A3E
-	call sub_5369h
+	call page_map_banks
 	call conn_load_permits
-	jp sub_533dh
+	jp page_play_banks
 door_load_paged:               ; 0x5A47
-	call sub_5369h
+	call page_map_banks
 	call door_load
-	jp sub_533dh
+	jp page_play_banks
 ; scenery_load (seg0 0x5A50) - on screen build, page seg14, unpack the current
 ; hub's scenery_list stream into 0xE000 (3 stages x 16 rooms x 24 bytes =
 ; 0x480), then compact vendor ids into 0xDE00 (l5ab6h). Instantiation of
-; the current room is scenery_room_load (from sub_6389h).
+; the current room is scenery_room_load (from actor_state_reset).
 scenery_load:                  ; 0x5A50
 	ld hl,0e000h
 	ld de,0e001h
@@ -4038,7 +4036,7 @@ scenery_load:                  ; 0x5A50
 	call scenery_unpack
 	jp l5ab6h
 scenery_unpack:                ; 0x5A63
-	call sub_5357h         ; page seg14/15
+	call page_sound_banks         ; page seg14/15
 	call scenery_list_lookup
 	ld de,0e000h           ; dest: 16 room slots of 0x18 bytes per stage
 l5a6ch:
@@ -4080,7 +4078,7 @@ l5a8eh:
 l5a9ah:
 	pop de
 	pop de
-	jp sub_533dh           ; restore banks
+	jp page_play_banks           ; restore banks
 scenery_list_lookup:           ; 0x5A9F
 	ld a,(0d000h)
 	or a
@@ -4368,7 +4366,9 @@ scenery_pos_xy:
 	ld b,a
 	inc hl
 	ret
-sub_5c2ch:
+; play_tick (seg0 0x5C2C) - in-stage play loop.  Credits (CE40) divert to
+; credits_tick; the F2 map (CF38) early-outs; otherwise events, actors, SAT.
+play_tick:
 	call event_vscroll
 	call frame_vram_refresh
 	ld a,(0ce40h)

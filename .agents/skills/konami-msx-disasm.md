@@ -48,7 +48,9 @@ Paths below are relative to this repo root.
 - `gfx/` — editable graphics assets (PNG + txt); original compressed bytes stay
   authoritative.
 - `music/` — rendered BGM WAVs from the PSG bytecode (`tools/psgplay.py`).
-  Recognizable but not fully hardware-accurate (later).
+  AY-3-8910 timing (fmaster/8); no speaker filter.
+- `sfx/` — rendered SFX WAVs (`make sfx`); same `{id}_{name}.wav` convention
+  as `music/`.
 
 ## Mapper first
 

@@ -91,7 +91,7 @@
     DEPHASE
 
 ; --- segments 4..8 : playfield tilesets (labeled 8x8 4bpp) -----------------
-; Paged by sub_53a5h (seg 4/5/6) and sub_5393h (seg 7/8, stage >= 13).
+; Paged by page_tileset_banks (seg 4/5/6) and page_tileset_late (seg 7/8, stage >= 13).
 ; Sets overlap and spill across banks; labels mark tileset_ptr starts.
 ; Staff / ending text are INCLUDE'd from the middle of seg5 / seg8.
     PHASE 0x6000

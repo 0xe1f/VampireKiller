@@ -51,7 +51,7 @@ def msx2_channel(n):
     return (n << 5) | (n << 2) | (n >> 1)
 
 def load_palette_table(data, file_off):
-    """Parse an l4845h table: (index, rb, g)+ terminated by 0xFF. Missing
+    """Parse an palette_apply table: (index, rb, g)+ terminated by 0xFF. Missing
     indices stay (0,0,0)."""
     pal = [(0, 0, 0)] * 16
     i = file_off
@@ -66,7 +66,7 @@ def load_palette_table(data, file_off):
 
 def vk_play_palette(data):
     """In-game 16-colour VDP palette: title extras at seg10 0xBF6F, then the
-    8 fixed HUD/sprite colours at 0xBF88 (`sub_572eh`). Stage palettes overlay
+    8 fixed HUD/sprite colours at 0xBF88 (`palette_hud_load`). Stage palettes overlay
     indices 4,5,6,7,9,10,11,13 only; HUD bonus tiles never use those."""
     pal = load_palette_table(data, 0x15F6F)   # CPU 0xBF6F
     fixed = load_palette_table(data, 0x15F88)  # CPU 0xBF88
@@ -86,7 +86,7 @@ MSX2_DEFAULT_RGB = [
 ]
 
 def _apply_palette_overlay(pal, overlay):
-    """l4845h only writes listed indices; omitted slots keep the previous RGB."""
+    """palette_apply only writes listed indices; omitted slots keep the previous RGB."""
     for i, rgb in enumerate(overlay):
         if rgb != (0, 0, 0):
             pal[i] = rgb
@@ -100,7 +100,7 @@ def _palette_file_off(cpu):
 
 def vk_stage_palette(data, stage):
     """Play-mode palette after `0x5714`: BIOS default, then the 8 HUD-fixed
-    colours (`sub_572eh`), then that row of the 0xBEA7 table. Room entry then
+    colours (`palette_hud_load`), then that row of the 0xBEA7 table. Room entry then
     overlays 9AB0[stage][room].palette via `0x5787` (see vk_playfield_palette)."""
     pal = [(msx2_channel(r), msx2_channel(g), msx2_channel(b))
            for r, g, b in MSX2_DEFAULT_RGB]
@@ -855,7 +855,7 @@ def _bitrev(b):
     return r
 
 def _apply_sprite_conv(vram, src, count, dest):
-    """Replay sub_4745h / sub_4786h: bit-reverse 16-byte halves and copy
+    """Replay gfx_script_convert / sub_4786h: bit-reverse 16-byte halves and copy
     count*32 bytes from VRAM src to dest (linear 16x16 -> sprite quadrants)."""
     e800 = bytes(vram[src:src + count * 32])
     if len(e800) < count * 32:

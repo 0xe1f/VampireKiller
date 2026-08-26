@@ -1,5 +1,5 @@
 ; ===========================================================================
-;  SEGMENT 13 - bank 0x0D, paged at 0xA000-0xBFFF (page 2b) by sub_5369h.
+;  SEGMENT 13 - bank 0x0D, paged at 0xA000-0xBFFF (page 2b) by page_map_banks.
 ;  Sprite/metatile graphics plus the room-transition brain and white-key door
 ;  table.  Origin is set by PHASE 0xA000 in VampireKiller.asm; regenerate with
 ;   tools/regen-seg.sh 13 0xA000 segments/seg13.blocks
@@ -51,7 +51,7 @@ simon_cell1_ptr:
 
 ; ---------------------------------------------------------------------------
 ;  conn_lookup (seg13 0xB963) - room-transition BRAIN.
-;  Pending dir 0xC41B is 1=up 2=down 3=left 4=right (from sub_7682h / l77d8h).
+;  Pending dir 0xC41B is 1=up 2=down 3=left 4=right (from room_edge_detect / l77d8h).
 ;  Looks up conn_ptr[stage][room], picks the matching nibble, writes 0xD001.
 ;  0xF = blocked -> return without carry (state_room_trans treats that as death).
 ;  0xC41B == 0xFF (simon_portal_wait after crouch+UP on a pad) skips the

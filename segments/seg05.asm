@@ -1,5 +1,5 @@
 ; ===========================================================================
-;  SEGMENT 5 - tileset bank, paged at 0x8000 by sub_53a5h / credits_keyframe.
+;  SEGMENT 5 - tileset bank, paged at 0x8000 by page_tileset_banks / credits_keyframe.
 ;  s01 tail, staff roll (unused high tile ids), then s07 / s04 / s10.
 ; ===========================================================================
 

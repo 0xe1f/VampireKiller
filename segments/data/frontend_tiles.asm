@@ -1,4 +1,4 @@
-; Frontend / HUD 8x8 4bpp (seg9 0x8000).  load after sub_5381h:
+; Frontend / HUD 8x8 4bpp (seg9 0x8000).  load after page_title_banks:
 ; `ld hl,frontend_tiles` / tileset_blit copies 0xBF tiles (to 0x97E0).
 ; Bonus HUD ids 1-20 reuse tile 0x80+ (0x9000); potion at 0x9A00.
 ; Uncompressed 8x8 4bpp (SCREEN 5).  Each defb is one pixel-row

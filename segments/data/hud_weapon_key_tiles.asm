@@ -1,4 +1,4 @@
-; HUD keys/weapons (seg6 0xB9C8), copied to VRAM 0xD9C8 after sub_53a5h.
+; HUD keys/weapons (seg6 0xB9C8), copied to VRAM 0xD9C8 after page_tileset_banks.
 ; Uncompressed 8x8 4bpp (SCREEN 5).  Each defb is one pixel-row
 ; (4 bytes, high nibble = left).  Eight rows = one tile (32 bytes).
 

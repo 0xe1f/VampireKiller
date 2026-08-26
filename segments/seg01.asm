@@ -316,29 +316,29 @@ data_60e9_start:
 	defb 048h
 data_60e9_end:
 
-; --- sub_615bh - load three tables from seg14 into RAM ----------------------
+; --- object_list_load - load three tables from seg14 into RAM ----------------------
 ;  Pages seg 14 into page 2a (writes 0x0E to 0x8000 and to its shadow 0xF0F2),
 ;  copies three streams into the RAM buffers at 0xDB00 / 0xDC00 / 0xDD00 via
-;  sub_6188h, then restores seg 2 (0x02) before returning.  Interrupts are held
+;  object_list_unpack, then restores seg 2 (0x02) before returning.  Interrupts are held
 ;  off (di/ei) around the bank switch.
-; --- sub_615bh - load the current screen's object list from seg14 ------------
+; --- object_list_load - load the current screen's object list from seg14 ------------
 ;  Builds the 0xDB00 object/display list for the current cell, unpacking it from
 ;  data that lives in ROM segment 14.  Interrupts are held off around each bank
 ;  switch (the interrupt handler runs banked code).
-sub_615bh:
+object_list_load:
 	di
 	ld a,00eh              ; page ROM segment 14 ...
 	ld (08000h),a          ; ... into page 2a (0x8000)
 	ld (0f0f2h),a          ; keep the seg-2a shadow byte in step
 	ei
-	call sub_61b0h         ; clear the 0xDB00 list to empty slots
-	call sub_61a5h         ; HL -> this level's packed object data (in seg14)
+	call object_list_clear         ; clear the 0xDB00 list to empty slots
+	call object_list_lookup         ; HL -> this level's packed object data (in seg14)
 	ld de,0db00h           ; unpack stream 0 -> object list at 0xDB00
-	call sub_6188h
+	call object_list_unpack
 	ld de,0dc00h           ; unpack stream 1 -> 0xDC00
-	call sub_6188h
+	call object_list_unpack
 	ld de,0dd00h           ; unpack stream 2 -> 0xDD00
-	call sub_6188h
+	call object_list_unpack
 	di
 	ld a,002h              ; restore ROM segment 2 ...
 	ld (08000h),a          ; ... into page 2a
@@ -346,12 +346,12 @@ sub_615bh:
 	ei
 	ret
 
-; --- sub_6188h - unpack one object stream into a 4-byte-per-entry table -------
+; --- object_list_unpack - unpack one object stream into a 4-byte-per-entry table -------
 ;  Source HL, destination DE.  Each source pair (id,attr) expands to a 4-byte
 ;  slot [id, attr, _, _].  id low 7 bits = actor type (same ids as entity_tbl);
 ;  bit7 is stored but stripped at spawn (only dogs ever set it; role unknown).
 ;  0x00 = end of row (jump DE to the next 0x10 boundary), 0xFF = end of stream.
-sub_6188h:
+object_list_unpack:
 	ld (0cff0h),de         ; remember the row's base address
 l618ch:
 	ld a,(hl)              ; next source byte
@@ -371,17 +371,17 @@ l619bh:
 	ld a,e
 	add a,010h             ; ... + 0x10 = next row
 	ld e,a
-	jr sub_6188h
-; --- sub_61a5h - find this level's packed object data in seg14 ---------------
-sub_61a5h:
+	jr object_list_unpack
+; --- object_list_lookup - find this level's packed object data in seg14 ---------------
+object_list_lookup:
 	ld a,(0d002h)          ; A = current cell/level index
 	ld de,object_list_ptr  ; DE = hub -> packed object streams (seg14)
 	call lookup_word_tbl         ; DE = table[A]
 	ex de,hl               ; HL = pointer to the packed object data
 	ret
-; --- sub_61b0h - clear the 0xDB00 object list --------------------------------
+; --- object_list_clear - clear the 0xDB00 object list --------------------------------
 ;  0xC0 slots of 4 bytes.  slot+0 = 0 (empty), slot+3 = running index 1..0xC0.
-sub_61b0h:
+object_list_clear:
 	ld hl,0db00h
 	ld c,001h              ; running slot index
 	ld b,0c0h              ; 0xC0 slots
@@ -456,7 +456,7 @@ l6200h:
 
 ; --- konami_logo_draw (0x6209) - set up the Konami logo screen ---------------
 ;  Boot front-end step, run from seg0's state machine.  Draws the Konami logo
-;  (orange/red/grey) as a tile layout (l6243h + l6296h via sub_6276h) and sets
+;  (orange/red/grey) as a tile layout (l6243h + l6296h via tile_string_draw) and sets
 ;  the VDP backdrop to white (R7 = 0x0F).  Then seeds the 3-byte block that the
 ;  per-frame stepper konami_logo_step (0x6253) uses to wipe the logo in:
 ;     0xC420 = 0x3C frame divider (advance the wipe every other frame)
@@ -464,9 +464,9 @@ l6200h:
 ;     0xC422 = done flag (0 = revealing, 1 = finished; seg0 polls this)
 konami_logo_draw:
 	call 047dbh             ; seg0 helper (screen prep - purpose not yet mapped)
-	call 0572eh             ; seg0 helper (purpose not yet mapped)
+	call palette_hud_load   ; 8 fixed HUD/sprite colours
 	ld hl,l6243h            ; HL -> parameter table l6243h
-	call 04845h             ; seg0 routine consuming the table at HL
+	call palette_apply      ; apply the table at HL
 	ld b,00fh               ; value 0x0F ...
 	ld c,007h               ; ... into VDP register 7 (backdrop colour = white)
 	call WRTVDP
@@ -478,7 +478,7 @@ konami_logo_draw:
 	call 05316h             ; seg0 helper (purpose not yet mapped)
 	ld de,04040h            ; screen position for the logo tiles
 	ld hl,l6296h            ; HL -> logo tile-layout stream
-	call sub_6276h          ; paint the logo via the tile-string interpreter
+	call tile_string_draw          ; paint the logo via the tile-string interpreter
 	call 047ceh             ; seg0 helper (purpose not yet mapped)
 	ld hl,0c420h            ; seed the 3-byte wipe-state block:
 	ld (hl),03ch            ;   0xC420 = 0x3C  frame divider
@@ -529,13 +529,13 @@ l6265h:
 	ld a,001h
 	jp vdp_hmmm              ; seg0 VDP block copy -> tail-call (returns to caller)
 
-; --- sub_6276h - tile-string interpreter ------------------------------------
+; --- tile_string_draw - tile-string interpreter ------------------------------------
 ;  Walks a byte stream at HL, placing tiles at screen position DE:
 ;     0xFF = end of stream
 ;     0xFE = move to next row (D += following byte, E += 8)
 ;     else = draw the tile in the byte via 0x4B36 / 0x4B56
 ;  Used by konami_logo_draw to paint the logo layout (tile data at l6296h).
-sub_6276h:
+tile_string_draw:
 	push de                ; save the current row's start position
 l6277h:
 	ld a,(hl)              ; fetch next stream byte
@@ -553,7 +553,7 @@ l6277h:
 	ld a,008h              ; E += 8      (fixed column step for the new row)
 	add a,e
 	ld e,a
-	jr sub_6276h           ; re-save the new row start and continue
+	jr tile_string_draw           ; re-save the new row start and continue
 l628bh:
 	ld a,c                 ; A = tile id
 	call 04b36h            ; seg0: place tile A at DE
@@ -628,32 +628,32 @@ l62eah:
 ;  not yet mapped; the annotated ones below are the known pieces.
 	call load_stage_tileset
 	call 05714h
-	call sub_63beh         ; clear 0xC420..0xC46F per-screen state
-	call sub_6409h
+	call simon_block_clear         ; clear 0xC420..0xC46F per-screen state
+	call simon_spawn_pos
 	call scenery_load      ; unpack scenery_list into 0xE000 / 0xDE00
-	call sub_63cch         ; hide all hardware sprites
-	call sub_6389h         ; reset the object/actor state area
+	call sprites_hide         ; hide all hardware sprites
+	call actor_state_reset         ; reset the object/actor state area
 	call room_gfx_load
 	call 056e8h
 	call 04f8ah
 	call 047dbh
-	call sub_633ah         ; set the current cell's event type (0xCE00)
+	call cell_event_set         ; set the current cell's event type (0xCE00)
 	call 04f98h
 	call vendor_tick       ; C5B5/C5C5 special objects (seg2 0x91C5)
 	call brazier_tick_all  ; tick braziers/candles (seg2 0x8678)
 	call door_anim_tick
-	call 08eedh
+	call hud_bonus_refresh
 	ld a,(0ce00h)          ; event code for this cell
 	cp 006h
 	call z,sub_6334h       ; event 6 -> extra setup (sub_691bh + l69a7h)
 	call 047ceh
 	call 09cb0h
-	call sub_615bh         ; load the packed object list into 0xDB00/DC00/DD00
+	call object_list_load         ; load the packed object list into 0xDB00/DC00/DD00
 	jp l61c2h              ; spawn actors from the room object list
 sub_6334h:
 	call sub_691bh
 	jp l69a7h
-; --- sub_633ah - set the current cell's "event" type ------------------------
+; --- cell_event_set - set the current cell's "event" type ------------------------
 ;  Clears the event state (0xCE00 + flags 0xCE40/0CE0B/0CE08/0CE15), then looks
 ;  up the current map cell in l6376h[row=0xD000]: the byte's high nibble is the
 ;  column it applies to and the low nibble is the event code.  If the high nibble
@@ -661,7 +661,7 @@ sub_6334h:
 ;  additionally kicks off its handler (seg0 dracula_portrait_load 0x5887, plus
 ;  0x59F3 / tail-call dracula_body_load 0x57E6).
 ;  Non-event cells hold 0xFF (high nibble 0xF never matches a real column).
-sub_633ah:
+cell_event_set:
 	xor a
 	ld (0ce40h),a
 	ld (0ce00h),a          ; 0xCE00 = current event code (0 = none)
@@ -713,13 +713,13 @@ l6376h:
 	rst 38h
 	rst 38h
 	sub (hl)
-; --- sub_6389h - reset the big object/actor state area and its sub-systems ---
+; --- actor_state_reset - reset the big object/actor state area and its sub-systems ---
 ;  Clears 0xC470..0xC6FF (0x290 bytes) to 0, then calls the per-subsystem reset
 ;  helpers (scenery_room_load into C470, door_load_paged,
 ;  conn_load_permits_paged, platform_load/platform_tick, whip_slots_clear), then zeroes two
 ;  strided tables: 7 entries 0x80 apart from 0xC800, and 8 entries 0x80 apart
 ;  from 0xD700.
-sub_6389h:
+actor_state_reset:
 	ld hl,0c470h
 	ld de,0c471h           ; dst = src+1
 	ld (hl),000h
@@ -734,19 +734,19 @@ sub_6389h:
 	ld hl,0c800h           ; zero 7 entries, 0x80 apart, from 0xC800
 	ld de,00080h
 	ld b,007h
-	call sub_63b8h
+	call mem_clear_stride
 	ld hl,0d700h           ; zero 8 entries, 0x80 apart, from 0xD700
 	ld b,008h
-; --- sub_63b8h - zero B entries starting at HL, stride DE -------------------
-sub_63b8h:
+; --- mem_clear_stride - zero B entries starting at HL, stride DE -------------------
+mem_clear_stride:
 	ld (hl),000h
 	add hl,de              ; next entry (DE apart)
-	djnz sub_63b8h
+	djnz mem_clear_stride
 	ret
-; --- sub_63beh - clear the 0xC420..0xC46F state block (0x50 bytes) -----------
+; --- simon_block_clear - clear the 0xC420..0xC46F state block (0x50 bytes) -----------
 ;  Includes the Konami-logo wipe counters (0xC420-0xC422) among other per-screen
 ;  state, reset before a new screen is built.
-sub_63beh:
+simon_block_clear:
 	ld hl,0c420h
 	ld d,h
 	ld e,l
@@ -756,11 +756,11 @@ sub_63beh:
 	ldir
 l63cbh:
 	ret
-; --- sub_63cch - hide all hardware sprites ----------------------------------
+; --- sprites_hide - hide all hardware sprites ----------------------------------
 ;  The sprite attribute table shadow lives at 0xD600 (4 bytes/sprite: Y,X,pat,
 ;  colour).  Writing Y=0xE0 to all 0x20 sprites parks them off the bottom of the
 ;  screen (0xE0 is the "hide the rest" sentinel Y in MSX sprite mode).
-sub_63cch:
+sprites_hide:
 	ld hl,0d600h           ; HL -> sprite attribute shadow (Y of sprite 0)
 	ld b,020h              ; 32 sprites
 l63d1h:
@@ -783,7 +783,7 @@ l63d1h:
 	call 05677h
 	call 0573ah
 	call 0567fh
-	call sub_63cch         ; hide all hardware sprites
+	call sprites_hide         ; hide all hardware sprites
 l63f1h:
 	call 04ea6h
 l63f4h:
@@ -794,11 +794,11 @@ l63f4h:
 	call 04f8ah
 	call 04f98h
 	jp 047ceh              ; -> seg0
-; --- sub_6409h - set Simon's spawn position + facing from the per-row table -
+; --- simon_spawn_pos - set Simon's spawn position + facing from the per-row table -
 ;  Looks up l6426h[row=0xD000] (2 bytes): byte0 with bit0 masked off -> Simon Y
 ;  (0xC425) and bit0 -> facing flag 0xC42C (0=right, 1=left); byte1 -> Simon X
 ;  (0xC427).  So each room row carries Simon's entry Y, X and facing.
-sub_6409h:
+simon_spawn_pos:
 	ld a,(0d000h)          ; A = current row
 	ld hl,l6426h
 	add a,a                ; *2 (2 bytes per row)
@@ -1068,17 +1068,17 @@ lookup_word_tbl:
 ;  When nothing special is going on (event 0xCE00 != 5, sub-state 0xC5AC != 5,
 ;  flag 0xCE0C == 0) this animates: it advances the phase in 0xC00F (cycles
 ;  0..0x78 in steps of 0x68 &0x78), then re-uploads the animated pattern tables
-;  to VRAM.  Otherwise it falls back to the plain shadow blit at l65abh.
+;  to VRAM.  Otherwise it falls back to the plain shadow blit at pattern_shadow_blit.
 frame_vram_refresh:
 	ld a,(0ce0ch)
 	or a
-	jp nz,l65abh           ; effect flag set -> plain blit
+	jp nz,pattern_shadow_blit           ; effect flag set -> plain blit
 	ld a,(0ce00h)
 	cp 005h
-	jr z,l65abh            ; event 5 -> plain blit
+	jr z,pattern_shadow_blit            ; event 5 -> plain blit
 	ld a,(0c5ach)
 	cp 005h
-	jr z,l65abh            ; sub-state 5 -> plain blit
+	jr z,pattern_shadow_blit            ; sub-state 5 -> plain blit
 	ld hl,0c00fh
 	ld a,(hl)
 	add a,068h
@@ -1086,9 +1086,9 @@ frame_vram_refresh:
 	ld (hl),a
 	ld a,(00007h)
 	ld c,a
-	call sub_6591h         ; upload the phase-selected tile patterns
+	call pattern_phase_upload         ; upload the phase-selected tile patterns
 	ld hl,0f600h
-	call 046b6h            ; set VRAM write pointer to 0xF600
+	call vdp_set_write            ; set VRAM write pointer to 0xF600
 	ld a,(0c00fh)
 	ld d,010h              ; 16 rows
 	ld h,0d6h              ; source high byte (0xD6xx pattern shadow)
@@ -1101,10 +1101,10 @@ l6584h:
 	dec d
 	jr nz,l6584h
 	ret
-; --- sub_6591h - upload the phase-selected pattern block to VRAM 0xF400 ------
-sub_6591h:
+; --- pattern_phase_upload - upload the phase-selected pattern block to VRAM 0xF400 ------
+pattern_phase_upload:
 	ld hl,0f400h
-	call 046b6h            ; set VRAM write pointer to 0xF400
+	call vdp_set_write            ; set VRAM write pointer to 0xF400
 	ld a,(0c00fh)
 	ld d,010h              ; 16 rows
 	add a,a
@@ -1118,12 +1118,12 @@ l659dh:
 	dec d
 	jr nz,l659dh
 	ret
-; --- l65abh - plain blit: copy the 0xD400 shadow (0x280 bytes) to VRAM 0xF400
-l65abh:
+; --- pattern_shadow_blit - plain blit: copy the 0xD400 shadow (0x280 bytes) to VRAM 0xF400
+pattern_shadow_blit:
 	ld hl,0d400h
 	ld de,0f400h
 	ld bc,00280h
-	jp 0467ch              ; -> seg0 CPU->VRAM copy helper
+	jp vram_write              ; -> seg0 CPU->VRAM copy helper
 ; --- event_dracula (seg1 0x65B7) - event-6 CE01 sub-state machine ------------
 ;  room_event_tick dispatches event 6 here.  Does NOT run in logo/title/
 ;  attract/normal play.  CE01 selects one of 11 handlers; 0xCE02 is a per-step
@@ -1260,7 +1260,7 @@ event_dracula_done:
 	ret
 ; --- credits_tick (seg1 0x66C1) - ending credits, dispatched on 0xCE40 ------
 ;  Event 6 (Dracula) finishes the CE01 machine by raising CE40=1.  Play tick
-;  (sub_5c2ch) then calls here instead of the normal loop.  CE40 (1..4) minus
+;  (play_tick) then calls here instead of the normal loop.  CE40 (1..4) minus
 ;  1 selects the step; each advances via credits_next.  Story + staff text
 ;  live in seg8 (0xBF20) and seg5 (0x82C0); see credits_ending.asm /
 ;  credits_staff.asm.
@@ -1327,7 +1327,7 @@ credits_init:
 	ld a,00eh
 	ld d,0ffh
 	ld e,00fh
-	jp 0481bh              ; seg0 VRAM setup/fill helper
+	jp palette_set              ; seg0 VRAM setup/fill helper
 ; --- credits_frame (seg1 0x6736) - one credits frame -----------------------
 credits_frame:
 	call credits_clock     ; bump CE33 every 4th frame
@@ -1365,7 +1365,7 @@ credits_keyframe:
 	ex de,hl               ; HL -> {tick, x, ...}
 	ld a,(0ce33h)
 	cp (hl)                ; timeline tick == this line's tick?
-	jp nz,0533dh           ; not yet -> restore banks and return
+	jp nz,page_play_banks           ; not yet -> restore banks and return
 	inc hl
 	ld a,(hl)              ; X, or 0xFF = end of roll
 	inc hl
@@ -1379,13 +1379,13 @@ credits_keyframe:
 	call 04adch            ; blit the line, +8 X per glyph
 	ld hl,0ce31h
 	inc (hl)               ; next credits_script_ptr entry
-	jp 0533dh              ; restore banks and return
+	jp page_play_banks              ; restore banks and return
 credits_script_done:
 	ld a,001h
 	ld (0ce32h),a          ; raise "script finished" flag
 	ld a,0ffh
 	call play_sound        ; fade (play_sound 0xFF)
-	jp 0533dh              ; restore banks and return
+	jp page_play_banks              ; restore banks and return
 ; credits_script_ptr (seg1 0x6795): 43 words, indexed by CE31.  First 7 are
 ; the ending paragraph in seg8; the rest are the last line + staff in seg5.
 credits_script_ptr:
@@ -1446,7 +1446,7 @@ l67f5h:
 	ld d,(hl)
 	ld e,005h
 	ld a,006h
-	jp 0481bh
+	jp palette_set
 l6804h:
 	ld h,l
 	ld (hl),l
@@ -1470,7 +1470,7 @@ l6804h:
 sub_6817h:
 	ld de,CHKRAM
 	ld a,006h
-	jp 0481bh
+	jp palette_set
 sub_681fh:
 	ld hl,0ce38h
 	inc (hl)
@@ -1749,7 +1749,7 @@ l6a3bh:
 	inc hl
 	ld e,a
 	ld a,c
-	call 0481bh
+	call palette_set
 	ld a,(0ce13h)
 	and a
 	ret
@@ -1862,7 +1862,7 @@ l6b13h:
 	jr z,l6b2bh
 	call simon_attack_tick
 l6b2bh:
-	call sub_7682h
+	call room_edge_detect
 	call sub_75c7h
 	call sub_75e9h
 	call sub_75f9h
@@ -3445,15 +3445,15 @@ l7676h:
 l767eh:
 	ld (0c42eh),hl
 	ret
-; sub_7682h (seg1 0x7682): per-frame room-EDGE / stair detector.  Compares
+; room_edge_detect (seg1 0x7682): per-frame room-EDGE / stair detector.  Compares
 ; Simon's Y (0xC425) and X (0xC427) against the screen bounds and, when he steps
 ; past an edge, records the pending-exit direction in 0xC41B (1=up 2=down 3=left
-; 4=right) - which the transition brain (seg13 0xB963, via seg0 sub_5a35h) turns
+; 4=right) - which the transition brain (seg13 0xB963, via seg0 conn_lookup_paged) turns
 ; into the new 0xD001.  Horizontal exits also gate on the cached permit bytes
 ; 0xC41E/0xC41F (0xFF = blocked); a blocked horizontal edge is instead handled as
 ; a stage boundary at l77d8h/set_stage_boundary.  0xC420 = Simon's action state
 ; (3 = on stairs, 6 = mid-transition -> skip).
-sub_7682h:
+room_edge_detect:
 	ld a,(0c420h)
 	cp 006h
 	ret z                  ; already transitioning -> nothing to do
@@ -4179,7 +4179,7 @@ title_fill_loop:
 title_set_color2:
 	ld a,002h
 	ld de,01101h
-	jp 0481bh              ; sub_481bh write one palette entry
+	jp palette_set              ; palette_set write one palette entry
 ; title_sat_init (seg1 0x7AF6): seed SAT shadow 0xD600 from
 ; title_sat_tmpl (11 two-byte Y,X pairs) and colour rows, then blit.
 title_sat_init:
@@ -4223,8 +4223,8 @@ l7b26h:
 	jr nz,l7b1dh
 	ld a,002h
 	ld de,CHKRAM
-	call 0481bh
-	jp l65abh
+	call palette_set
+	jp pattern_shadow_blit
 ; tile_layout_draw (0x7B39): blit a title_layout stream.  HL -> stream, DE =
 ; start pos.  0xFF=end, 0xFE=next row (next byte added to D, E+=8), else tile id.
 tile_layout_draw:
@@ -4689,7 +4689,7 @@ l7df6h:
 	rla
 	ret nc
 l7e00h:
-	call 081b2h
+	call award_kill_score
 	jp 09a45h
 l7e06h:
 	ld a,(ix+000h)
@@ -4710,7 +4710,7 @@ l7e1eh:
 	ld (0c445h),a
 	ld a,01ch
 	call play_sound
-	call 081b2h
+	call award_kill_score
 	ld a,001h
 	ld (0ce15h),a
 	jp sub_780dh
@@ -4793,7 +4793,7 @@ l7eb7h:
 	ld a,(0c434h)
 	and a
 	jr z,l7ec8h
-	call 081b2h
+	call award_kill_score
 	call 09a45h
 	ld a,00dh
 	jp play_sound

@@ -477,7 +477,7 @@ def emit_tileset_banks(rom: bytes) -> None:
     )
     write_tile_file(
         "hud_weapon_key_tiles.asm",
-        ["; HUD keys/weapons (seg6 0xB9C8), copied to VRAM 0xD9C8 after sub_53a5h."]
+        ["; HUD keys/weapons (seg6 0xB9C8), copied to VRAM 0xD9C8 after page_tileset_banks."]
         + pixnote,
         b6[0x19C8:],
         0xB9C8,
@@ -549,7 +549,7 @@ def emit_tileset_banks(rom: bytes) -> None:
         os.path.join(SEGS, "seg04.asm"),
         [
             "; ===========================================================================",
-            ";  SEGMENT 4 - tileset bank, paged at 0x6000 by sub_53a5h (page 1b).",
+            ";  SEGMENT 4 - tileset bank, paged at 0x6000 by page_tileset_banks (page 1b).",
             ";  Pixel source: data/tileset_s00.asm + data/tileset_s01.asm.",
             "; ===========================================================================",
         ],
@@ -559,7 +559,7 @@ def emit_tileset_banks(rom: bytes) -> None:
         os.path.join(SEGS, "seg05.asm"),
         [
             "; ===========================================================================",
-            ";  SEGMENT 5 - tileset bank, paged at 0x8000 by sub_53a5h / credits_keyframe.",
+            ";  SEGMENT 5 - tileset bank, paged at 0x8000 by page_tileset_banks / credits_keyframe.",
             ";  s01 tail, staff roll (unused high tile ids), then s07 / s04 / s10.",
             "; ===========================================================================",
         ],
@@ -575,7 +575,7 @@ def emit_tileset_banks(rom: bytes) -> None:
         os.path.join(SEGS, "seg06.asm"),
         [
             "; ===========================================================================",
-            ";  SEGMENT 6 - tileset bank, paged at 0xA000 by sub_53a5h (page 2b).",
+            ";  SEGMENT 6 - tileset bank, paged at 0xA000 by page_tileset_banks (page 2b).",
             ";  s10 tail, then HUD weapon/key tiles at 0xB9C8.",
             "; ===========================================================================",
         ],
@@ -585,7 +585,7 @@ def emit_tileset_banks(rom: bytes) -> None:
         os.path.join(SEGS, "seg07.asm"),
         [
             "; ===========================================================================",
-            ";  SEGMENT 7 - late-game tileset bank, paged at 0x8000 by sub_5393h",
+            ";  SEGMENT 7 - late-game tileset bank, paged at 0x8000 by page_tileset_late",
             ";  (stage >= 13 overlays the 0x8000 window).",
             "; ===========================================================================",
         ],
@@ -596,7 +596,7 @@ def emit_tileset_banks(rom: bytes) -> None:
         [
             "; ===========================================================================",
             ";  SEGMENT 8 - late-game tileset + title glyphs + ending paragraph.",
-            ";  Paged at 0xA000 by sub_5393h (tiles) and credits_keyframe (text).",
+            ";  Paged at 0xA000 by page_tileset_late (tiles) and credits_keyframe (text).",
             "; ===========================================================================",
         ],
         [
@@ -654,7 +654,7 @@ def emit_simon_rle(rom: bytes) -> None:
         return "simon_rle_%04x" % cpu
 
     lines = [
-        "; Packed 1bpp sprite RLE (sub_46f8h), CPU 0xA319-0xB5A1.",
+        "; Packed 1bpp sprite RLE (rle_dec), CPU 0xA319-0xB5A1.",
         "; Pixel bytes are defb %xxxxxxxx (MSB=left, one 8px row of an 8x8",
         "; cell; VRAM order TL/BL/TR/BR per 16x16).  Run/literal counts stay",
         "; hex so the packed stream is byte-exact.",
@@ -731,56 +731,57 @@ def emit_seg13_gaps(rom: bytes) -> None:
 
 # Packed PSG (sfx + music that still fits in seg14).  label "" = no label.
 # (label, cpu, size, comment) — ROM order, contiguous 0x8E29-0xA000.
+# Labels match music/ sfx/ WAV stems (hyphen -> _; music channels _a/_b/_c).
 PSG_STREAMS = [
     ("", 0x8E29, 0x0002, "unused 1F A8 (= 0xA81F dummy)"),
-    ("sfx_01", 0x8E2B, 0x002D, "placed-enemy / grunt"),
-    ("sfx_02", 0x8E58, 0x0011, "vendor offer withdrawn"),
-    ("sfx_1d", 0x8E69, 0x0021, "vendor take hearts"),
-    ("sfx_03", 0x8E8A, 0x000F, "projectile tick"),
-    ("sfx_04", 0x8E99, 0x0015, "axe throw"),
-    ("sfx_05", 0x8EAE, 0x001D, "whip"),
-    ("sfx_06", 0x8ECB, 0x0019, "axe fly"),
-    ("sfx_07", 0x8EE4, 0x000F, "jump"),
-    ("sfx_08", 0x8EF3, 0x0032, ""),
-    ("sfx_09", 0x8F25, 0x0031, "door / stair"),
-    ("sfx_0a", 0x8F56, 0x001F, ""),
-    ("sfx_0b", 0x8F75, 0x0044, "Simon hurt"),
-    ("sfx_0c", 0x8FB9, 0x0024, "hit"),
-    ("sfx_0d", 0x8FDD, 0x0051, "kill"),
-    ("sfx_0e", 0x902E, 0x0037, ""),
-    ("sfx_0f", 0x9065, 0x0035, "heart"),
-    ("sfx_10", 0x909A, 0x002D, "vendor leave / money bag"),
-    ("sfx_11", 0x90C7, 0x001F, ""),
-    ("sfx_12", 0x90E6, 0x0051, "collect / purchase"),
-    ("sfx_13", 0x9137, 0x001B, ""),
-    ("sfx_14", 0x9152, 0x0027, "yellow key"),
-    ("sfx_15", 0x9179, 0x0099, "portal flash"),
-    ("sfx_16", 0x9212, 0x0063, "blue gem"),
-    ("sfx_17", 0x9275, 0x0063, ""),
-    ("sfx_18", 0x92D8, 0x0042, "stair / land"),
-    ("sfx_1a", 0x931A, 0x0085, ""),
-    ("sfx_1c", 0x939F, 0x002B, ""),
-    ("sfx_1b", 0x93CA, 0x0099, "white cross"),
+    ("sfx_01_boss_heal", 0x8E2B, 0x002D, "boss HP drip-fill"),
+    ("sfx_02_vendor_withdraw", 0x8E58, 0x0011, "vendor offer withdrawn"),
+    ("sfx_1d_vendor_hearts", 0x8E69, 0x0021, "vendor take hearts"),
+    ("sfx_03_cross_fly", 0x8E8A, 0x000F, "cross fly tick"),
+    ("sfx_04_knife_throw", 0x8E99, 0x0015, "knife throw"),
+    ("sfx_05_whip", 0x8EAE, 0x001D, "whip swing"),
+    ("sfx_06_axe_fly", 0x8ECB, 0x0019, "axe fly"),
+    ("sfx_07_land", 0x8EE4, 0x000F, "land from height"),
+    ("sfx_08_merman_out", 0x8EF3, 0x0032, "merman emerge"),
+    ("sfx_09_water_in", 0x8F25, 0x0031, "merman dive / water pit"),
+    ("sfx_0a_mummy_shot", 0x8F56, 0x001F, "mummy bandage"),
+    ("sfx_0b_shield_block", 0x8F75, 0x0044, "yellow shield absorb"),
+    ("sfx_0c_hit", 0x8FB9, 0x0024, "hit"),
+    ("sfx_0d_ring_kill", 0x8FDD, 0x0051, "sapphire ring kill"),
+    ("sfx_0e_block_break", 0x902E, 0x0037, "breakable block"),
+    ("sfx_0f_heart", 0x9065, 0x0035, "heart"),
+    ("sfx_10_money_bag", 0x909A, 0x002D, "money bag / vendor leave"),
+    ("sfx_11_chest", 0x90C7, 0x001F, "chest unlock"),
+    ("sfx_12_collect", 0x90E6, 0x0051, "collect / purchase"),
+    ("sfx_13_simon_hurt", 0x9137, 0x001B, "Simon hurt"),
+    ("sfx_14_key", 0x9152, 0x0027, "key"),
+    ("sfx_15_portal", 0x9179, 0x0099, "portal / vertical door"),
+    ("sfx_16_blue_gem", 0x9212, 0x0063, "blue gem pickup"),
+    ("sfx_17_gem_warn", 0x9275, 0x0063, "blue gem expire warn"),
+    ("sfx_18_holy_water", 0x92D8, 0x0042, "holy water break"),
+    ("sfx_1a_door", 0x931A, 0x0085, "horizontal door"),
+    ("sfx_1c_boss_clear", 0x939F, 0x002B, "HP-bar enemy death"),
+    ("sfx_1b_white_cross", 0x93CA, 0x0099, "white cross"),
     ("snd_fd_seq", 0x9463, 0x000D, ""),
-    ("sfx_19", 0x9470, 0x001B, "vendor offer"),
+    ("sfx_19_vendor_offer", 0x9470, 0x001B, "vendor offer"),
     ("snd_fb_seq", 0x948B, 0x0010, ""),
-    ("music_80a", 0x949B, 0x0066, "stages 0-3"),
-    ("music_80b", 0x9501, 0x0097, "stages 0-3"),
-    ("music_80c", 0x9598, 0x00D1, "stages 0-3"),
-    ("music_81a", 0x9669, 0x005E, "stages 4-6 and 11-12"),
-    ("music_81b", 0x96C7, 0x00A6, "stages 4-6 and 11-12"),
-    ("music_81c", 0x976D, 0x006D, "stages 4-6 and 11-12"),
-    ("music_82a", 0x97DA, 0x00B7, "stages 7-9"),
-    ("music_82b", 0x9891, 0x00AC, "stages 7-9"),
-    ("music_82c", 0x993D, 0x011B, "stages 7-9"),
-    ("music_83a", 0x9A58, 0x0060, "stages 16-17"),
-    ("music_83b", 0x9AB8, 0x00B2, "stages 16-17"),
-    ("music_83c", 0x9B6A, 0x00AB, "stages 16-17"),
-    ("music_84a", 0x9C15, 0x00C6, "stages 13-15"),
-    ("music_84b", 0x9CDB, 0x011D, "stages 13-15"),
-    ("music_84c", 0x9DF8, 0x00C9, "stages 13-15"),
-    ("music_85a", 0x9EC1, 0x00C8, "stages 10 and 18"),
-    ("music_85b", 0x9F89, 0x0077, "stages 10 and 18; continues at music_85b_cont"),
+    ("music_80_bgm_s00_03_a", 0x949B, 0x0066, "stages 0-3"),
+    ("music_80_bgm_s00_03_b", 0x9501, 0x0097, "stages 0-3"),
+    ("music_80_bgm_s00_03_c", 0x9598, 0x00D1, "stages 0-3"),
+    ("music_81_bgm_s04_06_11_12_a", 0x9669, 0x005E, "stages 4-6 and 11-12"),
+    ("music_81_bgm_s04_06_11_12_b", 0x96C7, 0x00A6, "stages 4-6 and 11-12"),
+    ("music_81_bgm_s04_06_11_12_c", 0x976D, 0x006D, "stages 4-6 and 11-12"),
+    ("music_82_bgm_s07_09_a", 0x97DA, 0x00B7, "stages 7-9"),
+    ("music_82_bgm_s07_09_b", 0x9891, 0x00AC, "stages 7-9"),
+    ("music_82_bgm_s07_09_c", 0x993D, 0x011B, "stages 7-9"),
+    ("music_83_bgm_s16_17_a", 0x9A58, 0x0060, "stages 16-17"),
+    ("music_83_bgm_s16_17_b", 0x9AB8, 0x00B2, "stages 16-17"),
+    ("music_83_bgm_s16_17_c", 0x9B6A, 0x00AB, "stages 16-17"),
+    ("music_84_bgm_s13_15_a", 0x9C15, 0x00C6, "stages 13-15"),
+    ("music_84_bgm_s13_15_b", 0x9CDB, 0x011D, "stages 13-15"),
+    ("music_84_bgm_s13_15_c", 0x9DF8, 0x00C9, "stages 13-15"),
+    ("music_85_bgm_s10_18_a", 0x9EC1, 0x00C8, "stages 10 and 18"),
+    ("music_85_bgm_s10_18_b", 0x9F89, 0x0077, "stages 10 and 18; continues at music_85_bgm_s10_18_b_cont"),
 ]
 
 
@@ -789,7 +790,7 @@ def emit_psg_streams(rom: bytes) -> None:
     b14 = 14 * 0x2000
     lines = [
         "; Packed PSG streams (seg14 0x8E29-0x9FFF).  sfx_tbl / music_ptr /",
-        "; snd_fb_seq / snd_fd_seq.  Music 85b continues in data/psg_seg15.asm;",
+        "; snd_fb_seq / snd_fd_seq.  music_85_bgm_s10_18_b continues in psg_seg15.asm;",
         "; ids 85c and 86-8F live there too.",
         "",
     ]
@@ -912,7 +913,7 @@ def walk_script(rom: bytes, start: int) -> tuple[int, list]:
 
 
 def emit_pal_bytes(rom: bytes, start: int, end: int) -> list[str]:
-    """Decode l4845h palettes from start until end (exclusive)."""
+    """Decode palette_apply palettes from start until end (exclusive)."""
     lines: list[str] = []
     cpu = start
     while cpu < end:
@@ -968,7 +969,7 @@ def emit_seg9_10(rom: bytes) -> None:
     write_tile_file(
         "frontend_tiles.asm",
         [
-            "; Frontend / HUD 8x8 4bpp (seg9 0x8000).  load after sub_5381h:",
+            "; Frontend / HUD 8x8 4bpp (seg9 0x8000).  load after page_title_banks:",
             "; `ld hl,frontend_tiles` / tileset_blit copies 0xBF tiles (to 0x97E0).",
             "; Bonus HUD ids 1-20 reuse tile 0x80+ (0x9000); potion at 0x9A00.",
         ]
@@ -1069,7 +1070,7 @@ def emit_seg9_10(rom: bytes) -> None:
     # 0xA000 continues pal_9ffe (5 bytes) then pal_a005 ... pal_a059
     plines = [
         "; Room palettes continued from pal_9ffe (seg9 0x9FFE).",
-        "; l4845h tables: (index, rb, g)+ 0xFF.  Ends where gfx RLE starts (0xA066).",
+        "; palette_apply tables: (index, rb, g)+ 0xFF.  Ends where gfx RLE starts (0xA066).",
         "; pal_9ffe continued (idx 4 already emitted in seg9)",
         "\tdefb "
         + ",".join("0x%02x" % b for b in pal_rest[0:5])
@@ -1184,8 +1185,8 @@ def emit_seg9_10(rom: bytes) -> None:
     write_lines(os.path.join(DATA, "seg10_bda7.asm"), ulines)
 
     slines = [
-        "; Stage palette pointer table (seg10 0xBEA7) + l4845h tables.",
-        "; sub_572eh loads hud_fixed_palette; title extras at 0xBF6F.",
+        "; Stage palette pointer table (seg10 0xBEA7) + palette_apply tables.",
+        "; palette_hud_load loads hud_fixed_palette; title extras at 0xBF6F.",
         "stage_palette_ptr:",
     ]
     for st in range(19):
@@ -1213,7 +1214,7 @@ def emit_seg9_10(rom: bytes) -> None:
         os.path.join(SEGS, "seg09.asm"),
         [
             "; ===========================================================================",
-            ";  SEGMENT 9 - front-end gfx bank, paged at 0x8000 by sub_5381h.",
+            ";  SEGMENT 9 - front-end gfx bank, paged at 0x8000 by page_title_banks.",
             ";  HUD/frontend tiles, room_gfx_ptr + scripts, pal_9ffe prefix.",
             "; ===========================================================================",
         ],
@@ -1227,7 +1228,7 @@ def emit_seg9_10(rom: bytes) -> None:
         os.path.join(SEGS, "seg10.asm"),
         [
             "; ===========================================================================",
-            ";  SEGMENT 10 - front-end gfx bank, paged at 0xA000 by sub_5381h.",
+            ";  SEGMENT 10 - front-end gfx bank, paged at 0xA000 by page_title_banks.",
             ";  Room palettes, enemy/weapon RLE, stage palettes.",
             "; ===========================================================================",
         ],
@@ -1242,36 +1243,36 @@ def emit_seg9_10(rom: bytes) -> None:
 
 # Packed music tails + env tables (seg15 0xA000-0xABF8).  ROM order.
 MUSIC_SEG15 = [
-    ("music_85b_cont", 0xA000, "tail of music_85b (EA 0x9F9C)"),
-    ("music_85c", 0xA051, "85 C; stages 10 and 18"),
-    ("music_86a", 0xA157, "86 A; Dracula boss"),
-    ("music_86c", 0xA1B9, "86 C"),
-    ("music_86b", 0xA217, "86 B"),
-    ("music_87a", 0xA2C5, "87 A; boss"),
-    ("music_87b", 0xA303, "87 B"),
-    ("music_87c", 0xA35B, "87 C"),
-    ("music_88a", 0xA39E, "88 A; Dracula portrait (CE01=4)"),
-    ("music_88b", 0xA3E4, "88 B"),
-    ("music_88c", 0xA43C, "88 C"),
-    ("music_89a", 0xA49B, "89 A; game over (simon_dying)"),
-    ("music_89b", 0xA4B0, "89 B"),
-    ("music_89c", 0xA4C4, "89 C"),
-    ("music_8aa", 0xA4D1, "8A A; enter castle"),
-    ("music_8ab", 0xA506, "8A B"),
-    ("music_8ac", 0xA51D, "8A C"),
-    ("music_8ba", 0xA54E, "8B A; game over"),
-    ("music_8bb", 0xA573, "8B B"),
-    ("music_8bc", 0xA5A5, "8B C"),
-    ("music_8ca", 0xA5DF, "8C A; boss defeated"),
-    ("music_8cb", 0xA5FD, "8C B"),
-    ("music_8cc", 0xA621, "8C C"),
-    ("music_8da", 0xA671, "8D A; Dracula defeated"),
-    ("music_8db", 0xA68F, "8D B"),
-    ("music_8dc", 0xA6AA, "8D C"),
-    ("music_8ea", 0xA6C4, "8E A; credits"),
-    ("music_8eb", 0xA764, "8E B"),
-    ("music_8ec", 0xA7FE, "8E C"),
-    ("music_8f", 0xA81F, "dummy silence (all three channels)"),
+    ("music_85_bgm_s10_18_b_cont", 0xA000, "tail of music_85_bgm_s10_18_b (EA 0x9F9C)"),
+    ("music_85_bgm_s10_18_c", 0xA051, "85 C; stages 10 and 18"),
+    ("music_86_bgm_boss_dracula_a", 0xA157, "86 A; Dracula boss"),
+    ("music_86_bgm_boss_dracula_c", 0xA1B9, "86 C"),
+    ("music_86_bgm_boss_dracula_b", 0xA217, "86 B"),
+    ("music_87_bgm_boss_a", 0xA2C5, "87 A; boss"),
+    ("music_87_bgm_boss_b", 0xA303, "87 B"),
+    ("music_87_bgm_boss_c", 0xA35B, "87 C"),
+    ("music_88_bgm_boss_dracula_portrait_a", 0xA39E, "88 A; Dracula portrait (CE01=4)"),
+    ("music_88_bgm_boss_dracula_portrait_b", 0xA3E4, "88 B"),
+    ("music_88_bgm_boss_dracula_portrait_c", 0xA43C, "88 C"),
+    ("music_89_simon_death_a", 0xA49B, "89 A; Simon death"),
+    ("music_89_simon_death_b", 0xA4B0, "89 B"),
+    ("music_89_simon_death_c", 0xA4C4, "89 C"),
+    ("music_8a_enter_castle_a", 0xA4D1, "8A A; enter castle"),
+    ("music_8a_enter_castle_b", 0xA506, "8A B"),
+    ("music_8a_enter_castle_c", 0xA51D, "8A C"),
+    ("music_8b_game_over_a", 0xA54E, "8B A; game over"),
+    ("music_8b_game_over_b", 0xA573, "8B B"),
+    ("music_8b_game_over_c", 0xA5A5, "8B C"),
+    ("music_8c_boss_defeated_a", 0xA5DF, "8C A; boss defeated"),
+    ("music_8c_boss_defeated_b", 0xA5FD, "8C B"),
+    ("music_8c_boss_defeated_c", 0xA621, "8C C"),
+    ("music_8d_dracula_defeated_a", 0xA671, "8D A; Dracula defeated"),
+    ("music_8d_dracula_defeated_b", 0xA68F, "8D B"),
+    ("music_8d_dracula_defeated_c", 0xA6AA, "8D C"),
+    ("music_8e_credits_a", 0xA6C4, "8E A; credits"),
+    ("music_8e_credits_b", 0xA764, "8E B"),
+    ("music_8e_credits_c", 0xA7FE, "8E C"),
+    ("music_8f_silence", 0xA81F, "dummy silence (all three channels)"),
 ]
 
 ENV_PTR_MAIN = [
@@ -1311,7 +1312,7 @@ def emit_seg15(rom: bytes) -> None:
     lines = [
         "; Packed PSG music tails (seg15 0xA000-0xA81F) + unused blob +",
         "; 12-word env pointer tables (sound_env_ptr / sound_env_ptr_alt)",
-        "; and their 0xFF-ended streams.  music_85b_cont continues music_85b",
+        "; and their 0xFF-ended streams.  music_85_bgm_s10_18_b_cont continues music_85_bgm_s10_18_b",
         "; from seg14.  Unidentified 0xA820-0xAAD5 is not in music_ptr.",
         "",
     ]

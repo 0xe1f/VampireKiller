@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Decompress a Vampire Killer graphics stream (the RLE format used by the
-VRAM loader sub_46f8h / l46f2h at 0x46F2 in segment 0) into a flat binary.
+VRAM loader rle_dec / rle_dec_addr at 0x46F2 in segment 0) into a flat binary.
 
 Control-byte grammar (source is read linearly; the decompressed bytes are
 written to a moving VRAM pointer):

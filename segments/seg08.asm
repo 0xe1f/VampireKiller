@@ -1,6 +1,6 @@
 ; ===========================================================================
 ;  SEGMENT 8 - late-game tileset + title glyphs + ending paragraph.
-;  Paged at 0xA000 by sub_5393h (tiles) and credits_keyframe (text).
+;  Paged at 0xA000 by page_tileset_late (tiles) and credits_keyframe (text).
 ; ===========================================================================
 
     INCLUDE "data/tileset_s16_cont.asm"

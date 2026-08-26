@@ -78,7 +78,7 @@ l8070h:
 	jr z,l8079h
 	jp p,l807fh
 l8079h:
-	call sub_81b2h
+	call award_kill_score
 	call sub_9a45h
 l807fh:
 	ld a,(iy+001h)
@@ -229,7 +229,7 @@ l816ah:
 ; the kill score - see l81d5h below).  Then:
 ;   * Red shield (0xC701 bit 4, bonus id 3): if Simon is facing the hit, take B
 ;     as-is (not doubled) and spend a charge (0xC441--; at 0, res bit4 +
-;     sub_8eedh drops the HUD).  A backstab still takes the doubled hit.
+;     hud_bonus_refresh drops the HUD).  A backstab still takes the doubled hit.
 ;   * Otherwise (no red shield / not facing): B is DOUBLED, so unshielded
 ;     contact = 2 * (l81d5h odd byte).  Runtime-confirmed: zombie(t01) odd 1 -> 2,
 ;     dog(t05) odd 3 -> 6 (0x1E->0x18).  Then jp damage_health (0xC415 -= B).
@@ -266,7 +266,7 @@ l819fh:
 	ld hl,0c701h
 	res 4,(hl)             ; charges gone -> drop the red shield
 	push bc
-	call sub_8eedh
+	call hud_bonus_refresh
 	pop bc
 l81afh:
 	jp damage_health       ; 0xC415 -= B
@@ -274,7 +274,7 @@ l81afh:
 ; Looks up the per-type hundreds value D from table l81d5h[(type-1)] (E=0 low pair),
 ; then picks the high pair C by type (0x11 -> 3, 0x17 -> 5, else 0) and calls
 ; add_score with C:D:E.
-sub_81b2h:
+award_kill_score:
 	ld a,(ix+000h)
 	ld b,a
 	dec a
@@ -949,7 +949,7 @@ l8623h:
 	jr nz,l8649h
 	ld hl,0c701h
 	res 5,(hl)             ; charges gone -> drop yellow shield
-	call sub_8eedh
+	call hud_bonus_refresh
 l8649h:
 	pop bc
 	ld de,00080h
@@ -2082,7 +2082,7 @@ sub_8d30h:
 	ld a,(ix+004h)
 ; ---------------------------------------------------------------------------
 ;  collect_bonus (seg2 0x8D33) - apply a picked-up bonus whose id is in A.
-;  Entry sub_8d33h pushes the common tail play_sound; sub_8d37h is the bare entry
+;  Entry collect_bonus pushes the common tail play_sound; collect_bonus_apply is the bare entry
 ;  (caller supplies its own continuation).  Latches the bonus id into 0xC419
 ;  (last-pickup latch, drives the pickup HUD/message) then dispatches through the
 ;  25-entry word table collect_bonus_tbl at 0x8D45 (index = A-1; A>=0x1A falls through to l8d77h):
@@ -2097,7 +2097,7 @@ sub_8d30h:
 collect_bonus:
 	ld hl,play_sound
 	push hl
-sub_8d37h:
+collect_bonus_apply:
 	ld (0c419h),a          ; latch last-collected bonus id
 	call 08f2ah
 	cp 01ah
@@ -2133,14 +2133,14 @@ collect_bonus_tbl:             ; (seg2 0x8D45) word[id-1]; id>=0x1A -> l8d77h
 ; --- weapon pickup (bonus id >= 0x1A) ---------------------------------------
 ; index = id - 0x19 -> C416: 0x1A chain (1), 0x1B knife (2), 0x1C axe (3),
 ; 0x1D cross (4). Index 5 is holy water (bonus_holy_water / C701 bit3), not a
-; C416 weapon. Otherwise store the new weapon id, run sub_8ea1h (HUD), then
+; C416 weapon. Otherwise store the new weapon id, run hud_weapon_icon (HUD), then
 ; FALL THROUGH into bonus_rosary (brief C440 no-spawn window).
 l8d77h:
 	sub 019h
 	cp 005h
 	jr z,bonus_holy_water
 	ld (0c416h),a          ; set equipped weapon id
-	call sub_8ea1h
+	call hud_weapon_icon
 ; --- bonus_rosary (id 6, 0x8D83) - temporary "no new enemies" power-up ------
 ; Arms the enemy-spawn suppression timer 0xC440: while nonzero, room_spawner
 ; (seg0 0x5EBF) bails every frame and no new enemies spawn. Duration depends on
@@ -2163,7 +2163,7 @@ l8d91h:
 bonus_holy_water:              ; id 0x1E (0x8D94): C701 bit3; jump+LEFT/RIGHT, 5 hearts
 	ld b,008h
 l8d96h:
-	call sub_8e74h
+	call inv_or_c701
 	jr l8d91h
 bonus_hourglass:               ; id 10 (0x8D9B): C701 bit6
 	ld b,040h
@@ -2261,7 +2261,7 @@ bonus_white_bible:             ; id 17 (0x8E2D): C702 bit7, vendor price halved
 	res 6,(hl)             ; drop the black-bible bit (mutually exclusive)
 	ld b,080h
 l8e34h:
-	call sub_8e79h         ; 0xC702 |= B
+	call inv_or_c702         ; 0xC702 |= B
 	ld a,012h              ; pickup popup message id
 	ret
 bonus_map:                     ; id 15 (0x8E3A): C431 bit6, C701 bit7, C70F=3
@@ -2282,7 +2282,7 @@ bonus_blue_bag:                ; id 20 (0x8E52): +1000 score
 	jr l8e4ch
 bonus_yellow_key:              ; id 23 (0x8E57): C701 bit1, C700=1 (chests)
 	ld b,002h
-	call sub_8e74h
+	call inv_or_c701
 	ld hl,0c700h
 	ld (hl),001h
 	call sub_8ed0h
@@ -2290,17 +2290,17 @@ bonus_yellow_key:              ; id 23 (0x8E57): C701 bit1, C700=1 (chests)
 	ret
 bonus_white_key:               ; id 24 (0x8E67): C701 bit0 (stage-exit door)
 	ld b,001h
-	call sub_8e74h
+	call inv_or_c701
 	call sub_8ec1h
 	ld a,014h
 	ret
 	pop hl
 	ret
-; OR bit-mask B into an inventory byte: sub_8e74h -> 0xC701, sub_8e79h -> 0xC702
-sub_8e74h:
+; OR bit-mask B into an inventory byte: inv_or_c701 -> 0xC701, inv_or_c702 -> 0xC702
+inv_or_c701:
 	ld hl,0c701h
 	jr l8e7ch
-sub_8e79h:
+inv_or_c702:
 	ld hl,0c702h
 l8e7ch:
 	ld a,b
@@ -2313,7 +2313,7 @@ bonus_staff:                   ; id 18 (0x8E80): C700=3, C701 bit2; drops yellow
 	ld hl,0c701h
 	res 1,(hl)             ; can't hold yellow key with the staff
 	ld b,004h
-	call sub_8e74h
+	call inv_or_c701
 	ld a,003h
 	ld (0c700h),a
 	call sub_8ed0h
@@ -2322,8 +2322,8 @@ bonus_staff:                   ; id 18 (0x8E80): C700=3, C701 bit2; drops yellow
 lose_weapon:                   ; (0x8E9A) C416=0 leather; refresh HUD (missed catch)
 	xor a
 	ld (0c416h),a
-	jp sub_8ea1h
-sub_8ea1h:                     ; HUD equipped-weapon icon from C416
+	jp hud_weapon_icon
+hud_weapon_icon:                     ; HUD equipped-weapon icon from C416
 	ld a,(0c416h)
 	ld de,l800ch
 	or a
@@ -2362,7 +2362,7 @@ sub_8ed0h:
 	ld a,017h
 l8eebh:
 	jr l8eadh
-sub_8eedh:
+hud_bonus_refresh:
 	call sub_8f51h
 	ld a,(0c701h)
 	ld c,a
@@ -2435,7 +2435,7 @@ sub_8f51h:
 	ld d,a
 	jp 04911h
 ; Pickup-popup tick: if 0xC5E5==0xFF (active), every 0x40 frames decrement the
-; 0xC5E6 timer; when it hits 0, tear the popup down (sub_8eedh).
+; 0xC5E6 timer; when it hits 0, tear the popup down (hud_bonus_refresh).
 sub_8f5ch:
 	ld a,(0c5e5h)
 	inc a
@@ -2446,7 +2446,7 @@ sub_8f5ch:
 	ld hl,0c5e6h
 	dec (hl)
 	ret nz
-	jp sub_8eedh
+	jp hud_bonus_refresh
 sub_8f6fh:
 	push hl
 	ld a,(ix+004h)
@@ -3351,13 +3351,14 @@ sub_94b6h:
 	add a,c
 	ld e,a
 	ret
-; --- vendor_purchase_tick (0x94BE) --------------------------------------------
+; --- vendor_purchase_tick (0x94C1) --------------------------------------------
 ; Runs while an offer is on screen.  Every 0x20 frames tick down the 0xC706 offer
 ; timer; when it hits 0 the offer is withdrawn (vendor_offer_withdraw).  Otherwise poll the
 ; buy/refuse buttons: nothing pressed -> keep waiting (ret 0xFF, vendor_offer_pending); SHIFT/
 ; refuse -> withdraw (vendor_offer_withdraw, sfx 0x02); SPACE/confirm -> buy only if Simon has
 ; enough hearts (0xC417 >= price 0xC707): deduct price (spend_hearts) and grant
-; the item (collect_bonus / sub_8d37h), sfx 0x12.
+; the item (collect_bonus / collect_bonus_apply), sfx 0x12.
+vendor_purchase_tick:
 	ld a,(0c003h)
 	and 01fh
 	jr nz,l94ceh
@@ -3380,7 +3381,7 @@ l94ceh:
 	call c,sub_9514h
 	call spend_hearts      ; pay the price in hearts
 	ld a,(0c708h)
-	call sub_8d37h         ; collect_bonus(item) -> give the purchased item
+	call collect_bonus_apply         ; collect_bonus(item) -> give the purchased item
 	pop af
 	call c,l939eh
 	ld a,012h
@@ -3481,7 +3482,7 @@ minimap_driver:
 	jr nz,l9589h
 	ld hl,0c701h           ; last use spent...
 	res 7,(hl)             ; ...clear the map-held flag
-	call sub_8eedh
+	call hud_bonus_refresh
 l9589h:
 	call 04805h            ; switch to the map screen (VDP page/setup)
 	ld hl,DCOMPR
@@ -3501,7 +3502,7 @@ l95aah:
 	inc (hl)
 	ret
 l95afh:                    ; state 1: build the map, then advance to "displayed"
-	call sub_95d7h         ; draw every room's cell (loops over all rooms)
+	call minimap_build         ; draw every room's cell (loops over all rooms)
 	call sub_981ch
 	call sub_985ah
 	jr l95aah
@@ -3518,15 +3519,15 @@ l95bah:                    ; state 2 (displayed): F2 again closes the map
 	xor a
 	ld (0cf38h),a          ; back to state 0 (playing)
 	ret
-; --- sub_95d7h - build the whole minimap: loop room index 0xCFFD = 0..N-1,
-;     drawing each room's cell.  sub_9681h places the cell; the loop ends when the
-;     index reaches the per-stage room count in minimap_room_count (l95fdh[stage]).
-sub_95d7h:
+; --- minimap_build - build the whole minimap: loop room index 0xCFFD = 0..N-1,
+;     drawing each room's cell.  minimap_room_pos places the cell; the loop ends when the
+;     index reaches the per-stage room count in minimap_room_count (minimap_room_count[stage]).
+minimap_build:
 	xor a
 	ld (0cffdh),a          ; room index = 0
 l95dbh:
 	call sub_9610h
-	call sub_9681h         ; look up + set this room's minimap cell position
+	call minimap_room_pos         ; look up + set this room's minimap cell position
 	call sub_979ah
 	call sub_980eh
 	ld a,(0cffdh)
@@ -3534,31 +3535,16 @@ l95dbh:
 	ld (0cffdh),a          ; ++room index
 	ld c,a
 	ld a,(0d000h)          ; stage
-	ld hl,l95fdh           ; minimap_room_count[stage]
+	ld hl,minimap_room_count           ; minimap_room_count[stage]
 	call ADD_HL_A
 	ld a,c
 	cp (hl)
 	jr nz,l95dbh           ; loop until all rooms drawn
 	ret
-; minimap_room_count: one byte per stage = number of rooms (== geometry rowbase
-; deltas for stages 0..17, and 10 for stage 18/Dracula whose rowbase is a sentinel).
-; z80dasm shows this DATA as instructions; it is never executed.  TODO: db pass.
-l95fdh:
-	inc bc
-	ex af,af'
-	ld b,006h
-	ld b,006h
-	ld b,009h
-	ex af,af'
-	add hl,bc
-	add hl,bc
-	ld b,00ch
-	inc c
-	ex af,af'
-	ld a,(bc)
-	ld a,(bc)
-	inc c
-	ld a,(bc)
+; minimap_room_count (seg2 0x95FD): rooms per stage 0..18.
+minimap_room_count:
+	defb 003h,008h,006h,006h,006h,006h,006h,009h,008h
+	defb 009h,009h,006h,00ch,00ch,008h,00ah,00ah,00ch,00ah
 sub_9610h:
 	ld hl,0e800h
 	ld a,(0d000h)
@@ -3622,17 +3608,17 @@ l966fh:
 	dec c
 	jr nz,l966fh
 	ret
-; --- sub_9681h - MINIMAP ROOM POSITION LOOKUP.  This is the authoritative room
+; --- minimap_room_pos - MINIMAP ROOM POSITION LOOKUP.  This is the authoritative room
 ;     geography: rooms are placed on the F2 map at HAND-AUTHORED cells, not derived
 ;     from the room-connectivity graph (which is a navigation graph with wrap/portal
-;     edges).  Per stage 0xD000, l969ch[stage] points to an array of one-byte POSITION
+;     edges).  Per stage 0xD000, minimap_stage_ptr[stage] points to an array of one-byte POSITION
 ;     CODES (one per room 0xCFFD); minimap_coord_tbl (0x975E) maps a code to a packed
 ;     screen coord (high byte X = 0x20+0x20*col over 6 columns, low byte Y = 0x38+
 ;     0x15*row over 5 rows).  Result stored at 0xCFF2 = this room's draw position.
 ;     Decoded for all 19 stages by tools/roomperm.py (its layout() reads this table).
-sub_9681h:
+minimap_room_pos:
 	ld a,(0d000h)          ; stage
-	ld de,l969ch           ; minimap_stage_ptr[]
+	ld de,minimap_stage_ptr           ; minimap_stage_ptr[]
 	call lookup_word_tbl   ; de = this stage's position-code array
 	ld a,(0cffdh)          ; room index
 	call ADD_DE_A
@@ -3641,9 +3627,9 @@ sub_9681h:
 	call lookup_word_tbl   ; de = packed (X,Y) screen coord for that code
 	ld (0cff2h),de         ; store as this room's minimap draw position
 	ret
-; minimap_stage_ptr: word[stage] -> per-room position-code array (see sub_9681h).
+; minimap_stage_ptr: word[stage] -> per-room position-code array (see minimap_room_pos).
 ; z80dasm shows the following as instructions; it is DATA and never executed.
-l969ch:
+minimap_stage_ptr:
 	jp nz,0c596h
 	sub (hl)
 	call 0d396h
@@ -3947,7 +3933,7 @@ sub_980eh:
 sub_981ch:
 	ld a,(0d001h)
 	ld (0cffdh),a
-	call sub_9681h
+	call minimap_room_pos
 	ld hl,(0cff2h)
 	ld a,(0c425h)
 	sub 040h
@@ -4113,7 +4099,7 @@ l98f9h:
 	call sub_9936h
 	jr c,l990bh
 	call actor_type_tick
-	call sub_99c0h
+	call actor_integrate
 l990bh:
 	call actor_cull_offscreen
 	pop bc
@@ -4214,7 +4200,6 @@ l99bch:
 	add hl,de
 	djnz sub_99b6h
 	ret
-sub_99c0h:
 ; ---------------------------------------------------------------------------
 ;  actor_integrate (seg2 0x99C0) - advance one actor by its velocity.  Skips
 ;  dead slots (+0x06 == 0).  Adds the 16-bit Y velocity (+0x07/+0x08) to the Y
@@ -4659,7 +4644,7 @@ l9cc2h:
 	ex af,af'
 	ex af,af'
 	ex af,af'
-sub_9ccah:
+spawn_rate_gate:
 	exx
 	ld hl,0cf10h
 	dec (hl)
@@ -4688,24 +4673,24 @@ l9ce9h:
 	xor a
 	ret
 ; --- zombie_generator (0x9ced) - continuous zombie spawner (room_spawner bit0) -
-;  Rate-gated by sub_9ccah (0xCF00 counter, threshold table l9d4ah scaled by the
-;  0xD012 difficulty/mood).  When it fires, sub_9d03h picks the spawn position
+;  Rate-gated by spawn_rate_gate (0xCF00 counter, threshold table l9d4ah scaled by the
+;  0xD012 difficulty/mood).  When it fires, spawn_pick_pos picks the spawn position
 ;  (hardcoded per stage/room - NOT read from the tile map), then spawns
 ;  actor_zombie.  Typical: X = 0xF0 (right edge) or 0x10 (left), Y = 0xC0.
 zombie_generator:
 	ld hl,0cf00h
 	ld de,l9d4ah
-	call sub_9ccah         ; time to spawn?
+	call spawn_rate_gate         ; time to spawn?
 	ret nz
-	call sub_9d03h         ; DE = spawn position (D=X, E=Y)
+	call spawn_pick_pos         ; DE = spawn position (D=X, E=Y)
 	call sub_9e1dh
 	ret c                  ; bail if the slot area / cap says no
 	ld c,actor_zombie
 	jp spawn_actor
-; --- sub_9d03h - pick a ground-enemy spawn position by stage/room -------------
+; --- spawn_pick_pos - pick a ground-enemy spawn position by stage/room -------------
 ;  Out: D = X, E = Y.  D flips 0xF0 <-> 0x10 = right/left edge by a per-actor
 ;  flag.  Reads stage 0xD000 (L) and room 0xD001 (H).  Tile map is not consulted.
-sub_9d03h:
+spawn_pick_pos:
 	ld a,(0c425h)          ; Simon Y (used by some stage branches)
 	ld c,a
 	ld hl,(0d000h)         ; L = stage (0xD000), H = room (0xD001)
@@ -4766,7 +4751,7 @@ merman_generator_3:         ; (0x9D59) bit2, actor_merman_red (spit, 2 HP)
 merman_spawn:
 	ld de,l9d96h
 	push bc
-	call sub_9ccah
+	call spawn_rate_gate
 	pop bc
 	ret nz
 	ld e,0c8h              ; Y = 0xC8
@@ -4799,7 +4784,7 @@ hanging_bat_generator:         ; (0x9D9E) bit3, actor_hanging_bat
 	ld c,actor_hanging_bat
 flyer_spawn:                   ; bats / ghosts / medusa heads: edge X, Y=SimonY-8
 	push bc
-	call sub_9ccah
+	call spawn_rate_gate
 	pop bc
 	ret nz
 	inc hl
@@ -4833,7 +4818,7 @@ l9de6h:                        ; medusa-head spawn-rate thresholds
 roc_generator:                 ; (0x9DEE) bit6, actor_roc
 	ld hl,0cf0ch
 	ld de,l9e15h
-	call sub_9ccah
+	call spawn_rate_gate
 	ret nz
 	ld a,(0c427h)
 	cp 0c0h
@@ -4887,7 +4872,7 @@ l9e3eh:
 	call sub_9936h
 	jr c,l9e50h
 	call shot_type_tick
-	call sub_99c0h
+	call actor_integrate
 l9e50h:
 	call actor_sat_build
 	call actor_cull_offscreen

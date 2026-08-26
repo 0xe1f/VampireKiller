@@ -1,5 +1,5 @@
 ; ===========================================================================
-;  SEGMENT 12 - bank 0x0C, paged at 0x8000-0x9FFF (page 2a) by sub_5369h /
+;  SEGMENT 12 - bank 0x0C, paged at 0x8000-0x9FFF (page 2a) by page_map_banks /
 ;  room_map_build.  Per-stage 4x4 metatile definition tables (16 bytes = one
 ;  metatile).  Origin is set by PHASE 0x8000 in VampireKiller.asm.
 ;

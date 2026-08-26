@@ -1,0 +1,532 @@
+; logo_font (seg13 0xBE59): 52 x 8x8 1bpp glyphs for the boot Konami
+; logo.  Loaded by logo_font_load (seg0 0x5316) from konami_logo_draw
+; via glyph_blit_run onto page 0 at Y=0 (tile ids 0x01-0x34; X=0 /
+; id 0x00 is blank).  Different sheet from hud_font: logo ids 0x2C-
+; 0x2E are wordmark cells, not HUD '<' '=' '>'.  Each defb is one
+; row, MSB = left pixel.
+; Preview: gfx/font_logo.png.  Source: data/font_logo.asm.
+logo_font:  ; 0xBE59  ink 1 at (8,0); ids 01-0D
+; 0x01
+	defb %00000111
+	defb %00000111
+	defb %00001111
+	defb %00001111
+	defb %00001111
+	defb %00011111
+	defb %00011111
+	defb %00111111
+
+; 0x02
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111111
+
+; 0x03
+	defb %11111000
+	defb %11111000
+	defb %11110000
+	defb %11110000
+	defb %11110000
+	defb %11100000
+	defb %11100000
+	defb %11100000
+
+; 0x04
+	defb %00000000
+	defb %00000000
+	defb %00000000
+	defb %00000000
+	defb %00000001
+	defb %00000011
+	defb %00001111
+	defb %01111111
+
+; 0x05
+	defb %00111111
+	defb %01111111
+	defb %01111111
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111111
+
+; 0x06
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111100
+	defb %11110000
+	defb %11000000
+
+; 0x07
+	defb %11000000
+	defb %11000000
+	defb %10000000
+	defb %10000000
+	defb %00000000
+	defb %00000000
+	defb %00000000
+	defb %00000000
+
+; 0x08
+	defb %00000000
+	defb %00000000
+	defb %00000000
+	defb %00000001
+	defb %00000011
+	defb %00000111
+	defb %00001111
+	defb %00001111
+
+; 0x09
+	defb %00001111
+	defb %00111111
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111111
+
+; 0x0A
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111110
+	defb %11111100
+	defb %11111000
+	defb %11111000
+	defb %11110000
+
+; 0x0B
+	defb %11111000
+	defb %11000000
+	defb %00000000
+	defb %00000000
+	defb %00000000
+	defb %00000000
+	defb %00000000
+	defb %00000000
+
+; 0x0C
+	defb %00011111
+	defb %00011111
+	defb %00011111
+	defb %00111111
+	defb %00111111
+	defb %00111111
+	defb %01111111
+	defb %01111111
+
+; 0x0D
+	defb %11110000
+	defb %11100000
+	defb %11100000
+	defb %11000000
+	defb %11000000
+	defb %11000000
+	defb %10000000
+	defb %10000000
+
+logo_font_ink2:  ; 0xBEC1  ink 2 at (0x70,0); ids 0E-1A
+; 0x0E
+	defb %00000000
+	defb %00000000
+	defb %00000000
+	defb %00000000
+	defb %00000000
+	defb %00000001
+	defb %00000001
+	defb %00000011
+
+; 0x0F
+	defb %01111111
+	defb %01111111
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111111
+
+; 0x10
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111110
+	defb %11111110
+	defb %11111100
+
+; 0x11
+	defb %10000000
+	defb %10000000
+	defb %00000000
+	defb %00000000
+	defb %00000000
+	defb %00000000
+	defb %00000000
+	defb %00000000
+
+; 0x12
+	defb %00000000
+	defb %00000000
+	defb %00000000
+	defb %00000000
+	defb %00000000
+	defb %00000000
+	defb %00000000
+	defb %00000111
+
+; 0x13
+	defb %00000011
+	defb %00000111
+	defb %00000111
+	defb %00001111
+	defb %00011111
+	defb %00111111
+	defb %11111111
+	defb %11111111
+
+; 0x14
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111000
+
+; 0x15
+	defb %11111100
+	defb %11111000
+	defb %11111000
+	defb %11110000
+	defb %11100000
+	defb %11000000
+	defb %00000000
+	defb %00000000
+
+; 0x16
+	defb %00000000
+	defb %00000011
+	defb %00001111
+	defb %00011111
+	defb %00111111
+	defb %01111111
+	defb %11111111
+	defb %11111111
+
+; 0x17
+	defb %11111111
+	defb %11111100
+	defb %11110000
+	defb %11100000
+	defb %11000000
+	defb %10000000
+	defb %10000000
+	defb %00000000
+
+; 0x18
+	defb %00000001
+	defb %00000001
+	defb %00000001
+	defb %00000011
+	defb %00000011
+	defb %00000011
+	defb %00000111
+	defb %00000111
+
+; 0x19
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %11111111
+
+; 0x1A
+	defb %11111111
+	defb %11111110
+	defb %11111110
+	defb %11111100
+	defb %11111100
+	defb %11111100
+	defb %11111000
+	defb %11111000
+
+logo_font_ink3:  ; 0xBF29  ink 3 at (0xD8,0), wraps to Y=8 at id 20; ids 1B-34
+; 0x1B
+	defb %00111100
+	defb %00111100
+	defb %01111000
+	defb %01111000
+	defb %01111001
+	defb %11110011
+	defb %11110111
+	defb %11111111
+
+; 0x1C
+	defb %00011111
+	defb %00111110
+	defb %01111100
+	defb %11111001
+	defb %11110011
+	defb %11100011
+	defb %11000011
+	defb %10000111
+
+; 0x1D
+	defb %00011111
+	defb %01111111
+	defb %11111000
+	defb %11110000
+	defb %11100000
+	defb %11100000
+	defb %11000000
+	defb %11000000
+
+; 0x1E
+	defb %11000000
+	defb %11110000
+	defb %11111000
+	defb %01111000
+	defb %01111000
+	defb %01111001
+	defb %01111001
+	defb %01111001
+
+; 0x1F
+	defb %01111111
+	defb %01111111
+	defb %11111111
+	defb %11110111
+	defb %11110111
+	defb %11100111
+	defb %11100111
+	defb %11100111
+
+; 0x20
+	defb %00001111
+	defb %00001111
+	defb %00011110
+	defb %00011110
+	defb %00011110
+	defb %00111100
+	defb %00111100
+	defb %00111100
+
+; 0x21
+	defb %00000011
+	defb %00000111
+	defb %00001111
+	defb %00001110
+	defb %00011110
+	defb %00111100
+	defb %00111000
+	defb %01111000
+
+; 0x22
+	defb %11100000
+	defb %11100000
+	defb %11100000
+	defb %11100000
+	defb %11100000
+	defb %11100001
+	defb %11100001
+	defb %11100001
+
+; 0x23
+	defb %01111110
+	defb %01111110
+	defb %11111110
+	defb %11110110
+	defb %11110110
+	defb %11101110
+	defb %11101110
+	defb %11101110
+
+; 0x24
+	defb %00001111
+	defb %00001111
+	defb %00011111
+	defb %00011101
+	defb %00111101
+	defb %00111011
+	defb %01111011
+	defb %01110011
+
+; 0x25
+	defb %11110001
+	defb %11110001
+	defb %11100011
+	defb %11100011
+	defb %11100011
+	defb %11000111
+	defb %11000111
+	defb %11000111
+
+; 0x26
+	defb %11100000
+	defb %11100000
+	defb %11000000
+	defb %11000000
+	defb %11000000
+	defb %10000000
+	defb %10000000
+	defb %10000000
+
+; 0x27
+	defb %00000001
+	defb %00000001
+	defb %00000001
+	defb %00000011
+	defb %00000011
+	defb %00000011
+	defb %00000111
+	defb %00000111
+
+; 0x28
+	defb %11101111
+	defb %11100111
+	defb %11100111
+	defb %11000111
+	defb %11000111
+	defb %11000011
+	defb %10000011
+	defb %10000011
+
+; 0x29
+	defb %10000111
+	defb %10000111
+	defb %10000111
+	defb %11000111
+	defb %11000111
+	defb %11000111
+	defb %11100011
+	defb %11100000
+
+; 0x2A
+	defb %10000000
+	defb %10000000
+	defb %10000001
+	defb %10000001
+	defb %10000011
+	defb %11000111
+	defb %11111111
+	defb %11111110
+
+; 0x2B
+	defb %11111011
+	defb %11110011
+	defb %11110011
+	defb %11110111
+	defb %11100111
+	defb %11000111
+	defb %10001111
+	defb %00001111
+
+; 0x2C
+	defb %11000111
+	defb %11000111
+	defb %11000111
+	defb %10000111
+	defb %10000111
+	defb %10000111
+	defb %00000111
+	defb %00000111
+
+; 0x2D
+	defb %01111000
+	defb %01111000
+	defb %01111001
+	defb %11110001
+	defb %11110011
+	defb %11110111
+	defb %11100111
+	defb %11101111
+
+; 0x2E
+	defb %01110000
+	defb %11110000
+	defb %11111111
+	defb %11111111
+	defb %11111111
+	defb %10000000
+	defb %10000000
+	defb %00000000
+
+; 0x2F
+	defb %11100011
+	defb %11100011
+	defb %11100011
+	defb %11100111
+	defb %11100111
+	defb %11100111
+	defb %11101111
+	defb %11101111
+
+; 0x30
+	defb %11001110
+	defb %11001110
+	defb %11001111
+	defb %10001111
+	defb %10001111
+	defb %10001111
+	defb %00001111
+	defb %00001111
+
+; 0x31
+	defb %11110111
+	defb %11100111
+	defb %11000111
+	defb %11001111
+	defb %10001111
+	defb %10001111
+	defb %00011110
+	defb %00011110
+
+; 0x32
+	defb %10001111
+	defb %10001111
+	defb %10001111
+	defb %00011110
+	defb %00011110
+	defb %00011110
+	defb %00111100
+	defb %00111100
+
+; 0x33
+	defb %00000111
+	defb %00001000
+	defb %00010111
+	defb %00010100
+	defb %00010111
+	defb %00010100
+	defb %00001000
+	defb %00000111
+
+; 0x34
+	defb %10000000
+	defb %01000000
+	defb %00100000
+	defb %10100000
+	defb %00100000
+	defb %10100000
+	defb %01000000
+	defb %10000000
+
+; 0xFF pad to end of seg13 (0xBFF9).
+	defb 0xff,0xff,0xff,0xff,0xff,0xff,0xff

@@ -494,7 +494,10 @@ def main():
 
     dump_bonus_hud(data)
     dump_credits_font(data)
+    dump_hud_font(data)
+    dump_logo_font(data)
     dump_enemy_sheet(data)
+    dump_hazards(data)
     dump_script_rle(data)
     dump_tilesets(data)
 
@@ -917,6 +920,45 @@ def dump_bonus_hud(data):
 CREDITS_FONT_FILE = 14 * 0x2000 + 0x0824
 CREDITS_FONT_CHARS = "0123456789.':," + "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
+def dump_hazards(data):
+    """Environmental hazards - things that damage Simon but are not actors.
+    The 0xC580 spike bars of stage 6 room 1 are the only one: no C500/C800
+    slot, no HP, and drawn as a 4bpp *background* block rather than sprites,
+    so they are absent from enemy_sheet.png.
+
+    seg0 0x54A6 assembles the picture in VRAM page 1 at (0x80, 0x70) out of two
+    seg9 fragments, and spike_bar_slot_tick (seg2 0x8FF1) HMMMs a 32x16 window
+    of it into the playfield.  The top 4 rows are one chain link: the copy is
+    drawn at Y-4 with a 4px step, so descending leaves a link behind each step
+    and the chain is a smear, not stored artwork."""
+    pal = vk_playfield_palette(data, 6, 1)
+
+    def frag(cpu, w, h):
+        fo = _cpu_file(9, cpu, 0x8000)
+        return [[data[fo + y * (w // 2) + x // 2] >> 4 if x % 2 == 0
+                 else data[fo + y * (w // 2) + x // 2] & 0x0F
+                 for x in range(w)] for y in range(h)]
+
+    link = frag(0x9A80, 8, 4)          # spike_bar_mount
+    unit = frag(0x9A90, 8, 8)          # spike (tiled x4 across the 32px bar)
+    bar = [[0] * 32 for _ in range(12)]
+    for y in range(4):                 # link centred over the bar
+        for x in range(8):
+            bar[y][12 + x] = link[y][x]
+    for i in range(4):
+        for y in range(8):
+            for x in range(8):
+                bar[4 + y][i * 8 + x] = unit[y][x]
+
+    def rgb(grid):
+        return [[pal[v] if v else OFF for v in row] for row in grid]
+
+    cells = [rgb(bar), rgb(unit), rgb(link)]
+    labels = ["SPIKE BAR 32x12", "SPIKE 8x8", "CHAIN 8x4"]
+    render_packed_png(os.path.join(GFX, "hazards.png"), cells, labels=labels,
+                      col_units=4)
+    print("hazards.png              spike bar (stage 6 room 1) + its fragments")
+
 def dump_credits_font(data):
     """Uncompressed 8x8 1bpp ending-credits font (not in manifest.tsv — raw, not RLE)."""
     pal = vk_play_palette(data)
@@ -925,9 +967,46 @@ def dump_credits_font(data):
     for i in range(40):
         glyph = raw[i * 8:(i + 1) * 8]
         cells.append([[(row >> (7 - x)) & 1 for x in range(8)] for row in glyph])
-    render_png(os.path.join(GFX, "credits_font.png"), cells, [OFF, pal[14]],
-               cols=10, size=8, scale=12, labels=list(CREDITS_FONT_CHARS))
-    print("credits_font.png         40 x 8x8 1bpp (0-9 . ' : , A-Z)")
+    render_png(os.path.join(GFX, "font_credits.png"), cells, [OFF, pal[14]],
+               cols=10, size=8, scale=12,
+               labels=[_hex_id(ord(c)) for c in CREDITS_FONT_CHARS])
+    print("font_credits.png         40 x 8x8 1bpp (0-9 . ' : , A-Z)")
+
+# seg8 hud_font @ CPU 0xBD80 (file 0x11D80): 48 x 8x8 1bpp, MSB = left.
+# ASCII '0'..'_' (vk ids 0x20+).  hud_font_load ink 0x0E.  Not credits_font.
+HUD_FONT_FILE = 8 * 0x2000 + 0x1D80
+HUD_FONT_CHARS = "".join(chr(c) for c in range(0x30, 0x60))
+
+def dump_hud_font(data):
+    """Uncompressed 8x8 1bpp HUD/title font (not in manifest.tsv — raw, not RLE)."""
+    pal = vk_play_palette(data)
+    raw = data[HUD_FONT_FILE:HUD_FONT_FILE + 48 * 8]
+    cells = []
+    for i in range(48):
+        glyph = raw[i * 8:(i + 1) * 8]
+        cells.append([[(row >> (7 - x)) & 1 for x in range(8)] for row in glyph])
+    render_png(os.path.join(GFX, "font_hud.png"), cells, [OFF, pal[14]],
+               cols=16, size=8, scale=12,
+               labels=[_hex_id(0x20 + i) for i in range(48)])
+    print("font_hud.png             48 x 8x8 1bpp ('0'-'_')")
+
+# seg13 logo_font @ CPU 0xBE59 (file 0x1BE59): 52 x 8x8 1bpp, MSB = left.
+# Tile ids 0x01-0x34 (id 0x00 is blank at X=0).  logo_font_load three inks
+# onto page 0 at Y=0; tile_string_draw copies with no HUD +0x38.
+LOGO_FONT_FILE = 13 * 0x2000 + 0x1E59
+
+def dump_logo_font(data):
+    """Uncompressed 8x8 1bpp boot Konami-logo font (not in manifest.tsv — raw, not RLE)."""
+    pal = vk_play_palette(data)
+    raw = data[LOGO_FONT_FILE:LOGO_FONT_FILE + 52 * 8]
+    cells = []
+    for i in range(52):
+        glyph = raw[i * 8:(i + 1) * 8]
+        cells.append([[(row >> (7 - x)) & 1 for x in range(8)] for row in glyph])
+    render_png(os.path.join(GFX, "font_logo.png"), cells, [OFF, pal[14]],
+               cols=16, size=8, scale=12,
+               labels=[_hex_id(0x01 + i) for i in range(52)])
+    print("font_logo.png            52 x 8x8 1bpp (Konami logo ids 01-34)")
 
 def dump_script_rle(data):
     """Unique gfx-script cmd-0 RLE streams targeting sprite VRAM (0xF800+).

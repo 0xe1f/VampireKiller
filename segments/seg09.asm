@@ -5,7 +5,7 @@
 
     INCLUDE "data/frontend_tiles.asm"
 
-    INCLUDE "data/bonus_hud_9a80.asm"
+    INCLUDE "data/spike_bar.asm"
 
     INCLUDE "data/room_gfx.asm"
 

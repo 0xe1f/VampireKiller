@@ -43,8 +43,9 @@
     INCLUDE "segments/actors.inc"
 
 ; --- text helpers -----------------------------------------------------------
-;  HUD/title font is loaded at tile 0x10, so those strings are (ASCII-0x10)
-;  with space -> 0x00.  Credits font is 1:1 ASCII, space still -> 0x00.
+;  HUD/title font (hud_font, seg8 0xBD80) is '0'-'_' at atlas ids 0x20+,
+;  so those strings are (ASCII-0x10) with space -> 0x00.  Credits font is
+;  1:1 ASCII, space still -> 0x00.
 ;    vk "SCORE"                      ; HUD/title glyph bytes
 ;    cr 0x08, 0x20, "SO THE BRAVE"   ; credits: tick, x, text, 0xFF
     MACRO vk str
@@ -93,7 +94,10 @@
 ; --- segments 4..8 : playfield tilesets (labeled 8x8 4bpp) -----------------
 ; Paged by page_tileset_banks (seg 4/5/6) and page_tileset_late (seg 7/8, stage >= 13).
 ; Sets overlap and spill across banks; labels mark tileset_ptr starts.
-; Staff / ending text are INCLUDE'd from the middle of seg5 / seg8.
+; Staff / ending text are INCLUDE'd from the middle of seg5 / seg8;
+; HUD/title 1bpp font is data/font_hud.asm at the end of the title tiles;
+; ending-credits 1bpp font is data/font_credits.asm in seg14; boot Konami-logo
+; 1bpp font is data/font_logo.asm at the end of seg13.
     PHASE 0x6000
     INCLUDE "segments/seg04.asm"
     DEPHASE

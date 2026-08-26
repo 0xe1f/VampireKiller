@@ -25,5 +25,7 @@ data_door_tbl: start 0xBB61 end 0xBB9A type bytedata
 ; Stage/room -> (Y,X) spots that arm 0xC5B1 and fill 0xC5B2/C5B4.
 data_spot_tbl: start 0xBBCD end 0xBBF6 type bytedata
 
-; Remainder of the bank (more graphics / unreversed data).
-data_tail: start 0xBBF6 end 0xC000 type bytedata
+; Remainder of the bank after spot_tbl (unreversed graphics), then logo_font
+; 0xBE59 (52 x 8x8 1bpp Konami-logo glyphs) + 0xFF pad.
+data_tail: start 0xBBF6 end 0xBE59 type bytedata
+data_logo_font: start 0xBE59 end 0xC000 type bytedata

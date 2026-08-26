@@ -11,7 +11,7 @@ The entire ROM should ultimately live in the repo as source: every byte is eithe
 state** (like Konamiman's Metal Gear disassembly, which has zero `incbin`).
 VK has no remaining `INCBIN`: every bank is `INCLUDE`'d source (code banks 0-3
 and 11-14 still being annotated; data banks 4-10 and 15 are labeled dumps).
-Seg14 is scenery / object-list / spawn-mask / credits-font / PSG-driver source
+Seg14 is scenery / object-list / spawn-mask / `font_credits.asm` / PSG-driver source
 (packed streams labeled hex); tileset banks 4-8 and metatile streams/defs are
 labeled `.asm` (`tileset_s00`..`s18`, `mtile_stream_sNN_rNN`); Simon/intro sprite
 RLE is labeled packed streams (`intro_simon_0`..`7`, `simon_rle_xxxx`, `intro_sky`).
@@ -63,7 +63,8 @@ Fully migrated banks (0-15) have no `.bin`.
   in `segments/seg01.blocks` (tables at 0x6000-0x602f, 0x605f-0x615a incl. a word
   table at 0x608d). Annotated so far:
   - `konami_logo_draw`/`konami_logo_step` (0x6209/0x6253): logo screen + the
-    top-to-bottom wipe (confirmed by the author); `tile_string_draw` tile-string interp.
+    top-to-bottom wipe (confirmed by the author); `logo_font_load` blits
+    `logo_font`; `tile_string_draw` tile-string interp.
   - Object-list loader cluster 0x615b-0x6208: `object_list_load` unpacks the current
     cell's object list from seg 14 into the 4-byte-slot tables at 0xDB00/DC00/DD00
     (`object_list_unpack` unpacker, `object_list_lookup` per-level pointer, `object_list_clear` clear,
@@ -402,8 +403,8 @@ Fully migrated banks (0-15) have no `.bin`.
     * **Simon takes damage** via damage_health (0x4632): `hurt_simon_contact`
       (seg2 0x8173) = 2x the *odd* byte of l81d5h[type] (zombie 2, dog 6; shield
       0xC701 bit4 halves + spends 0xC441 charge); `hurt_simon_projectile` (seg2
-      0x85AD) = fixed 8 or 16 from a 0xC580 hazard slot, and sets hurt state
-      0xC420=5.  l81d5h's odd byte is the per-type contact-damage field (its even
+      0x85AD) = fixed 8 or 16 from a 0xC580 spike-bar slot (16 while it
+      descends, 8 while it retracts), and sets hurt state 0xC420=5.  l81d5h's odd byte is the per-type contact-damage field (its even
       byte is the kill score).
     * **Simon deals damage** via `weapon_hit_damage` (seg1 0x7E33) -> `damage_enemy`
       (0x4643, 0xC418 -= B).  Per-weapon table by (type-0x11): leather/knife =
@@ -921,6 +922,57 @@ Fully migrated banks (0-15) have no `.bin`.
 
 ## In progress / next
 
+Seg0 VDP layer named end to end: the command-engine primitives
+(`vdp_cmd_wait` / `vdp_status_read` / `vdp_line_h` / `vdp_line_v` / `vdp_box` /
+`vdp_hmmv` / `vdp_hmmc` alongside the existing `vdp_hmmm` / `vdp_lmmm`), the
+`vram_write` tile blitters, the 1bpp glyph path (`glyph_blit_run` ->
+`glyph_expand_4bpp` -> `vram_blit_tile8`), and the HUD painters
+(`hud_draw_all`, `hud_panel_frames`, the bar frames).  Two stale claims in
+game-notes corrected while doing it: `hud_panel_frames` (0x454C) draws three
+`vdp_box` outlines rather than copying title graphics, and `sub_554fh` blits a
+32x32 image as a 4x4 tile grid rather than assembling the sprite attribute
+table (that is seg1 `simon_sat_build` / `actor_sat_build`).
+
+Swept out every z80dasm symbol-for-immediate false xref in segs 0-3 (**91**
+`ld rr,NAME` sites plus `ld bc,l4206h`, which was a 66x6 rectangle size, not an
+address).  z80dasm substitutes a name for any matching value, so each small
+constant that collides with a low BIOS entry came back as that entry:
+`ld de,CHKRAM` for `ld de,0` (73 sites), plus SYNCHR 8 / CHRGTR 0x10 /
+WRSLT 0x14 / OUTDO 0x18 / DCOMPR 0x20 / CALLF 0x30 / SETRD 0x50 and a few
+higher ones (QINLIN, UPC, SCALXY, SETC) used as counters and velocities.  All
+are hex literals now; only `call`/`jp` targets still carry BIOS names.  Two
+values are worth remembering: the `ldir` at seg0 0x5150 copies **0x14 = 20**
+bytes (the PSG channel block), and seg2 `shot_axe` adds **0x50**/frame.
+Gotcha folded into the `konami-msx-disasm` skill — re-audit after every regen.
+
+Spike bars (stage 6 room 1) identified and annotated end to end: the two seg9
+fragments once labelled `bonus_hud_9a80`/`_9a90` are `spike_bar_mount` + `spike`
+(now `data/spike_bar.asm`), staged by seg0 0x54A6 into page 1 at (0x80,0x70) and
+drawn by `hazard_tick` -> `spike_bar_slot_tick`.  The consumer had been invisible
+because its source coordinate was disassembled as a code label (`ld hl,l8070h`,
+now `08070h`) - another instance of the immediate-operand-is-a-lie trap, this one
+a real seg2 label rather than a BIOS name.  The chain above each bar is a smear,
+not artwork (16-row block, 12 rows of art, drawn at Y-4 with a 4px step).  Full
+write-up in game-notes "Spike bars".
+
+Two follow-ups left open by that pass, both worth resolving:
+
+1. **`msx.sym` cannot name `spike_bars_restore` (0x902E).** The address is already
+   taken in the flat symbol file by `sfx_0e_block_break`, a PSG stream at the same
+   CPU address in seg14/15.  Every other routine in the cluster got an equ; this
+   one is named in `seg02.asm` only, so a z80dasm regen will re-label it with the
+   SFX name.  This is the general "flat sym over banked ROM" problem, so audit how
+   many such collisions exist across all segments before choosing a fix
+   (per-segment `.sym` files, or a bank-qualified naming scheme).  Gotcha recorded
+   in the `konami-msx-disasm` skill.
+2. **`hurt_simon_projectile` (0x85AD) is misnamed.** It scans only the 3-slot
+   0xC580 pool, and that pool holds nothing but the spike bars - enemy projectiles
+   live in the 8 D700 shot slots and hit Simon by a different path.  Renaming it
+   (`hurt_simon_hazard`, or `hurt_simon_spikes` if we confirm nothing else ever
+   seeds C580) touches `seg01.asm` 0x4621, `msx.sym`, and several sections here
+   and in game-notes; left alone for now to keep the trail of existing notes
+   readable.
+
 Half-renames (comment/`msx.sym` name, still `sub_XXXXh` in source) folded in for
 the graphics kernel, bank switchers, object-list loader, minimap, and the
 confirmed gameplay helpers (`award_kill_score`, `collect_bonus_apply`, etc.).
@@ -1131,8 +1183,11 @@ Known live RAM map (runtime-confirmed this session):
          block); +05 bonus id; +07/+08 E000 pos ptr.  First tick saves D100
          under the slot (E480/E4A0) and stamps brick tiles for kind 3.
   0xC500 floor pickups/chests: 8 slots, stride 0x10 (`pickup_tick`).
-  0xC580 hazard/projectile slots: 3 x 8 bytes (`hazard_tick`;
-         `hurt_simon_projectile` overlap). Seeded on stage 6 room 1.
+  0xC580 spike bars: 3 x 8 bytes (`hazard_tick`; `hurt_simon_projectile`
+         overlap, 32x8 box). Stage 6 room 1 only - the pool holds nothing else.
+         +0 state 1=descending/2=retracting, +1 Y, +2 X, +3 descend rate mask,
+         +4 tick, +5 steps per sweep, +6 step count.  Drawn as a 32x16
+         background block from page 1 (0x80,0x70); see game-notes "Spike bars".
   0xC598 moving platforms: 2 x 7 bytes (`platform_tick`; table `platform_tbl`
          stages 5 and 10). SAT at 0xD638/0xD648.
   0xC5A6 whip-break sparks: 2 x 3 bytes (`break_spark_tick`).
@@ -1197,7 +1252,7 @@ Known live RAM map (runtime-confirmed this session):
          spawned flyers (fireballs, bones, axes, sickles, snakes,
          bandages) plus the death flame (type 12 / kind 0xFF). Ticked by
          `shot_tick`. Not Simon's thrown weapons (C450/C460 `projectile_*`)
-         and not the 3-slot C580 `hazard_*` pool.
+         and not the 3-slot C580 spike-bar pool.
 
 Snapshot session (F9 x7: baseline -> 5 braziers -> castle) nailed the inventory
 block that every prior movement WATCH missed.  Method note: the F9 RAM-diff alone
@@ -1240,8 +1295,12 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   `segments/actors.inc`; routine names go in `segments/msx.sym`.
 - Identified binary data (standing practice): dump known blobs to labeled
   `defb` (`tools/emit_identified_data.py` -> `segments/data/` and tileset
-  banks), Metal Gear style. 4bpp tiles are hex `defb` pixel-rows; 1bpp glyphs use
-  `defb %xxxxxxxx`. Packed sprite RLE uses `%` pixel rows (counts stay hex).
+  banks), Metal Gear style. 4bpp tiles are hex `defb` pixel-rows. Identified
+  uncompressed 1bpp sheets (`hud_font`, `credits_font`, `logo_font`) use
+  `defb %xxxxxxxx` (MSB=left, one row per line) — extract as soon as the
+  sheet is found; do not leave them as hex in a leftover dump. Packed sprite
+  RLE uses `%` pixel rows (counts stay hex). PNG contact sheets label hex
+  tile ids, not ASCII chars.
   PNG/`rleenc.py` is preview/modding, not the assemble source (packer is not
   byte-exact). Unidentified leftover slices are labeled
   hex once a bank is off `.bin`. Do not mass-convert a whole unknown bank to
@@ -1285,13 +1344,18 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   merman_generator_3, hanging_bat_generator, flying_skull_generator, ghost_head_generator,
   roc_generator, door_blit_tiles, read_buttons, input_edge, play_sound,
   frontend_input, frontend_to_title, frontend_game_start, slot_sig_7ffa,
-  credits_font_load, credits_font_blit, load_weapon_sprites, load_vdoor_sprites,
+  credits_font_load, credits_font_blit, hud_font_load, logo_font_load, load_weapon_sprites, load_vdoor_sprites,
   gfx_script_run, gfx_script_rle, gfx_script_copy, gfx_script_convert, room_gfx_load,
   load_stage_tileset, tileset_ptr, dracula_portrait_load,
   dracula_portrait_palette, main_tick, play_tick, rle_dec, rle_dec_addr,
   vram_write, vdp_set_write, vdp_set_read, palette_set, palette_apply,
   video_init, page_play_banks, page_map_banks, page_title_banks,
-  page_tileset_banks, page_tileset_late, page_sound_banks, palette_hud_load;
+  page_tileset_banks, page_tileset_late, page_sound_banks, palette_hud_load,
+  vdp_cmd_wait, vdp_status_read, vdp_line_h/_v (+ _save), vdp_box, vdp_hmmv,
+  vdp_hmmc, vram_blit_tile8/_tile16/_tile_run, glyph_blit, glyph_blit_run,
+  glyph_expand_4bpp, tile_atlas_pos, blit_advance_x, hud_draw_all,
+  draw_stage_hud, hud_panel_frames, hud_bars_redraw, health_bar_redraw,
+  health_bar_frame, enemy_meter_frame;
   seg1: simon_action_tick, simon_walk_left/right, simon_jump_tick, simon_mirror_frames,
   simon_crouch, simon_stairs, simon_fall, simon_hurt, simon_dying,
   simon_portal_wait, simon_attack_tick, whip_tick, projectile_tick,
@@ -1312,7 +1376,9 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   lose_weapon, shot_throw, shot_spawn, shot_alloc, shot_bone, shot_tick,
   shot_type_tick, fireball, medusa_snake, mummy_bandage, shot_axe, shot_sickle,
   actors_tick, c800_tick, pickup_tick, vendor_tick, break_spark_tick,
-  hazard_tick, platform_tick, platform_load, platform_tbl,
+  hazard_tick, spike_bars_seed_once, spike_bars_seed, spike_bar_seeds,
+  spike_bars_run, spike_bar_slot_tick, spike_bars_restore,
+  platform_tick, platform_load, platform_tbl,
   actor_type_tick, actor_tick_tbl, vendor_outcome_tbl, vendor_hit_latch,
   vendor_leave, award_kill_score, collect_bonus_apply, inv_or_c701/c702,
   hud_weapon_icon, hud_bonus_refresh, spawn_rate_gate, spawn_pick_pos,
@@ -1341,12 +1407,14 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   boss_clear_orb, boss_clear_orb_wait, boss_clear_heal, boss_clear_done;
   seg13: conn_lookup, conn_load_permits, conn_room_record, conn_ptr, door_load,
   door_load_coords, door_tbl, spot_load_coords, spot_tbl, simon_cell0_ptr,
-  simon_cell1_ptr, intro_simon, intro_sky;
+  simon_cell1_ptr, intro_simon, intro_sky, logo_font, logo_font_ink2,
+  logo_font_ink3;
   seg11/12: mtile_rowbase, mtile_roomptr, mtile_stream_c41a, mtile_streams,
   mtile_defbase, mtile_defs_s00..s18, mtile_def_c41a.
   tilesets: tileset_s00..s18 (in-source; s00/s13 omitted from msx.sym — CPU
   window collides with mtile_rowbase / scenery_list_ptr), hud_weapon_key_tiles,
-  title_logo_jp_tiles, title_logo_en_tiles, title_castle_tiles.
+  title_logo_jp_tiles, title_logo_en_tiles, title_castle_tiles, hud_font,
+  hud_font_solid, hud_tile_bf00, logo_font, logo_font_ink2, logo_font_ink3.
   seg14: scenery_list_ptr, scenery_list_s00, scenery_list_h0..h5,
   spawn_bitmask_ptr, spawn_mask_s00..s18, object_list_ptr,
   object_list_h0..h5, credits_font, credits_font_az, sound_tick, sound_idle,

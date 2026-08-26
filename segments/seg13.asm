@@ -13,7 +13,7 @@
 ;  Landmarks: 0xA041 = mtile_def_c41a (room_map_build when 0xC41A != 0); 0xA281 /
 ;  0xA2D1 = Simon cell pointer tables (below); 0xA319 = packed sprite RLE
 ;  (intro_simon + in-game frames); 0xB5A1-0xB894 figure Dracula 32x32 body;
-;  0xB895 = intro_sky.
+;  0xB895 = intro_sky; 0xBE59 = logo_font (boot Konami-logo 1bpp).
 	INCLUDE "data/mtile_defs_s18_b.asm"
 	INCLUDE "data/mtile_def_c41a.asm"
 
@@ -478,5 +478,6 @@ spot_tbl:                        ; (seg13 0xBBCD) (stage, dest<<4|room, Y, X), 0
 	defb 00ch,02bh,0a8h,098h ; stage 12 room 11 dest=2 Y=0xA8 X=0x98
 	defb 0ffh                ; end
 
-; Remainder of the bank (more graphics / unreversed data).
+; Remainder of the bank, then the boot Konami-logo 1bpp font.
 	INCLUDE "data/seg13_bbf6.asm"
+	INCLUDE "data/font_logo.asm"

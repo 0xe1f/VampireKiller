@@ -158,6 +158,9 @@ hud_weapon_key_tiles: equ 0xb9c8	; HUD keys/weapons 8x8 4bpp (seg6)
 title_logo_jp_tiles: equ 0xaea0	; title kana glyphs (seg8)
 title_logo_en_tiles: equ 0xb260	; title CASTLEVANIA glyphs (seg8)
 title_castle_tiles: equ 0xac80	; 0x11 shared castle emblem glyphs (seg8)
+hud_font: equ 0xbd80		; 48 x 8x8 1bpp HUD/title glyphs ('0'-'_') (seg8)
+hud_font_solid: equ 0xbed8	; all-1s glyph; hud_font_load blits ink 0 to (0,0) for space
+hud_tile_bf00: equ 0xbf00	; 8x8 4bpp follow-on (hud_font_load -> VRAM 0xA440)
 dracula_portrait_load: equ 0x5887	; event-6: seg15 frame+face tiles into page-1 atlas (s18r9)
 dracula_portrait_palette: equ 0x59f3	; event-6: HUD-fixed then 0xBF6F pink/flesh (replaces s18 purple)
 dracula_portrait_parts_load: equ 0x5992	; 8 x 16x16 eyes/mouth to page-1 Y=0xA0
@@ -190,6 +193,30 @@ play_tick: equ 0x5c2c	; in-stage play loop: events, actors, SAT, pause, credits
 room_gfx_load: equ 0x5787	; 9AB0[D000-1][D001]: gfx_script_run then palette_apply
 vdp_hmmm: equ 0x494d	; V9938 HMMM: HL=SX,SY DE=DX,DY BC=NX,NY; A=pages
 vdp_lmmm: equ 0x49e2	; V9938 LMMM (colour-0 skip); A packed pages+logic
+vdp_cmd_wait: equ 0x4853	; spin until S#2 bit0 (CE) clears
+vdp_status_read: equ 0x485c	; read status register A via R15, then restore R15=0
+vdp_line_h: equ 0x487c	; LINE: H=X L=Y B=length C=colour (MAJ 0, along X)
+vdp_line_v: equ 0x48af	; LINE with MAJ 1 (along Y); same H/L/B/C
+vdp_box: equ 0x48e3	; rectangle outline: H=X L=Y D=width E=height C=colour
+vdp_line_v_save: equ 0x48fd	; vdp_line_v preserving HL/DE/BC
+vdp_line_h_save: equ 0x4907	; vdp_line_h preserving HL/DE/BC
+vdp_hmmv: equ 0x4911	; HMMV fill: H=X L=Y D=page B=w C=h A=byte (0 = 256)
+vdp_hmmc: equ 0x4991	; HMMC: CPU bytes at HL -> rect D,E size B,C page A
+glyph_blit_run: equ 0x4a2e	; blit B 8x8 1bpp glyphs at D,E in ink C
+glyph_blit: equ 0x4a37	; one glyph: expand to 0xC110 then blit to the bitmap
+vram_blit_tile8: equ 0x4a58	; one 8x8 4bpp tile, HL src -> DE VRAM (0x80 stride)
+vram_blit_tile_run: equ 0x4a6d	; B consecutive 8x8 tiles, wrapping each 0x80 line
+vram_blit_tile16: equ 0x4a82	; one 16x16 4bpp tile (16 rows of 8)
+glyph_expand_4bpp: equ 0x4aac	; 8x8 1bpp at HL -> 4bpp scratch 0xC110, ink C
+tile_atlas_pos: equ 0x4b48	; tile id A -> H=SX=(A&1F)*8, L=SY=(A&E0)>>2
+blit_advance_x: equ 0x4b56	; step D,E one 8x8 cell right, wrap to the next row
+hud_draw_all: equ 0x451a	; repaint the whole HUD (labels, counters, meters, icons)
+draw_stage_hud: equ 0x4542	; draw the HUD STAGE number (0xC411, BCD)
+hud_panel_frames: equ 0x454c	; three vdp_box outlines along the top HUD row
+hud_bars_redraw: equ 0x45b7	; repaint both HUD meters with their frames
+health_bar_redraw: equ 0x45c0	; health frame + draw_health_bar
+enemy_meter_frame: equ 0x45c6	; clear + border the enemy meter panel (66x6)
+health_bar_frame: equ 0x45cf	; clear + border the health bar panel (66x6)
 add_score: equ 0x44f5	; add C:D:E (BCD hi:mid:lo) to the 3-byte score at 0xC405-0xC407
 state_hub_advance: equ 0x4324	; C409: boss-clear/credits -> hub++ then advance_stage
 state_pause: equ 0x43e1	; C40A: F1 freeze; F1 again resumes play
@@ -222,6 +249,8 @@ read_fkeys: equ 0x4bfb	; sample kbd row 6 -> bit0=F1,bit1=F2,bit2=F3 (edge-detec
 play_sound: equ 0x50a6	; A=id: 0=stop, 1-7F sfx, 80-8F music, FB-FF special
 credits_font_load: equ 0x53e5	; page seg14/15 and blit ending credits_font + _az
 credits_font_blit: equ 0x53e8	; blit only (banks already paged)
+hud_font_load: equ 0x53bd	; page seg7/8 and blit hud_font + hud_tile_bf00
+logo_font_load: equ 0x5316	; page seg13, blit logo_font, fall into page_play_banks
 room_spawner: equ 0x5ebf	; per-frame enemy spawner; spawn_bitmask_ptr[stage][room]
 zombie_generator: equ 0x9ced	; room_spawner bit0: rate-gated zombie (actor type 01) spawner
 merman_generator: equ 0x9d52	; room_spawner bit1: actor_merman_green type 02 (1 HP)
@@ -420,7 +449,12 @@ scenery_drop: equ 0x8996	; bonus B at DE -> C500; slime skips flame
 scenery_drop_slot: equ 0x8999
 drop_spawn: equ 0x89ea	; flame+C500, or slime directly to scenery_drop_slot
 pickup_tick: equ 0x8a51	; 8 x C500 floor items/chests
-hazard_tick: equ 0x8fd6	; 3 x C580 hazard slots (hurt_simon_projectile)
+spike_bars_seed_once: equ 0x8fa1	; seed the C580 bars only if slot 0 is free
+spike_bars_seed: equ 0x8fa6	; seed 3 x C580 from spike_bar_seeds (stage 6 room 1)
+spike_bar_seeds: equ 0x8fc4	; 3 x 6-byte spike-bar seeds
+hazard_tick: equ 0x8fd6	; 3 x C580 spike bars (hurt_simon_projectile)
+spike_bars_run: equ 0x8fd9	; walk the 3 C580 slots, stride 8
+spike_bar_slot_tick: equ 0x8ff1	; advance one bar +-4px and repaint it (32x16 HMMM)
 platform_load: equ 0x9034	; seed C598 from platform_tbl for this room
 platform_tbl: equ 0x9073	; {stage,room,n}+n×4; stages 5 and 10
 platform_tick: equ 0x90a2	; 2 x C598 moving platforms (carry Simon via C439)
@@ -478,6 +512,9 @@ simon_cell0_ptr: equ 0xA281	; 40 words, index 0xC42E (legs) -> RLE streams
 simon_cell1_ptr: equ 0xA2D1	; 36 words, index 0xC42F (torso/whip) -> RLE streams
 intro_simon: equ 0xA319		; first intro_simon RLE stream (VRAM 0xF800)
 intro_sky: equ 0xB895		; intro cloud/bat sprite stream (VRAM 0xFA00)
+logo_font: equ 0xBE59		; 52 x 8x8 1bpp Konami-logo glyphs, ids 01-34 (seg13)
+logo_font_ink2: equ 0xBEC1	; logo_font ids 0E-1A (ink 2)
+logo_font_ink3: equ 0xBF29	; logo_font ids 1B-34 (ink 3; wraps to Y=8 at id 20)
 conn_lookup: equ 0xB963		; pending dir 0xC41B -> dest room 0xD001 (0xF = blocked)
 conn_write_room: equ 0xB987	; ld (0xD001),a / scf / ret
 conn_from_spot: equ 0xB98C	; C41B==0xFF: D001 = C5B4 (spot_tbl dest nibble)

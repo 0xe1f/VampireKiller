@@ -395,7 +395,7 @@ state_stage_bridge:            ; 4 (0x422C)
 	daa
 	ld (hl),a
 	call sub_47dbh
-	call sub_451ah
+	call hud_draw_all
 	call 062edh
 	ld hl,0c413h
 	ld (hl),001h           ; stay in play (0 = attract/death leave-play)
@@ -496,7 +496,7 @@ l42e3h:
 	ld hl,l4300h
 	call l4ad2h
 l42f8h:
-	call sub_451ah
+	call hud_draw_all
 	ld a,078h
 	jp l41c9h
 l4300h:
@@ -572,7 +572,7 @@ advance_stage:
 	ld (0c408h),a          ; clear stage-boundary (white-key door) latch
 	ld a,004h
 	jp l41b6h
-	ld hl,CHKRAM
+	ld hl,00000h
 	ld (0c000h),hl
 	ret
 l4377h:
@@ -826,40 +826,47 @@ add_score:
 	ld (0c402h),bc         ; unused (no readers); visible score is C405-C407
 	ld (0c403h),bc
 	jr l4538h
-sub_451ah:
-	ld hl,l4c07h
+; --- hud_draw_all (seg0 0x451A) - paint the whole HUD from scratch: the static
+;     labels, then every counter, meter, frame and icon.
+hud_draw_all:
+	ld hl,l4c07h           ; HUD label strings (vk-encoded)
 	call l4ad2h
-	call sub_4542h
+	call draw_stage_hud
 	call draw_hearts_hud
 	call draw_lives_hud
-	call sub_45b7h
-	call sub_454ch
+	call hud_bars_redraw
+	call hud_panel_frames
 	call hud_weapon_icon
-	call 08ebbh
+	call 08ebbh            ; seg2: HUD key/weapon tiles
 	call hud_bonus_refresh
 l4538h:
 	ld hl,0c407h
 	ld de,03800h
 	ld b,003h
 	jr l457fh
-sub_4542h:
-	ld de,09c00h
-	ld hl,0c411h
+; --- draw_stage_hud (seg0 0x4542) - draw the HUD STAGE number (0xC411, BCD).
+draw_stage_hud:
+	ld de,09c00h           ; HUD cell for the stage readout
+	ld hl,0c411h           ; stage/area label (packed BCD)
 	ld b,001h
 	jr l457fh
-sub_454ch:
+; --- hud_panel_frames (seg0 0x454C) - the three boxed HUD panels along the top
+;     row (y=0x0B, 18 tall): 18 wide at x=0x7F in colour 8, then 34 wide at
+;     x=0x93 and 66 wide at x=0xB7 in colour 14.  Outlines only; the counters
+;     drawn above sit inside them.
+hud_panel_frames:
 	ld hl,07f0bh
-	ld de,01212h
+	ld de,01212h           ; 18 x 18
 	ld c,008h
-	call sub_48e3h
+	call vdp_box
 	ld hl,0930bh
-	ld de,02212h
+	ld de,02212h           ; 34 x 18
 	ld c,00eh
-	call sub_48e3h
+	call vdp_box
 	ld hl,0b70bh
-	ld de,04212h
+	ld de,04212h           ; 66 x 18
 	ld c,00eh
-	jp sub_48e3h
+	jp vdp_box
 ; --- draw_hearts_hud (seg0 0x456D) - draw the HEART counter (0xC417, BCD) -----
 ;  hl -> BCD source, de -> VDP name-table cell; B counts source bytes (1 byte =
 ;  2 decimal digits).  Runtime-confirmed: 0xC417 is the heart total (cap 0x99).
@@ -920,22 +927,26 @@ l45b0h:
 l45b4h:
 	xor a
 	jr l45b0h
-sub_45b7h:
-	call sub_45c0h
+; --- hud_bars_redraw (seg0 0x45B7) - repaint both HUD meters, frame and all.
+;     health_bar_redraw (0x45C0) does just Simon's; the frame helpers below
+;     clear the panel and draw its colour-14 border, then the bar is filled in.
+;     Frame is 66x6 at (0x3B,0x0D) / (0x3B,0x16), one pixel around each 64x4 bar.
+hud_bars_redraw:
+	call health_bar_redraw
 l45bah:
-	call sub_45c6h
+	call enemy_meter_frame
 	jp draw_enemy_meter
-sub_45c0h:
-	call sub_45cfh
+health_bar_redraw:
+	call health_bar_frame
 	jp draw_health_bar
-sub_45c6h:
-	ld hl,03b16h
-	ld bc,l4206h
+enemy_meter_frame:
+	ld hl,03b16h           ; (X,Y) just outside the enemy meter
+	ld bc,04206h           ; 66 x 6 (immediate, not a code address)
 l45cch:
-	jp sub_5d15h
-sub_45cfh:
-	ld hl,03b0dh
-	ld bc,l4206h
+	jp sub_5d15h           ; clear the panel + draw its border
+health_bar_frame:
+	ld hl,03b0dh           ; (X,Y) just outside the health bar
+	ld bc,04206h           ; 66 x 6
 	jp l45cch
 ; draw_health_bar (seg0 0x45D8) - draw the HEALTH bar from 0xC415 (len = health*2).
 draw_health_bar:
@@ -949,7 +960,7 @@ draw_health_bar:
 	ld c,004h
 	ld d,000h
 	ld a,011h
-	jp l4911h
+	jp vdp_hmmv
 ; draw_enemy_meter (seg0 0x45EC) - draw the ENEMY/BOSS energy meter from 0xC418 (cap 0x80).
 draw_enemy_meter:
 	ld hl,0c418h           ; enemy/boss energy (0..0x80)
@@ -971,7 +982,7 @@ l4602h:
 	ld c,004h
 	ld d,000h
 	ld a,088h
-	jp l4911h
+	jp vdp_hmmv
 ; restore_health (seg0 0x460C) - restore HEALTH: 0xC415 += B, clamped to 0x20 max.
 restore_health:
 	ld hl,0c415h           ; Simon health
@@ -985,7 +996,7 @@ restore_health:
 	ld a,020h
 l461bh:
 	ld (hl),a
-	jp sub_45c0h
+	jp health_bar_redraw
 ; restore ENEMY/BOSS energy: 0xC418 += B, clamped to the 0x80 maximum.
 	ld hl,0c418h           ; enemy/boss energy
 	ld a,(hl)
@@ -1013,7 +1024,7 @@ l463ah:
 	ld a,(hl)
 	sub b
 	ld (hl),a
-	jp sub_45c0h
+	jp health_bar_redraw
 ; damage_enemy (seg0 0x4643) - subtract B from the on-screen ENEMY/BOSS energy
 ; 0xC418 (the enemies/bosses that carry an HP bar, types >= 0x11), floored at 0.
 ; This is where Simon's whip/sub-weapon damage lands (see seg1 weapon_hit_damage).
@@ -1323,7 +1334,7 @@ l47ach:
 	djnz l47a6h
 	ret
 	call sub_47f7h
-	ld bc,CHKRAM
+	ld bc,00000h
 	jr l47c6h
 sub_47c0h:
 	call sub_47f7h
@@ -1348,10 +1359,10 @@ sub_47dbh:
 	call WRTVDP
 	jr l4805h
 sub_47e8h:
-	ld hl,CHKRAM
+	ld hl,00000h
 	xor a
 	ld d,a
-	call l4911h
+	call vdp_hmmv
 	ld b,000h
 	ld c,017h
 	jp WRTVDP
@@ -1419,29 +1430,36 @@ palette_apply:
 	inc hl
 	call palette_set
 	jr palette_apply
-l4853h:
-	ld a,002h
-	call sub_485ch
-	rra
-	jr c,l4853h
+; --- vdp_cmd_wait (seg0 0x4853) - spin until the VDP command engine is idle.
+;     Polls S#2 bit0 (CE, "command executing"); every command helper below
+;     calls this first so it can safely reload the command registers.
+vdp_cmd_wait:
+	ld a,002h              ; status register 2
+	call vdp_status_read
+	rra                    ; bit0 -> carry = CE (still executing)
+	jr c,vdp_cmd_wait
 	ret
-sub_485ch:
+; --- vdp_status_read (seg0 0x485C) - read V9938 status register A into A.
+;     R15 selects which of S#0..S#9 appears on the status port; it is put back
+;     to 0 afterwards so the BIOS interrupt handler still reads S#0.  Port
+;     numbers come from the BIOS VDP port bytes at 0x0006/0x0007 (+1 = 0x99).
+vdp_status_read:
 	push bc
 	push hl
-	ld hl,(00006h)
-	inc h
+	ld hl,(00006h)         ; L = VDP read port, H = VDP write port (0x98)
+	inc h                  ; 0x99 = register write / status read port
 	inc l
 	ld c,h
 	di
-	out (c),a
+	out (c),a              ; R15 = A (status register select)
 	ld a,08fh
 	out (c),a
 	ld c,l
-	in a,(c)
+	in a,(c)               ; read the selected status register
 	push af
 	xor a
 	ld c,h
-	out (c),a
+	out (c),a              ; R15 = 0 again (BIOS/IRQ expects S#0)
 	ld a,08fh
 	out (c),a
 	pop af
@@ -1449,154 +1467,173 @@ sub_485ch:
 	pop bc
 	ei
 	ret
-sub_487ch:
-	call l4853h
+; --- vdp_line_h (seg0 0x487C) - V9938 LINE, horizontal run.
+;     H = X, L = Y (page 0), B = length, C = colour.  R17 is pointed at R36
+;     with auto-increment, so DX/DY/NX/NY/CLR/ARG/CMR go out as one stream on
+;     the indirect data port (0x9B).  ARG bit0 (MAJ) = 0 -> long side is X.
+vdp_line_h:
+	call vdp_cmd_wait
+	push bc                ; stash length/colour for the NX/CLR writes
+	ld a,(00007h)
+	inc a
+	ld c,a                 ; 0x99 = register port
+	ld a,024h
+	di
+	out (c),a              ; R17 = 36 (DX), auto-increment on
+	ld a,091h
+	out (c),a
+	inc c
+	inc c                  ; 0x9B = indirect register data
+	out (c),h              ; R36 DX = X
+	xor a
+	out (c),a              ; R37
+	out (c),l              ; R38 DY = Y
+	out (c),a              ; R39 (page 0)
+	pop hl                 ; H = length, L = colour
+	dec h
+	out (c),h              ; R40 NX = length-1 (long side)
+	xor a
+	out (c),a              ; R41
+	xor a
+	out (c),a              ; R42 NY = 0 (short side)
+	out (c),a              ; R43
+	out (c),l              ; R44 CLR = colour
+	out (c),a              ; R45 ARG = 0 -> MAJ 0, long side is X
+	ld a,070h
+	out (c),a              ; R46 CMR = LINE, logic IMP
+	ei
+	ret
+; --- vdp_line_v (seg0 0x48AF) - the same LINE command with ARG bit0 (MAJ) = 1,
+;     so the long side runs down Y instead.  Same H/L/B/C convention.
+vdp_line_v:
+	call vdp_cmd_wait
 	push bc
 	ld a,(00007h)
 	inc a
 	ld c,a
 	ld a,024h
 	di
-	out (c),a
+	out (c),a              ; R17 = 36 (DX), auto-increment on
 	ld a,091h
 	out (c),a
 	inc c
 	inc c
-	out (c),h
+	out (c),h              ; R36 DX = X
 	xor a
-	out (c),a
-	out (c),l
-	out (c),a
-	pop hl
+	out (c),a              ; R37
+	out (c),l              ; R38 DY = Y
+	out (c),a              ; R39 (page 0)
+	pop hl                 ; H = length, L = colour
 	dec h
-	out (c),h
+	out (c),h              ; R40 NX = length-1
 	xor a
-	out (c),a
+	out (c),a              ; R41
 	xor a
-	out (c),a
-	out (c),a
-	out (c),l
-	out (c),a
+	out (c),a              ; R42 NY = 0
+	out (c),a              ; R43
+	out (c),l              ; R44 CLR = colour
+	inc a
+	out (c),a              ; R45 ARG = 1 -> MAJ 1, long side is Y
 	ld a,070h
-	out (c),a
+	out (c),a              ; R46 CMR = LINE, logic IMP
 	ei
 	ret
-sub_48afh:
-	call l4853h
-	push bc
-	ld a,(00007h)
-	inc a
-	ld c,a
-	ld a,024h
-	di
-	out (c),a
-	ld a,091h
-	out (c),a
-	inc c
-	inc c
-	out (c),h
-	xor a
-	out (c),a
-	out (c),l
-	out (c),a
-	pop hl
-	dec h
-	out (c),h
-	xor a
-	out (c),a
-	xor a
-	out (c),a
-	out (c),a
-	out (c),l
-	inc a
-	out (c),a
-	ld a,070h
-	out (c),a
-	ei
-	ret
-sub_48e3h:
+; --- vdp_box (seg0 0x48E3) - rectangle OUTLINE built from four LINE commands.
+;     H = X, L = Y (top-left), D = width, E = height, C = colour.  Left and top
+;     edges first, then the bottom at Y+height-1 and the right at X+width-1.
+;     Draws the HUD bar frames (health_bar_frame) and the message-panel border.
+vdp_box:
 	ld b,e
-	call sub_48fdh
+	call vdp_line_v_save   ; left edge, height tall
 	ld b,d
-	call sub_4907h
+	call vdp_line_h_save   ; top edge, width wide
 	push hl
 	ld a,l
 	dec a
 	add a,e
-	ld l,a
+	ld l,a                 ; Y += height-1
 	ld b,d
-	call sub_4907h
+	call vdp_line_h_save   ; bottom edge
 	pop hl
 	ld a,h
 	dec a
 	add a,d
-	ld h,a
+	ld h,a                 ; X += width-1
 	ld b,e
-	jp sub_48fdh
-sub_48fdh:
+	jp vdp_line_v_save     ; right edge
+; --- vdp_line_v_save / vdp_line_h_save (0x48FD / 0x4907) - the LINE helpers
+;     with HL/DE/BC preserved, so vdp_box keeps its parameters across all four
+;     edges (the primitives themselves clobber HL and B).
+vdp_line_v_save:
 	push hl
 	push de
 	push bc
-	call sub_48afh
+	call vdp_line_v
 	pop bc
 	pop de
 	pop hl
 	ret
-sub_4907h:
+vdp_line_h_save:
 	push hl
 	push de
 	push bc
-	call sub_487ch
+	call vdp_line_h
 	pop bc
 	pop de
 	pop hl
 	ret
-l4911h:
-	ex af,af'
-	call l4853h
+; --- vdp_hmmv (seg0 0x4911) - V9938 HMMV: fill a VRAM rectangle with one byte.
+;     H = X, L = Y, D = VRAM page (DY high), B = width, C = height, A = the
+;     fill byte (two 4bpp pixels, e.g. 0x11 = colour 1).  A width or height of
+;     0 means 256: the NX/NY high bit is set instead.  Used for the HUD bars
+;     (draw_health_bar / draw_enemy_meter), panel interiors, and the page 0/1
+;     clears in video_init.
+vdp_hmmv:
+	ex af,af'              ; keep the fill byte
+	call vdp_cmd_wait
 	push bc
 	ld a,(00007h)
 	inc a
 	ld c,a
 	ld a,024h
 	di
-	out (c),a
+	out (c),a              ; R17 = 36 (DX), auto-increment on
 	ld a,091h
 	out (c),a
 	inc c
 	inc c
-	out (c),h
+	out (c),h              ; R36 DX = X
 	xor a
-	out (c),a
-	out (c),l
-	out (c),d
-	pop hl
-	out (c),h
-	cp h
+	out (c),a              ; R37
+	out (c),l              ; R38 DY = Y
+	out (c),d              ; R39 DY high = VRAM page
+	pop hl                 ; H = width, L = height
+	out (c),h              ; R40 NX = width
+	cp h                   ; width 0 means 256 px...
 	jr nz,l4936h
-	inc a
+	inc a                  ; ...so carry it in the NX high bit
 l4936h:
-	out (c),a
+	out (c),a              ; R41
 	xor a
-	out (c),l
-	cp l
+	out (c),l              ; R42 NY = height
+	cp l                   ; height 0 means 256 px
 	jr nz,l493fh
 	inc a
 l493fh:
-	out (c),a
+	out (c),a              ; R43
 	ex af,af'
-	out (c),a
+	out (c),a              ; R44 CLR = fill byte
 	xor a
-	out (c),a
+	out (c),a              ; R45 ARG = 0
 	ld a,0c0h
-	out (c),a
+	out (c),a              ; R46 CMR = HMMV
 	ei
 	ret
 ; vdp_hmmm (seg0 0x494D): V9938 HMMM. HL=(SX,SY), DE=(DX,DY), BC=(NX,NY).
 ; A bits 1-0 = source page, bits 3-2 = dest page. ARG=0 (no X/Y flip).
 vdp_hmmm:
 	ex af,af'
-	call l4853h
+	call vdp_cmd_wait
 	push bc
 	ld a,(00007h)
 	inc a
@@ -1637,64 +1674,69 @@ vdp_hmmm:
 	out (c),a
 	ei
 	ret
-sub_4991h:
-	ex af,af'
-	call l4853h
+; --- vdp_hmmc (seg0 0x4991) - V9938 HMMC: push CPU bytes into a VRAM rectangle.
+;     HL = source bytes, D = X, E = Y, A = VRAM page, B = width, C = height.
+;     The first byte rides out with the command; R17 is then re-pointed at R44
+;     with auto-increment OFF so the feed loop can keep writing CLR, waiting on
+;     S#2 TR between bytes.  Ends when CE clears.  CMR 0xF0 = HMMC.
+vdp_hmmc:
+	ex af,af'              ; keep the destination page
+	call vdp_cmd_wait
 	push bc
 	ld a,(00007h)
 	inc a
 	ld c,a
 	ld a,024h
 	di
-	out (c),a
+	out (c),a              ; R17 = 36 (DX), auto-increment on
 	ld a,091h
 	out (c),a
 	inc c
 	inc c
-	out (c),d
+	out (c),d              ; R36 DX = X
 	xor a
-	out (c),a
-	out (c),e
+	out (c),a              ; R37
+	out (c),e              ; R38 DY = Y
 	ex af,af'
-	out (c),a
-	pop de
-	out (c),d
+	out (c),a              ; R39 DY high = VRAM page
+	pop de                 ; D = width, E = height
+	out (c),d              ; R40 NX = width
 	xor a
-	out (c),a
-	out (c),e
-	out (c),a
-	ld a,(hl)
+	out (c),a              ; R41
+	out (c),e              ; R42 NY = height
+	out (c),a              ; R43
+	ld a,(hl)              ; first data byte travels with the command
 	inc hl
-	out (c),a
+	out (c),a              ; R44 CLR
 	xor a
-	out (c),a
+	out (c),a              ; R45 ARG = 0
 	ld a,0f0h
-	out (c),a
+	out (c),a              ; R46 CMR = HMMC
 	dec c
-	dec c
+	dec c                  ; back to the register port
 	ld a,0ach
-	out (c),a
+	out (c),a              ; R17 = 44 (CLR), auto-increment OFF
 	ld a,091h
 	out (c),a
 	inc c
 	inc c
 l49d1h:
 	ld a,002h
-	call sub_485ch
-	rra
+	call vdp_status_read   ; S#2
+	rra                    ; CE clear -> transfer done
 	ret nc
 	add a,a
-	add a,a
+	add a,a                ; carry = TR (S#2 bit7): VDP wants a byte
 	jr nc,l49d1h
 	ld a,(hl)
 	inc hl
-	out (c),a
+	out (c),a              ; feed the next byte through CLR
 	jr l49d1h
 ; vdp_lmmm (seg0 0x49E2): V9938 LMMM (colour-0 skip). Same HL/DE/BC as vdp_hmmm.
 ; A is packed page + logic bits (0x48 = page-1 -> page-0, used for Dracula torso).
 vdp_lmmm:
 	ex af,af'
-	call l4853h
+	call vdp_cmd_wait
 	push bc
 	ld a,(00007h)
 	inc a
@@ -1742,74 +1784,93 @@ vdp_lmmm:
 	out (c),a
 	ei
 	ret
-l4a2eh:
-	call sub_4a37h
-	call sub_4b56h
-	djnz l4a2eh
+; --- glyph_blit_run (seg0 0x4A2E) - blit B consecutive 8x8 1bpp glyphs.
+;     HL = glyph bytes, D = X, E = Y, B = count, C = ink colour.  Used by
+;     hud_font_load (0x53BD) for hud_font, credits_font_blit (0x53E8) for
+;     credits_font / credits_font_az, and logo_font_load (0x5316) for
+;     logo_font / logo_font_ink2 / logo_font_ink3.
+glyph_blit_run:
+	call glyph_blit
+	call blit_advance_x
+	djnz glyph_blit_run
 	ret
-sub_4a37h:
+; --- glyph_blit (seg0 0x4A37) - expand one 1bpp glyph to 4bpp and blit it.
+;     D = X, E = Y, C = ink.  SCREEN 5 has no pattern table, so the glyph is
+;     first painted into the 0xC110 scratch tile, then copied to the bitmap at
+;     VRAM 0x8000 + Y*0x80 + X/2.  HL advances to the next glyph.
+glyph_blit:
 	push bc
 	push de
 	push hl
 	push de
-	call sub_4aach
+	call glyph_expand_4bpp
 	pop de
-	ld b,d
+	ld b,d                 ; swap to (Y,X) so the 16-bit shift below works
 	ld d,e
 	ld e,b
-	srl d
+	srl d                  ; (Y<<8 | X) >> 1 = Y*0x80 + X/2
 	rr e
 	ld a,d
-	add a,080h
+	add a,080h             ; + VRAM page-0 bitmap base (0x8000)
 	ld d,a
-	ld hl,0c110h
-	call sub_4a58h
+	ld hl,0c110h           ; the expanded 4bpp tile
+	call vram_blit_tile8
 	pop hl
-	ld bc,SYNCHR
+	ld bc,00008h           ; next glyph (8 bytes of 1bpp rows)
 	add hl,bc
 	pop de
 	pop bc
 	ret
-sub_4a58h:
+; --- vram_blit_tile8 (seg0 0x4A58) - blit one 8x8 4bpp tile.  HL = source
+;     (32 bytes: 8 rows of 4), DE = VRAM dest.  A SCREEN 5 scanline is 0x80
+;     bytes, so each row advances the destination by 0x80.  DE comes back
+;     unchanged, pointing at the tile's top-left again.
+vram_blit_tile8:
 	push de
-	ld b,008h
+	ld b,008h              ; 8 pixel rows
 l4a5bh:
 	push bc
-	ld bc,00004h
+	ld bc,00004h           ; 4 bytes = 8 pixels at 4bpp
 	call vram_write
 	ex de,hl
-	ld bc,00080h
+	ld bc,00080h           ; next scanline
 	add hl,bc
 	ex de,hl
 	pop bc
 	djnz l4a5bh
 	pop de
 	ret
-l4a6dh:
+; --- vram_blit_tile_run (seg0 0x4A6D) - blit B consecutive 8x8 tiles, laying
+;     them left to right.  DE steps 4 bytes per tile and wraps at the end of
+;     the 0x80-byte line, where it drops down one tile row (D += 4 = 8 lines).
+;     This is the tile-atlas upload (dest 0x8004+, 32 tiles per row).
+vram_blit_tile_run:
 	push bc
-	call sub_4a58h
+	call vram_blit_tile8
 	ld a,004h
-	add a,e
+	add a,e                ; next tile to the right
 	cp 080h
 	jr nz,l4a7dh
 	ld a,004h
-	add a,d
+	add a,d                ; wrapped: down one tile row (8 scanlines)
 	ld d,a
 	xor a
 l4a7dh:
 	ld e,a
 	pop bc
-	djnz l4a6dh
+	djnz vram_blit_tile_run
 	ret
-sub_4a82h:
+; --- vram_blit_tile16 (seg0 0x4A82) - the same for one 16x16 4bpp tile
+;     (16 rows of 8 bytes), and l4A97 for a run of them.
+vram_blit_tile16:
 	push de
-	ld b,010h
+	ld b,010h              ; 16 pixel rows
 l4a85h:
 	push bc
-	ld bc,SYNCHR
+	ld bc,00008h           ; 8 bytes = 16 pixels at 4bpp
 	call vram_write
 	ex de,hl
-	ld bc,00080h
+	ld bc,00080h           ; next scanline
 	add hl,bc
 	ex de,hl
 	pop bc
@@ -1818,13 +1879,13 @@ l4a85h:
 	ret
 l4a97h:
 	push bc
-	call sub_4a82h
+	call vram_blit_tile16
 	ld a,008h
-	add a,e
+	add a,e                ; next tile to the right
 	cp 080h
 	jr nz,l4aa7h
 	ld a,008h
-	add a,d
+	add a,d                ; wrapped: down one tile row
 	ld d,a
 	xor a
 l4aa7h:
@@ -1832,29 +1893,33 @@ l4aa7h:
 	pop bc
 	djnz l4a97h
 	ret
-sub_4aach:
-	ld b,008h
-	ld de,0c110h
+; --- glyph_expand_4bpp (seg0 0x4AAC) - expand an 8x8 1bpp glyph at HL into the
+;     32-byte 4bpp scratch tile at 0xC110.  C is the ink colour; a 0 bit becomes
+;     colour 0 (transparent).  Each source row shifts out 8 bits MSB-first and
+;     `rld` packs them two pixels at a time into 4 destination bytes.
+glyph_expand_4bpp:
+	ld b,008h              ; 8 rows
+	ld de,0c110h           ; 4bpp scratch tile
 l4ab1h:
 	push bc
 	push hl
 	ex de,hl
 	ld a,(de)
-	ld d,a
-	ld b,004h
+	ld d,a                 ; D = this row's 8 source bits
+	ld b,004h              ; 4 dest bytes = 8 pixels
 l4ab8h:
-	ld a,c
+	ld a,c                 ; ink for a set bit...
 	rl d
 	jr c,l4abeh
-	xor a
+	xor a                  ; ...colour 0 for a clear bit
 l4abeh:
-	rld
+	rld                    ; push the pixel into the high nibble
 	ld a,c
 	rl d
 	jr c,l4ac6h
 	xor a
 l4ac6h:
-	rld
+	rld                    ; and the low nibble
 	inc hl
 	djnz l4ab8h
 	ex de,hl
@@ -1894,7 +1959,7 @@ sub_4aeeh:
 	or a
 	ld h,a
 	jr z,l4afah
-	call sub_4b48h
+	call tile_atlas_pos
 	add a,038h
 l4afah:
 	ld l,a
@@ -1908,7 +1973,7 @@ l4afah:
 l4b07h:
 	push af
 	call sub_4aeeh
-	call sub_4b56h
+	call blit_advance_x
 	pop af
 	djnz l4b07h
 	ret
@@ -1916,7 +1981,7 @@ sub_4b12h:
 	push bc
 	push hl
 	push de
-	call sub_4b48h
+	call tile_atlas_pos
 	ld bc,00808h
 	ld a,001h
 	call vdp_hmmm
@@ -1927,7 +1992,7 @@ sub_4b12h:
 	push bc
 	push hl
 	push de
-	call sub_4b48h
+	call tile_atlas_pos
 	ld bc,00808h
 	ld a,048h
 	call vdp_lmmm
@@ -1938,7 +2003,7 @@ sub_4b12h:
 	push bc
 	push hl
 	push de
-	call sub_4b48h
+	call tile_atlas_pos
 	ld bc,00808h
 	ld a,005h
 	call vdp_hmmm
@@ -1946,24 +2011,30 @@ sub_4b12h:
 	pop hl
 	pop bc
 	ret
-sub_4b48h:
+; --- tile_atlas_pos (seg0 0x4B48) - tile id A -> source position in the VRAM
+;     atlas: H = SX = (A & 0x1F) * 8, L = SY = (A & 0xE0) >> 2.  32 tiles per
+;     row, 8 scanlines per row.  Callers pass HL straight to vdp_hmmm/vdp_lmmm.
+tile_atlas_pos:
 	ld b,a
-	and 01fh
+	and 01fh               ; column = id & 0x1F
 	add a,a
 	add a,a
-	add a,a
+	add a,a                ; * 8 pixels
 	ld h,a
 	ld a,b
-	and 0e0h
+	and 0e0h               ; row = id >> 5
 	rrca
-	rrca
+	rrca                   ; * 8 scanlines
 	ld l,a
 	ret
-sub_4b56h:
+; --- blit_advance_x (seg0 0x4B56) - step a blit position one 8x8 cell right,
+;     wrapping to the next row of cells (D = X, E = Y).  Shared by
+;     glyph_blit_run and the HUD tile runs.
+blit_advance_x:
 	ld a,d
 	add a,008h
 	ld d,a
-	ret nz
+	ret nz                 ; wrapped past X=255 -> down one cell row
 	ld a,e
 	add a,008h
 	ld e,a
@@ -1971,9 +2042,9 @@ sub_4b56h:
 ; --- video_init - video subsystem init.  Selects SCREEN 5 (VDP mode G4:
 ;     256x212, 16 colours, 4 bits/pixel bitmap).  This is why the graphics
 ;     banks (seg 4-9, 15) hold 4bpp bitmap data blitted to VRAM with the VDP
-;     command engine (see sub_48e3h / l4911h), rather than 1bpp tile patterns.
+;     command engine (see vdp_box / vdp_hmmv), rather than 1bpp tile patterns.
 ;     Actors are drawn with hardware sprites (mode 2, 16x16).  After the mode
-;     switch it clears VRAM page 0/1 via the block-fill helper l4911h.
+;     switch it clears VRAM page 0/1 via the block-fill helper vdp_hmmv.
 video_init:
 	call sub_507dh
 	call l4805h
@@ -1986,15 +2057,15 @@ video_init:
 	ld b,a
 	ld c,a
 	ld d,a
-	call l4911h
+	call vdp_hmmv
 	xor a
 	ld h,a
 	ld l,a
 	ld b,a
 	ld c,a
 	ld d,001h
-	call l4911h
-	call l4853h
+	call vdp_hmmv
+	call vdp_cmd_wait
 	ld b,004h
 	ld hl,l4b9ch
 l4b89h:
@@ -2171,7 +2242,7 @@ l4d41h:
 title_build:
 	call sub_47dbh
 	call sub_4de2h
-	call l4853h
+	call vdp_cmd_wait
 	call palette_hud_load
 	ld b,003h
 	ld de,06606h
@@ -2197,13 +2268,13 @@ l4d6dh:
 	ld de,00700h
 	call palette_set
 	call sub_47f7h
-	call sub_53bdh
+	call hud_font_load
 	call title_load_tiles  ; load region-specific title glyphs into VRAM
-	ld hl,CHRGTR
+	ld hl,00010h
 	ld bc,00068h
 	ld a,0ffh
 	ld d,000h
-	call l4911h
+	call vdp_hmmv
 	ld hl,00516h
 	call title_fill_strips
 	ld hl,00569h
@@ -2235,10 +2306,10 @@ l4dd5h:
 sub_4de2h:
 	ld d,000h
 l4de4h:
-	ld hl,CHKRAM
-	ld bc,CHKRAM
+	ld hl,00000h
+	ld bc,00000h
 	xor a
-	jp l4911h
+	jp vdp_hmmv
 sub_4deeh:
 	ld hl,0c420h
 	ld de,0c421h
@@ -2261,7 +2332,7 @@ sub_4deeh:
 	ld (0c418h),a          ; enemy/boss energy meter = full (0x80)
 	call 062d7h
 	call 062edh
-	jp sub_451ah
+	jp hud_draw_all
 sub_4e27h:
 	call play_tick
 	ld a,(0c41bh)
@@ -2369,10 +2440,10 @@ l4ec4h:
 	ld de,03068h
 	jp spawn_actor
 	ld hl,0ffe0h
-	ld de,CHKRAM
+	ld de,00000h
 	bit 0,(ix+000h)
 	jr z,l4ee9h
-	ld hl,DCOMPR
+	ld hl,00020h
 	ld de,0fff0h
 l4ee9h:
 	call actor_set_yvel
@@ -2458,7 +2529,7 @@ l4f86h:
 ;  Walks 0xD140 (map row 2, skipping the 2 HUD rows) as 22 rows x 32 cols and
 ;  draws each tile via sub_4b12h (dest advances 8px per cell / 8px per row).
 	ld hl,0d140h
-	ld de,DCOMPR
+	ld de,00020h
 	ld b,016h
 l4fa0h:
 	push bc
@@ -2669,13 +2740,13 @@ play_sound:
 	jp p,l5171h
 	ld de,0c01ch
 	ld hl,l515dh
-	ld bc,WRSLT
+	ld bc,00014h
 	ldir
 	ld hl,l515dh
-	ld bc,WRSLT
+	ld bc,00014h
 	ldir
 	ld hl,l515dh
-	ld bc,WRSLT
+	ld bc,00014h
 	ldir
 	and 07fh
 	rlca
@@ -2746,12 +2817,12 @@ l5140h:
 l515dh:
 	nop
 	nop
-	ld bc,CHKRAM
+	ld bc,00000h
 	nop
 	nop
 	nop
 	nop
-	ld bc,CHKRAM
+	ld bc,00000h
 	nop
 	nop
 	ld bc,00001h
@@ -2772,7 +2843,7 @@ l5183h:
 	ld (0c096h),a
 	ld de,0c058h
 	ld hl,l515dh
-	ld bc,WRSLT
+	ld bc,00014h
 	ldir
 	rlca
 	ld hl,sfx_ptr
@@ -2837,7 +2908,7 @@ l51cbh:
 	ld (0c01ah),hl
 	ld de,0c080h
 	ld hl,l515dh
-	ld bc,WRSLT
+	ld bc,00014h
 	ldir
 	ld hl,snd_fd_seq
 	ld (0c080h),hl
@@ -2902,7 +2973,7 @@ l529ch:
 	ld (0c018h),hl
 	ld de,0c06ch
 	ld hl,l515dh
-	ld bc,WRSLT
+	ld bc,00014h
 	ldir
 	ld hl,snd_fb_seq
 	ld (0c078h),hl
@@ -2941,19 +3012,25 @@ l52f0h:
 	ld a,(0c0a6h)
 	cp 0f8h
 	ret
+; logo_font_load (seg0 0x5316): page seg13 and blit the 8x8 1bpp Konami-logo
+; font (logo_font at 0xBE59, 52 glyphs, tile ids 0x01-0x34) onto page 0 at
+; Y=0 in inks 1/2/3.  Falls through into page_play_banks.  Called from
+; konami_logo_draw; tile_string_draw then copies those cells with no HUD
+; +0x38, so ids 0x2C-0x2E are logo wordmark tiles, not hud_font '<' '=' '>'.
+logo_font_load:
 	call page_map_banks
-	ld hl,0be59h
-	ld de,00800h
-	ld bc,00d01h
-	call l4a2eh
-	ld hl,0bec1h
-	ld de,07000h
-	ld bc,00d02h
-	call l4a2eh
-	ld hl,0bf29h
-	ld de,0d800h
-	ld bc,01a03h
-	call l4a2eh
+	ld hl,logo_font
+	ld de,00800h           ; X=8, Y=0 (id 0x00 at X=0 is blank)
+	ld bc,00d01h           ; B=13 glyphs, ink 1
+	call glyph_blit_run
+	ld hl,logo_font_ink2
+	ld de,07000h           ; X=0x70, Y=0
+	ld bc,00d02h           ; B=13 glyphs, ink 2
+	call glyph_blit_run
+	ld hl,logo_font_ink3
+	ld de,0d800h           ; X=0xD8, Y=0 (wraps to Y=8 at id 0x20)
+	ld bc,01a03h           ; B=26 glyphs, ink 3
+	call glyph_blit_run
 ; --- page_play_banks - restore the default bank set after a graphics load: seg 1 @
 ;     0x6000 (page 1b), seg 2 @ 0x8000 (page 2a), seg 3 @ 0xA000 (page 2b).
 ;     These are the banks the running game code normally expects paged in.
@@ -3053,23 +3130,29 @@ page_tileset_banks:
 	ld (hl),a
 	ei
 	ret
-sub_53bdh:
+; hud_font_load (seg0 0x53BD): page seg7/8 and blit the 8x8 1bpp HUD/title
+; font (hud_font at 0xBD80, 48 glyphs '0'-'_') into SCREEN 5 page 1 at
+; Y=0x40, ink 0x0E.  The all-1s glyph at hud_font_solid is first painted
+; ink 0 at (0,0) so vk space (0x00) HMMM-copies a blank.  Then one 8x8
+; 4bpp tile at hud_tile_bf00.  Called from title_build; the atlas stays
+; in page 1 through play (below the playfield tileset).
+hud_font_load:
 	call page_tileset_late
-	ld de,CHKRAM
+	ld de,00000h
 	ld c,000h
-	ld hl,0bed8h
-	call sub_4a37h
+	ld hl,hud_font_solid
+	call glyph_blit
 	ld de,00040h
-	ld hl,0bd80h
+	ld hl,hud_font
 	ld bc,0300eh
-	call l4a2eh
-	ld hl,0bf00h
+	call glyph_blit_run
+	ld hl,hud_tile_bf00
 	ld de,0a440h
 	ld b,001h
-	call l4a6dh
+	call vram_blit_tile_run
 	jp page_play_banks
 ; credits_font_load (seg0 0x53E5): page segs 14/15 and blit the 8x8 1bpp
-; ending-credits font (digits+punct, then A-Z) into SCREEN 5 via l4a2eh.
+; ending-credits font (digits+punct, then A-Z) into SCREEN 5 via glyph_blit_run.
 ; Called from credits_init (post-Dracula script player). credits_font_blit
 ; (0x53E8) skips the pager when those banks are already in.
 credits_font_load:
@@ -3078,11 +3161,11 @@ credits_font_blit:
 	ld de,08040h
 	ld hl,credits_font
 	ld bc,00e0eh           ; B=14 glyphs 0-9 . ' : ,
-	call l4a2eh
+	call glyph_blit_run
 	ld de,00848h
 	ld hl,credits_font_az
 	ld bc,01a0eh           ; B=26 glyphs A-Z
-	call l4a2eh
+	call glyph_blit_run
 	jp page_play_banks
 ; door_blit_tiles (0x5403): paint the 6-tile door graphic.  HL is 0xC5AC on
 ; entry (from door_anim_tick when it was 0xFF).  ld de,(0xC5AD) loads E=Y
@@ -3103,7 +3186,7 @@ l540eh:
 	ld l,a
 	ld bc,00808h
 	xor a
-	call sub_4991h
+	call vdp_hmmc
 	pop hl
 	inc hl
 	inc hl
@@ -3196,20 +3279,22 @@ l548ch:
 	ld de,0b028h
 	ld b,001h
 	call l4a97h
-	ld hl,bonus_hud_9a80
+; Assemble the 32x16 spike-bar hazard in page 1 at (0x80, 0x70); hazard_tick
+; (seg2 0x8FD6) HMMMs it from there into the playfield.
+	ld hl,spike_bar_mount  ; bracket, centred over the bar at (X=140, Y=112)
 	ld de,08c70h
 	ld bc,00804h
 	ld a,001h
-	call sub_4991h
-	ld de,08074h
+	call vdp_hmmc
+	ld de,08074h           ; bar+spike unit tiled x4 -> X=128..159, Y=116
 	ld b,004h
 l54c0h:
 	push bc
 	push de
-	ld hl,bonus_hud_9a90
+	ld hl,spike
 	ld bc,00808h
 	ld a,001h
-	call sub_4991h
+	call vdp_hmmc
 	pop de
 	pop bc
 	ld a,d
@@ -3302,7 +3387,7 @@ l5558h:
 	inc hl
 	ld h,(hl)
 	ld l,a
-	call sub_4a58h
+	call vram_blit_tile8
 	ld a,004h
 	call ADD_DE_A
 	pop hl
@@ -3478,7 +3563,7 @@ load_stage_tileset:
 tileset_blit:
 	ld de,08004h
 	ld b,0bfh
-	call l4a6dh
+	call vram_blit_tile_run
 	jp page_play_banks
 	call page_title_banks
 	ld hl,frontend_tiles
@@ -3691,7 +3776,7 @@ l581bh:
 	push bc
 	push de
 	push hl
-	ld bc,CHRGTR
+	ld bc,00010h
 	call vram_write
 	pop hl
 	pop de
@@ -3791,23 +3876,23 @@ sub_589ch:
 	ld hl,dracula_frame_abf8
 	ld b,008h
 	ld de,08018h
-	call l4a6dh
+	call vram_blit_tile_run
 	ld hl,dracula_frame_acf8
 	ld b,002h
 	ld de,08040h
-	call l4a6dh
+	call vram_blit_tile_run
 	ld hl,dracula_frame_ad38
 	ld b,002h
 	ld de,08060h
-	call l4a6dh
+	call vram_blit_tile_run
 	ld hl,dracula_frame_ad78
 	ld b,001h
 	ld de,08070h
-	call l4a6dh
+	call vram_blit_tile_run
 	ld hl,dracula_face
 	ld b,06ch
 	ld de,08078h
-	jp l4a6dh
+	jp vram_blit_tile_run
 sub_58d3h:
 	ld hl,dracula_frame_ad78
 	ld b,001h
@@ -3826,7 +3911,7 @@ sub_58f1h:
 	push hl
 	call sub_5904h
 	pop hl
-	ld de,DCOMPR
+	ld de,00020h
 	add hl,de
 	pop de
 	call sub_5962h
@@ -3836,13 +3921,13 @@ sub_58f1h:
 sub_5904h:
 	push de
 	ld de,0e800h
-	ld bc,DCOMPR
+	ld bc,00020h
 	ldir
 	call sub_5919h
 	pop de
 	ld hl,0e800h
 	ld b,001h
-	jp l4a6dh
+	jp vram_blit_tile_run
 sub_5919h:
 	ld hl,0e800h
 	ld de,0e803h
@@ -3911,7 +3996,7 @@ l5976h:
 	pop de
 	ld hl,0e800h
 	ld b,001h
-	jp l4a6dh
+	jp vram_blit_tile_run
 dracula_portrait_parts_load:
 	ld hl,dracula_portrait_parts
 	ld de,0d000h
@@ -3989,13 +4074,13 @@ title_load_tiles:
 	ld hl,0ac80h           ; 0x11 shared castle glyphs (seg8 0xAC80)...
 	ld de,08004h           ; ...to VRAM 0x8004
 	ld b,011h
-	call l4a6dh
+	call vram_blit_tile_run
 	ld a,(0002bh)          ; MSX character set (0 = Japanese)...
 	and 00fh
 	jr nz,l5a2ah           ; non-zero -> international glyphs
 	ld hl,0aea0h           ; Japanese: 0x1E "Akumajo Dracula" kana glyphs
 	ld b,01eh
-	call l4a6dh
+	call vram_blit_tile_run
 	call page_map_banks
 	ld de,0bbf6h
 	call rle_dec_addr
@@ -4003,7 +4088,7 @@ title_load_tiles:
 l5a2ah:                        ; international/other machine
 	ld hl,0b260h           ; 0x59 "VAMPIRE KILLER" glyphs (seg8 0xB260)
 	ld b,059h
-	call l4a6dh
+	call vram_blit_tile_run
 l5a32h:
 	jp page_play_banks           ; restore default banks
 ; Paged-call wrappers into seg13 (bank 0x0d @ 0xA000).  page_map_banks pages it in,
@@ -4311,7 +4396,7 @@ scenery_room_ptr:
 	ld (0cffeh),a
 	push bc
 	push de
-	ld de,CHKRAM
+	ld de,00000h
 	ld a,(0d000h)
 	or a
 	jr z,l5bf5h
@@ -4488,7 +4573,7 @@ slot_sig_7ffa:                 ; 6 bytes compared at CPU 0x7FFA via RDSLT
 sub_5cf6h:
 	call sub_5d04h
 	ld c,00eh
-	call sub_48e3h
+	call vdp_box
 	ld hl,l5d1dh
 	jp l4ad2h
 sub_5d04h:
@@ -4499,14 +4584,14 @@ sub_5d0ah:
 	ld d,000h
 	push bc
 	push hl
-	call l4911h
+	call vdp_hmmv
 	pop hl
 	pop de
 	ret
 sub_5d15h:
 	call sub_5d0ah
 	ld c,00eh
-	jp sub_48e3h
+	jp vdp_box
 l5d1dh:
 	ld e,b
 	and b
@@ -4899,7 +4984,7 @@ l5f49h:
 	ld c,a
 	and a
 	jr z,spawn_actor_init
-	ld de,CHKRAM
+	ld de,00000h
 	ld hl,0d638h
 	ld b,00eh
 l5f68h:

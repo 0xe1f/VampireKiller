@@ -317,6 +317,55 @@ those handlers with a different spawn-init (overflow of `entity_tbl` into seg1
 (`l87f6h`) is a different field. An earlier overlay treated list-id `0x1F` as a
 door candidate because those 3 rooms matched a scan — they are the placed bats.
 
+### Spike bars (the 0xC580 hazard pool)
+
+The three chain-hung spike bars of **stage 6 room 1** are the only thing that
+ever occupies the 0xC580 pool — `spike_bars_seed` (seg2 0x8FA6) refuses to seed
+unless `0xD000`/`0xD001` = stage 6 / room 1, and nothing else writes those
+slots. They are **not enemies**: no C500/C800 actor slot, no HP, no death
+state, and they cannot be destroyed. They are also **not sprites** — each is a
+32×16 4bpp *background* block moved with `vdp_hmmm`, so there is nothing to add
+to `gfx/enemy_sheet.png`.
+
+`hazard_tick` (0x8FD6) → `spike_bars_run` → `spike_bar_slot_tick` (0x8FF1) per
+live slot. Slot layout (8 bytes, `spike_bar_seeds` at 0x8FC4 seeds `+0..+5`):
+
+| off | meaning |
+| ---: | --- |
+| +0 | state: 1 = descending (+4px/step), 2 = retracting (−4px/step), 0 = free |
+| +1 | Y (the bar/collision row) |
+| +2 | X (fixed column) |
+| +3 | extra rate gate while descending: 0 = every tick, 1 = every 2nd |
+| +4 | free-running tick counter |
+| +5 | steps per sweep, then toggle state (`0x0B × 4` = 44px of travel) |
+| +6 | steps taken this sweep |
+
+Seeds are X = `0x3C` / `0x7C` / `0xBC` at Y = `0x60` — the three arches — with
+tick phases 0/1/2 so they do not move in lockstep, and the right-hand bar
+gated to half rate. Descending is gated by `+4 & +3` and retracting by
+`+4 & 3`, so a bar **drops fast and crawls back up**. Contact damage comes
+from `hurt_simon_projectile` (0x85AD) over a 32×8 box: **16** while descending,
+**8** while retracting (it reads bit 0 of the state byte, which is what makes
+the two directions differ).
+
+The graphic is staged once by the HUD/bonus loader at seg0 0x54A6, which builds
+the picture in **VRAM page 1 at (0x80, 0x70)** out of two seg9 fragments:
+`spike_bar_mount` (8×4, one chain link) centred at X=140, and `spike` (8×8, a
+bar segment with one downward spike) blitted four times at X = `0x80`/`0x88`/
+`0x90`/`0x98` to span 32px. Dumped by `dump_hazards` to `gfx/hazards.png`
+(assembled bar + both fragments, stage 6 room 1 palette). Note the pixel
+indices are 4/6/0xB, all **stage-overlay** slots, so the same bytes are gold
+here but would come out pink or cyan under another stage's palette.
+
+**The chain is a smear, not artwork.** The copied block is 16 rows but the art
+is only 12 — rows 0–3 are the chain link, 4–11 the bar and spikes, 12–15 blank
+— and it is drawn at `Y−4` with a 4px step. So every descending step leaves
+rows 0–3 uncovered and the links stack into a seamless vertical rod, while
+retracting paints the bar back over them (and the blank rows wipe the spike
+tips). That is why the three bars in the room have visibly different chain
+lengths: chain length *is* the drop distance. `spike_bars_restore` (0x902E)
+repaints them after the F2 map screen, reseeding so the sweep restarts.
+
 ## Room geometry / tile map (CONFIRMED, static + runtime, byte-exact)
 
 Every room is an **8 wide x 6 tall grid of METATILES**; each metatile is a **4x4
@@ -505,9 +554,13 @@ on-screen **ENEMY/BOSS energy** (full `0x80`, used by HP-bar enemies, types ≥ 
   of 2× when Simon is facing the hit, and spends a shield charge (`0xC441`);
   when charges run out the shield drops.  The **yellow shield** (id 4, bit 5)
   absorbs enemy shots instead.
-- **Hazard / enemy projectile** — `hurt_simon_projectile` (seg2 0x85AD). Fixed
-  **8**, or **16** if the slot's flag bit is set. Also forces the hurt state
+- **Hazard** — `hurt_simon_projectile` (seg2 0x85AD), a 32×8 overlap test against
+  the three 0xC580 slots. Fixed **8**, or **16** when bit 0 of the slot's state
+  byte is set. In practice that pool only ever holds the stage 6 room 1 spike
+  bars, whose state byte is 1 while descending and 2 while retracting — so the
+  16 is the falling bar and the 8 is the rising one. Also forces the hurt state
   (`0xC420 = 5`). Ignored during i-frame/freeze timers (`0xC42D`, `0xC43A`).
+  See [Spike bars](#spike-bars-the-0xc580-hazard-pool).
 
 **Simon deals damage** to HP-bar enemies via `weapon_hit_damage` (seg1 0x7E33) →
 `damage_enemy` (seg0 0x4643, `0xC418 -= B`). B comes from a per-weapon table indexed
@@ -910,10 +963,11 @@ in seg00 are converted. `title_layout` 0x4C3F-0x4D0E is `defb`.
 
 Text is stored as **tile codes = ASCII - 0x10** (so decode with `+0x10`).
 Cross-checked against the Metal Gear disassembly (which stores text as plain
-ASCII); Vampire Killer offsets HUD/title text by 0x10 because that font is
-loaded into VRAM starting at tile 0x10. Digits '0'-'9' = tiles 0x20-0x29
-(confirmed by the score renderer `sub_458fh`: `and 0x0F / add 0x20`). `0x00`
-= space/blank tile between words; `0xFE` and `0xFF` are line/record control
+ASCII); Vampire Killer offsets HUD/title text by 0x10 because `hud_font`
+(seg8 0xBD80) is the ASCII range `'0'`–`'_'` uploaded at atlas ids 0x20+.
+Digits '0'-'9' = tiles 0x20-0x29 (confirmed by the score renderer `sub_458fh`:
+`and 0x0F / add 0x20`). `0x00` = space/blank (HMMM from VRAM (0,0), the
+ink-0 blit of `hud_font_solid`); `0xFE` and `0xFF` are line/record control
 bytes; other high bytes (0x48,0xA0,0x58,0xD1...) are VDP position/attribute
 prefixes. The `vk` macro in `VampireKiller.asm` authors these.
 
@@ -933,12 +987,22 @@ Data region is `l4c07h` .. 0x4D4D (right before `sub_4d4eh`, the title builder).
 `0x4C00-0x4C06` is real code (a keyboard-read routine).
 
 HUD/title strings are authored with `vk` (ASCII−0x10) in seg0 `l4c07h` /
-`l4d0fh`. The 8x8 1bpp ending-credits glyphs live in seg14 `credits_font`
-(0x8824: digits 0-9 then `. ' : ,`) and `credits_font_az` (0x8894: A-Z), one
-`defb %xxxxxxxx` row per scanline. `credits_font_load` (seg0 0x53E5) is
-called from `credits_init` and blits them into SCREEN 5 via `l4a2eh` (ink
-C=0x0E). Sheet: `gfx/credits_font.png` (`make gfx`). HUD/title text uses a
-different font (tile base 0x10, ASCII-0x10 encoding above).
+`l4d0fh`. The HUD/title glyphs are seg8 `hud_font` (0xBD80: 48 × 8×8 1bpp,
+ASCII `'0'`–`'_'`), one `defb %xxxxxxxx` row per scanline in
+`segments/data/font_hud.asm`. `hud_font_load` (seg0 0x53BD, from
+`title_build`) expands them via `glyph_blit_run` (ink C=0x0E) onto VRAM
+page 1 at Y=`0x40`. Drawing is HMMM from that atlas (`sub_4aeeh`, source Y
++= `0x38`). Sheet: `gfx/font_hud.png` (`make gfx`). The 8x8 1bpp
+ending-credits glyphs are a different sheet in `segments/data/font_credits.asm`:
+seg14 `credits_font` (0x8824: digits 0-9 then `. ' : ,`) and `credits_font_az`
+(0x8894: A-Z). `credits_font_load` (seg0 0x53E5) is called from `credits_init`
+and blits them via `glyph_blit_run` (ink C=0x0E). Sheet: `gfx/font_credits.png`.
+The boot Konami logo is a third 1bpp sheet: seg13 `logo_font` (0xBE59: 52 × 8×8,
+tile ids `0x01`–`0x34`) in `segments/data/font_logo.asm`. `logo_font_load`
+(seg0 0x5316, from `konami_logo_draw`) blits three ink groups onto page 0 at
+Y=0; `tile_string_draw` copies them with no HUD `+0x38`. Logo ids `0x2C`–
+`0x2E` are wordmark cells, not `hud_font` `'<'` `'='` `'>'`. Sheet:
+`gfx/font_logo.png`.
 
 ### PSG driver (seg14)
 
@@ -988,16 +1052,22 @@ Video mode is **SCREEN 5** (VDP mode G4: 256x212, 16 colours, 4 bits/pixel
 bitmap). Set in `video_init`: `ld a,5 / call CHGMOD (0x005f)`. Consequences:
 
 - Backgrounds/tiles/logos are stored as **4bpp bitmap data** (high nibble = left
-  pixel, colour index 0-15, colour 0 = transparent/background). They are copied
-  to VRAM with the **VDP command engine** (`out (c)` streams to R17-indirect +
-  the command registers) via `sub_48e3h`, `l4911h`, and helpers `sub_48fdh` /
-  `sub_4907h` / `sub_487ch` / `sub_485ch` - NOT as 1bpp pattern tables.
+  pixel, colour index 0-15, colour 0 = transparent/background) and reach VRAM
+  two ways. Bulk pixels go through `vram_write` (OTIR) wrapped by the tile
+  blitters `vram_blit_tile8` / `vram_blit_tile16` / `vram_blit_tile_run`
+  (0x80-byte scanline stride), and `sub_554fh` blits a 32x32 image as a 4x4
+  grid of them. Everything else uses the **VDP command engine** (`out (c)`
+  streams to R17-indirect + the command registers): `vdp_hmmm` / `vdp_lmmm`
+  copy VRAM to VRAM, `vdp_hmmc` pushes CPU bytes in, `vdp_hmmv` fills a
+  rectangle, and `vdp_line_h` / `vdp_line_v` / `vdp_box` draw the HUD and panel
+  borders. All of them wait on `vdp_cmd_wait` (S#2 CE via `vdp_status_read`)
+  first. Nothing here is a 1bpp pattern table.
 - Actors (Simon, enemies, items) are drawn with **hardware sprites** (mode 2,
   16x16, **1bpp** patterns). A multicolour character is built from several 1bpp
-  planes the VDP OR-combines (the `CC` bit, 0x40, in the sprite colour byte);
-  the sprite attribute table is assembled by `sub_554fh` (nested 4x4 loops
-  writing 4-byte OAM records via `sub_4a58h`), so large characters are grids of
-  hardware sprites. Only the background is 4bpp - the sprites are never 4bpp.
+  planes the VDP OR-combines (the `CC` bit, 0x40, in the sprite colour byte), so
+  large characters are grids of hardware sprites; the sprite attribute table is
+  assembled in seg1 (`simon_sat_build` / `actor_sat_build`). Only the background
+  is 4bpp - the sprites are never 4bpp.
   Evidence: seg13/0xA319 patterns alternate sparse/dense pixel counts
   (52,164, 49,145, ...), each sparse plane nearly a subset of the next dense
   one - so `intro_simon` is 8 two-plane sprites, not 16 frames. The
@@ -1015,9 +1085,10 @@ Bank classification (by entropy / zero-fill, `tools/gfxview.py` + a quick scan):
   actor artwork.
 - **seg 10-14**: mixed code + data tables.
 
-Title graphics load (`sub_454ch`, called from the title builder): copies from
-ROM `0x7F0B`, `0x930B`, `0xB70B` (banked pages 1b/2a/2b) to VRAM `0x1212`,
-`0x2212`, `0x4212` with `c` = block count via `sub_48e3h`.
+(Earlier note corrected: `hud_panel_frames` at 0x454C is not a graphics copy.
+Its `0x7F0B` / `0x930B` / `0xB70B` and `0x1212` / `0x2212` / `0x4212` operands are
+`vdp_box` coordinates — three HUD panel outlines on the top row, not ROM
+addresses and VRAM destinations.)
 
 ### Graphics are RLE-compressed (format cracked)
 
@@ -1090,9 +1161,9 @@ four 16×16 cells per unique stream, labelled by dest). Seg13 `0xA319+` is
 `load_stage_tileset` (seg0 0x5653), first call in the screen builder, pages
 seg 4/5/6 (`page_tileset_banks`; stage ≥ 13 overlays seg 7/8 via `page_tileset_late`) and blits
 **0xBF uncompressed 8×8 4bpp** tiles from `tileset_ptr[D000]` into SCREEN 5
-VRAM starting `0x8004` (`l4a6dh` / `sub_4a58h`, 32 bytes/tile). That dest is
+VRAM starting `0x8004` (`vram_blit_tile_run` / `vram_blit_tile8`, 32 bytes/tile). That dest is
 X=8 on page 1, so nametable id 0 samples unloaded VRAM (blank / colour 0) and
-id N is ROM tile N−1 (`sub_4b48h`: SX=(A&0x1F)*8, SY=(A&0xE0)>>2). The
+id N is ROM tile N−1 (`tile_atlas_pos`: SX=(A&0x1F)*8, SY=(A&0xE0)>>2). The
 playfield drawer (`0x4F98`) paints 22 rows from `0xD140` (map rows 2–23).
 Eight unique sources (courtyard; stages 1-3 / 4-6 / 7-9 / 10-12 / 13-15 /
 16-17; Dracula). `make gfx` writes `gfx/tileset_s00.png` … `tileset_s18.png`
@@ -1146,8 +1217,16 @@ Catalogued so far (extend `manifest.tsv` as more sets are identified):
   RLE-decompresses to VRAM 0xF8C0 then `gfx_script_convert` converts 1bpp quadrants.
   Knife = 2 patterns (one two-plane sprite); axe/cross = 4 (two frames).
   In-game SAT for Simon's body is `simon_sat_cell0/1` (seg1 0x798C/0x79DC).
-- `credits_font.png` - 40 x 8x8 1bpp ending-credits glyphs from seg14
-  `credits_font` (0-9 `. ' : ,` A-Z). Raw, not RLE; loaded by `credits_init`.
+- `font_credits.png` - 40 x 8x8 1bpp ending-credits glyphs from seg14
+  `credits_font` (`data/font_credits.asm`; 0-9 `. ' : ,` A-Z). Raw, not RLE;
+  loaded by `credits_init`.
+- `font_hud.png` - 48 x 8x8 1bpp HUD/title glyphs from seg8 `hud_font`
+  (`data/font_hud.asm`; `'0'`–`'_'`). Raw, not RLE; loaded by `hud_font_load`
+  from `title_build`.
+- `font_logo.png` - 52 x 8x8 1bpp boot Konami-logo glyphs from seg13 `logo_font`
+  (`data/font_logo.asm`; tile ids `01`–`34`). Raw, not RLE; loaded by
+  `logo_font_load` from `konami_logo_draw`. Not `hud_font` (overlapping ids
+  `2C`–`2E` are a different bitmap).
 - `enemy_sheet.png` - one labelled frame per `entity_tbl` type `01`–`16`, plus
   candle-blob recolours **1A/1B/1C** (`make gfx`). Each frame is cropped to
   the SAT cells it actually occupies (16×16, 16×32, 32×16, … — type `16` is
@@ -1179,6 +1258,15 @@ Catalogued so far (extend `manifest.tsv` as more sets are identified):
   `0E 42` — HUD-fixed indices 15/8/14), appended as **1A/1B/1C**.
   Boss types use the event-room tileset. Not in `manifest.tsv`
   (derived, like the HUD bonus sheets).
+- `hazards.png` - environmental hazards: things that damage Simon but are not
+  actors, so they never appear on `enemy_sheet.png`. The stage 6 room 1 spike
+  bars are the **only** one in the game — every other damage source is an enemy
+  or an enemy shot. Three labelled cells: the assembled `SPIKE BAR 32x12` plus
+  its two seg9 fragments (`SPIKE 8x8`, `CHAIN 8x4`). Same convention as
+  `enemy_sheet.png` (packed mixed sizes, `NAME WxH` labels, `OFF` filling the
+  object's rectangle), but the pixels are 4bpp *background* data read straight
+  from seg9 rather than composited sprite planes. Palette is stage 6 room 1's
+  playfield sequence. Derived, not in `manifest.tsv`.
 - `script_rle.png` - unique per-room gfx-script cmd-0 RLE streams (30 sources,
   21 scripts). First up-to-four 16×16 cells per stream, labelled by VRAM dest.
   Derived; same `make gfx` pass as `enemy_sheet.png`.
@@ -1218,3 +1306,14 @@ record used by the entity dispatch at 0x5FD0 / `entity_tbl`).
 
 - Per-level / per-boss data tables (which bank they live in). Boss CE01
   machines for events 1–6 are named; leftover is other unnamed tables.
+- **Symbol collisions across banks.** `segments/msx.sym` is flat but the ROM is
+  banked, so two things at the same CPU address in different banks cannot both be
+  named. Known case: seg2 `spike_bars_restore` (0x902E) vs. the seg14/15 PSG
+  stream `sfx_0e_block_break`, which is why that one routine has no equ. Audit
+  the full collision count, then decide between per-segment symbol files and a
+  bank-qualified scheme.
+- **`hurt_simon_projectile` (0x85AD) is misnamed** — it only scans the 3-slot
+  0xC580 pool, which holds nothing but the spike bars; enemy projectiles are the
+  8 D700 shot slots on a different path. Rename to `hurt_simon_hazard` once we
+  have confirmed nothing else ever seeds C580 (touches seg1 0x4621, `msx.sym`,
+  and several note sections).

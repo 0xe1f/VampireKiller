@@ -129,7 +129,7 @@ l80d6h:
 	ld a,00ch
 	jp play_sound
 l80dbh:
-	ld de,CHRGTR
+	ld de,00010h
 	add ix,de
 	djnz l80b3h
 	ret
@@ -758,7 +758,7 @@ l8520h:
 	ret c
 l8538h:
 	ld hl,0c598h
-	ld de,CHKRAM
+	ld de,00000h
 	ld b,002h
 l8540h:
 	ld a,(hl)
@@ -2014,7 +2014,7 @@ l8cbfh:
 	ret
 l8cc4h:
 	ex af,af'
-	ld bc,SCALXY
+	ld bc,0010eh
 sub_8cc8h:
 	ld l,050h
 	cp 010h
@@ -2483,36 +2483,65 @@ sub_8f9bh:
 	ld a,(hl)
 	and b
 	ret
-sub_8fa1h:
+; --- the spike bars (0xC580 hazard pool) ------------------------------------
+; The only thing that ever occupies the three 0xC580 slots: the chain-hung
+; spike bars of stage 6 room 1.  They are *not* actors - no C500 slot, no HP,
+; they cannot be killed - and they are *not* hardware sprites.  Each is a
+; 32x16 4bpp background block HMMM'd out of the page-1 staging area that seg0
+; 0x54A6 assembles at (0x80, 0x70) from spike_bar_mount + 4x spike.
+;
+; 8-byte slot layout (only +0..+5 are seeded; +6/+7 are zeroed):
+;   +0 state: 1 = descending (+4/step), 2 = retracting (-4/step); 0 = free.
+;             bit 0 also picks the contact damage, so descending hurts more.
+;   +1 Y     current position (the collision/bar row)
+;   +2 X     fixed column
+;   +3 mask  extra rate gate while descending (0 = every tick, 1 = every 2nd)
+;   +4 tick  free-running frame counter, incremented every tick
+;   +5 steps steps per sweep; toggles state on reaching it (0x0B*4 = 44px)
+;   +6 count steps taken so far in this sweep
+;
+; Descending is gated by `+4 & +3` and retracting by `+4 & 3`, so a bar drops
+; fast and crawls back up. Contact damage is dealt by hurt_simon_projectile
+; (0x85AD) over a 32x8 box: 16 HP while descending, 8 HP while retracting.
+;
+; The chain the bar hangs from is not artwork - it is a deliberate smear.  The
+; block is 16 rows but the art is only 12: rows 0-3 are the spike_bar_mount
+; chain link, rows 4-11 the bar and spikes, rows 12-15 blank.  It is drawn at
+; Y-4, and the step is also 4px, so each descending step leaves row 0-3 behind
+; uncovered and the links stack into a seamless rod.  Retracting paints the bar
+; over the links again (and the blank rows 12-15 wipe the spike tips), so the
+; chain grows and shrinks with the drop, which is why the three bars in the
+; room have visibly different chain lengths.
+spike_bars_seed_once:              ; (0x8FA1) seed only if slot 0 is free
 	ld a,(0c580h)
 	or a
 	ret nz
-sub_8fa6h:
+spike_bars_seed:                   ; (0x8FA6) seed unconditionally
 	ld hl,(0d000h)
 	ld de,00106h
 	rst 20h
-	ret nz
-	ld hl,l8fc4h
+	ret nz                 ; D000/D001 = stage/room: stage 6 room 1 only
+	ld hl,spike_bar_seeds
 	ld de,0c580h
 	ld b,003h
 l8fb6h:
 	push bc
 	ld bc,00006h
-	ldir
+	ldir                   ; 6 seed bytes -> slot
 	xor a
 	ld (de),a
 	inc e
-	inc e
+	inc e                  ; zero +6, skip +7 (stride 8)
 	pop bc
 	djnz l8fb6h
 	ret
-l8fc4h:                            ; 3 x 6-byte C580 seeds (stage 6 room 1)
-	defb 001h,060h,03ch,000h,000h,00bh
-	defb 001h,060h,07ch,000h,001h,00ah
-	defb 001h,060h,0bch,001h,002h,00bh
-hazard_tick:                       ; (seg2 0x8FD6) 3 x C580 hazard slots
-	call sub_8fa1h
-l8fd9h:
+spike_bar_seeds:                   ; 3 x 6-byte C580 seeds (stage 6 room 1)
+	defb 001h,060h,03ch,000h,000h,00bh ; left arch:   X=0x3C, every tick
+	defb 001h,060h,07ch,000h,001h,00ah ; centre arch: X=0x7C, tick phase 1
+	defb 001h,060h,0bch,001h,002h,00bh ; right arch:  X=0xBC, half rate
+hazard_tick:                       ; (seg2 0x8FD6) tick the 3 spike bars
+	call spike_bars_seed_once
+spike_bars_run:                    ; (0x8FD9) walk the 3 slots, stride 8
 	ld hl,0c580h
 	ld b,003h
 l8fdeh:
@@ -2522,7 +2551,7 @@ l8fdeh:
 	push hl
 	ld a,(hl)
 	or a
-	call nz,sub_8ff1h
+	call nz,spike_bar_slot_tick    ; state != 0 -> live
 	pop hl
 	pop bc
 	ld a,008h
@@ -2530,53 +2559,58 @@ l8fdeh:
 	ld l,a
 	djnz l8fdeh
 	ret
-sub_8ff1h:
+; spike_bar_slot_tick (0x8FF1): advance and repaint one bar.  IX/HL = slot,
+; A = state.  Falls through to the HMMM, so the bar is redrawn only on the
+; ticks it actually moves.
+spike_bar_slot_tick:
 	inc hl
-	ld e,(hl)
+	ld e,(hl)              ; E = +1 Y
 	inc hl
-	ld d,(hl)
+	ld d,(hl)              ; D = +2 X
 	inc hl
-	ld c,(hl)
+	ld c,(hl)              ; C = +3 descend rate mask
 	inc hl
 	inc (hl)
-	ld b,(hl)
-	inc hl
+	ld b,(hl)              ; B = +4 tick counter (post-increment)
+	inc hl                 ; -> +5
 	dec a
-	jr nz,l9005h
+	jr nz,l9005h           ; state 2 -> retracting
 	ld a,c
 	and b
-	ret nz
-	ld a,004h
+	ret nz                 ; descending: gate on tick & +3
+	ld a,004h              ; +4 px (downwards)
 	jr l900bh
 l9005h:
 	ld a,003h
 	and b
-	ret nz
-	ld a,0fch
+	ret nz                 ; retracting: only every 4th tick
+	ld a,0fch              ; -4 px (upwards)
 l900bh:
 	add a,e
-	ld e,a
-	ld a,(hl)
-	inc hl
+	ld e,a                 ; E = new Y
+	ld a,(hl)              ; A = +5 steps per sweep
+	inc hl                 ; -> +6
 	inc (hl)
-	sub (hl)
+	sub (hl)               ; steps - count
 	jr nz,l901ch
-	ld (hl),a
+	ld (hl),a              ; end of sweep: count = 0
 	ld a,(ix+000h)
-	xor 003h
+	xor 003h               ; state 1 <-> 2 (descend <-> retract)
 	ld (ix+000h),a
 l901ch:
-	ld (ix+001h),e
+	ld (ix+001h),e         ; commit Y
 	ld a,e
 	sub 004h
-	ld e,a
-	ld hl,l8070h
-	ld bc,02010h
+	ld e,a                 ; draw 4px high: block row 0 is the chain link
+	ld hl,08070h           ; SX=0x80 SY=0x70: the spike-bar staging block, page 1
+	ld bc,02010h           ; 32x16 (spike_bar_mount + 4x spike, staged by seg0 0x54A6)
 	ld a,001h
-	jp vdp_hmmm
-sub_902eh:
-	call sub_8fa6h
-	jp l8fd9h
+	jp vdp_hmmm            ; src page 1 -> dest page 0 at (X, Y-4)
+; spike_bars_restore (0x902E): repaint the bars after the F2 map screen has
+; overwritten the playfield (reseeds, so the sweep restarts from the top).
+spike_bars_restore:
+	call spike_bars_seed
+	jp spike_bars_run
 platform_load:                     ; (seg2 0x9034) seed C598 from platform_tbl
 	ld hl,0c598h
 	ld a,(hl)
@@ -3269,7 +3303,7 @@ sub_9453h:
 	ld a,(0c703h)
 sub_9456h:
 	push af
-	ld bc,CHKRAM
+	ld bc,00000h
 	ld a,(0d000h)
 	or a
 l945eh:
@@ -3485,8 +3519,8 @@ minimap_driver:
 	call hud_bonus_refresh
 l9589h:
 	call 04805h            ; switch to the map screen (VDP page/setup)
-	ld hl,DCOMPR
-	ld bc,QINLIN
+	ld hl,00020h
+	ld bc,000b4h
 	xor a
 	ld d,000h
 	call 04911h
@@ -3511,7 +3545,7 @@ l95bah:                    ; state 2 (displayed): F2 again closes the map
 	bit 1,a                ; F2 pressed?
 	ret z
 	call 04f98h            ; restore the play screen and resume
-	call sub_902eh
+	call spike_bars_restore
 	call door_begin_open
 	call sub_9273h
 	call sub_870eh
@@ -3572,7 +3606,7 @@ l963dh:
 	cp 003h
 	call z,sub_9653h
 l964bh:
-	ld de,CHRGTR
+	ld de,00010h
 	add ix,de
 	djnz l963dh
 	ret
@@ -4274,7 +4308,7 @@ sub_9a21h:
 	call actor_free
 	ld c,(ix+003h)
 	ld b,(ix+005h)
-	ld hl,CHKRAM
+	ld hl,00000h
 	ld e,l
 	ld d,h
 	ld a,0ffh
@@ -4576,7 +4610,7 @@ l9c12h:
 	dec (ix+00ch)
 	ret nz
 	inc (ix+001h)
-	ld de,CHKRAM
+	ld de,00000h
 	call actor_set_xvel
 	ld de,00800h
 	jp actor_set_yvel
@@ -4590,7 +4624,7 @@ l9c4dh:
 	jr l9c12h
 l9c60h:
 	ex af,af'
-	ld bc,SCALXY
+	ld bc,0010eh
 sub_9c64h:
 	ld e,(ix+003h)
 	ld d,(ix+005h)
@@ -4933,7 +4967,7 @@ mummy_bandage:            ; (0x9E97) seek stored Y (ix+10/11), poses 0x39/0x3A
 	inc c
 l9eb7h:
 	ld (ix+00bh),c
-	ld de,CALLF
+	ld de,00030h
 	ld a,(ix+003h)
 	cp (ix+011h)
 	jr c,l9ec8h
@@ -4951,7 +4985,7 @@ shot_axe:                      ; (0x9ECC) poses 0x63-0x66; homing on thrower CFF
 	add a,063h
 	ld (ix+00bh),a
 	bit 7,(ix+010h)
-	ld de,OUTDO
+	ld de,00018h
 	jr nz,l9ee7h
 	ld de,0ffe8h
 l9ee7h:
@@ -4992,7 +5026,7 @@ l9f17h:
 	and 003h
 	add a,04bh             ; pose 0x4B / 4C / 4D / 4E
 	ld (ix+00bh),a
-	ld de,SETRD            ; +0x50/frame (SETRD equ 0x50, not the BIOS entry)
+	ld de,00050h            ; +0x50/frame
 	jp actor_add_yvel
 shot_sickle:                   ; (0x9F29) poses 0x7D-0x80; windup then fly 0x1E
 	ld a,(ix+00ch)
@@ -5017,7 +5051,7 @@ shot_sickle:                   ; (0x9F29) poses 0x7D-0x80; windup then fly 0x1E
 l9f53h:
 	dec (ix+00ch)
 	ret nz
-	ld de,CHKRAM
+	ld de,00000h
 	call actor_set_xvel
 	call actor_set_yvel
 	ld (ix+00ch),03ch

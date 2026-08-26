@@ -66,7 +66,7 @@ mummy_bandage_init:            ; (0xA054) store Y, drop Yvel by 0x100
 shot_sickle_init:              ; (0xA071) visible, timer 0x3C, vel 0
 	ld (ix+006h),001h
 	ld (ix+00ch),03ch
-	ld de,CHKRAM
+	ld de,00000h
 	call actor_set_yvel
 	jp actor_set_xvel
 shot_axe_init:                 ; (0xA082) facing from Xvel; thrower ptr CFFC
@@ -352,7 +352,7 @@ la264h:
 	ld (ix+013h),012h
 	inc (ix+001h)
 la272h:
-	ld hl,CHKRAM
+	ld hl,00000h
 	ld de,0fc00h
 	bit 0,(ix+00bh)
 	jr z,la281h
@@ -447,7 +447,7 @@ merman_fall:
 	jr nz,la32eh
 	call merman_pick_frame
 la32eh:
-	ld de,CHKRAM
+	ld de,00000h
 	call actor_set_xvel
 	ld de,00080h
 	call actor_add_yvel
@@ -480,7 +480,7 @@ la36dh:
 	ld (ix+015h),001h
 	ld (ix+001h),001h
 	ld (ix+013h),008h
-	ld de,CHKRAM
+	ld de,00000h
 	jp actor_set_yvel
 la387h:
 	ld a,(ix+003h)
@@ -605,7 +605,7 @@ la48dh:
 	ld (ix+006h),001h
 	ret
 la499h:
-	ld hl,CHKRAM
+	ld hl,00000h
 	ld de,00300h            ; spit X vel right
 	bit 7,(ix+00ah)
 	jr z,la4a8h
@@ -735,7 +735,7 @@ actor_set_xvel:
 ; 200 pts. No projectile. Shape 0x50.
 enemy_pikeman_tick:
 	ld (ix+006h),001h
-	ld de,CHKRAM
+	ld de,00000h
 	ld (ix+010h),e
 	ld (ix+011h),e
 	call actor_set_yvel
@@ -1135,7 +1135,7 @@ la870h:
 	ld (ix+00bh),a          ; store animation frame (+0x0B)
 	ld (ix+006h),001h       ; mark actor alive (+0x06 = 1)
 	ld (ix+00ch),000h       ; clear anim/state timer (+0x0C)
-	ld de,CHKRAM            ; DE = 0 (offset, not the BIOS entry)
+	ld de,00000h            ; DE = 0 (offset, not the BIOS entry)
 	call actor_set_xvel
 	jp actor_set_yvel            ; chain to shared actor tail
 enemy_dog_go:
@@ -1196,7 +1196,7 @@ la8f8h:
 	ld (ix+001h),001h
 	ld (ix+002h),000h
 	call sub_a9a9h
-	ld de,CHKRAM
+	ld de,00000h
 	jp actor_set_yvel
 sub_a910h:
 	ld a,(ix+00ch)
@@ -1247,7 +1247,7 @@ la952h:
 	ld (ix+00bh),b          ; walk anim frame (+0x0B = 0x3d / 0x3b)
 	ld (ix+00ch),008h       ; anim timer (+0x0C = 8)
 	ld (ix+010h),c          ; facing flag (+0x10 = 0 right / 1 left)
-	ld de,CHKRAM            ; DE = 0 (offset, not the BIOS entry)
+	ld de,00000h            ; DE = 0 (offset, not the BIOS entry)
 	jp actor_set_yvel            ; chain to shared actor tail
 enemy_zombie_go:
 	dec (ix+00ch)
@@ -1271,7 +1271,7 @@ la98bh:
 	ld e,(ix+003h)
 	call map_solid_pair
 	jr nc,la9b2h
-	ld de,CHKRAM
+	ld de,00000h
 	call actor_set_yvel
 	ld e,(ix+011h)
 	ld d,(ix+012h)
@@ -1283,7 +1283,7 @@ sub_a9a9h:
 	ld (ix+003h),a
 	ret
 la9b2h:
-	ld de,CHKRAM
+	ld de,00000h
 	call actor_set_xvel
 	ld de,00060h
 	jp actor_add_yvel
@@ -1519,7 +1519,7 @@ enemy_dracula_tick:
 	ld (ix+006h),000h
 	ld de,0fe00h
 	call actor_set_yvel
-	ld de,CHKRAM
+	ld de,00000h
 	call actor_set_xvel
 	ld (ix+00bh),056h
 	ld (ix+00ch),01eh
@@ -1596,7 +1596,7 @@ dracula_idle_cast:
 dracula_fireballs:
 	dec (ix+00ch)
 	ret nz
-	ld hl,CHKRAM
+	ld hl,00000h
 	call dracula_spawn_fireball
 	ld hl,00180h
 	call dracula_spawn_fireball
@@ -1710,7 +1710,7 @@ lad0dh:
 	call actor_set_xvel
 	ld de,0fd00h
 	jp actor_set_yvel
-	ld de,SETRD
+	ld de,00050h
 	jp actor_add_yvel
 sub_ad1fh:
 	push ix
@@ -1833,7 +1833,7 @@ dracula_torso_select:
 ; pts, walk 0x0140. Shape 0x5F.
 enemy_axe_knight_tick:
 	ld (ix+006h),001h
-	ld de,CHKRAM
+	ld de,00000h
 	call actor_set_yvel
 	call actor_set_xvel_speedup
 	ld (ix+00bh),05fh
@@ -1862,7 +1862,7 @@ lae13h:
 	ld (ix+00bh),05fh
 lae34h:
 	call actor_set_xvel_speedup
-	ld de,CHKRAM
+	ld de,00000h
 	jp actor_set_yvel
 lae3dh:
 	call sub_af1fh
@@ -1929,7 +1929,7 @@ laec8h:
 	push ix
 	pop hl
 	ld (0cffch),hl
-	ld hl,CHKRAM
+	ld hl,00000h
 	ld de,00400h
 	ld a,(0c427h)
 	cp (ix+005h)
@@ -1997,7 +1997,7 @@ sub_af47h:
 ; enemy_red_skeleton_tick (seg3 0xAF51) - type 09. Fast walk (0x0220), no
 ; projectile. 2 HP, 200 pts. Stage 13 (SAT 02 45). Same skeleton script as 11.
 enemy_red_skeleton_tick:
-	ld de,CHKRAM
+	ld de,00000h
 	call actor_set_yvel
 	ld (ix+011h),030h
 	xor a
@@ -2148,7 +2148,7 @@ lb08dh:
 	sub 018h
 	cp (ix+003h)
 	jr nc,lb0a6h
-	ld de,CHKRAM
+	ld de,00000h
 lb0a6h:
 	call actor_set_yvel
 	ld de,0fee0h
@@ -2156,7 +2156,7 @@ lb0a6h:
 	ld a,(ix+005h)
 	sub (hl)
 	jr nc,lb0b8h
-	ld de,SETC
+	ld de,00120h
 lb0b8h:
 	call actor_set_xvel
 	ret
@@ -2359,7 +2359,7 @@ lb23bh:
 	ld (ix+00bh),067h
 	ld (ix+010h),001h
 	call actor_set_xvel
-	ld de,CHKRAM
+	ld de,00000h
 	jp actor_set_yvel
 hunchback_go:
 	ld a,(ix+001h)
@@ -2373,7 +2373,7 @@ hunchback_wait:
 	call sub_af47h
 	cp 03ch
 	ret nc
-	ld de,CHKRAM
+	ld de,00000h
 	call actor_set_xvel
 	inc (ix+001h)
 	ret
@@ -2422,7 +2422,7 @@ lb2c3h:
 hunchback_jump:
 	call lb345h
 	call sub_b307h
-	ld de,CHKRAM
+	ld de,00000h
 	call c,sub_a649h
 	ld d,(ix+005h)
 	ld e,(ix+003h)
@@ -2433,7 +2433,7 @@ hunchback_jump:
 	ld e,a
 	call map_solid_pair
 	ret nc
-	ld de,CHKRAM
+	ld de,00000h
 	jp actor_set_yvel
 lb2f4h:
 	call map_solid_pair
@@ -2490,7 +2490,7 @@ enemy_white_skeleton_tick:
 	ld de,0fdc0h           ; else left
 lb35ah:
 	call actor_set_xvel_speedup
-	ld de,CHKRAM           ; Yvel = 0
+	ld de,00000h            ; Yvel = 0
 	call actor_set_yvel
 	ld (ix+006h),001h      ; alive / visible
 	ld (ix+011h),000h
@@ -2616,7 +2616,7 @@ lb46eh:
 	call probe_wall_right
 	jr nc,lb479h
 lb473h:
-	ld de,CHKRAM
+	ld de,00000h
 	call actor_set_xvel
 lb479h:
 	ld de,00068h           ; gravity
@@ -2642,7 +2642,7 @@ lb497h:
 	ld (ix+001h),a         ; landed -> walk
 	ld (ix+002h),a
 	call sub_a9a9h         ; snap Y to 8 px
-	ld de,CHKRAM
+	ld de,00000h
 	jp actor_set_yvel
 white_skel_throw:              ; (0xB4B0)
 	dec (ix+010h)
@@ -2670,7 +2670,7 @@ lb4cdh:
 enemy_blob_tick:
 	call blob_set_pose
 	ld (ix+006h),001h
-	ld de,CHKRAM
+	ld de,00000h
 	ld (ix+00eh),e
 	call actor_set_xvel
 	call actor_set_yvel
@@ -2712,14 +2712,14 @@ blob_hop:
 	call sub_b5e7h
 	jp nc,lb5f6h
 	call sub_b5b5h
-	ld de,CHKRAM
+	ld de,00000h
 	call c,actor_set_xvel
 	call sub_b5a5h
 	jr c,lb552h
 	dec (ix+010h)
 	ret nz
 lb552h:
-	ld de,CHKRAM
+	ld de,00000h
 	call actor_set_yvel
 	call actor_set_xvel
 	ld a,(ix+003h)
@@ -2731,7 +2731,7 @@ lb552h:
 	ret
 sub_b570h:
 	call sub_b5b5h
-	ld de,CHKRAM
+	ld de,00000h
 	call c,actor_set_xvel
 	call sub_b5e7h
 	jr c,lb586h
@@ -2798,7 +2798,7 @@ sub_b5e7h:
 	ld d,(ix+005h)
 	jp 07baah
 lb5f6h:
-	ld de,CHKRAM
+	ld de,00000h
 	call actor_set_xvel
 	ld de,00200h
 	call actor_set_yvel
@@ -3049,7 +3049,7 @@ actor_orb_tick:
 	ld (ix+00eh),000h
 	ld (ix+00ch),000h
 	ld (ix+07eh),000h
-	ld de,CHKRAM
+	ld de,00000h
 	call actor_set_xvel
 	ld de,00100h
 	jp actor_set_yvel
@@ -3179,7 +3179,7 @@ event_mummies_wait:
 enemy_mummy_tick:
 	ld (ix+00bh),036h
 	ld (ix+010h),020h
-	ld de,CHKRAM
+	ld de,00000h
 	call actor_set_yvel
 	ld (ix+014h),002h
 	ld (ix+015h),001h
@@ -3377,7 +3377,7 @@ enemy_frankenstein_tick:
 	ld (ix+011h),000h
 	ld (ix+010h),030h
 	ld (ix+006h),001h
-	ld de,CHKRAM
+	ld de,00000h
 	call actor_set_xvel
 lba68h:
 	jp actor_set_yvel
@@ -3445,7 +3445,7 @@ frank_arm_igor:
 igor_tick:
 	ld (ix+006h),001h
 	ld (ix+010h),000h
-	ld de,CHKRAM
+	ld de,00000h
 	call actor_set_yvel
 	call actor_set_xvel
 	call igor_arm_throw
@@ -3610,7 +3610,7 @@ grim_sickle_spawn:
 	ld c,(hl)
 	inc hl
 	ld b,(hl)
-	ld de,CHKRAM
+	ld de,00000h
 	ld h,e
 	ld l,e
 	ld a,016h
@@ -3642,7 +3642,7 @@ lbc7dh:
 grim_fly:
 	ld e,(ix+007h)
 	ld d,(ix+008h)
-	ld hl,SYNCHR
+	ld hl,00008h
 	add hl,de
 	ex de,hl
 	call actor_set_yvel
@@ -3737,7 +3737,7 @@ medusa_bob:
 	inc c
 lbd59h:
 	ld (ix+00bh),c
-	ld de,DCOMPR
+	ld de,00020h
 	ld a,(ix+003h)
 	cp 0a0h
 	jr c,lbd69h
@@ -3875,7 +3875,7 @@ enemy_giant_bat_tick:
 	jr z,lbe6eh
 	ld (ix+013h),001h
 lbe6eh:
-	ld de,CHKRAM
+	ld de,00000h
 	call actor_set_xvel
 	jp actor_set_yvel
 enemy_giant_bat_go:
@@ -3966,7 +3966,7 @@ lbf04h:
 	cp 0c0h
 	ret c
 lbf30h:
-	ld de,CHKRAM
+	ld de,00000h
 	call actor_set_xvel
 	call actor_set_yvel
 	ld a,r

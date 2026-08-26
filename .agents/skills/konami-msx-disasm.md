@@ -75,11 +75,15 @@ of `<Game>.asm`.
    rendering, never bytes). Mark mis-decoded tables and convert them to `db`.
   Keep unreversed graphics as `INCBIN` slices of the bank `.bin`, not a mass
   `defb` dump. Identified blobs (tilesets, metatile tables, named RLE streams)
-  graduate to labeled `defb` (Metal Gear style); 4bpp tiles are hex pixel-rows;
-  1bpp glyphs use `defb %xxxxxxxx`. Packed sprite RLE uses the same `%`
+  graduate to labeled `defb` (Metal Gear style); 4bpp tiles are hex pixel-rows.
+  **1bpp sheets** (uncompressed 8×8 glyph/tile bitmaps, typically consumed by
+  `glyph_blit` / `glyph_blit_run`) are extracted the moment they are identified:
+  one `defb %xxxxxxxx` row per scanline (MSB = left). Do not leave a known 1bpp
+  sheet as hex in a leftover dump. Packed 1bpp sprite RLE uses the same `%`
   rows for pixel bytes (run/literal counts stay hex). PNG is preview-only
-  until the packer is byte-exact. Mixed banks (named tables + hex leftover
-  slices). VK seg15 is music tails + env tables + 4bpp Dracula portrait.
+  (hex tile-id labels, not ASCII chars) until the packer is byte-exact. Mixed
+  banks (named tables + hex leftover slices). VK seg15 is music tails + env
+  tables + 4bpp Dracula portrait.
   VK seg14 is scenery
   lists + spawn masks + enemy lists + sound: emit the cracked tables as commented
   `defw`/`defb` once ids are named; packed PSG as labeled hex streams.
@@ -102,6 +106,23 @@ of `<Game>.asm`.
   and macro-like pseudo-instruction helpers (e.g. `DISPATCH_A`); `lower_snake` for
   all game code/data. Small numeric type `equ`s (`actor_zombie: equ 0x01`) live in
   an `INCLUDE`d `.inc`, never `msx.sym`.
+- **A symbol in an immediate operand is usually a lie.** z80dasm substitutes a
+  symbol for *any* matching value, so every small constant that collides with a
+  low BIOS entry comes back as that name: `ld de,0` reads `ld de,CHKRAM`
+  (0x0000), and 8/0x10/0x14/0x20/0x50 become SYNCHR/CHRGTR/WRSLT/DCOMPR/SETRD.
+  Same trap for a code label whose address doubles as data (`ld bc,l4206h` was a
+  66x6 rectangle size). Only `call`/`jp`/`jr` targets are real references —
+  rewrite `ld rr,NAME` back to a hex literal (byte-identical, and `make verify`
+  proves it). Audit with a regex for BIOS names on non-branch lines after every
+  regen; VK had 91 of these hiding in segs 0-3.
+- **`msx.sym` is flat, the ROM is banked.** One symbol file covers every bank, so
+  two different things at the same CPU address in different banks cannot both be
+  named there — whichever entry exists wins for all of them on regen. VK has this
+  at 0x902E (seg2 `spike_bars_restore` vs. the seg14/15 PSG stream
+  `sfx_0e_block_break`), so that routine is named in the `.asm` only. Committed
+  source stays correct either way; the cost is paid at regen time, so keep a list
+  of the collisions and re-apply those names by hand. If the count grows, move to
+  per-segment symbol files rather than fighting it.
 - **Text**: MSX games often store text as `(ASCII - offset)` because the font is
   loaded at a nonzero tile base. Crack the offset, then use an sjasmplus `MACRO`
   (`vk` / `cr` in `VampireKiller.asm`) so source strings stay readable ASCII
@@ -110,6 +131,12 @@ of `<Game>.asm`.
 - **Graphics**: usually custom RLE to VRAM (SCREEN 5 = 4bpp bitmap on MSX2, plus
   1bpp hardware sprites). Find the decompressor, then extract to editable assets
   with the gfx pipeline; keep compressed bytes authoritative.
+- **1bpp sheets in binary**: any uncompressed 1bpp glyph/tile sheet we identify
+  is committed as `defb %xxxxxxxx` (MSB = left, one row per line) plus a PNG
+  contact sheet labelled with hex tile ids. Same `%` form for packed 1bpp RLE
+  *pixel* bytes; control bytes stay hex. 4bpp tiles stay hex nibble-rows. VK's
+  three raw 8×8 sheets are `hud_font`, `credits_font`, and `logo_font` (boot
+  Konami logo; not the HUD `<` `=` `>` cells even though those tile ids overlap).
 
 ## Konami idioms to expect
 

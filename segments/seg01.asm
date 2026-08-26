@@ -455,8 +455,9 @@ l6200h:
 	ret
 
 ; --- konami_logo_draw (0x6209) - set up the Konami logo screen ---------------
-;  Boot front-end step, run from seg0's state machine.  Draws the Konami logo
-;  (orange/red/grey) as a tile layout (l6243h + l6296h via tile_string_draw) and sets
+;  Boot front-end step, run from seg0's state machine.  Blits logo_font
+;  (seg13 1bpp, inks 1/2/3) then draws the Konami logo (orange/red/grey) as a
+;  tile layout (l6243h + l6296h via tile_string_draw) and sets
 ;  the VDP backdrop to white (R7 = 0x0F).  Then seeds the 3-byte block that the
 ;  per-frame stepper konami_logo_step (0x6253) uses to wipe the logo in:
 ;     0xC420 = 0x3C frame divider (advance the wipe every other frame)
@@ -475,7 +476,7 @@ konami_logo_draw:
 	xor a                   ; fill/colour value 0
 	ld d,001h
 	call 04911h             ; seg0 VDP fill (clears the logo area to white)
-	call 05316h             ; seg0 helper (purpose not yet mapped)
+	call logo_font_load     ; blit seg13 logo_font onto page 0 at Y=0
 	ld de,04040h            ; screen position for the logo tiles
 	ld hl,l6296h            ; HL -> logo tile-layout stream
 	call tile_string_draw          ; paint the logo via the tile-string interpreter
@@ -1253,7 +1254,7 @@ event_dracula_done:
 	ld hl,0ce02h
 	dec (hl)
 	ret nz
-	ld hl,CHKRAM           ; 0x0000 (CHKRAM equ) -> reset event pointer
+	ld hl,00000h            ; reset event pointer
 	ld (0ce00h),hl         ; 0xCE00 = 0 (no event)
 	ld a,001h
 	ld (0ce40h),a          ; start credits_tick (ending only; other bosses use C409)
@@ -1468,7 +1469,7 @@ l6804h:
 	ld (hl),l
 	ld h,l
 sub_6817h:
-	ld de,CHKRAM
+	ld de,00000h
 	ld a,006h
 	jp palette_set
 sub_681fh:
@@ -1488,7 +1489,7 @@ credits_wipe:
 	ld l,000h
 	srl h
 	rr l
-	ld de,CHKRAM
+	ld de,00000h
 	add hl,de
 	ld bc,00080h
 	xor a
@@ -1711,7 +1712,7 @@ l69ebh:
 	ld b,b
 	ld iy,0f680h
 	ld de,0ce60h
-	ld bc,DCOMPR
+	ld bc,00020h
 	call 04661h
 	ld a,080h
 	ld (0ce13h),a
@@ -1911,7 +1912,7 @@ l6b6eh:
 	ld a,(0c422h)
 	and a
 	ret nz
-	ld de,CHKRAM
+	ld de,00000h
 	ld (0c42eh),de         ; walk anim frames (legs, torso)
 	call simon_mirror_frames
 	ld a,(0c007h)          ; held: 0=UP 1=DOWN 2=LEFT 3=RIGHT
@@ -2003,7 +2004,7 @@ l6c17h:
 	ld bc,00002h
 	jr z,l6bf5h
 	call sub_7cbah
-	ld bc,UPC
+	ld bc,00102h
 	jr z,l6bf5h
 	ld a,002h
 	ld (0c420h),a
@@ -2083,7 +2084,7 @@ simon_step_walk_frames:        ; (0x6CAB)
 	ld de,00101h
 	jr c,l6cbfh
 	rra
-	ld de,CHKRAM
+	ld de,00000h
 	jr c,l6cbfh
 	ld de,00202h
 l6cbfh:
@@ -2401,7 +2402,7 @@ l6ef1h:
 	call sub_7b6fh
 	ret nc
 l6efch:
-	ld de,CHKRAM
+	ld de,00000h
 	ld (0c42eh),de
 	xor a
 	ld (0c435h),a
@@ -2445,7 +2446,7 @@ simon_fall:                    ; 4 (0x6F44)
 	jr nz,l6f71h
 	call sub_7b8fh
 	jr c,l6f71h
-	ld de,CHKRAM
+	ld de,00000h
 	ld (0c42eh),de
 	call simon_mirror_frames
 	ld hl,0c428h
@@ -2785,7 +2786,7 @@ l71d3h:
 	ld (ix+000h),a
 	ret
 l71dfh:
-	ld de,CHRGTR
+	ld de,00010h
 	add ix,de
 	djnz l71d3h
 	ret
@@ -2896,7 +2897,7 @@ l7299h:
 	ld (ix+001h),a
 	ret
 l72b1h:
-	ld de,CHRGTR
+	ld de,00010h
 	add ix,de
 	djnz l7299h
 	ret
@@ -3632,7 +3633,7 @@ door_open_walk:
 	ld a,(0c420h)
 	and a
 	ret nz
-	ld bc,CHKRAM
+	ld bc,00000h
 	ld (0c42eh),bc
 	call simon_mirror_frames
 	ld a,(0c42ch)
@@ -4155,7 +4156,7 @@ simon_sat_7acd:
 	defb 0e2h, 0e9h
 	defb 0e2h, 0e9h
 ; title_fill_strips (seg1 0x7AD6): HMMV-fill 16 strips (colour 2,
-; NX=7 NY=9) via l4911h, stepping HL.Y by 0x10.  Caller sets HL dest
+; NX=7 NY=9) via vdp_hmmv, stepping HL.Y by 0x10.  Caller sets HL dest
 ; (title uses 0x0516 and 0x0569).
 title_fill_strips:
 	ld e,010h              ; 16 strips
@@ -4222,7 +4223,7 @@ l7b26h:
 	dec c
 	jr nz,l7b1dh
 	ld a,002h
-	ld de,CHKRAM
+	ld de,00000h
 	call palette_set
 	jp pattern_shadow_blit
 ; tile_layout_draw (0x7B39): blit a title_layout stream.  HL -> stream, DE =

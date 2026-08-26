@@ -16,8 +16,8 @@ VampireKiller.asm   master file: stitches the 16 segments into the ROM image
 segments/           one file per 8 KiB segment
   seg00..03.asm     code banks — INCLUDE'd, being annotated
   seg04..10.asm     INCLUDE stitchers (tilesets, gfx scripts, palettes, RLE)
-  seg11..15.asm     map / scenery / credits font / PSG / portrait — INCLUDE'd
-  data/             metatiles, tilesets, 1bpp sprite RLE, PSG, gfx scripts
+  seg11..15.asm     map / scenery / fonts / PSG / portrait — INCLUDE'd
+  data/             metatiles, tilesets, fonts, 1bpp sprite RLE, PSG, gfx scripts
 tools/              helper scripts + symbol/block files (see below)
 docs/               notes (game behaviour, text encoding, sprites) + progress
 gfx/                readable graphics catalogue (PNG sheets committed; `make gfx`)

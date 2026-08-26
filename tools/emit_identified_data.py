@@ -48,8 +48,16 @@ def defb_lines(buf: bytes) -> list[str]:
 
 
 def bits_byte(b: int) -> str:
-    """One 8px 1bpp row; MSB = left. Same form as credits_font."""
+    """One 8px 1bpp row; MSB = left. Required form for every 1bpp sheet."""
     return "%%%s" % format(b, "08b")
+
+
+def append_1bpp_glyph(lines: list[str], rows: bytes, comment: str) -> None:
+    """One 8x8 1bpp glyph as 8 binary rows. comment is the hex id / note."""
+    lines.append("; %s" % comment)
+    for b in rows:
+        lines.append("\tdefb %s" % bits_byte(b))
+    lines.append("")
 
 
 def emit_rle_1bpp(packed: bytes) -> list[str]:
@@ -99,6 +107,136 @@ def emit_rle_1bpp(packed: bytes) -> list[str]:
 def pix4_row(four: bytes) -> str:
     """One SCREEN 5 8-pixel row as 4 bytes (high nibble = left)."""
     return "\tdefb " + ",".join("0x%02x" % b for b in four)
+
+
+# HUD/title font: 48 x 8x8 1bpp at seg8 0xBD80 (ASCII '0'..'_').
+# title_load_tiles' 0x59 English glyphs end exactly here; the old 4bpp dump
+# kept walking and labelled these "en tile 0x59+".
+HUD_FONT_CPU = 0xBD80
+HUD_FONT_N = 48
+HUD_FONT_NOTES = {
+    ":": "  (face)",
+    "[": "  (all-1s; hud_font_load blits ink 0 to (0,0) for space)",
+    "^": "  (heart left)",
+    "_": "  (heart right)",
+}
+
+
+def emit_hud_font(rom: bytes) -> None:
+    """48 1bpp HUD glyphs + the 8x8 4bpp follow-on at 0xBF00."""
+    b8 = bank(rom, 8)
+    raw = b8[0x1D80:0x1F00]
+    assert len(raw) == HUD_FONT_N * 8
+    lines = [
+        "; HUD / title font (seg8 0xBD80): 48 x 8x8 1bpp glyphs, ASCII '0'..'_'.",
+        "; HUD/title strings are vk (ASCII-0x10); space is 0x00 (copies the",
+        "; ink-0 blit of hud_font_solid at VRAM (0,0)).  hud_font_load",
+        "; (seg0 0x53BD) expands these via glyph_blit_run to page 1 at Y=0x40,",
+        "; ink 0x0E.  Drawing is HMMM from that atlas (sub_4aeeh, Y += 0x38).",
+        "; Each defb is one row, MSB = left pixel.  Not the credits font.",
+        "; Preview: gfx/font_hud.png.  Source: data/font_hud.asm.",
+        "hud_font:",
+        "",
+    ]
+    for i in range(HUD_FONT_N):
+        cpu = HUD_FONT_CPU + i * 8
+        ch = chr(0x30 + i)
+        note = HUD_FONT_NOTES.get(ch, "")
+        if ch == "'":
+            lines.append("; \"'\"%s" % note)
+        else:
+            lines.append("; '%s'%s" % (ch, note))
+        if cpu == 0xBED8:
+            lines.append("hud_font_solid:")
+        for b in raw[i * 8 : (i + 1) * 8]:
+            lines.append("\tdefb %s" % bits_byte(b))
+        lines.append("")
+    tile = b8[0x1F00:0x1F20]
+    assert len(tile) == TILE
+    lines.append("; 0xBF00  one 8x8 4bpp tile (vram_blit_tile_run dest 0xA440).")
+    lines.append("hud_tile_bf00:  ; 0xBF00")
+    for r in range(8):
+        lines.append(pix4_row(tile[r * 4 : r * 4 + 4]))
+    write_lines(os.path.join(DATA, "font_hud.asm"), lines)
+
+
+CREDITS_FONT_CPU = 0x8824
+CREDITS_FONT_CHARS = "0123456789.':," + "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+
+def emit_credits_font(rom: bytes) -> None:
+    """40 1bpp ending-credits glyphs at seg14 0x8824."""
+    raw = bank(rom, 14)[0x0824 : 0x0824 + 40 * 8]
+    assert len(raw) == 40 * 8
+    lines = [
+        "; credits_font (seg14 0x8824): 40 x 8x8 1bpp glyphs for the ending message",
+        "; and credits.  Loaded by credits_font_load (seg0 0x53E5) from credits_init.",
+        "; First 14 at VRAM dest DE=0x8040 (digits 0-9, then . ' : ,); A-Z at",
+        "; DE=0x0848.  Each defb is one row, MSB = left pixel.",
+        "; Preview: gfx/font_credits.png.  Source: data/font_credits.asm.",
+        "credits_font:",
+    ]
+    for i, ch in enumerate(CREDITS_FONT_CHARS):
+        if i == 14:
+            lines.append("; A-Z (seg14 0x8894)")
+            lines.append("credits_font_az:")
+        if ch == "'":
+            lines.append("; \"'\"")
+        else:
+            lines.append("; '%s'" % ch)
+        for b in raw[i * 8 : (i + 1) * 8]:
+            lines.append("\tdefb %s" % bits_byte(b))
+        lines.append("")
+    # drop the trailing blank so the file ends on the last glyph row
+    if lines[-1] == "":
+        lines.pop()
+    write_lines(os.path.join(DATA, "font_credits.asm"), lines)
+
+
+# Boot Konami-logo font: 52 x 8x8 1bpp at seg13 0xBE59.  logo_font_load
+# (seg0 0x5316, from konami_logo_draw) blits three ink groups onto page 0
+# at Y=0 (no HUD +0x38).  tile_string_draw ids 0x01-0x34; 0x00 is blank.
+LOGO_FONT_CPU = 0xBE59
+LOGO_FONT_GROUPS = (
+    (0x01, 13, "logo_font", "ink 1 at (8,0); ids 01-0D"),
+    (0x0E, 13, "logo_font_ink2", "ink 2 at (0x70,0); ids 0E-1A"),
+    (0x1B, 26, "logo_font_ink3", "ink 3 at (0xD8,0), wraps to Y=8 at id 20; ids 1B-34"),
+)
+
+
+def emit_logo_font(rom: bytes) -> None:
+    """52 1bpp Konami-logo glyphs at seg13 0xBE59 plus 0xFF pad to 0xC000."""
+    b13 = bank(rom, 13)
+    raw = b13[0x1E59:0x1E59 + 52 * 8]
+    assert len(raw) == 52 * 8
+    pad = b13[0x1FF9:]
+    assert pad == b"\xff" * 7
+    lines = [
+        "; logo_font (seg13 0xBE59): 52 x 8x8 1bpp glyphs for the boot Konami",
+        "; logo.  Loaded by logo_font_load (seg0 0x5316) from konami_logo_draw",
+        "; via glyph_blit_run onto page 0 at Y=0 (tile ids 0x01-0x34; X=0 /",
+        "; id 0x00 is blank).  Different sheet from hud_font: logo ids 0x2C-",
+        "; 0x2E are wordmark cells, not HUD '<' '=' '>'.  Each defb is one",
+        "; row, MSB = left pixel.",
+        "; Preview: gfx/font_logo.png.  Source: data/font_logo.asm.",
+    ]
+    off = 0
+    for first_id, count, label, note in LOGO_FONT_GROUPS:
+        cpu = LOGO_FONT_CPU + off
+        lines.append("%s:  ; 0x%04X  %s" % (label, cpu, note))
+        for i in range(count):
+            append_1bpp_glyph(
+                lines,
+                raw[off + i * 8 : off + (i + 1) * 8],
+                "0x%02X" % (first_id + i),
+            )
+        off += count * 8
+    if lines[-1] == "":
+        lines.pop()
+    lines.append("")
+    lines.append("; 0xFF pad to end of seg13 (0xBFF9).")
+    lines.append("\tdefb " + ",".join("0x%02x" % b for b in pad))
+    write_lines(os.path.join(DATA, "font_logo.asm"), lines)
 
 
 def append_mtile_def(lines: list[str], chunk: bytes, comment: str) -> None:
@@ -513,9 +651,10 @@ def emit_tileset_banks(rom: bytes) -> None:
         [
             "; Stage 18 tileset (seg8 0xA4C0) plus title glyphs overlaid on high ids:",
             "; castle 0xAC80 (0x11), kana 0xAEA0 (0x1E), CASTLEVANIA 0xB260 (0x59).",
+            "; HUD/title 1bpp font follows in font_hud.asm at 0xBD80.",
         ]
         + slicenote,
-        b8[0x04C0:0x1F20],
+        b8[0x04C0:0x1D80],
         0xA4C0,
         [
             (0xA4C0, "s18"),
@@ -530,6 +669,7 @@ def emit_tileset_banks(rom: bytes) -> None:
             (0xB260, "title_logo_en_tiles", "title CASTLEVANIA glyphs"),
         ],
     )
+    emit_hud_font(rom)
     write_tile_file(
         "tileset_s08_pad.asm",
         ["; 0xFF pad to end of seg8 (0xBFD2)."],
@@ -602,6 +742,7 @@ def emit_tileset_banks(rom: bytes) -> None:
         [
             "data/tileset_s16_cont.asm",
             "data/tileset_s18.asm",
+            "data/font_hud.asm",
             "credits_ending.asm",
             "data/tileset_s08_pad.asm",
         ],
@@ -639,7 +780,7 @@ def emit_simon_rle(rom: bytes) -> None:
     """Labeled packed RLE streams at simon_cell0/1_ptr + intro_simon + orphans.
 
     Covers CPU 0xA319-0xB5A1 exactly.  intro_sky is a separate file (0xB895).
-    0xB5A1-0xB894 is figure Dracula body (dracula_body_closed/open); the 0xBBF6 tail is hex in emit_seg13_gaps.
+    0xB5A1-0xB894 is figure Dracula body (dracula_body_closed/open); 0xBBF6-0xBE58 is hex leftover; logo_font at 0xBE59.
     """
     b13 = 13 * 0x2000
     cell0 = _words(rom, b13 + (0xA281 - 0xA000), 40)
@@ -719,14 +860,16 @@ def emit_seg13_gaps(rom: bytes) -> None:
     lines.extend(defb_lines(opened))
     write_lines(os.path.join(DATA, "seg13_b5a1.asm"), lines)
 
-    tail = rom[b13 + (0xBBF6 - 0xA000) : b13 + 0x2000]
-    assert len(tail) == 0x040A
+    tail = rom[b13 + (0xBBF6 - 0xA000) : b13 + (0xBE59 - 0xA000)]
+    assert len(tail) == 0x0263
     lines = [
-        "; Remainder of seg13 after spot_tbl (0xBBF6-0xBFFF). Unreversed.",
+        "; Remainder of seg13 after spot_tbl (0xBBF6-0xBE58). Unreversed.",
+        "; logo_font follows in font_logo.asm at 0xBE59.",
         "seg13_tail_bbf6:  ; 0xBBF6",
     ]
     lines.extend(defb_lines(tail))
     write_lines(os.path.join(DATA, "seg13_bbf6.asm"), lines)
+    emit_logo_font(rom)
 
 
 # Packed PSG (sfx + music that still fits in seg14).  label "" = no label.
@@ -989,13 +1132,13 @@ def emit_seg9_10(rom: bytes) -> None:
     tail = b9[0x1A80:0x1AB0]
     assert len(tail) == 0x30
     tlines = [
-        "; 0x9A80-0x9AAF: extra HUD blits (sub_4991h from 0x9A80 / 0x9A90).",
-        "bonus_hud_9a80:  ; 0x9A80",
+        "; 0x9A80-0x9AAF: stage spike-bar scenery (vdp_hmmc from 0x9A80 / 0x9A90).",
+        "spike_bar_mount:  ; 0x9A80",
     ]
     tlines.extend(defb_lines(tail[:0x10]))
-    tlines.append("bonus_hud_9a90:  ; 0x9A90")
+    tlines.append("spike:  ; 0x9A90")
     tlines.extend(defb_lines(tail[0x10:]))
-    write_lines(os.path.join(DATA, "bonus_hud_9a80.asm"), tlines)
+    write_lines(os.path.join(DATA, "spike_bar.asm"), tlines)
 
     # --- room_gfx_ptr + records + scripts + pal_9ffe prefix ---
     ptrs = [word_at(rom, 0x9AB0 + s * 2) for s in range(18)]
@@ -1220,7 +1363,7 @@ def emit_seg9_10(rom: bytes) -> None:
         ],
         [
             "data/frontend_tiles.asm",
-            "data/bonus_hud_9a80.asm",
+            "data/spike_bar.asm",
             "data/room_gfx.asm",
         ],
     )
@@ -1436,6 +1579,7 @@ def main() -> None:
     emit_mtile_streams(rom)
     emit_mtile_defs(rom)
     emit_tileset_banks(rom)
+    emit_credits_font(rom)
     emit_simon_rle(rom)
     emit_seg13_gaps(rom)
     emit_psg_streams(rom)

@@ -66,40 +66,50 @@ data_6000_start:
 	defb 069h
 	defb 0c9h
 data_6000_end:
+; actor_sat_patterns (seg1 0x6030) - copy SAT colour/attr bytes from the
+;  word table at actor_sat_pat_ptr (caller DE = 0x608B, indexed by type) into
+;  each 5-byte cell's last byte (slot|0x20 + 5 + n*5).  Skips if +20 == 0.
+actor_sat_patterns:
 	ld a,(ix+020h)
 	and a
 	ret z
 	ld a,(ix+000h)
 	call lookup_word_tbl
 	ld hl,(0cff3h)
-	set 5,l
-	ld b,(hl)
+	set 5,l                ; HL -> SAT sub-block (slot | 0x20)
+	ld b,(hl)              ; B = sprite count
 	ld a,005h
 	add a,l
-	ld l,a
+	ld l,a                 ; HL -> first cell colour (+0x25)
 l6045h:
 	ld a,(de)
 	inc de
-	ld (hl),a
+	ld (hl),a              ; cell+4 = colour/attr
 	ld a,l
 	add a,005h
 	ld l,a
 	djnz l6045h
 	ret
+; actor_sat_assign (seg1 0x604F) - store hardware SAT index D at cell E
+;  (offset +0x21 + E*5 of the slot at 0xCFF3).  Spawn/shot_alloc claim a
+;  free D638 slot (Y=0xE0) then call this.
+actor_sat_assign:
 	push hl
 	ld hl,(0cff3h)
 	ld a,e
 	add a,a
 	add a,a
-	add a,e
-	add a,021h
+	add a,e                ; A = E*5
+	add a,021h             ; first cell at +0x21
 	call ADD_HL_A
-	ld (hl),d
+	ld (hl),d              ; cell+0 = SAT index
 	pop hl
 	ret
 
-; BLOCK 'data_605f' (start 0x605f end 0x608d)
-data_605f_start:
+; BLOCK 'actor_spr_count' (start 0x605f end 0x608d)
+;  Sprite counts per actor type. spawn_actor indexes as 0x605E+type
+;  (type 0 would read the ret above; type 1 zombie = 4).
+actor_spr_count:
 	defb 004h
 	defb 004h
 	defb 004h
@@ -146,10 +156,12 @@ data_605f_start:
 	defb 002h
 	defb 002h
 	defb 002h
-data_605f_end:
+actor_spr_count_end:
 
-; BLOCK 'ptr_tbl_608d' (start 0x608d end 0x60e9)
-ptr_tbl_608d_start:
+; BLOCK 'actor_sat_pat_ptr' (start 0x608d end 0x60e9)
+;  Word[type] -> SAT colour/attr stream (in actor_sat_colors). spawn_actor
+;  calls lookup_word_tbl with DE=0x608B (type 1 reads this first word).
+actor_sat_pat_ptr:
 	defw 06119h
 	defw 06119h
 	defw 0612fh
@@ -196,10 +208,11 @@ ptr_tbl_608d_start:
 	defw 06159h
 	defw 06159h
 	defw 06159h
-ptr_tbl_608d_end:
+actor_sat_pat_ptr_end:
 
-; BLOCK 'data_60e9' (start 0x60e9 end 0x615b)
-data_60e9_start:
+; BLOCK 'actor_hp_tbl' (start 0x60e9 end 0x6119)
+;  HP per actor type. spawn_actor indexes as 0x60E8+type (type 1 zombie = 1).
+actor_hp_tbl:
 	defb 001h
 	defb 001h
 	defb 002h
@@ -248,6 +261,12 @@ data_60e9_start:
 	defb 001h
 	defb 001h
 	defb 001h
+actor_hp_tbl_end:
+
+; BLOCK 'actor_sat_colors' (start 0x6119 end 0x615b)
+;  SAT colour/attr init streams (one byte per sprite). Pointed at by
+;  actor_sat_pat_ptr; actor_sat_patterns copies them into cell+4.
+actor_sat_colors:
 	defb 002h
 	defb 044h
 	defb 002h
@@ -314,7 +333,7 @@ data_60e9_start:
 	defb 042h
 	defb 002h
 	defb 048h
-data_60e9_end:
+actor_sat_colors_end:
 
 ; --- object_list_load - load three tables from seg14 into RAM ----------------------
 ;  Pages seg 14 into page 2a (writes 0x0E to 0x8000 and to its shadow 0xF0F2),
@@ -719,7 +738,9 @@ l6376h:
 ;  helpers (scenery_room_load into C470, door_load_paged,
 ;  conn_load_permits_paged, platform_load/platform_tick, whip_slots_clear), then zeroes two
 ;  strided tables: 7 entries 0x80 apart from 0xC800, and 8 entries 0x80 apart
-;  from 0xD700.
+;  from 0xD700.  The wipe is also why the C580 spike bars and C598 platforms
+;  start empty: spike_bars_seed / platform_load re-fill them after this, and
+;  platform_load never writes +5/+6 because they are already 0 here.
 actor_state_reset:
 	ld hl,0c470h
 	ld de,0c471h           ; dst = src+1
@@ -847,7 +868,7 @@ l6426h:
 ;  Input: IX -> actor struct.  Skips object types 0x0E and 0x17.  Pages seg 6
 ;  into page 2b (0xA000), looks up the actor's shape stream by (ix+0x0B) in the
 ;  word table at 0xB473, then writes sprite-attribute entries into the actor's
-;  0x20-offset block, adding the actor position (ix+3 = X, ix+5 = Y).  A leading
+;  0x20-offset block, adding the actor position (ix+3 = Y, ix+5 = X).  A leading
 ;  stream code 0x80/0x81/0x82 selects a fixed (dx,dy) offset list for multi-part
 ;  sprites; otherwise the stream carries explicit offsets.  Restores seg 3.
 actor_sat_build:
@@ -880,11 +901,11 @@ actor_sat_build:
 l647dh:
 	ld a,(de)
 	inc de
-	add a,(ix+003h)
+	add a,(ix+003h)        ; Y = shape dy + pixel Y
 	ld (hl),a
 	inc l
 	ld a,(de)
-	add a,(ix+005h)
+	add a,(ix+005h)        ; X = shape dx + pixel X
 	ld (hl),a
 	inc de
 	inc l
@@ -4623,7 +4644,7 @@ combat_tick:
 	call sub_7e6eh
 	call sub_7eebh
 	call sub_7fe9h
-	call hurt_simon_projectile
+	call hurt_simon_spikes
 	ld a,(0c416h)
 	cp 002h
 	jr nc,l7d92h           ; C416>=2: projectile weapons

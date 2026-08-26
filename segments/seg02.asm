@@ -854,13 +854,15 @@ l8597h:
 	sub d
 	cp 008h
 	ret                    ; carry = X overlap
-; --- hurt_simon_projectile (seg2 0x85AD) - Simon TAKES damage from a hazard ------
-; Scans the 3 hazard/projectile slots at 0xC580; if Simon overlaps one (sub_85e5h
+; --- hurt_simon_spikes (seg2 0x85AD) - Simon TAKES damage from a spike bar ------
+; Scans the 3 spike-bar slots at 0xC580; if Simon overlaps one (spike_bar_overlap
 ; returns carry) it puts Simon into the hurt/knockback state (0xC420=5) and deals
-; fixed damage: B = 8, or B = 16 when bit 0 of the slot byte is set (stronger
-; hazard).  Skipped while Simon is already dying (0xC420==6) or during the 0xC42D /
+; fixed damage: B = 8, or B = 16 when bit 0 of the slot byte is set (descending).
+; Nothing else ever seeds C580 (only spike_bars_seed, and only on stage 6 room 1);
+; enemy shots live in the 8 D700 slots and hit Simon by a different path.
+; Skipped while Simon is already dying (0xC420==6) or during the 0xC42D /
 ; 0xC43A i-frame / freeze timers.
-hurt_simon_projectile:
+hurt_simon_spikes:
 	ld a,(0c420h)
 	cp 006h
 	ret z                  ; already dying -> ignore
@@ -870,23 +872,23 @@ hurt_simon_projectile:
 	ld a,(0c43ah)
 	and a
 	ret nz
-	ld hl,0c580h           ; 3 hazard/projectile slots
+	ld hl,0c580h           ; 3 spike-bar slots
 	ld b,003h
 l85c2h:
 	ld a,(hl)
 	and a
 	jr z,l85ddh
 	push hl
-	call sub_85e5h         ; overlap test vs Simon
+	call spike_bar_overlap ; overlap test vs Simon
 	pop hl
 	jr nc,l85ddh           ; no hit -> next slot
 	ld a,005h
 	ld (0c420h),a          ; hurt/knockback state
 	ld a,(hl)
 	rra
-	ld b,008h              ; base hazard damage = 8
+	ld b,008h              ; retracting = 8
 	jr nc,l85dah
-	ld b,010h              ; flagged hazard = 16
+	ld b,010h              ; descending (bit 0 set) = 16
 l85dah:
 	jp damage_health       ; 0xC415 -= B
 l85ddh:
@@ -894,7 +896,9 @@ l85ddh:
 	call ADD_HL_A
 	djnz l85c2h
 	ret
-sub_85e5h:
+; spike_bar_overlap (0x85E5) - carry if Simon's feet overlap this bar's 32x8 box.
+; HL -> slot; uses +1 Y and +2 X.  Y test is Simon Y - 0x1C vs the bar row.
+spike_bar_overlap:
 	inc hl
 	ld a,(hl)
 	ld d,a
@@ -2511,7 +2515,7 @@ sub_8f9bh:
 ;   +6 count steps taken so far in this sweep
 ;
 ; Descending is gated by `+4 & +3` and retracting by `+4 & 3`, so a bar drops
-; fast and crawls back up. Contact damage is dealt by hurt_simon_projectile
+; fast and crawls back up. Contact damage is dealt by hurt_simon_spikes
 ; (0x85AD) over a 32x8 box: 16 HP while descending, 8 HP while retracting.
 ;
 ; The chain the bar hangs from is not artwork - it is a deliberate smear.  The
@@ -2634,8 +2638,8 @@ spike_bars_restore:
 ;    +4 span   ticks per sweep before reversing
 ;    +5 tick   free-running counter, incremented but unread here
 ;    +6 count  ticks elapsed in this sweep
-;  Note +5/+6 are NOT seeded (platform_load skips them), so they rely on 0xC598
-;  already being clear when the room loads.
+;  Note +5/+6 are NOT seeded (platform_load skips them): actor_state_reset
+;  already zeroed 0xC470-0xC6FF, which includes the C598 pool.
 ;
 ;  Simon's side: platform_stand_test (0x852B) sets 0xC439 to the slot id he is
 ;  standing on, and platform_carry_simon (seg1 0x6BB6) then nudges his X by the
@@ -4169,7 +4173,7 @@ l98f9h:
 	and a
 	jr z,l990fh
 	push bc
-	call sub_9936h
+	call actor_freeze_check
 	jr c,l990bh
 	call actor_type_tick
 	call actor_integrate
@@ -4198,7 +4202,10 @@ l9925h:
 	pop bc
 	djnz l9925h
 	ret
-sub_9936h:
+; actor_freeze_check (seg2 0x9936) - C if this actor should skip type tick
+;  and integrate: D010 bit 0 is set during Simon's whip, and +7E != 0
+;  (spawn default). Flames/pickups clear +7E so they keep animating.
+actor_freeze_check:
 	ld a,(0d010h)
 	and a
 	ret z
@@ -4314,8 +4321,9 @@ actor_cull_offscreen:
 	jr nc,actor_free        ; X off the right
 	cp 007h
 	ret nc
-; actor_free (seg2 0x99FD) - clear the actor slot (+0x00 type, +0x0E) and, if it
-; owns a linked sub-slot (flagged at +0x25), release that too.
+; actor_free (seg2 0x99FD) - clear the actor slot (+0x00 type, +0x0E) and
+;  hide every hardware sprite it claimed (SAT sub-block at slot|0x20: count
+;  then 5-byte cells; each cell+0 is a D638 index, written Y=0xE0).
 actor_free:
 	xor a
 	ld (ix+000h),a
@@ -4942,7 +4950,7 @@ l9e3eh:
 	and a
 	jr z,l9e57h
 	push bc
-	call sub_9936h
+	call actor_freeze_check
 	jr c,l9e50h
 	call shot_type_tick
 	call actor_integrate
@@ -5157,7 +5165,7 @@ l9fd1h:
 	cp 0e0h
 	jr nz,l9fdfh
 	ld (hl),0e1h
-	call 0604fh
+	call actor_sat_assign
 	inc e
 	dec c
 	jr z,l9fe7h

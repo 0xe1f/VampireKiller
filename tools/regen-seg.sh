@@ -28,10 +28,16 @@ rom="references/VampireKiller.rom"      # gitignored reference ROM
 tmpbin="$(mktemp)"
 dd if="$rom" of="$tmpbin" bs=8192 skip="$seg" count=1 status=none
 
-args=(-a -t -l -g "$org" -S segments/msx.sym)
+# Flat msx.sym cannot name two things at the same CPU address in different
+# banks.  tools/seg_sym.py emits a per-segment file: BIOS + out-of-window
+# names from msx.sym, in-window names from this bank's labels.
+mkdir -p generated
+python3 tools/seg_sym.py "$seg"
+sym="generated/seg${segnn}.z80dasm.sym"
+
+args=(-a -t -l -g "$org" -S "$sym")
 [ -n "$blocks" ] && args+=(-b "$blocks")
 
-mkdir -p generated
 raw="generated/seg${segnn}.raw.asm"
 gen="generated/seg${segnn}.generated.asm"
 

@@ -3,8 +3,9 @@
 ;  object_list_load, scenery_load, play_sound, and int_handler (with seg15 at 0xA000).
 ;  Origin is set by PHASE 0x8000 in VampireKiller.asm.
 ;
-;  Shares the CPU window with seg02; labels here are unique names (not
-;  z80dasm lxxxh) to avoid colliding with seg02.asm.
+;  Shares the CPU window with seg02; names here are unique (not z80dasm
+;  lxxxh).  regen-seg.sh filters msx.sym per bank, so a collision at the
+;  same CPU address in seg02 is fine.
 ;
 ;  Layout:
 ;    0x8000  scenery_list_ptr / packed per-hub candle, block, chest, vendor
@@ -1442,24 +1443,24 @@ sound_tick:
 	jp nz,sound_fb_tick
 	ld a,(0c0a5h)                   ; fade / 0xFF timer (lo)
 	dec a
-	jp m,snd_89a5
-	jp nz,snd_89a2
+	jp m,sound_run_channels
+	jp nz,sound_fade_store
 	ld a,(0c0a6h)                   ; fade / 0xFF timer (hi-ish)
 	dec a
 	ld (0c0a6h),a
 	cp 0f0h
-	jp nz,snd_89a0
+	jp nz,sound_fade_reload
 	ld hl,sound_idle
 	ld (0c010h),hl
 	ld (0c012h),hl
 	ld (0c014h),hl
 	xor a
-	jp snd_89a2
-snd_89a0:
+	jp sound_fade_store
+sound_fade_reload:
 	ld a,03ah
-snd_89a2:
+sound_fade_store:
 	ld (0c0a5h),a
-snd_89a5:
+sound_run_channels:
 	xor a
 	ld b,a
 	ld hl,(0c010h)                  ; channel A tick
@@ -1491,25 +1492,25 @@ sound_ch_go:
 sound_idle:
 	ld a,(0c095h)
 	cp 003h
-	jp nz,snd_89dd
+	jp nz,sound_idle_slot
 	xor a
 	ld (0c096h),a                   ; clear current sfx id
 	ld a,(0c095h)
-snd_89dd:
+sound_idle_slot:
 	rlca                            ; *2 -> word slot in C010..C016
 	ld hl,0c010h
 	add a,l
 	ld l,a
-	jr nc,snd_89e6
+	jr nc,sound_idle_arm
 	inc h
-snd_89e6:
-	ld de,snd_89f1
+sound_idle_arm:
+	ld de,sound_idle_ret
 	ld (hl),e
 	inc hl
 	ld (hl),d
 	ld e,000h                       ; volume 0 / period 0
 	jp sound_psg_vol
-snd_89f1:
+sound_idle_ret:
 	ret
 
 ; play_sound 0xFD overlay (C098 bit0): jp (C01A) — usually sound_ch_fd.
@@ -1560,9 +1561,9 @@ sound_mix_apply:
 	rlca
 	add a,l
 	ld l,a
-	jr nc,snd_8a35
+	jr nc,sound_mix_pair
 	inc h
-snd_8a35:
+sound_mix_pair:
 	ld a,(0c097h)
 	and (hl)               ; enable bits
 	inc hl
@@ -1614,22 +1615,22 @@ sound_ch_c:
 sound_ch_tick:
 	ld a,(0c095h)
 	cp 002h                ; music C?
-	jp nz,snd_8a89
+	jp nz,sound_ch_duration
 	ld a,(0c096h)
 	or a
-	jp z,snd_8a89
+	jp z,sound_ch_duration
 	set 5,(ix+002h)        ; sfx live: yield PSG C
-snd_8a89:
+sound_ch_duration:
 	dec (ix+009h)          ; duration
-	jp z,snd_8aca          ; expired -> fetch next bytecode
+	jp z,sound_ch_next          ; expired -> fetch next bytecode
 	bit 0,(ix+002h)        ; 1 = pitched note
-	jp z,snd_8ab3
+	jp z,sound_ch_env_hold
 	ld a,(ix+009h)
 	cp (ix+00bh)           ; still in attack (before decay start)?
-	jp nc,snd_8aa3
+	jp nc,sound_ch_decay
 	cp (ix+006h)           ; past decay end -> hold volume
 	ret nc
-snd_8aa3:
+sound_ch_decay:
 	ld e,(ix+00ah)         ; current volume
 	dec e                  ; decay 1 per tick
 	ret m                  ; already 0
@@ -1637,7 +1638,7 @@ snd_8aa3:
 	bit 5,(ix+002h)        ; sfx owns PSG C?
 	ret nz
 	jp sound_psg_vol
-snd_8ab3:
+sound_ch_env_hold:
 	bit 5,(ix+002h)        ; sfx owns PSG C?
 	ret nz
 	bit 7,(ix+002h)        ; env already finished?
@@ -1647,7 +1648,7 @@ snd_8ab3:
 	set 7,(ix+002h)        ; done: mute
 	ld e,000h
 	jp sound_psg_vol
-snd_8aca:
+sound_ch_next:
 	ld l,(ix+000h)         ; stream ptr
 	ld h,(ix+001h)
 
@@ -1669,20 +1670,20 @@ sound_fetch:
 	ld b,a
 	ld e,(ix+003h)         ; duration scale (cmd 0xD0)
 	xor a
-snd_8aeb:
+sound_note_mul:
 	add a,e                ; duration = (lo+1) * scale
-	djnz snd_8aeb
+	djnz sound_note_mul
 	ld (ix+009h),a
 	ld a,(0c095h)
 	cp 002h                ; music C?
-	jp nz,snd_8b04
+	jp nz,sound_note_go
 	ld a,(0c096h)
 	or a                   ; sfx live?
-	jp nz,snd_8b04
+	jp nz,sound_note_go
 	res 5,(ix+002h)        ; reclaim PSG C
-snd_8b04:
+sound_note_go:
 	bit 0,(ix+002h)        ; 1 = pitched tone
-	jp z,snd_8b53
+	jp z,sound_note_env
 	ld a,(ix+009h)
 	sub (ix+005h)          ; decay-start offset
 	ld (ix+00bh),a
@@ -1696,37 +1697,37 @@ snd_8b04:
 	ld hl,sound_note_tbl
 	add a,l
 	ld l,a
-	jr nc,snd_8b27
+	jr nc,sound_note_load
 	inc h
-snd_8b27:
+sound_note_load:
 	ld e,(hl)              ; period lo
 	inc hl
 	ld d,(hl)              ; period hi
 	ld b,(ix+007h)         ; extra SRL = drop octaves
-snd_8b2d:
+sound_note_shift:
 	srl d
 	rr e
-	djnz snd_8b2d
+	djnz sound_note_shift
 	bit 6,(ix+002h)        ; detune?
-	jp z,snd_8b3c
+	jp z,sound_note_out
 	inc de                 ; +2 period
 	inc de
-snd_8b3c:
+sound_note_out:
 	call sound_psg_period
 	ld a,(0c0a6h)          ; fade offset
 	add a,(ix+004h)        ; + base volume
-	jp p,snd_8b49
+	jp p,sound_note_vol
 	xor a                  ; clamp 0
-snd_8b49:
+sound_note_vol:
 	ld (ix+00ah),a         ; current volume
 	ld e,a
 	call sound_psg_vol
 	jp sound_mix_tone
-snd_8b53:
+sound_note_env:
 	bit 2,(ix+002h)        ; alt env table?
-	jp nz,snd_8b7b
+	jp nz,sound_env_alt
 	ld hl,sound_env_ptr             ; seg15 env/period table
-snd_8b5d:
+sound_env_index:
 	ld a,c
 	and 0f0h               ; hi nibble = env index
 	rrca
@@ -1734,9 +1735,9 @@ snd_8b5d:
 	rrca                   ; *2 -> word offset
 	add a,l
 	ld l,a
-	jr nc,snd_8b68
+	jr nc,sound_env_write
 	inc h
-snd_8b68:
+sound_env_write:
 	ld a,(hl)
 	ld (ix+00ch),a         ; env stream ptr lo
 	inc hl
@@ -1746,9 +1747,9 @@ snd_8b68:
 	ld a,001h
 	ld (ix+00eh),a         ; duration 1 -> fetch next tick
 	ret
-snd_8b7b:
+sound_env_alt:
 	ld hl,sound_env_ptr_alt         ; seg15 alt env/period table
-	jp snd_8b5d
+	jp sound_env_index
 ; One octave of AY periods (little-endian, 12 notes).  Hi nibble of a
 ; note byte * 2 indexes this; IX+7 extra SRL steps drop octaves.
 ; Noise/env notes instead use sound_env_ptr / sound_env_ptr_alt (seg15).
@@ -1764,9 +1765,9 @@ sound_rest:
 	ld b,a
 	ld e,(ix+003h)         ; duration scale
 	xor a
-snd_8ba1:
+sound_rest_mul:
 	add a,e                ; duration = (lo+1) * scale
-	djnz snd_8ba1
+	djnz sound_rest_mul
 	ld (ix+009h),a
 	bit 5,(ix+002h)        ; sfx owns PSG C?
 	ret nz
@@ -1774,29 +1775,29 @@ snd_8ba1:
 	ld (ix+00ah),e         ; volume 0
 	jp sound_psg_vol
 
-; Commands: hi nibble D = set duration scale (lo nibble -> IX+3);
-; E = extended (lo selects octave / lock / jump / call / return);
-; lo=0xE = loop (count, addr); lo=0xF = end channel (clear C0A7 bit).
-; Other lo nibbles load envelope (IX+4/+5/+6).
+; Commands: 0xD0|n = duration scale (sound_cmd_scale); 0xE0|n = extended
+; (sound_cmd_ext: octave / lock / detune / jump / call / return);
+; lo=0xE = loop (count, addr); lo=0xF = end channel (sound_cmd_stop).
+; Other lo nibbles load envelope (sound_cmd_vol -> IX+4/+5/+6).
 sound_cmd:
 	and 0f0h
 	cp 0d0h                         ; 0xD0 | scale
-	jp z,snd_8c06
+	jp z,sound_cmd_scale
 	cp 0e0h                         ; 0xE0 | sub-op
-	jp z,snd_8c0f
+	jp z,sound_cmd_ext
 	ld a,c
 	and 00fh
 	cp 00fh
-	jp z,snd_8c80
+	jp z,sound_cmd_stop
 	cp 00eh
-	jp nz,snd_8bed         ; other lo = envelope params
+	jp nz,sound_cmd_vol         ; other lo = envelope params
 	ld a,(ix+010h)
 	dec a
-	jp z,snd_8be4          ; loop count done -> skip addr
-	jp p,snd_8bd9
+	jp z,sound_loop_skip          ; loop count done -> skip addr
+	jp p,sound_loop_set
 	ld a,(hl)
 	dec a
-snd_8bd9:
+sound_loop_set:
 	inc hl
 	ld (ix+010h),a         ; loop count
 	ld a,(hl)
@@ -1804,13 +1805,13 @@ snd_8bd9:
 	ld h,(hl)
 	ld l,a                 ; jump to loop addr
 	jp sound_fetch
-snd_8be4:
+sound_loop_skip:
 	ld (ix+010h),a
 	inc hl
 	inc hl
 	inc hl                 ; skip count + addr
 	jp sound_fetch
-snd_8bed:
+sound_cmd_vol:
 	inc a
 	ld (ix+004h),a         ; base volume
 	ld a,(hl)
@@ -1826,57 +1827,57 @@ snd_8bed:
 	and 00fh
 	ld (ix+006h),a         ; decay end
 	jp sound_fetch
-snd_8c06:
+sound_cmd_scale:
 	ld a,c
 	and 00fh
 	ld (ix+003h),a         ; duration scale
 	jp sound_fetch
-snd_8c0f:
+sound_cmd_ext:
 	ld a,c
 	and 00fh
 	cp 006h
-	jp c,snd_8c42
-	jp z,snd_8c4c
+	jp c,sound_cmd_octave
+	jp z,sound_cmd_lock
 	cp 007h
-	jp z,snd_8c5b
+	jp z,sound_cmd_detune
 	cp 00ah
-	jp z,snd_8c62
+	jp z,sound_cmd_jump
 	cp 00bh
-	jp z,snd_8c54
+	jp z,sound_cmd_unlock
 	cp 00dh
-	jp z,snd_8c69
+	jp z,sound_cmd_call
 	cp 00eh
-	jp z,snd_8c77
+	jp z,sound_cmd_return
 	and 007h
 	ld b,a
 	ld a,(ix+002h)
 	and 0f8h
-	or b                   ; E0 | 0..5 / 8 / 9 / C: store lo into flags
+	or b                   ; E0 | 8 / 9 / C: low 3 bits into IX+2 flags
 	ld (ix+002h),a
 	jp sound_fetch
-snd_8c42:
+sound_cmd_octave:
 	neg
 	add a,006h
 	ld (ix+007h),a         ; octave = 6 - lo_nibble (SRL count)
 	jp sound_fetch
-snd_8c4c:
+sound_cmd_lock:
 	ld a,001h
 	ld (0c0a8h),a          ; lock (block new sfx)
 	jp sound_fetch
-snd_8c54:
+sound_cmd_unlock:
 	xor a
 	ld (0c0a8h),a          ; unlock
 	jp sound_fetch
-snd_8c5b:
+sound_cmd_detune:
 	set 6,(ix+002h)        ; detune (+2 period)
 	jp sound_fetch
-snd_8c62:
+sound_cmd_jump:
 	ld a,(hl)
 	inc hl
 	ld h,(hl)
 	ld l,a                 ; jump to addr
 	jp sound_fetch
-snd_8c69:
+sound_cmd_call:
 	ld e,(hl)
 	inc hl
 	ld d,(hl)
@@ -1885,18 +1886,18 @@ snd_8c69:
 	ld (ix+013h),h
 	ex de,hl
 	jp sound_fetch
-snd_8c77:
+sound_cmd_return:
 	ld l,(ix+012h)         ; return
 	ld h,(ix+013h)
 	jp sound_fetch
-snd_8c80:
+sound_cmd_stop:
 	ld a,(0c095h)
 	inc a
 	ld b,a
 	ld a,07fh
-snd_8c87:
+sound_cmd_stop_mask:
 	rlca                   ; bit mask for this slot
-	djnz snd_8c87
+	djnz sound_cmd_stop_mask
 	ld b,a
 	ld a,(0c0a7h)
 	and b
@@ -1922,19 +1923,19 @@ sound_sfx_fetch:
 	ld (ix+00eh),a
 	ld l,(ix+00ch)
 	ld h,(ix+00dh)
-snd_8cb9:
+sound_sfx_op:
 	ld a,(hl)
 	cp 0ffh                         ; 0xFF = end of sfx
 	jp z,sfx_ptr                    ; CY = finished
 	inc hl
 	ld c,a
 	cp 0feh                         ; 0xFE = sfx loop
-	jp z,snd_8d18
+	jp z,sound_sfx_loop
 	and 0f0h
 	cp 020h
-	jp z,snd_8d38
+	jp z,sound_sfx_mix
 	cp 010h
-	jp nz,snd_8ce1
+	jp nz,sound_sfx_nibble
 	ld a,c
 	and 00fh
 	rlca
@@ -1945,30 +1946,30 @@ snd_8cb9:
 	inc hl
 	ld c,a
 	and 0f0h
-snd_8ce1:
+sound_sfx_nibble:
 	rrca
 	rrca
 	rrca
 	rrca
 	ld e,a
 	bit 4,(ix+00ah)
-	jp z,snd_8cf5
+	jp z,sound_sfx_fade
 	ld a,00dh              ; AY envelope shape
 	call WRTPSG
-	jp snd_8d09
-snd_8cf5:
+	jp sound_sfx_tone
+sound_sfx_fade:
 	ld a,(0c095h)
 	cp 003h
-	jp nc,snd_8d06
+	jp nc,sound_sfx_amp
 	ld a,(0c0a6h)
 	add a,e
-	jp p,snd_8d05
+	jp p,sound_sfx_fade_ok
 	xor a
-snd_8d05:
+sound_sfx_fade_ok:
 	ld e,a
-snd_8d06:
+sound_sfx_amp:
 	call sound_psg_vol
-snd_8d09:
+sound_sfx_tone:
 	ld a,c
 	and 00fh
 	ld d,a
@@ -1977,45 +1978,45 @@ snd_8d09:
 	ld (ix+00ch),l
 	ld (ix+00dh),h
 	jp sound_psg_period
-snd_8d18:
+sound_sfx_loop:
 	ld a,(ix+011h)         ; 0xFE loop count
 	dec a
-	jp z,snd_8d2f          ; count done -> skip addr
-	jp p,snd_8d24
+	jp z,sound_sfx_loop_skip          ; count done -> skip addr
+	jp p,sound_sfx_loop_set
 	ld a,(hl)
 	dec a
-snd_8d24:
+sound_sfx_loop_set:
 	inc hl
 	ld (ix+011h),a
 	ld a,(hl)
 	inc hl
 	ld h,(hl)
 	ld l,a                 ; jump to loop addr
-	jp snd_8cb9
-snd_8d2f:
+	jp sound_sfx_op
+sound_sfx_loop_skip:
 	ld (ix+011h),a
 	inc hl
 	inc hl
 	inc hl                 ; skip count + addr
-	jp snd_8cb9
-snd_8d38:
+	jp sound_sfx_op
+sound_sfx_mix:
 	bit 0,c
-	jp nz,snd_8d4e
+	jp nz,sound_sfx_mix_noise
 	bit 1,c
-	jp nz,snd_8d48
+	jp nz,sound_sfx_mix_tone
 	call sound_mix_mute    ; 0x20: mute
-	jp snd_8d5c
-snd_8d48:
+	jp sound_sfx_mix_done
+sound_sfx_mix_tone:
 	call sound_mix_tone    ; 0x22: tone
-	jp snd_8d5c
-snd_8d4e:
+	jp sound_sfx_mix_done
+sound_sfx_mix_noise:
 	bit 1,c
-	jp nz,snd_8d59
+	jp nz,sound_sfx_mix_both
 	call sound_mix_noise   ; 0x21: noise
-	jp snd_8d5c
-snd_8d59:
+	jp sound_sfx_mix_done
+sound_sfx_mix_both:
 	call sound_mix_both    ; 0x23: tone+noise
-snd_8d5c:
+sound_sfx_mix_done:
 	ld a,c
 	rlca
 	and 010h
@@ -2030,7 +2031,7 @@ snd_8d5c:
 	cp 020h
 	jp z,sound_sfx_hold
 	cp 028h
-	jp c,snd_8cb9
+	jp c,sound_sfx_op
 	ld e,(hl)
 	inc hl
 	ld a,00ch              ; AY envelope period coarse
@@ -2039,7 +2040,7 @@ snd_8d5c:
 	inc hl
 	ld a,00bh              ; AY envelope period fine
 	call WRTPSG
-	jp snd_8cb9
+	jp sound_sfx_op
 
 ; NC = keep this sfx tick; CY (sfx_ptr) = finished -> idle.
 sound_sfx_hold:

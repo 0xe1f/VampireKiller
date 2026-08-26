@@ -411,7 +411,7 @@ Seeds are X = `0x3C` / `0x7C` / `0xBC` at Y = `0x60` — the three arches — wi
 tick phases 0/1/2 so they do not move in lockstep, and the right-hand bar
 gated to half rate. Descending is gated by `+4 & +3` and retracting by
 `+4 & 3`, so a bar **drops fast and crawls back up**. Contact damage comes
-from `hurt_simon_projectile` (0x85AD) over a 32×8 box: **16** while descending,
+from `hurt_simon_spikes` (0x85AD) over a 32×8 box: **16** while descending,
 **8** while retracting (it reads bit 0 of the state byte, which is what makes
 the two directions differ).
 
@@ -459,9 +459,8 @@ one frame at each end. `platform_tbl` records are `{Y, X, step, span}` after a
 get one each at Y `0x8F` or `0xA7` with spans 64–160.
 
 Note `platform_load` writes `+0` then `ldir`s four bytes into `+1..+4` and skips
-`+5`/`+6` with two `inc de`, so **the counters are never initialised** — correct
-behaviour depends on 0xC598 already being clear when the room loads. Not yet
-confirmed where that clear happens.
+`+5`/`+6` with two `inc de`. That is fine: `actor_state_reset` (seg1 0x63BA)
+already zeroed `0xC470..0xC6FF` on room load, which includes the C598 pool.
 
 `platform_sat_build` (0x90DF) emits slot 1 to SAT `0xD638` with colours at
 `0xD4E0`, slot 2 to `0xD648`/`0xD520`. Cell geometry comes from
@@ -670,12 +669,13 @@ on-screen **ENEMY/BOSS energy** (full `0x80`, used by HP-bar enemies, types ≥ 
   of 2× when Simon is facing the hit, and spends a shield charge (`0xC441`);
   when charges run out the shield drops.  The **yellow shield** (id 4, bit 5)
   absorbs enemy shots instead.
-- **Hazard** — `hurt_simon_projectile` (seg2 0x85AD), a 32×8 overlap test against
-  the three 0xC580 slots. Fixed **8**, or **16** when bit 0 of the slot's state
-  byte is set. In practice that pool only ever holds the stage 6 room 1 spike
-  bars, whose state byte is 1 while descending and 2 while retracting — so the
-  16 is the falling bar and the 8 is the rising one. Also forces the hurt state
-  (`0xC420 = 5`). Ignored during i-frame/freeze timers (`0xC42D`, `0xC43A`).
+- **Hazard** — `hurt_simon_spikes` (seg2 0x85AD), a 32×8 overlap test against
+  the three 0xC580 spike-bar slots (`spike_bar_overlap`). Fixed **8**, or **16**
+  when bit 0 of the slot's state byte is set. Nothing else ever seeds that pool
+  (`spike_bars_seed` is the only writer, and only on stage 6 room 1); enemy shots
+  live in the 8 D700 slots. State is 1 while descending and 2 while retracting —
+  so the 16 is the falling bar and the 8 is the rising one. Also forces the hurt
+  state (`0xC420 = 5`). Ignored during i-frame/freeze timers (`0xC42D`, `0xC43A`).
   See [Spike bars](#spike-bars-the-0xc580-hazard-pool).
 
 **Simon deals damage** to HP-bar enemies via `weapon_hit_damage` (seg1 0x7E33) →
@@ -686,7 +686,7 @@ by `(enemy type − 0x11)`:
 - vs type 0x17 with weapon ≥ 2 the hit is quartered.
 
 Lesser enemies (type < 0x11) have no HP bar; they use per-actor HP at `ix+0D`
-(table `0x60E9`). Leather whip subtracts 1 per connected hit, other weapons 2.
+(`actor_hp_tbl` at 0x60E9). Leather whip subtracts 1 per connected hit, other weapons 2.
 
 Hit tests pick a **box size by type** then overlap Simon / whip / C450–C460 /
 the yellow shield. C800 actors use `hit_class_c800_tbl` (classes 1–7: fodder
@@ -1052,6 +1052,49 @@ edge-detected through 0xC709):
 - **SHIFT / refuse**, can't afford, or timer expires → offer withdrawn, sfx 0x02.
 - nothing pressed → offer stays open.
 
+## Actors (C800 / D700)
+
+Seven **C800** slots (stride `0x80`: C800, C880, … CB80) plus eight **D700**
+shot slots of the same layout. `spawn_actor` (seg0 0x5F24) takes C=type,
+D=X, E=Y. Type 0 is free. C450/C460 (thrown knife/axe/cross) is a
+**different** struct — do not mix (there `ix+3` is velocity).
+
+Shared physics header (`actor_integrate` 0x99C0, velocity helpers in seg3):
+
+| off | meaning |
+| ---: | --- |
+| +00 | type (0 = free) |
+| +01 | per-type sub-state |
+| +02 / +03 | Y 16-bit fixed (frac / pixel) |
+| +04 / +05 | X 16-bit fixed (frac / pixel) |
+| +06 | physics alive (`actor_integrate` skips if 0; spawn writes 0, init usually sets 1) |
+| +07 / +08 | signed Y velocity |
+| +09 / +0A | signed X velocity |
+| +0B | pose / shape id (seg6 word table 0xB473 while that bank is paged) |
+| +0C | timer |
+| +0D | HP from `actor_hp_tbl` (0x60E9; spawn indexes as 0x60E8+type) |
+| +0E | flags. **bit 0 = hittable** this frame (`rra`/`jr nc` in whip/proj tests; `res 0` on a hit). **bit 2** = rearm hittable (`actors_rearm_hittable`). Spawn writes 7. |
+| +0F | copied from CFFA at spawn (spawn zeros CFFA first; unused on C800) |
+| +10..+1E | per-type scratch (merman spit at +1B, facing, saved Y, …) |
+| +1F | drop gate. Spawn copies CFFB (always 0); callers write `ix+1F` after `spawn_actor`. Flame→pickup uses this. |
+| +7E | respect Simon-attack freeze: when D010 is set (whip wind-up), `actor_freeze_check` skips type tick + integrate if +7E ≠ 0. Spawn sets 1; flames/pickups clear it. |
+| +7F | spawn / `shot_alloc` write 1; no readers found yet |
+
+Hardware SAT is **Y then X**. `actor_sat_build` adds `ix+3` to Y and `ix+5` to
+X. An F8 dump that showed the dog's "X" at +02/+03 was a mis-index of the Y
+pixel, not a per-type layout.
+
+SAT sub-block at `slot|0x20`, stride 5 (`actor_sat_patterns` 0x6030,
+`actor_sat_assign` 0x604F, `actor_sat_build` / `actor_sat_emit`):
+
+| off | meaning |
+| ---: | --- |
+| +20 | sprite count (`actor_spr_count`; spawn indexes 0x605E+type; type 1 = 4) |
+| +21 + n×5 | SAT index, Y, X, pattern, colour/attr (colour 0 → hide with Y=0xE1) |
+
+`actor_free` walks that block and writes Y=0xE0 into each claimed D638 cell
+(`set 5,l` is +0x20, not a linked sub-slot at +0x25).
+
 ## Text encoding (CRACKED + converted to ASCII)
 
 DONE: HUD/title strings use the `vk` macro (`vk "PUSH SPACE KEY"`): each
@@ -1082,14 +1125,11 @@ note the real glyph in a comment.
   and the title builder loads graphics from pointers into the 0x8000-0xBFFF banks
   (e.g. `ld hl,0x930b` / `0xb70b` at 0x4557/0x4562) - so sprite/tile BITMAPS live
   in the graphics segments (4-15), not seg00.
-- Konami actor/OBJ struct (from Metal Gear `constants/structures.asm`) is the
-  template for VK's ix-based entity record (entity dispatch at 0x5FD0): fields
-  like ID/Status/Y/X/Speed/SpriteId/ANIM/LIFE/Direction + trailing per-sprite
-  sub-records (Spr*Layer/Y/X/Pattern/Color). VK entity uses ix offsets up to
-  ~0x7f, so its record is similarly large.
-- NEXT for sprites: disassemble a graphics bank, locate the sprite pattern
-  generator data, and emit it as 32-byte (16x16) pattern arrays (optionally in
-  binary rows) for easy editing - mirroring MG's `gfx/sprites.asm` layout.
+- Actor SAT comes from the C800/D700 slot: pose `ix+0B` selects a seg6 shape
+  stream at 0xB473; `actor_sat_build` writes Y/X/pattern into the 5-byte cells
+  at `slot|0x20`. See [Actors (C800 / D700)](#actors-c800--d700).
+- Pixel patterns are 1bpp RLE into VRAM 0xF800+ (per-room gfx scripts), not a
+  Metal Gear-style 32-byte pattern array in ROM.
 
 ### Text encoding details
 
@@ -1152,7 +1192,10 @@ named from call sites in `sfx_tbl`. The renderer uses AY-3-8910 timing
 (fmaster/8, 16-step hardware envelope); still no speaker filter, and BGM
 loop/fade is heuristic. Channel RAM:
 C010..C016 tick pointers, 20-byte blocks at C01C/C030/C044/C058/C06C/C080,
-C097 mixer shadow, C098 overlay flags, C0A5 fade.
+C097 mixer shadow, C098 overlay flags, C0A5 fade. Music bytecode commands
+are named in the driver (`sound_cmd_scale` / `_ext` / `_octave` / `_jump` /
+`_call` / `_return` / `_stop`, `sound_loop_set`); sfx ops likewise
+(`sound_sfx_op`, `_loop`, `_mix`).
 
 ## Code layout & where the "main loop" is
 
@@ -1447,14 +1490,10 @@ record used by the entity dispatch at 0x5FD0 / `entity_tbl`).
 
 - Per-level / per-boss data tables (which bank they live in). Boss CE01
   machines for events 1–6 are named; leftover is other unnamed tables.
-- **Symbol collisions across banks.** `segments/msx.sym` is flat but the ROM is
-  banked, so two things at the same CPU address in different banks cannot both be
-  named. Known case: seg2 `spike_bars_restore` (0x902E) vs. the seg14/15 PSG
-  stream `sfx_0e_block_break`, which is why that one routine has no equ. Audit
-  the full collision count, then decide between per-segment symbol files and a
-  bank-qualified scheme.
-- **`hurt_simon_projectile` (0x85AD) is misnamed** — it only scans the 3-slot
-  0xC580 pool, which holds nothing but the spike bars; enemy projectiles are the
-  8 D700 shot slots on a different path. Rename to `hurt_simon_hazard` once we
-  have confirmed nothing else ever seeds C580 (touches seg1 0x4621, `msx.sym`,
-  and several note sections).
+- **Symbol collisions across banks — handled at regen.** `segments/msx.sym` stays
+  one catalog, but z80dasm `-S` is flat, so 48 CPU addresses are shared by two
+  banks (21 of them with a real name on both sides). The known case that started
+  the audit is still the type specimen: seg2 `spike_bars_restore` (0x902E) vs.
+  seg14 `sfx_0e_block_break`. `tools/regen-seg.sh` now filters through
+  `tools/seg_sym.py` so each bank keeps its own name. Re-run
+  `tools/seg_sym.py --audit` after a regen or a bulk rename.

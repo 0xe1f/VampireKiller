@@ -6,14 +6,16 @@
 ; 48 bytes before the first routine at 0x6030.
 data_6000: start 0x6000 end 0x6030 type bytedata
 
-; 0x6030-0x605e: two small routines (entry points 0x6030 and 0x604f), left as code.
+; 0x6030-0x605e: actor_sat_patterns (0x6030) + actor_sat_assign (0x604F).
 
-; Byte tables (per-entry counts / small parameters) preceding a word table.
-data_605f: start 0x605f end 0x608d type bytedata
-; Word-pointer table: 46 entries, all pointing into the 0x61xx data below.
-ptr_tbl_608d: start 0x608d end 0x60e9 type worddata
-; More byte tables up to the routine at 0x615b.
-data_60e9: start 0x60e9 end 0x615b type bytedata
+; Sprite counts per actor type (spawn indexes as 0x605E+type).
+actor_spr_count: start 0x605f end 0x608d type bytedata
+; Word[type] -> SAT colour/attr init stream (spawn uses 0x608B+type*2).
+actor_sat_pat_ptr: start 0x608d end 0x60e9 type worddata
+; HP per actor type (spawn indexes as 0x60E8+type).
+actor_hp_tbl: start 0x60e9 end 0x6119 type bytedata
+; SAT colour/attr init streams pointed at by actor_sat_pat_ptr.
+actor_sat_colors: start 0x6119 end 0x615b type bytedata
 
 ; Konami logo tile-layout stream consumed by sub_6276h (0xFE=newline, 0xFF=end).
 logo_layout: start 0x6296 end 0x62d7 type bytedata

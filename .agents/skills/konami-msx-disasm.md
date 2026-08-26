@@ -115,14 +115,15 @@ of `<Game>.asm`.
   rewrite `ld rr,NAME` back to a hex literal (byte-identical, and `make verify`
   proves it). Audit with a regex for BIOS names on non-branch lines after every
   regen; VK had 91 of these hiding in segs 0-3.
-- **`msx.sym` is flat, the ROM is banked.** One symbol file covers every bank, so
-  two different things at the same CPU address in different banks cannot both be
-  named there — whichever entry exists wins for all of them on regen. VK has this
-  at 0x902E (seg2 `spike_bars_restore` vs. the seg14/15 PSG stream
-  `sfx_0e_block_break`), so that routine is named in the `.asm` only. Committed
-  source stays correct either way; the cost is paid at regen time, so keep a list
-  of the collisions and re-apply those names by hand. If the count grows, move to
-  per-segment symbol files rather than fighting it.
+- **`msx.sym` is flat, the ROM is banked.** One hand-maintained file covers every
+  bank, but z80dasm `-S` can only attach one name to a CPU address. VK has 48 of
+  these collisions (21 named-vs-named, including 0x902E `spike_bars_restore` vs
+  `sfx_0e_block_break`). `tools/regen-seg.sh` therefore runs `tools/seg_sym.py N`
+  first: BIOS + out-of-window names from `msx.sym`, in-window names from *this*
+  bank's labels. Keep putting new names in `msx.sym` (the catalog); do not split
+  it into per-segment files. `tools/seg_sym.py --audit` reprints the collision
+  list. Cross-bank calls to a unique address still name; colliding addresses in
+  a *different* bank are left numeric.
 - **Text**: MSX games often store text as `(ASCII - offset)` because the font is
   loaded at a nonzero tile base. Crack the offset, then use an sjasmplus `MACRO`
   (`vk` / `cr` in `VampireKiller.asm`) so source strings stay readable ASCII
@@ -208,7 +209,10 @@ of `<Game>.asm`.
 - Actor/object slot arrays (fixed count, fixed stride) with a type/active byte at
   offset 0; a per-type behaviour handler table indexed by type. Cross-reference
   Metal Gear's `references/MetalGear/constants/structures.asm` — Konami reused
-  structures across games.
+  structures across games. VK C800/D700 is a shared 0x80-byte record: pixel **Y at
+  +3, X at +5** (hardware SAT is Y then X — a RAM dump that "moves on +03" during
+  a horizontal flee is Y, not a per-type layout). SAT sub-block at `slot|0x20`,
+  stride 5. Field table: `docs/game-notes.md` Actors.
 
 ## Deriving level / map structure
 

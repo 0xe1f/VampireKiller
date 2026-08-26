@@ -226,7 +226,8 @@ state_hub_advance: equ 0x4324	; C409: boss-clear/credits -> hub++ then advance_s
 state_pause: equ 0x43e1	; C40A: F1 freeze; F1 again resumes play
 damage_enemy: equ 0x4643	; 0xC418 enemy/boss energy -= B (floored at 0)
 hurt_simon_contact: equ 0x8173	; Simon -= 2*l81d5h[type].odd on enemy contact (shield halves)
-hurt_simon_projectile: equ 0x85ad	; Simon -= 8/16 from a 0xC580 hazard slot, sets hurt state
+hurt_simon_spikes: equ 0x85ad	; Simon -= 8/16 from a C580 spike bar (16 descending, 8 retracting)
+spike_bar_overlap: equ 0x85e5	; carry if Simon overlaps this C580 bar's 32x8 box
 weapon_hit_damage: equ 0x7e33	; whip/sub-weapon damage to enemy 0xC418 (per weapon+type table)
 advance_stage: equ 0x434e	; next stage: 0xD000++ (stage), 0xD001=0 (room), bump 0xC410/11, transition 4
 room_map_build: equ 0x4fb6	; expand a room's 8x6 metatiles (4x4 tiles ea) into the 0xD100 tile map
@@ -315,6 +316,12 @@ simon_spawn_pos: equ 0x6409	; Simon Y/X/facing from l6426h[stage]
 pattern_phase_upload: equ 0x6591	; phase-selected pattern rows to VRAM 0xF400
 pattern_shadow_blit: equ 0x65ab	; copy 0xD400 shadow (0x280 bytes) to VRAM 0xF400
 room_edge_detect: equ 0x7682	; set C41B pending exit from Simon vs screen edges
+actor_sat_patterns: equ 0x6030	; copy SAT colour/attr init into slot|0x20 cells
+actor_sat_assign: equ 0x604f	; store SAT index D at cell E of slot|0x20
+actor_spr_count: equ 0x605f	; byte[type]; spawn indexes as 0x605E+type
+actor_sat_pat_ptr: equ 0x608d	; word[type] -> colour/attr stream; spawn uses 0x608B
+actor_hp_tbl: equ 0x60e9	; HP[type]; spawn indexes as 0x60E8+type
+actor_sat_colors: equ 0x6119	; SAT colour/attr init streams (cell+4)
 actor_sat_build: equ 0x644c	; one actor: seg6 shape stream -> SAT block at slot|0x20
 shot_sat_emit: equ 0x64ec	; 8 x shot SAT blocks -> 0xD638 hardware shadow
 c800_sat_emit: equ 0x64f3	; 7 x C800 SAT blocks -> 0xD638 hardware shadow
@@ -491,9 +498,10 @@ pickup_tick: equ 0x8a51	; 8 x C500 floor items/chests
 spike_bars_seed_once: equ 0x8fa1	; seed the C580 bars only if slot 0 is free
 spike_bars_seed: equ 0x8fa6	; seed 3 x C580 from spike_bar_seeds (stage 6 room 1)
 spike_bar_seeds: equ 0x8fc4	; 3 x 6-byte spike-bar seeds
-hazard_tick: equ 0x8fd6	; 3 x C580 spike bars (hurt_simon_projectile)
+hazard_tick: equ 0x8fd6	; 3 x C580 spike bars (hurt_simon_spikes)
 spike_bars_run: equ 0x8fd9	; walk the 3 C580 slots, stride 8
 spike_bar_slot_tick: equ 0x8ff1	; advance one bar +-4px and repaint it (32x16 HMMM)
+spike_bars_restore: equ 0x902e	; reseed + repaint after F2 map (same CPU addr as sfx_0e_block_break in seg14)
 platform_load: equ 0x9034	; seed C598 from platform_tbl for this room
 platform_tbl: equ 0x9073	; {stage,room,n}+n×{Y,X,step,span}; stages 5 and 10
 platform_tick: equ 0x90a2	; 2 x C598 moving platforms (carry Simon via C439)
@@ -531,11 +539,12 @@ actors_tick: equ 0x98ec	; if D010==0: room_spawner then c800_tick
 c800_tick: equ 0x98f3	; tick all 7 C800 actor slots
 shot_sat_build: equ 0x9917	; 8 x shot shape streams -> actor SAT
 c800_sat_build: equ 0x991f	; 7 x C800 shape streams -> actor SAT
+actor_freeze_check: equ 0x9936	; C if D010 set and +7E != 0 (skip tick/integrate)
 actor_type_tick: equ 0x9942	; per-frame C800 DISPATCH_A on type-1 (past spawn init)
 actor_tick_tbl: equ 0x9949	; word[type-1] -> tick; 1-22 plus overflow 0x18-0x24
 actor_integrate: equ 0x99c0	; add velocity (+0x07/08 Y, +0x09/0A X) to position
 actor_cull_offscreen: equ 0x99ec	; free actor if pixel pos left the play area
-actor_free: equ 0x99fd	; clear actor slot (+0x00/+0x0E) and any linked sub-slot
+actor_free: equ 0x99fd	; clear slot + hide SAT cells at slot|0x20
 spawn_rate_gate: equ 0x9cca	; CF00 counter vs difficulty-scaled threshold
 spawn_pick_pos: equ 0x9d03	; hardcoded ground-enemy spawn X/Y from stage/room
 shot_tick: equ 0x9e38	; 8 shot slots at 0xD700
@@ -734,9 +743,15 @@ object_list_ptr: equ 0x8668	; word[hub] -> packed object streams
 credits_font: equ 0x8824		; 14 x 8x8 1bpp ending-credits glyphs (0-9 . ' : ,)
 credits_font_az: equ 0x8894		; 26 x 8x8 1bpp glyphs A-Z
 sound_tick: equ 0x8964		; IRQ PSG tick (int_handler, segs 14+15 paged)
+sound_fade_reload: equ 0x89a0	; C0A5 := 0x3A (fade lo, 0xFF path)
+sound_fade_store: equ 0x89a2	; C0A5 := A
+sound_run_channels: equ 0x89a5	; tick music A/B/C then fall into sfx slot
 sound_ch_dispatch: equ 0x89bc	; call sound_ch_go then the C016 (sfx) slot
 sound_ch_go: equ 0x89c6		; C094=A channel, C095=B slot, jp (HL)
 sound_idle: equ 0x89ce		; silent-channel tick (all C010..C016 on stop)
+sound_idle_slot: equ 0x89dd	; arm this slot with sound_idle_ret + vol 0
+sound_idle_arm: equ 0x89e6
+sound_idle_ret: equ 0x89f1	; one-shot ret that replaces a live tick ptr
 sound_fd_tick: equ 0x89f2	; C098 bit0: jp (C01A)  (play_sound 0xFD)
 sound_fb_tick: equ 0x89f6	; C098 bit1: run C018 as slot 4
 sound_psg_period: equ 0x89ff	; write 12-bit period DE to PSG (fine=C094*2)
@@ -746,6 +761,7 @@ sound_mix_both: equ 0x8a1a	; mixer: tone + noise
 sound_mix_noise: equ 0x8a21	; mixer: noise only
 sound_mix_tone: equ 0x8a28	; mixer: tone only
 sound_mix_apply: equ 0x8a2c	; apply AND/OR pair from (HL)[C094] to C097 + PSG 7
+sound_mix_pair: equ 0x8a35	; AND/OR the mixer shadow from the table row
 sound_mix_tone_tbl: equ 0x8a45	; 3 x (AND,OR) enable tone, disable noise
 sound_mix_noise_tbl: equ 0x8a4b
 sound_mix_both_tbl: equ 0x8a51
@@ -755,14 +771,57 @@ sound_ch_a: equ 0x8a64		; music channel A (IX=0xC01C)
 sound_ch_b: equ 0x8a6b		; music channel B (IX=0xC030)
 sound_ch_c: equ 0x8a72		; music channel C (IX=0xC044)
 sound_ch_tick: equ 0x8a76	; common music-channel bytecode tick
+sound_ch_duration: equ 0x8a89	; --IX+9; decay, env-hold, or fetch
+sound_ch_decay: equ 0x8aa3	; pitched note: volume -- until hold
+sound_ch_env_hold: equ 0x8ab3	; rest/env: sfx-style period stream
+sound_ch_next: equ 0x8aca	; duration expired -> sound_fetch
 sound_fetch: equ 0x8ad0		; next music bytecode at (HL)
+sound_note_mul: equ 0x8aeb	; duration = (lo nibble+1) * IX+3
+sound_note_go: equ 0x8b04	; apply a pitched note (or env table)
+sound_note_load: equ 0x8b27	; period from sound_note_tbl
+sound_note_shift: equ 0x8b2d	; extra SRL = drop octaves (IX+7)
+sound_note_out: equ 0x8b3c	; write period + volume, mixer = tone
+sound_note_vol: equ 0x8b49
+sound_note_env: equ 0x8b53	; unpitched: load env stream ptr
+sound_env_index: equ 0x8b5d	; hi nibble -> sound_env_ptr word
+sound_env_write: equ 0x8b68	; IX+0C/+0D = env ptr
+sound_env_alt: equ 0x8b7b	; same, from sound_env_ptr_alt
 sound_note_tbl: equ 0x8b81	; 12 PSG periods, one octave (hi nibble of note)
 sound_rest: equ 0x8b99		; 0xC0..CF rest: duration only, period 0
+sound_rest_mul: equ 0x8ba1	; rest duration = (lo+1) * IX+3
 sound_cmd: equ 0x8bb4		; music command (byte >= 0xD0)
+sound_loop_set: equ 0x8bd9	; 0xxE loop: store count, jump to addr
+sound_loop_skip: equ 0x8be4	; loop count done: skip count+addr
+sound_cmd_vol: equ 0x8bed	; other lo: IX+4/+5/+6 envelope
+sound_cmd_scale: equ 0x8c06	; 0xD0|n -> IX+3 duration scale
+sound_cmd_ext: equ 0x8c0f	; 0xE0|n dispatch
+sound_cmd_octave: equ 0x8c42	; E0|0-5: IX+7 = 6-n
+sound_cmd_lock: equ 0x8c4c	; E0|6: C0A8=1, block new sfx
+sound_cmd_unlock: equ 0x8c54	; E0|B: C0A8=0
+sound_cmd_detune: equ 0x8c5b	; E0|7: IX+2 bit6, period +2
+sound_cmd_jump: equ 0x8c62	; E0|A: HL = addr
+sound_cmd_call: equ 0x8c69	; E0|D: save return in IX+12
+sound_cmd_return: equ 0x8c77	; E0|E: restore HL from IX+12
+sound_cmd_stop: equ 0x8c80	; lo=F: clear C0A7 live bit, idle
+sound_cmd_stop_mask: equ 0x8c87
 sound_ch_fb: equ 0x8c95		; play_sound 0xFB channel (IX=0xC06C)
 sound_sfx: equ 0x8c9c		; sfx channel tick (IX=0xC058)
 sound_sfx_go: equ 0x8ca0	; shared FB/sfx: fetch, idle when done
 sound_sfx_fetch: equ 0x8ca7	; sfx bytecode; NC=hold, CY=finished
+sound_sfx_op: equ 0x8cb9	; next sfx byte (FF end, FE loop, 1x/2x, else vol)
+sound_sfx_nibble: equ 0x8ce1	; high nibble -> volume / env shape
+sound_sfx_fade: equ 0x8cf5	; music slots: add C0A6 fade to volume
+sound_sfx_fade_ok: equ 0x8d05
+sound_sfx_amp: equ 0x8d06	; write amplitude
+sound_sfx_tone: equ 0x8d09	; low nibble + next byte -> period
+sound_sfx_loop: equ 0x8d18	; 0xFE loop (count, addr)
+sound_sfx_loop_set: equ 0x8d24
+sound_sfx_loop_skip: equ 0x8d2f
+sound_sfx_mix: equ 0x8d38	; 0x2x mixer: mute/noise/tone/both
+sound_sfx_mix_tone: equ 0x8d48
+sound_sfx_mix_noise: equ 0x8d4e
+sound_sfx_mix_both: equ 0x8d59
+sound_sfx_mix_done: equ 0x8d5c	; store mixer flags, duration, optional env period
 sound_sfx_hold: equ 0x8d8b	; or a / ret (NC, still playing)
 sfx_ptr: equ 0x8d8d		; scf/ret (CY, done); play_sound indexes id*2 from here
 sfx_tbl: equ 0x8d8f		; word[id 1..0x1D] -> sfx streams

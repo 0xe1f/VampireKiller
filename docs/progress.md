@@ -89,7 +89,7 @@ Fully migrated banks (0-15) have no `.bin`.
     - `actor_sat_build` (0x644C): one actor's hardware sprites from its shape
       stream; pages seg 6 (sprite shapes) into 0xA000, looks shape up in word
       table 0xB473 by (ix+0x0B), writes sprite attrs at (ix|0x20) offset by
-      actor X/Y (ix+3/+5); stream codes 0x80/81/82 pick fixed (dx,dy) offset
+      actor Y (ix+3) and X (ix+5); stream codes 0x80/81/82 pick fixed (dx,dy) offset
       lists; restores seg 3.
     - `shot_sat_emit` (0x64EC) / `c800_sat_emit` (0x64F3): render every active
       slot in a list (8 shots @ 0xD700 / 7 actors @ 0xC800, stride 0x80) via
@@ -402,7 +402,7 @@ Fully migrated banks (0-15) have no `.bin`.
   energy = 0xC418 (max 0x80):
     * **Simon takes damage** via damage_health (0x4632): `hurt_simon_contact`
       (seg2 0x8173) = 2x the *odd* byte of l81d5h[type] (zombie 2, dog 6; shield
-      0xC701 bit4 halves + spends 0xC441 charge); `hurt_simon_projectile` (seg2
+      0xC701 bit4 halves + spends 0xC441 charge); `hurt_simon_spikes` (seg2
       0x85AD) = fixed 8 or 16 from a 0xC580 spike-bar slot (16 while it
       descends, 8 while it retracts), and sets hurt state 0xC420=5.  l81d5h's odd byte is the per-type contact-damage field (its even
       byte is the kill score).
@@ -411,7 +411,7 @@ Fully migrated banks (0-15) have no `.bin`.
       04 08 08 04 04 04 10; chain/axe/cross = 06 0C 0C 06 06 06 18; type 0x17 with
       weapon>=2 is quartered.  Lesser enemies (type<0x11) die on the first hit.
     * Names in segments/msx.sym: damage_enemy, hurt_simon_contact,
-      hurt_simon_projectile, weapon_hit_damage.
+      hurt_simon_spikes, spike_bar_overlap, weapon_hit_damage.
 
 - Fourteenth session (2 recordings appended to idx 2762): (1) dog hits Simon,
   (2) reveal a wall vendor, whip him repeatedly, refuse a 50-heart knife offer,
@@ -887,9 +887,9 @@ Fully migrated banks (0-15) have no `.bin`.
     Simon X (0xC427) to choose idle frame 0x43 (far) / 0x3f (near); stores anim
     (+0x0B), alive (+0x06), clears timer (+0x0C).  This is the flee-right dog.
   Both names added to `segments/msx.sym`; seg0 `entity_tbl[0]`/`[4]` now reference
-  the labels (byte-exact).  NOTE the earlier dog/zombie X-offset puzzle: the code
-  uses +0x05 as the AI/compare X for BOTH; runtime showed +0x03 moving for the dog
-  - still worth a c800-c80f watch to see how +0x03 vs +0x05 relate during the flee.
+  the labels (byte-exact).  The earlier dog/zombie X-offset puzzle is closed:
+  +0x05 is X and +0x03 is Y for every type. The F8 flee dump that "moved +0x03"
+  was watching Y (hardware SAT is Y then X), not a per-type layout.
 
 - Seg2/seg3 annotation batch (all byte-exact, `make verify` clean).  Confirmed the
   candle -> flame -> heart chain AND the core actor slot layout straight from code:
@@ -915,8 +915,8 @@ Fully migrated banks (0-15) have no `.bin`.
     direction) so enemies get faster as the game advances - NOT scrolling (VK is
     room-based and does not scroll).
   All names in `segments/msx.sym`; cross-segment `call 0aXXXh` sites in seg0/1/2 now use
-  the labels.  (Audit correction: the "0xB473 sprite-shape table" note was wrong -
-  0xB473 is code, a `jr` target inside an actor routine, not data.)
+  the labels.  0xB473 is banked: with seg6 paged it is the actor shape-stream
+  word table (`actor_sat_build`); with seg3 paged the same CPU address is code.
   Tooling: fixed CRLF line endings in `tools/split-rom.sh` (it wouldn't run, which is
   what had left seg02-04.bin missing); it now regenerates seg01-15.bin cleanly.
 
@@ -969,9 +969,9 @@ The 7-byte C598 layout, the reverse-at-each-end mover, the 4-cell CC sprite
 build and `platform_tbl`'s `{Y,X,step,span}` records are all in game-notes now;
 `platform_stand_test` (0x852B) was unlabelled because seg1 reaches it by a raw
 cross-bank `call 0852bh`.  New `segments/seg02.blocks` covers the SAT cell table
-at 0x9146, which z80dasm had decoded as `ret nc` / `call nc`.  Open question:
-`platform_load` never seeds +5/+6, so it depends on C598 already being clear at
-room load - the clearing site is not yet identified.
+at 0x9146, which z80dasm had decoded as `ret nc` / `call nc`.  The +5/+6
+counters are never written by `platform_load` because `actor_state_reset`
+already zeroed 0xC470-0xC6FF (which includes C598) on room load.
 
 **Game Master cartridge pass - done.** The `0x5D1D` menu turned out to be one of
 three hidden features unlocked by Konami's **Game Master** cheat cartridge, and
@@ -998,23 +998,25 @@ shapes, so `@` is a horizontal rule, `_` is a right-pointing arrow (the menu
 cursor) and `?` is an **equals sign** - `vk "STAGE NUMBER?"` actually renders
 `STAGE NUMBER=`.
 
-Two follow-ups left open by the spike-bar pass, both worth resolving:
+Two follow-ups left open by the spike-bar pass, both closed this pass:
 
-1. **`msx.sym` cannot name `spike_bars_restore` (0x902E).** The address is already
-   taken in the flat symbol file by `sfx_0e_block_break`, a PSG stream at the same
-   CPU address in seg14/15.  Every other routine in the cluster got an equ; this
-   one is named in `seg02.asm` only, so a z80dasm regen will re-label it with the
-   SFX name.  This is the general "flat sym over banked ROM" problem, so audit how
-   many such collisions exist across all segments before choosing a fix
-   (per-segment `.sym` files, or a bank-qualified naming scheme).  Gotcha recorded
-   in the `konami-msx-disasm` skill.
-2. **`hurt_simon_projectile` (0x85AD) is misnamed.** It scans only the 3-slot
-   0xC580 pool, and that pool holds nothing but the spike bars - enemy projectiles
-   live in the 8 D700 shot slots and hit Simon by a different path.  Renaming it
-   (`hurt_simon_hazard`, or `hurt_simon_spikes` if we confirm nothing else ever
-   seeds C580) touches `seg01.asm` 0x4621, `msx.sym`, and several sections here
-   and in game-notes; left alone for now to keep the trail of existing notes
-   readable.
+1. **`hurt_simon_projectile` renamed to `hurt_simon_spikes`.** Confirmed: the
+   only writer of 0xC580 is `spike_bars_seed` (stage 6 room 1), and the room-load
+   wipe in `actor_state_reset` (seg1 0x63BA, 0xC470-0xC6FF) is why the pool
+   starts empty — that same wipe is also why `platform_load` can skip +5/+6.
+   Overlap helper named `spike_bar_overlap`. Enemy shots stay on the D700 path.
+2. **`msx.sym` collisions audited and filtered at regen.** 48 CPU addresses are
+   shared across banks (21 named-vs-named, 27 named-vs-auto). Splitting into
+   committed per-segment `.sym` files would duplicate the catalog; instead
+   `tools/seg_sym.py` builds a temp file per regen so 0x902E is
+   `spike_bars_restore` in seg2 and `sfx_0e_block_break` in seg14. That name is
+   now in `msx.sym` as well. `tools/seg_sym.py --audit` reprints the list.
+
+Seg14 PSG driver internals renamed: the `snd_8xxx` placeholders (kept unique
+vs seg2's `l8xxxh` in the shared 0x8000 window) are now `sound_*` names that
+match the rest of the tick (`sound_cmd_scale` / `_ext` / `_octave` / `_jump` /
+`_call` / `_return` / `_stop`, `sound_sfx_op` / `_loop` / `_mix`, fade and
+note helpers). All 50 are in `msx.sym`.
 
 Half-renames (comment/`msx.sym` name, still `sub_XXXXh` in source) folded in for
 the graphics kernel, bank switchers, object-list loader, minimap, and the
@@ -1226,7 +1228,7 @@ Known live RAM map (runtime-confirmed this session):
          block); +05 bonus id; +07/+08 E000 pos ptr.  First tick saves D100
          under the slot (E480/E4A0) and stamps brick tiles for kind 3.
   0xC500 floor pickups/chests: 8 slots, stride 0x10 (`pickup_tick`).
-  0xC580 spike bars: 3 x 8 bytes (`hazard_tick`; `hurt_simon_projectile`
+  0xC580 spike bars: 3 x 8 bytes (`hazard_tick`; `hurt_simon_spikes`
          overlap, 32x8 box). Stage 6 room 1 only - the pool holds nothing else.
          +0 state 1=descending/2=retracting, +1 Y, +2 X, +3 descend rate mask,
          +4 tick, +5 steps per sweep, +6 step count.  Drawn as a 32x16
@@ -1235,64 +1237,27 @@ Known live RAM map (runtime-confirmed this session):
          stages 5 and 10). SAT at 0xD638/0xD648, colours 0xD4E0/0xD520.
          +0 slot id, +1 Y (fixed), +2 X (moves), +3 signed step, +4 span,
          +5 free tick, +6 sweep count.  32x16 deck = 4 SAT cells, two CC pairs
-         (colours 2/4 on stage 5, 9/0xC on stage 10).  +5/+6 are NOT seeded by
-         platform_load.  See game-notes "Moving platforms".
+         (colours 2/4 on stage 5, 9/0xC on stage 10).  +5/+6 are skipped by
+         platform_load because actor_state_reset already zeroed 0xC470-0xC6FF.
+         See game-notes "Moving platforms".
   0xC5A6 whip-break sparks: 2 x 3 bytes (`break_spark_tick`).
-  0xC800 actor slots: 7 slots, stride 0x80 (0xC800, 0xC880, ...); also used for
-         the orb->item pickup.  Allocated/initialised by seg0 l5f24h (0x5F24):
-         scans the 7 slots for slot+0==0, fills the struct, then DISPATCH_A's the
-         per-type behaviour handler (entity_tbl at ~0x5F8F, indexed by type-1).
-         entity_tbl targets are banked addresses in page 2b (seg3 during play).
-         Runtime-mapped handlers so far: type 1 (walking zombie) = entity_tbl[0] =
-         0xA93B (seg3); type 5 (dog) = entity_tbl[4] = 0xA863 (seg3).  Both confirmed
-         by the anim/mover writer PCs clustering just past those addresses (03:a9xx,
-         03:a87x).  Seg3 is still INCBIN - annotate these when it's disassembled.
-         (Generic per-frame writers 02:99xx = sprite-attr composer, 03:a9xx = shared
-         actor animator/mover; they operate on any slot via IX/IY, so writer PCs
-         alone do NOT identify an enemy - the per-type handler comes from entity_tbl.)
-         Runtime-confirmed fields (2-zombie whip capture, 86-frame F8 recording):
-           +0x00 actor TYPE id: 0=free, 1=walking zombie, 0x1E=FLAME.
-                 0x1E is the generic destruction FLAME: when most objects are
-                 whipped and their health drops below 0 they turn into this flame
-                 before disappearing (game-mechanic confirmed by the author).  A
-                 whipped zombie is converted IN PLACE to type 0x1E (written by the
-                 spawner at 00:5f89), burns as a stationary flicker, then frees to
-                 0.  (So "kill" = despawn enemy + spawn the 0x1E flame in the slot.)
-           +0x04/+0x05 = 16-bit X (sub-pixel lo / screen-X hi; +05 counts DOWN as
-                 the zombie walks left, e9->3f, frozen once dying)
-           +0x0B animation frame (walk 0x3B/0x3C <-> death 0x85/0x86)
-           +0x0C state/anim timer (walk-anim phase while alive; 0x10->0 dissolve
-                 countdown while type==0x1E, then slot frees)
-           +0x06 / +0x0E alive sub-flags (init 1 / 7; both drop to 0 on death)
-         Zombies are 1-hit kills: no HP decrement was observed - +0x00 goes
-         straight 1 -> 0x1E on the whip's contact frame (whip phase 0xC422 -> 2).
-         DOG enemy (type 0x05; a DIFFERENT room from the zombie captures - a castle
-         "sitting dog" room with NO zombies, not the original zombie room).  F8
-         recording: idle actor that sits at fixed X=0x80 cycling an idle anim (+0x0B
-         frames 0x43/0x45/0x46) until Simon approaches within ~0x26 (38px: Simon
-         0xC427 walked 0xdc->0xa6), then FLEES right, accelerating (+0x03 X-hi
-         7e->7f->81->83->85->8d->91, i.e. ~1,2,2,2,8,4 px/frame) and DESPAWNS
-         (+0x00 05->00) once off-screen.  NOTE the dog's X was observed at
-         +0x02(sub/vel)/+0x03(hi), whereas the zombie's X was recorded at +0x04/+0x05.
-         These are separate enemy types captured in separate rooms, so the offset may
-         legitimately differ per type (not necessarily a mis-index) - verify with a
-         side-by-side WATCH=c800-c80f on each before assuming a single shared layout.
-         Candle -> FLAME -> SMALL-heart DROP lifecycle (runtime-confirmed in slot
-         0xC880; do NOT conflate with the large heart): whipping a candle spawns an
-         actor in a free 0xC800-block slot via spawn_actor (seg0 0x5F8A):
-           +0x00 = 0x1E = FLAME (destruction effect, same type as enemy death): X/Y
-                 hold STATIONARY for ~13 frames while +0x0B flickers 0x85<->0x86
-                 (seg2 animator 0x9B8B) - a burning-in-place flicker, NOT motion.
-           +0x00 = 0x24 = the SMALL HEART itself: now X/Y move (X-hi b1->b4, X-lo
-                 swings e0/a0/40/20/60/80, Y toggles) = the side-to-side UNDULATING
-                 fall the author described.  Freed to 0x00 when Simon touches it ->
-                 0xC417 += 1.
-         So the visible order is candle -> flame (0x1E) -> undulating small heart
-         (0x24) -> pickup.  Contrast the LARGE heart (slot 0xC800): appears as an
-         ORB, drops quickly to the floor, then turns into the large heart (older
-         0xC801 orb->heart two-phase / 0xC80C 0x14-frame timer, +5 hearts).
-         (0x1E vs 0x24 flame-vs-heart split is inferred from the motion profile;
-         WATCH=c880-c88f on a candle whip will confirm and give the handler PCs.)
+  0xC800 actor slots: 7 slots, stride 0x80 (0xC800, 0xC880, … 0xCB80). Same
+         0x80-byte layout as the 8 D700 shot slots. Allocated by `spawn_actor`
+         (seg0 0x5F24); SAT helpers `actor_sat_patterns` / `actor_sat_assign`.
+         Field table is in game-notes "Actors (C800 / D700)". Shared header:
+           +00 type (0=free), +01 sub-state,
+           +02/+03 Y frac/pixel, +04/+05 X frac/pixel,
+           +06 physics alive, +07/+08 Y vel, +09/+0A X vel,
+           +0B pose (seg6 0xB473), +0C timer, +0D HP (`actor_hp_tbl`),
+           +0E flags (bit0 hittable, bit2 rearm), +1F drop gate,
+           +20 SAT count then 5-byte cells (index, Y, X, pattern, colour),
+           +7E freeze-with-whip. Hardware SAT is Y then X, so pixel Y is +03
+           and pixel X is +05 for every type (the F8 dog "+02/+03 = X" note
+           was a mis-index of Y).
+         Heart drop chain (runtime, slot 0xC880): candle whip -> type 0x1E
+         flame (stationary flicker 0x85/0x86, +0C countdown) -> type 0x24
+         small heart if +1F set -> pickup (+1 heart). Large heart is a
+         different C800 orb->drop path (+5 hearts).
   0xD000 stage row/flag  0xD001 room index (seg13 0xB98A)  level change = seg0
          0x4362/65
   0xD700 shot slots: 8 slots, stride 0x80, same actor struct as C800. Enemy-
@@ -1357,8 +1322,10 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   needed to reassemble or to regenerate the disassembly faithfully. `tools/` is
   executable tooling only; `generated/` is gitignored derived scratch (never author
   there). How they're consumed: `bios.inc` and `actors.inc` are `INCLUDE`d by the
-  build (symbol equates, not emitted); `msx.sym` (z80dasm `-S`) and `seg*.blocks`
-  (z80dasm `-b`) are read only by `regen-seg.sh`. `bios.inc` and `msx.sym` overlap
+  build (symbol equates, not emitted); `msx.sym` is the name catalog,
+  `seg*.blocks` the code/data maps. `regen-seg.sh` runs `tools/seg_sym.py` so
+  z80dasm `-S` gets a *per-bank* view of `msx.sym` (flat file, banked ROM).
+  `bios.inc` and `msx.sym` overlap
   - keep them in sync.  Do **not** put small numeric `equ`s (`actor_zombie: equ
   0x01` and friends) in `msx.sym` — z80dasm would rewrite every `0x01` in listings.
 - Naming (STANDING PRACTICE): as soon as we have enough context to be confident of
@@ -1429,7 +1396,8 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   lose_weapon, shot_throw, shot_spawn, shot_alloc, shot_bone, shot_tick,
   shot_type_tick, fireball, medusa_snake, mummy_bandage, shot_axe, shot_sickle,
   actors_tick, c800_tick, pickup_tick, vendor_tick, break_spark_tick,
-  hazard_tick, spike_bars_seed_once, spike_bars_seed, spike_bar_seeds,
+  hazard_tick, hurt_simon_spikes, spike_bar_overlap,
+  spike_bars_seed_once, spike_bars_seed, spike_bar_seeds,
   spike_bars_run, spike_bar_slot_tick, spike_bars_restore,
   platform_tick, platform_load, platform_tbl, platform_move,
   platform_sat_build, platform_sat_cells, platform_sat_ofs, platform_fill16,
@@ -1473,7 +1441,7 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   seg14: scenery_list_ptr, scenery_list_s00, scenery_list_h0..h5,
   spawn_bitmask_ptr, spawn_mask_s00..s18, object_list_ptr,
   object_list_h0..h5, credits_font, credits_font_az, sound_tick, sound_idle,
-  sound_ch_a/b/c, sound_sfx, sfx_ptr, sfx_tbl, music_ptr.
+  sound_ch_a/b/c, sound_sfx, sound_cmd_*, sound_sfx_*, sfx_ptr, sfx_tbl, music_ptr.
   Actor type `equ`s: `segments/actors.inc` (`actor_zombie`..`actor_pickup`,
   `obj_next_room`/`obj_end_stream`); used in the packed object list and confirmed
   `spawn_actor` `ld c` sites.

@@ -4946,10 +4946,10 @@ l5f49h:
 	pop ix
 	ld (0cff3h),hl
 	ld a,(0cff0h)
-	ld hl,0605eh
+	ld hl,0605eh           ; actor_spr_count-1 (type 1 at 0x605F)
 	call ADD_HL_A
 	ld a,(hl)
-	ld (ix+020h),a
+	ld (ix+020h),a         ; SAT sprite count
 	ld c,a
 	and a
 	jr z,spawn_actor_init
@@ -4961,7 +4961,7 @@ l5f68h:
 	cp 0e0h
 	jr nz,l5f76h
 	ld (hl),0e1h
-	call 0604fh
+	call actor_sat_assign  ; cell E gets SAT index D
 	inc e
 	dec c
 	jr z,spawn_actor_init
@@ -4981,32 +4981,32 @@ spawn_actor_init:
 	ld a,(0cff0h)
 	ld (hl),a              ; slot+00 = actor type id (runtime-confirmed; 0=free)
 	inc l
-	ld (hl),000h           ; slot+01 = 0
+	ld (hl),000h           ; slot+01 = 0 (sub-state)
 	ld de,(0cff1h)         ; DE = spawn position word
 	inc l
-	ld (hl),000h           ; slot+02 = 0
+	ld (hl),000h           ; slot+02 = Y frac
 	inc l
-	ld (hl),e              ; slot+03 = Y
+	ld (hl),e              ; slot+03 = Y pixel
 	inc l
-	ld (hl),000h           ; slot+04 = 0 (becomes X sub-pixel accumulator at runtime)
+	ld (hl),000h           ; slot+04 = X frac
 	inc l
-	ld (hl),d              ; slot+05 = X (runtime-confirmed screen X)
+	ld (hl),d              ; slot+05 = X pixel
 	inc l
-	ld (hl),000h           ; slot+06 = 0
+	ld (hl),000h           ; slot+06 = 0 (physics; init usually sets 1)
 	ld a,(0cffah)
-	ld (ix+00fh),a         ; slot+0f
+	ld (ix+00fh),a         ; +0F from CFFA (spawn zeros it)
 	ld a,(0cffbh)
-	ld (ix+01fh),a         ; slot+1f
-	ld (ix+07eh),001h
+	ld (ix+01fh),a         ; +1F drop gate from CFFB (spawn zeros it)
+	ld (ix+07eh),001h      ; freeze with Simon's whip (D010)
 	ld (ix+07fh),001h
-	ld (ix+00eh),007h      ; slot+0e = 7 (alive flag; runtime-confirmed -> 0 on death)
-	ld de,0608bh
-	call 06030h
+	ld (ix+00eh),007h      ; flags: bits 0-2 (hittable + rearm)
+	ld de,0608bh           ; actor_sat_pat_ptr-2 (type 1 at 0x608D)
+	call actor_sat_patterns
 	ld a,(0cff0h)
-	ld de,060e8h
+	ld de,060e8h           ; actor_hp_tbl-1 (type 1 at 0x60E9)
 	call ADD_DE_A
 	ld a,(de)
-	ld (ix+00dh),a
+	ld (ix+00dh),a         ; +0D HP
 	ld hl,(0cff3h)
 	ld a,(ix+000h)          ; A = entity type (ix+0)...
 	dec a                   ; ...-1 -> 0-based index

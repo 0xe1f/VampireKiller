@@ -302,6 +302,13 @@ play_sound: equ 0x50a6	; A=id: 0=stop, 1-7F sfx, 80-8F music, FB-FF special
 credits_font_load: equ 0x53e5	; page seg14/15 and blit ending credits_font + _az
 credits_font_blit: equ 0x53e8	; blit only (banks already paged)
 hud_font_load: equ 0x53bd	; page seg7/8 and blit hud_font + hud_tile_bf00
+hud_cache_load: equ 0x5494	; page-1 caches: bonus HUD, spike bar, keys, candles, vendor 32x32s
+vendor_cache_load: equ 0x54f7	; five recolored vendor 32x32s to page-1 Y=0xA0
+vendor_recolor_copy: equ 0x5514	; vendor_tiles -> 0xE800, nibble 0xF := (ix+0)
+vendor_blit_32: equ 0x554f	; 4x4 of 8x8 from vendor_tile_ptr into VRAM DE
+vendor_tile_ptr: equ 0x5575	; 4x4 words in 0xE800 scratch (0xE900 = empty)
+vendor_recolor_tbl: equ 0x5595	; 5 cloak colours (magenta/red/grey/white/blue)
+vendor_tiles: equ 0xbda7	; 8 x 8x8 4bpp; nibble 0xF is the cloak key (seg10)
 logo_font_load: equ 0x5316	; page seg13, blit logo_font, fall into page_play_banks
 room_spawner: equ 0x5ebf	; per-frame enemy spawner; spawn_bitmask_ptr[stage][room]
 zombie_generator: equ 0x9ced	; room_spawner bit0: rate-gated zombie (actor type 01) spawner
@@ -384,9 +391,9 @@ holy_water_use: equ 0x7154	; C701 bit3: jump+LEFT/RIGHT, 5 hearts, one vial (C46
 holy_water_throw_left: equ 0x719B
 holy_water_throw_right: equ 0x71A8
 holy_water_throw: equ 0x71B1	; C461=5, spend 5 hearts
-holy_water_tick: equ 0x73AB	; C460 type 5: spawn, arc (l7084h), pool
+holy_water_tick: equ 0x73AB	; C460 type 5: spawn, arc (l7084h), floor flame
 holy_water_arc: equ 0x73E5
-holy_water_pool: equ 0x7420	; 24 frames on floor, SAT colour 8
+holy_water_flame: equ 0x7420	; 24 frames on floor, SAT colour 8, patterns F4/F8
 projectile_alloc: equ 0x71C5	; free C450/C460 slot; knife may take two
 projectile_arm: equ 0x728D	; whip phase 4: C436 -> slot type
 projectile_tick: equ 0x72B9	; both slots: motion + integrate + clip + SAT
@@ -460,7 +467,7 @@ bonus_white_bag: equ 0x8E49	; id 19: +5000 score
 bonus_blue_bag: equ 0x8E52	; id 20: +1000 score
 bonus_yellow_key: equ 0x8E57	; id 23: C701 bit1, C700=1
 bonus_white_key: equ 0x8E67	; id 24: C701 bit0
-bonus_staff: equ 0x8E80		; id 18: C700=3, C701 bit2; drops yellow key
+bonus_lockpick: equ 0x8E80	; id 18: C700=3, C701 bit2; drops yellow key
 bonus_potion: equ 0x8E14	; id 22: bottle, +32 HP; vendor 0x16 (not boss orb)
 lose_weapon: equ 0x8E9A		; missed catch: C416=0, refresh HUD
 inv_or_c701: equ 0x8e74	; OR B into inventory bitfield 0xC701
@@ -527,11 +534,15 @@ platform_fill16: equ 0x9112	; fill 16 colour bytes (one 16x16 sprite's lines)
 platform_sat_cells: equ 0x9119	; write the 4 SAT entries from a C598 slot
 platform_sat_ofs: equ 0x9146	; 4 x {X offset, pattern} deck cells
 vendor_tick: equ 0x91c5	; 2 x C5B5/C5C5 vendor/special-object slots
+vendor_draw_idle: equ 0x9263	; LMMM white (slot 3) vendor 32x32 at DE
+vendor_draw: equ 0x9265	; A=C70B 0..4 -> 32x32 LMMM from page-1 Y=0xA0 onto DE
+vendor_redraw_all: equ 0x9273	; idle-blit every occupied C5B5/C5C5 slot
+vendor_redraw: equ 0x928d	; one slot: D=X E=Y from +2/+1, then vendor_draw_idle
 vendor_outcome_dispatch: equ 0x92ae	; run whip-hit outcome by state 0xC70C (hearts/nothing/leave)
 vendor_outcome_tbl: equ 0x92b4	; word[C70C] -> hit/mood/hearts/leave
 vendor_pick_outcome: equ 0x92c2	; advance vendor state machine (transition tbl + R-reg RNG)
 vendor_transition_tbl: equ 0x9307	; 4 x 8-byte rows -> next 0xC70C state (>=7 = RNG coin-flip)
-vendor_state_action_tbl: equ 0x9327	; state 0..6 -> reaction id 0xC70B
+vendor_state_action_tbl: equ 0x9327	; state 0..6 -> C70B recolor slot (red/blue/magenta/white)
 vendor_hit_latch: equ 0x932e	; outcome 0: C40C=FF, latch vendor id
 vendor_leave: equ 0x935f	; outcome 6: vanish, +5000
 vendor_make_offer: equ 0x938e	; arm a sale: item 0xC708, price 0xC707, timer 0xC706

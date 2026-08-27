@@ -15,9 +15,8 @@
 
     INCLUDE "data/enemy_sprite_rle.asm"
 
-    INCLUDE "data/seg10_bda7.asm"
+    INCLUDE "data/vendor_tiles.asm"
 
     INCLUDE "data/stage_palettes.asm"
 
     ASSERT $ == 0xC000
-

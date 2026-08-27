@@ -305,14 +305,14 @@ The world is a hierarchy: **hub → stage → room**.
 - **Small yellow key** — unlocks a **chest** (chests hold bonuses; a chest can't be
   opened without one). Simon can carry **only 1** yellow key at a time. *Runtime:*
   the yellow key is **bonus id 0x17 (23)**; picking it up (from the 0xC500 pickup
-  list) sets **0xC701 bit 1** (white key = bit 0) and **0xC700 = 1** (the key/staff
+  list) sets **0xC701 bit 1** (white key = bit 0) and **0xC700 = 1** (the key/lockpick
   charge count). Opening a chest consumes it: **0xC701 bit 1 cleared, 0xC700 -> 0**;
   the chest's reward latches as its own bonus id (observed **0x13 / 19** once) and
   spawns into the object (0xC490) + pickup (0xC500) lists.
-- **Staff** — an alternative to the yellow key: a staff opens **3 chests** before it
+- **Lockpick** — an alternative to the yellow key: a lockpick opens **3 chests** before it
   disappears (expected to seed **0xC700 = 3** instead of 1 — unconfirmed).
 
-*Reversing hooks:* expect per-stage state for **key held (white / yellow / staff
+*Reversing hooks:* expect per-stage state for **key held (white / yellow / lockpick
 charges)**, **door locked/unlocked**, **chest opened** flags, and a **room/stage/hub
 index** driving which tile set + enemy set + room layout loads. Destructible-wall and
 chest contents are likely table-driven per room. Instant-death-on-drop implies a
@@ -758,7 +758,9 @@ Weapon behaviour (ROM):
 - On death (`sub_70e3h`) `C416` is cleared to 0. Missing a cross/axe catch also
   returns to leather (`lose_weapon` 0x8E9A) without waiting for death.
 - Thrown-weapon **patterns** come from seg10 via `load_weapon_sprites` (0x559A)
-  / `weapon_sprite_ptr` (0x55DE). Sheet: `gfx/sprites/enemy_sprite_rle.png`.
+  / `weapon_sprite_ptr` (0x55DE). Packed order in `data/enemy_sprite_rle.asm`
+  is knife, cross, skull pile, flying skull, then axe — not a contiguous
+  weapons block. Sheet: `gfx/sprites/enemy_sprite_rle.png`.
 
 Other pickups replace the weapon:
 
@@ -798,17 +800,18 @@ item (30 / 10 / 50 hearts).
 writes throw dir to `C468` (1=left, 0=right), sets projectile slot `C460` type
 **5**, and spends the hearts. Jump+DOWN is the hourglass if you also have bit 6.
 
-**Arc and pool.** `holy_water_tick` (0x73AB) on the **C460** slot (type at
+**Arc and flame.** `holy_water_tick` (0x73AB) on the **C460** slot (type at
 `C461`). Spawn copies Simon (`C425`/`C427`) with `velX` ±2 and `velY` 0. In flight
 (state 2) each frame does `Y += 2*l7084h[phase]` — `l7084h` is the signed dY
 table also used by hurt knockback — and `X += velX` (`projectile_integrate`). It lands when
 `sub_7b9fh` sees a solid tile, plays sfx `0x18`, and goes to state 3: a **24-frame
-pool** on the floor. SAT path `l759ch` paints that state **colour 8** (red).
+flame** on the floor (SAT patterns `0xF4`/`0xF8`, same spark as a falling heart;
+pixels in `gfx_rle_a185`). SAT path `l759ch` paints that state **colour 8** (red).
 
 **Damage.** Unlike the knife (type 2), a hit does **not** despawn the vial
 (`l807fh`). Fodder uses `l804fh` byte 3 = **2** HP per connected hit
-(knife/axe/cross/holy = 1/4/2/2). The pool can connect more than once: a hit
-clears enemy `+0x0E` bit 0, and `0x99A6` (called from the pool flicker) restores
+(knife/axe/cross/holy = 1/4/2/2). The flame can connect more than once: a hit
+clears enemy `+0x0E` bit 0, and `0x99A6` (called from the flame flicker) restores
 it on actors that still have bit 2. HP-bar types `0x11–0x17` go through
 `weapon_hit_damage` / `C416` (the equipped whip), not that 2.
 
@@ -851,7 +854,7 @@ gets the long 240-frame no-spawn window if the flag is set.
 
 **What it does not lengthen.** Instant pickups (white cross, potion, hearts,
 score bags) and the persistent inventory bits (boots, wings, candle, map, bibles,
-keys, staff, shields).
+keys, lockpick, shields).
 
 **How long it lasts.** Until death. The life-lost reset (`sub_70e3h`) zeros all
 of `0xC431`, so this flag, boots, and wings go together. It survives room and
@@ -896,11 +899,11 @@ flash white), **9** sapphire ring (C434, sprite flash red, touch-kills), **10**
 hourglass (jump+DOWN, 5 hearts → freeze), **11** tipped hourglass (secret:
 whip the id-10 world pickup once; see section above),
 **12** boots, **13** wings, **14** candle (white outlines on breakable blocks),
-**15** map, **16/17** black/white bible, **18** staff (C700=3), **19/20**
+**15** map, **16/17** black/white bible, **18** lockpick (C700=3), **19/20**
 white/blue money bag (+5000/+1000), **21** slime (fake candle drop; collecting
 it is a no-effect stub, leaving it hatches `actor_blob_blue` / `_red` / `_white` by hub), **22**
 potion/bottle (+32 = full bar; vendor 0x16; not the boss orb), **23** yellow
-key, **24** white key, **25** treasure chest (container; `l8c1bh` spends key/staff
+key, **24** white key, **25** treasure chest (container; `l8c1bh` spends key/lockpick
 and reveals the contents id at `ix+0x0D`). Bonus **`0x1E`** (holy water) is not
 in this 1–25 table; `l8d77h` takes `id - 0x19 == 5` to `bonus_holy_water`.
 
@@ -917,7 +920,9 @@ tiles from VRAM page 1. Loaded at the HUD init copy (seg0 ~0x548C):
 | 23–30 | seg6 `0xB9C8` (after `page_tileset_banks`) | `0xD9C8` | Y=`0x60` X=96..208 | `gfx/tilesets/hud_weapon_key_tiles.png` |
 
 `bonus_hud_tiles.png` is ids `01`–`14` then the potion (5 columns, CPU-address
-headers). `hud_weapon_key_tiles.png` is ids **`17`–`1E`**: yellow key, white key,
+headers). Per-tile labels in `data/bonus_hud_tiles.asm` match `collect_bonus`
+names (`bonus_hud_small_heart`, …; `BONUS_HUD_16X16` in `tools/emit_identified_data.py`).
+`hud_weapon_key_tiles.png` is ids **`17`–`1E`**: yellow key, white key,
 chest, chain whip, knife, **axe**, **cross**, holy water, then candle flames.
 
 **Palette.** `palette_set` writes one MSX2 entry (A=index, D=`0rrr0bbb`, E=`00000ggg`);
@@ -929,7 +934,7 @@ chest, chain whip, knife, **axe**, **cross**, holy water, then candle flames.
 | 0 | 000 | black / background |
 | 1 | 754 | peach (outlines, hourglass frame, yellow key, potion glass) |
 | 2 | 111 | dark grey (linework) |
-| 3 | 623 | magenta (red shield, staff, money-bag tie) |
+| 3 | 623 | magenta (red shield, lockpick, money-bag tie) |
 | 8 | 701 | red (hearts, sand, whip stripe, flames) |
 | 12 | 555 | grey (axe head, knife guard) |
 | 14 | 777 | white |
@@ -989,7 +994,13 @@ in these sheets.
 
 A vendor is a hidden "cloaked sitting person" revealed by whipping a wall. He is
 **not** a normal 0xC800 actor — he lives in the special-object list at 0xC5B5
-(2 slots of 0x10 bytes) and keeps his transaction state in the 0xC700 block:
+(2 slots of 0x10 bytes) and keeps his transaction state in the 0xC700 block.
+The figure is uncompressed 4bpp (`vendor_tiles` at seg10 `0xBDA7`, eight 8×8
+tiles). `hud_cache_load` builds five 32×32 copies in page-1 Y=`0xA0` with nibble
+`0xF` (the cloak) replaced from `vendor_recolor_tbl`; `vendor_draw` LMMMs one
+slot onto the playfield (colour 0 skip). Event 6 overwrites that cache with
+`dracula_portrait_parts` (no vendors in stage 18 room 9). Assembled preview:
+`gfx/vendor.png`.
 
 | Addr   | Meaning |
 |--------|---------|
@@ -1000,7 +1011,7 @@ A vendor is a hidden "cloaked sitting person" revealed by whipping a wall. He is
 | 0xC707 | **price in hearts** (packed BCD, e.g. 0x50 = 50) |
 | 0xC708 | **offered item** = bonus id (0x1B = knife) |
 | 0xC709 | previous button state (edge detection for buy/refuse) |
-| 0xC70B | reaction/animation id (from state via table 0x9327) |
+| 0xC70B | **cloak recolor slot** 0..4 (from `vendor_state_action_tbl`): 0 magenta / 1 red / 2 grey / 3 white / 4 blue. Idle draws slot 3; a whip reaction flickers 2 vs this id, then `vendor_draw` LMMMs that 32×32 from page-1 Y=`0xA0`. |
 | 0xC70C | **whip-outcome state** (0..6) driving the dispatch |
 | 0xD012 | persistent vendor "mood" tier (0..3), raised/lowered by whips |
 
@@ -1036,7 +1047,7 @@ column from the 0xC702 bible flags:
 | Item (bonus id) | normal | white bible (½) | black bible (×2) |
 |-----------------|--------|-----------------|------------------|
 | 0x0E (candle)   | 20     | 15              | 60               |
-| 0x12 (staff)    | 30     | 20              | 60               |
+| 0x12 (lockpick) | 30     | 20              | 60               |
 | 0x03 (red shield)| 20    | 10              | 60               |
 | 0x04 (yellow shield)| 20 | 10              | 80               |
 | 0x0A (hourglass)| 40     | 20              | 80               |
@@ -1073,7 +1084,7 @@ Shared physics header (`actor_integrate` 0x99C0, velocity helpers in seg3):
 | +06 | physics alive (`actor_integrate` skips if 0; spawn writes 0, init usually sets 1) |
 | +07 / +08 | signed Y velocity |
 | +09 / +0A | signed X velocity |
-| +0B | pose / shape id (`actor_shape_ptr` / seg6 word table while that bank is paged) |
+| +0B | pose / shape id (`actor_shape_ptr` / seg6 word table while that bank is paged). Named streams are `shape_*` in `data/actor_shape.asm`. Leftover ids to return to: used but unidentified **0x02 / 0x5A / 0xA5–0xA7**; unused **0x0D, 0x2D–0x32, 0x58, 0x76–0x78, 0x8E, 0xA3–0xA4**. |
 | +0C | timer |
 | +0D | HP from `actor_hp_tbl` (0x60E9; spawn indexes as 0x60E8+type) |
 | +0E | flags. **bit 0 = hittable** this frame (`rra`/`jr nc` in whip/proj tests; `res 0` on a hit). **bit 2** = rearm hittable (`actors_rearm_hittable`). Spawn writes 7. |
@@ -1222,7 +1233,7 @@ seg 2 @ 0x8000, seg 3 @ 0xA000. So the substantive gameplay (movement, AI,
 collision, item logic) lives in **code segments 1/2/3** (`INCLUDE`'d, still being
 annotated).  Map tables are banks 11-12; tileset banks 4-8 are labeled source.
 Seg 15 is labeled music tails / env tables / Dracula portrait.  Segs 9-10 are
-labeled gfx-script / palette / enemy+weapon RLE source.
+labeled gfx-script / palette / enemy+weapon RLE / vendor 32x32 source.
 
 ## Graphics format (sprite/tile hunt)
 
@@ -1233,7 +1244,7 @@ bitmap). Set in `video_init`: `ld a,5 / call CHGMOD (0x005f)`. Consequences:
   pixel, colour index 0-15, colour 0 = transparent/background) and reach VRAM
   two ways. Bulk pixels go through `vram_write` (OTIR) wrapped by the tile
   blitters `vram_blit_tile8` / `vram_blit_tile16` / `vram_blit_tile_run`
-  (0x80-byte scanline stride), and `sub_554fh` blits a 32x32 image as a 4x4
+  (0x80-byte scanline stride), and `vendor_blit_32` stamps a 32x32 as a 4x4
   grid of them. Everything else uses the **VDP command engine** (`out (c)`
   streams to R17-indirect + the command registers): `vdp_hmmm` / `vdp_lmmm`
   copy VRAM to VRAM, `vdp_hmmc` pushes CPU bytes in, `vdp_hmmv` fills a
@@ -1463,6 +1474,11 @@ Catalogued so far:
   object's rectangle), but the pixels are 4bpp *background* data read straight
   from seg9 rather than composited sprite planes. Palette is stage 6 room 1's
   playfield sequence. Derived (`make gfx`).
+- `vendor.png` - the cloaked sitting vendor as five 32×32 colour variants
+  (C70B 0..4: hearts / hit / flash / idle / mood). Assembled from
+  `data/vendor_tiles.asm` plus `vendor_tile_ptr` / `vendor_recolor_tbl`.
+  Palette is HUD-fixed. Derived (`make gfx`); the 8 source 8×8s are also
+  `gfx/tilesets/vendor_tiles.png`.
 - `gfx/fonts/<stem>.png` - 1bpp glyph asms (`font_credits`, `font_hud`,
   `font_logo`). Cell header is the hex tile id. HUD-fixed ink 14.
   Same `make gfx` pass.
@@ -1475,10 +1491,10 @@ Catalogued so far:
 - `tilesets/<stem>.png` - one sheet per 4bpp tileset asm
   (`tileset_s00.asm` → `tilesets/tileset_s00.png`, plus `tileset_s08_pad`,
   `intro_tiles`, `bonus_hud_tiles`, `hud_weapon_key_tiles`,
-  `dracula_portrait`, `dracula_portrait_parts`). Cell header is the CPU
+  `dracula_portrait`, `dracula_portrait_parts`, `vendor_tiles`). Cell header is the CPU
   address (4 hex digits).
   Playfield files use that stage's palette; intro uses `intro_palette_load`;
-  bonus HUD and HUD keys/weapons use HUD-fixed; portrait uses HUD-fixed then
+  bonus HUD and HUD keys/weapons / vendor 8×8s use HUD-fixed; portrait uses HUD-fixed then
   `0xBF6F`. 8×8 files are every 32-byte tile; `bonus_hud_tiles`,
   `hud_weapon_key_tiles`, and `dracula_portrait_parts` are 16×16.
 - `stage_sNN.png` - per-stage pixel rooms (`roomperm.py --pixels`):

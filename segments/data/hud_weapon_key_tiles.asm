@@ -6,7 +6,7 @@
 ; source at (80, 0x70), not this bank.
 ; Uncompressed 16x16 4bpp (SCREEN 5).  Each defb is one pixel-row
 ; (8 bytes, high nibble = left).  Sixteen rows = one tile (128 bytes).
-; Preview: gfx/tilesets/hud_weapon_key_tiles.png (`make gfx`); cell header = CPU address.
+; Preview: gfx/tilesets/<stem>.png (`make gfx`); cell header = CPU address.
 
 hud_weapon_key_tiles:  ; 0xB9C8  8 item icons + 4 candle flames
 hud_yellow_key:  ; 0xB9C8  bonus 0x17

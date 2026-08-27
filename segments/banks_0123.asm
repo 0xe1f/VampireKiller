@@ -3263,6 +3263,10 @@ door_tile_joint_end:           ; 0x5474 - joint one row up, blank last row
 	defb 003h,003h,030h,030h ; .3.33.3.
 	defb 000h,0c3h,03ch,000h ; ..C33C..
 	defb 000h,000h,000h,000h ; ........
+; hud_cache_load (seg0 0x5494): stage page-1 caches for HUD popups and
+; playfield overlays — bonus 16x16s, spike bar, weapon/key icons, candle
+; flames, then the five recolored vendor 32x32s at Y=0xA0.
+hud_cache_load:
 	call page_title_banks
 	ld hl,bonus_hud_tiles  ; bonus ids 1-20 (16x16 4bpp)
 	ld de,0a800h           ; VRAM page 1 Y=0x50 (wraps to Y=0x60 after 16)
@@ -3304,29 +3308,36 @@ l54c0h:
 	ld b,005h
 	call l4a97h
 	call page_title_banks
-	call sub_54f7h
+	call vendor_cache_load
 	jp page_play_banks
-sub_54f7h:
-	ld ix,l5595h
-	ld de,0d000h
+; vendor_cache_load (seg0 0x54F7): five 32x32 copies of vendor_tiles into
+; page-1 Y=0xA0 at X=0,32,64,96,128.  Nibble 0xF is replaced from
+; vendor_recolor_tbl (magenta/red/grey/white/blue).  vendor_blit LMMMs one
+; slot onto the playfield; event-6 dracula_portrait_parts_load overwrites
+; this cache (no vendors in that room).
+vendor_cache_load:
+	ld ix,vendor_recolor_tbl
+	ld de,0d000h           ; VRAM page 1 Y=0xA0 X=0
 	ld b,005h
 l5500h:
 	push bc
 	push de
-	call sub_5514h
-	call sub_554fh
+	call vendor_recolor_copy
+	call vendor_blit_32
 	pop de
 	ld a,010h
-	call ADD_DE_A
+	call ADD_DE_A          ; next variant 32px to the right
 	pop bc
 	inc ix
 	djnz l5500h
 	ret
-sub_5514h:
+; vendor_recolor_copy (0x5514): 256 bytes vendor_tiles -> 0xE800, swapping
+; each 0xF nibble for (ix+0)&0xF; then 32 zero bytes at 0xE900 (empty tile).
+vendor_recolor_copy:
 	exx
 	ld de,0e800h
-	ld hl,0bda7h
-	ld b,000h
+	ld hl,vendor_tiles
+	ld b,000h              ; 256 bytes
 l551dh:
 	push bc
 	ld a,(hl)
@@ -3366,8 +3377,9 @@ l553dh:
 	ldir
 	exx
 	ret
-sub_554fh:
-	ld hl,l5575h
+; vendor_blit_32 (0x554F): 4x4 of 8x8 tiles from vendor_tile_ptr into VRAM DE.
+vendor_blit_32:
+	ld hl,vendor_tile_ptr
 	ld b,004h
 l5554h:
 	push bc
@@ -3395,39 +3407,18 @@ l5558h:
 	pop bc
 	djnz l5554h
 	ret
-l5575h:
-	nop
-	jp (hl)
-	nop
-	jp (hl)
-	nop
-	jp (hl)
-	nop
-	jp (hl)
-	nop
-	jp (hl)
-	nop
-	ret pe
-	jr nz,$-22
-	ld b,b
-	ret pe
-	nop
-	jp (hl)
-	ld h,b
-	ret pe
-	add a,b
-	ret pe
-	nop
-	jp (hl)
-	and b
-	ret pe
-	ret nz
-	ret pe
-	ret po
-	ret pe
-	nop
-	jp (hl)
-l5595h:
+; vendor_tile_ptr (0x5575): 4x4 source words in the 0xE800 scratch (row-major).
+; 0xE900 is the zero tile; 0xE800+n*0x20 are vendor_tiles 0..7.  Empty top
+; row and the right/bottom gaps make the sitting figure 24x24 in a 32x32.
+vendor_tile_ptr:
+	defw 0e900h, 0e900h, 0e900h, 0e900h
+	defw 0e900h, 0e800h, 0e820h, 0e840h
+	defw 0e900h, 0e860h, 0e880h, 0e900h
+	defw 0e8a0h, 0e8c0h, 0e8e0h, 0e900h
+; vendor_recolor_tbl (0x5595): cloak colour for C70B 0..4 (HUD-fixed indices).
+; 3=magenta (give/take hearts), 8=red (hit), 2=grey (flash), 0xE=white (idle),
+; 0xF=blue (mood up/down).
+vendor_recolor_tbl:
 	defb 003h,008h,002h,00eh,00fh
 ; load_weapon_sprites (seg0 0x559A): RLE-decompress the equipped projectile
 ; (C416 2=knife / 3=axe / 4=cross) from seg10 into sprite gen 0xF8C0, then
@@ -4249,7 +4240,7 @@ l5b07h:
 ; Walked by the 0xDE00 compact (l5ab6h). Trailing zeros unused.
 vendor_offer_id:
 	defb 00eh              ; 0 candle
-	defb 012h              ; 1 staff
+	defb 012h              ; 1 lockpick
 	defb 003h              ; 2 red shield
 	defb 004h              ; 3 yellow shield
 	defb 00ah              ; 4 hourglass
@@ -5698,7 +5689,7 @@ l62d1h:
 	ld a,080h
 	ld (0c418h),a          ; enemy/boss energy meter = full (0x80)
 	call sub_70e3h
-	call 05494h
+	call hud_cache_load
 	call 0576fh
 l62eah:
 	jp 053bdh              ; -> seg0 (continue the state)
@@ -8117,15 +8108,16 @@ boomerang_catch:               ; (0x73A4) overlap Simon -> despawn (keep C416)
 	jp projectile_clear
 ; holy_water_tick (seg1 0x73AB): C460 slot type 5.  State 0/1 spawn at Simon
 ; (Y=C425+offset, X=C427, velX=±2 from C468, velY=0).  State 2 = arc
-; (Y += 2*l7084h[phase], land via map_solid_pair tile_is_solid).  State 3 = pool
-; (24 frames, SAT colour 8).
+; (Y += 2*l7084h[phase], land via map_solid_pair tile_is_solid).  State 3 =
+; floor flame (24 frames, SAT colour 8, patterns 0xF4/0xF8 — same spark as
+; a falling heart; pixels in gfx_rle_a185).
 holy_water_tick:
 	ld a,(ix+000h)
 	dec a
 	dec a
 	jr z,holy_water_arc    ; state 2
 	dec a
-	jr z,holy_water_pool   ; state 3
+	jr z,holy_water_flame  ; state 3
 	ld a,(0c420h)
 	cp 002h
 	ld a,(0c425h)
@@ -8148,7 +8140,7 @@ l73d5h:
 	ld (ix+005h),a
 	ld (ix+006h),038h
 	jp l7356h
-holy_water_arc:                ; (0x73E5) Y += 2*l7084h[ix+7]; land -> pool
+holy_water_arc:                ; (0x73E5) Y += 2*l7084h[ix+7]; land -> flame
 	ld a,(ix+007h)
 	ld hl,l7084h
 	call ADD_HL_A
@@ -8174,7 +8166,7 @@ l7404h:
 	ld (ix+007h),a
 	ld a,018h
 	jp play_sound
-holy_water_pool:               ; (0x7420) 0x18 frames on the floor, then despawn
+holy_water_flame:              ; (0x7420) 0x18 frames burning on the floor, then despawn
 	ld a,(0c003h)
 	and 004h
 	ld a,0f4h
@@ -8390,7 +8382,7 @@ l759ch:
 	ret nz
 	ld a,(ix+000h)
 	cp 003h
-	ret nz                 ; type 5 state 3 = holy-water pool: SAT colour 8
+	ret nz                 ; type 5 state 3 = holy-water flame: SAT colour 8
 	ld hl,0d480h
 	ld de,0d490h
 	ld b,010h
@@ -12148,7 +12140,7 @@ l8d19h:
 	pop bc
 	pop de
 	call sub_8854h
-	call sub_9273h
+	call vendor_redraw_all
 	call door_begin_open
 	call sub_870eh
 	pop de
@@ -12164,7 +12156,7 @@ sub_8d30h:
 ;  25-entry word table collect_bonus_tbl at 0x8D45 (index = A-1; A>=0x1A falls through to l8d77h):
 ;    1/2 hearts, 3/4 shields, 5 white cross, 6 rosary, 7 small orb, 8 blue gem,
 ;    9 sapphire ring, 10/11 hourglass (upright / tipped), 12/13 boots/wings,
-;    14 candle, 15 map, 16/17 bibles, 18 staff, 19/20 money bags,
+;    14 candle, 15 map, 16/17 bibles, 18 lockpick, 19/20 money bags,
 ;    21 slime (fake pickup; collect is a no-effect stub), 22 potion, 23/24 keys,
 ;    25 chest (container; world collect never reaches this stub).
 ;  Reached from both pickup paths: the mid-air 0xC800 heart (type 0x24, via
@@ -12198,7 +12190,7 @@ collect_bonus_tbl:             ; (seg2 0x8D45) word[id-1]; id>=0x1A -> l8d77h
 	defw bonus_map
 	defw bonus_black_bible
 	defw bonus_white_bible
-	defw bonus_staff
+	defw bonus_lockpick
 	defw bonus_white_bag
 	defw bonus_blue_bag
 	defw bonus_slime
@@ -12383,11 +12375,11 @@ l8e7ch:
 	or (hl)
 	ld (hl),a
 	ret
-bonus_staff:                   ; id 18 (0x8E80): C700=3, C701 bit2; drops yellow key
+bonus_lockpick:                ; id 18 (0x8E80): C700=3, C701 bit2; drops yellow key
 	ld hl,0c431h
 	set 1,(hl)
 	ld hl,0c701h
-	res 1,(hl)             ; can't hold yellow key with the staff
+	res 1,(hl)             ; can't hold yellow key with the lockpick
 	ld b,004h
 	call inv_or_c701
 	ld a,003h
@@ -12432,10 +12424,10 @@ sub_8ed0h:
 	ld a,(0c700h)
 	or a
 	jp z,l8980h
-	bit 2,b
-	ld a,012h
+	bit 2,b                ; C701 bit2 = lockpick
+	ld a,012h              ; bonus 0x12 lockpick
 	jr nz,l8eebh
-	ld a,017h
+	ld a,017h              ; bonus 0x17 yellow key
 l8eebh:
 	jr l8eadh
 hud_bonus_refresh:
@@ -12526,7 +12518,7 @@ sub_8f5ch:
 sub_8f6fh:
 	push hl
 	ld a,(ix+004h)
-	cp 019h                ; chest: need C700 (yellow key / staff charges)
+	cp 019h                ; chest: need C700 (yellow key / lockpick charges)
 	jr nz,l8f8ah
 	ld hl,0c700h
 	ld a,(hl)
@@ -13083,17 +13075,17 @@ l9230h:
 	ld a,(ix+00ah)
 	push af
 	rra
-	ld a,002h
+	ld a,002h              ; even frames: grey flash (C70B slot 2)
 	jr c,l923fh
-	ld a,(0c70bh)
+	ld a,(0c70bh)          ; odd frames: reaction colour
 l923fh:
 	push de
-	call sub_9265h
+	call vendor_draw
 	pop de
 	pop af
 	ret nz
 	ld a,(0c70bh)
-	call sub_9265h
+	call vendor_draw
 	ld (ix+000h),082h
 	jp vendor_outcome_dispatch
 l9253h:
@@ -13103,11 +13095,14 @@ l9253h:
 	pop de
 	call sub_9228h
 	bit 7,(hl)
-	jr z,l9263h
+	jr z,vendor_draw_idle
 	dec (hl)
-l9263h:
+; vendor_draw_idle (0x9263): LMMM the white (slot 3) 32x32 at DE.
+vendor_draw_idle:
 	ld a,003h
-sub_9265h:
+; vendor_draw (0x9265): A = C70B 0..4 -> SX=A*32, SY=0xA0, 32x32 LMMM
+; page-1 -> page-0 (colour 0 skip) at DE=(X,Y).
+vendor_draw:
 	rrca
 	rrca
 	rrca
@@ -13116,7 +13111,9 @@ sub_9265h:
 	ld a,048h
 	ld bc,02020h
 	jp vdp_lmmm
-sub_9273h:
+; vendor_redraw_all (0x9273): idle-blit every occupied C5B5/C5C5 slot
+; (after a screen restore: pickup, F2 map close).
+vendor_redraw_all:
 	ld hl,0c5b5h
 	ld bc,00200h
 l9279h:
@@ -13126,7 +13123,7 @@ l9279h:
 	pop ix
 	ld a,(hl)
 	or a
-	call nz,sub_928dh
+	call nz,vendor_redraw
 	pop hl
 	ld a,010h
 	add a,l
@@ -13135,12 +13132,12 @@ l9279h:
 	inc c
 	djnz l9279h
 	ret
-sub_928dh:
+vendor_redraw:
 	inc l
 	ld e,(hl)
 	inc l
 	ld d,(hl)
-	jp l9263h
+	jp vendor_draw_idle
 sub_9294h:
 	ld hl,0c5b5h
 	ld b,002h
@@ -13192,7 +13189,7 @@ vendor_outcome_tbl:
 ; state -> 0xC70C.  For "random" states >= 7 the low nibble of the R (refresh)
 ; register is used as a coin-flip to pick between two candidate states, which is
 ; the source of the run-to-run variation the player observes.  Finally the state
-; is mapped through vendor_state_action_tbl (0x9327) into the reaction id 0xC70B.
+; is mapped through vendor_state_action_tbl (0x9327) into C70B (recolor slot 0..4).
 vendor_pick_outcome:
 	ld de,vendor_transition_tbl            ; vendor_transition_tbl (8-byte rows per ix+5)
 	ld a,(ix+005h)
@@ -13239,8 +13236,8 @@ vendor_transition_tbl:
 	defb 000h,003h,003h,001h,005h,005h,005h,006h
 	defb 009h,009h,000h,005h,005h,005h,002h,006h
 	defb 005h,005h,005h,005h,000h,003h,005h,006h
-vendor_state_action_tbl:       ; (0x9327) state -> reaction id 0xC70B
-	defb 001h,004h,004h,000h,000h,003h,003h
+vendor_state_action_tbl:       ; (0x9327) state 0..6 -> C70B recolor slot
+	defb 001h,004h,004h,000h,000h,003h,003h  ; hit=red, mood=blue, hearts=magenta, idle=white
 vendor_hit_latch:              ; (0x932E) register that the vendor was hit
 	ld a,0ffh
 	ld (0c40ch),a
@@ -13396,7 +13393,7 @@ l942ah:
 ; vendor_price_tbl: 9 x { item id, normal, halved(white bible), doubled(black bible) }
 vendor_price_tbl:
 	defb 00eh,020h,015h,060h  ; candle
-	defb 012h,030h,020h,060h  ; staff
+	defb 012h,030h,020h,060h  ; lockpick
 	defb 003h,020h,010h,060h  ; red shield
 	defb 004h,020h,010h,080h  ; yellow shield
 	defb 00ah,040h,020h,080h  ; hourglass
@@ -13652,7 +13649,7 @@ l95bah:                    ; state 2 (displayed): F2 again closes the map
 	call 04f98h            ; restore the play screen and resume
 	call spike_bars_restore
 	call door_begin_open
-	call sub_9273h
+	call vendor_redraw_all
 	call sub_870eh
 	call 04810h
 	xor a

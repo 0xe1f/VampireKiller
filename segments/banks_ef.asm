@@ -181,7 +181,7 @@ scenery_list_h1:
 	defb 07ch,017h         ; r1 floor (12,7) yellow key
 	defb 03ch,035h         ; r1 candle (12,3) slime
 	defb 0b9h,08fh         ; r1 chest (9,11) map
-	defb 0ach,0c4h         ; r1 vendor (12,10) staff slot0
+	defb 0ach,0c4h         ; r1 vendor (12,10) lockpick slot0
 	defb 0feh              ; next room
 	defb 035h,035h         ; r2 candle (5,3) slime
 	defb 083h,021h         ; r2 candle (3,8) small heart
@@ -349,7 +349,7 @@ scenery_list_h2:
 	defb 065h,02ch         ; r1 candle (5,6) boots
 	defb 06ah,03ah         ; r1 candle (10,6) chain whip
 	defb 06ch,021h         ; r1 candle (12,6) small heart
-	defb 074h,07fh,092h    ; r1 reveal (4,7) chest staff
+	defb 074h,07fh,092h    ; r1 reveal (4,7) chest lockpick
 	defb 076h,07fh,08fh    ; r1 reveal (6,7) chest map
 	defb 078h,060h         ; r1 block (8,7) none
 	defb 07ch,077h         ; r1 block (12,7) yellow key
@@ -436,7 +436,7 @@ scenery_list_h3:
 	defb 038h,030h         ; r1 candle (8,3) black bible
 	defb 03eh,022h         ; r1 candle (14,3) large heart
 	defb 065h,021h         ; r1 candle (5,6) small heart
-	defb 032h,0c5h         ; r1 vendor (2,3) staff slot1
+	defb 032h,0c5h         ; r1 vendor (2,3) lockpick slot1
 	defb 069h,017h         ; r1 floor (9,6) yellow key
 	defb 0feh              ; next room
 	defb 062h,025h         ; r2 candle (2,6) white cross
@@ -481,7 +481,7 @@ scenery_list_h3:
 	defb 056h,078h         ; r1 block (6,5) white key
 	defb 076h,07fh,09eh    ; r1 reveal (6,7) chest holy water
 	defb 078h,07fh,091h    ; r1 reveal (8,7) chest white bible
-	defb 07ah,07fh,092h    ; r1 reveal (10,7) chest staff
+	defb 07ah,07fh,092h    ; r1 reveal (10,7) chest lockpick
 	defb 07ch,062h         ; r1 block (12,7) large heart
 	defb 094h,060h         ; r1 block (4,9) none
 	defb 096h,07fh,0c1h    ; r1 reveal (6,9) vendor candle slot1
@@ -490,7 +490,7 @@ scenery_list_h3:
 	defb 075h,021h         ; r2 candle (5,7) small heart
 	defb 08dh,022h         ; r2 candle (13,8) large heart
 	defb 0feh              ; next room
-	defb 056h,07fh,092h    ; r3 reveal (6,5) chest staff
+	defb 056h,07fh,092h    ; r3 reveal (6,5) chest lockpick
 	defb 078h,062h         ; r3 block (8,7) large heart
 	defb 07ch,07fh,083h    ; r3 reveal (12,7) chest red shield
 	defb 094h,060h         ; r3 block (4,9) none
@@ -515,7 +515,7 @@ scenery_list_h3:
 	defb 082h,020h         ; r2 candle (2,8) none
 	defb 097h,022h         ; r2 candle (7,9) large heart
 	defb 09ch,020h         ; r2 candle (12,9) none
-	defb 0aeh,092h         ; r2 chest (14,10) staff
+	defb 0aeh,092h         ; r2 chest (14,10) lockpick
 	defb 0feh              ; next room
 	defb 093h,021h         ; r3 candle (3,9) small heart
 	defb 098h,021h         ; r3 candle (8,9) small heart
@@ -581,7 +581,7 @@ scenery_list_h4:
 	defb 03ah,027h         ; r4 candle (10,3) small orb
 	defb 098h,020h         ; r4 candle (8,9) none
 	defb 094h,07fh,08fh    ; r4 reveal (4,9) chest map
-	defb 092h,0c6h         ; r4 vendor (2,9) staff slot2
+	defb 092h,0c6h         ; r4 vendor (2,9) lockpick slot2
 	defb 0feh              ; next room
 	defb 034h,029h         ; r5 candle (4,3) sapphire ring
 	defb 039h,022h         ; r5 candle (9,3) large heart
@@ -688,7 +688,7 @@ scenery_list_h4:
 	defb 087h,021h         ; r6 candle (7,8) small heart
 	defb 08ch,022h         ; r6 candle (12,8) large heart
 	defb 0a9h,017h         ; r6 floor (9,10) yellow key
-	defb 0adh,092h         ; r6 chest (13,10) staff
+	defb 0adh,092h         ; r6 chest (13,10) lockpick
 	defb 0feh              ; next room
 	defb 0feh              ; next room
 	defb 0a4h,017h         ; r8 floor (4,10) yellow key
@@ -719,7 +719,7 @@ scenery_list_h5:
 	defb 036h,022h         ; r6 candle (6,3) large heart
 	defb 094h,021h         ; r6 candle (4,9) small heart
 	defb 098h,022h         ; r6 candle (8,9) large heart
-	defb 0a6h,092h         ; r6 chest (6,10) staff
+	defb 0a6h,092h         ; r6 chest (6,10) lockpick
 	defb 0feh              ; next room
 	defb 0feh              ; next room
 	defb 0ach,018h         ; r8 floor (12,10) white key
@@ -794,7 +794,7 @@ scenery_list_h5:
 	defb 05ah,07fh,085h    ; r9 reveal (10,5) chest white cross
 	defb 076h,062h         ; r9 block (6,7) large heart
 	defb 078h,062h         ; r9 block (8,7) large heart
-	defb 0a9h,092h         ; r9 chest (9,10) staff
+	defb 0a9h,092h         ; r9 chest (9,10) lockpick
 	defb 0feh              ; next room
 	defb 04dh,018h         ; r10 floor (13,4) white key
 	defb 0adh,017h         ; r10 floor (13,10) yellow key
@@ -810,7 +810,7 @@ scenery_list_h5:
 	defb 0feh              ; next room
 	defb 075h,022h         ; r2 candle (5,7) large heart
 	defb 07dh,022h         ; r2 candle (13,7) large heart
-	defb 081h,092h         ; r2 chest (1,8) staff
+	defb 081h,092h         ; r2 chest (1,8) lockpick
 	defb 044h,017h         ; r2 floor (4,4) yellow key
 	defb 0feh              ; next room
 	defb 046h,022h         ; r3 candle (6,4) large heart
@@ -2069,7 +2069,7 @@ sfx_tbl:
 	defw sfx_0c_hit                ; whip/weapon vs actor, candle, shot
 	defw sfx_0d_ring_kill
 	defw sfx_0e_block_break
-	defw sfx_0f_heart              ; also staff pickup, vendor +5
+	defw sfx_0f_heart              ; also lockpick pickup, vendor +5
 	defw sfx_10_money_bag          ; also vendor leave +5000
 	defw sfx_11_chest
 	defw sfx_12_collect            ; default pickup / purchase

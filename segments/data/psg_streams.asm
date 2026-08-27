@@ -1,5 +1,5 @@
 ; Packed PSG streams (seg14 0x8E29-0x9FFF).  sfx_tbl / music_ptr /
-; snd_fb_seq / snd_fd_seq.  music_85_bgm_s10_18_b continues in data/psg_seg15.asm;
+; snd_fb_seq / snd_fd_seq.  music_85_bgm_s10_18_b continues in psg_seg15.asm;
 ; ids 85c and 86-8F live there too.
 
 ; 0x8E29  packed 2  ; unused 1F A8 (= 0xA81F dummy)

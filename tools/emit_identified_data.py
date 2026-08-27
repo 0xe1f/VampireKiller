@@ -27,6 +27,49 @@ TILE16 = 128  # vram_blit_tile16: 16 rows of 8 bytes
 NTILES = 0xBF
 TILESET_BYTES = NTILES * TILE  # 0x17E0
 
+# Bonus HUD 16x16s (seg9 0x9000): ids 1-20 then potion (id 22).  Labels
+# match collect_bonus handlers with a bonus_hud_ prefix so they don't
+# collide.  Id 21 (slime) has no tile here.  HUD init blits 20 icons to
+# Y=0x50, then potion to (X=80, Y=96).
+BONUS_HUD_16X16 = [
+    (0x9000, "bonus_hud_small_heart", "bonus 0x01"),
+    (0x9080, "bonus_hud_large_heart", "bonus 0x02"),
+    (0x9100, "bonus_hud_red_shield", "bonus 0x03"),
+    (0x9180, "bonus_hud_yellow_shield", "bonus 0x04"),
+    (0x9200, "bonus_hud_white_cross", "bonus 0x05"),
+    (0x9280, "bonus_hud_rosary", "bonus 0x06"),
+    (0x9300, "bonus_hud_small_orb", "bonus 0x07"),
+    (0x9380, "bonus_hud_blue_gem", "bonus 0x08"),
+    (0x9400, "bonus_hud_sapphire_ring", "bonus 0x09"),
+    (0x9480, "bonus_hud_hourglass", "bonus 0x0A"),
+    (0x9500, "bonus_hud_tipped_hourglass", "bonus 0x0B"),
+    (0x9580, "bonus_hud_boots", "bonus 0x0C"),
+    (0x9600, "bonus_hud_wings", "bonus 0x0D"),
+    (0x9680, "bonus_hud_candle", "bonus 0x0E"),
+    (0x9700, "bonus_hud_map", "bonus 0x0F"),
+    (0x9780, "bonus_hud_black_bible", "bonus 0x10"),
+    (0x9800, "bonus_hud_white_bible", "bonus 0x11"),
+    (0x9880, "bonus_hud_lockpick", "bonus 0x12"),
+    (0x9900, "bonus_hud_white_bag", "bonus 0x13"),
+    (0x9980, "bonus_hud_blue_bag", "bonus 0x14"),
+    (0x9A00, "bonus_hud_potion", "bonus 0x16"),
+]
+
+# First-tile CPU of each section comment in bonus_hud_tiles.asm.
+BONUS_HUD_GROUPS = [
+    (0x9000, "hearts"),
+    (0x9100, "shields"),
+    (0x9200, "white cross / rosary"),
+    (0x9300, "life orb / gems"),
+    (0x9480, "hourglasses"),
+    (0x9580, "boots / wings"),
+    (0x9680, "candle / map"),
+    (0x9780, "bibles"),
+    (0x9880, "lockpick"),
+    (0x9900, "money bags"),
+    (0x9A00, "potion"),
+]
+
 # HUD init copy (seg0 after page_tileset_banks): 8 x 16x16 item icons at
 # 0xB9C8 -> VRAM Y=0x60 X=96 (bonus 0x17-0x1E), then 4 candle flames at
 # 0xBDC8 -> Y=0x70 (playfield, l8991h A=0..3).  Each entry is one 16x16.
@@ -283,13 +326,16 @@ def emit_4bpp(
     cpu0: int,
     origins: list[tuple],
     labels: list[tuple[int, str, str]] | None = None,
+    sections: list[tuple[int, str]] | None = None,
 ) -> list[str]:
     """Emit 4bpp tiles as hex pixel-rows.  origins: (cpu, name) or
     (cpu, name, nbytes) with nbytes 32 (8x8) or 128 (16x16).  labels:
-    (cpu, name, comment); several labels may share a cpu."""
+    (cpu, name, comment); several labels may share a cpu.  sections:
+    (cpu, title) -> `; --- title ---` before that tile."""
     lab: dict[int, list[tuple[str, str]]] = {}
     for cpu, name, comment in labels or []:
         lab.setdefault(cpu, []).append((name, comment))
+    sec = dict(sections or [])
     orig_norm = []
     for o in origins or [(cpu0, "raw")]:
         orig_norm.append((o[0], o[1], o[2] if len(o) > 2 else TILE))
@@ -298,6 +344,10 @@ def emit_4bpp(
     i = 0
     while i < len(buf):
         cpu = cpu0 + i
+        if cpu in sec:
+            if lines and lines[-1] != "":
+                lines.append("")
+            lines.append("; --- %s ---" % sec[cpu])
         for name, comment in lab.get(cpu, []):
             lines.append("%s:  ; 0x%04X  %s" % (name, cpu, comment))
         origin, tname, tsize = orig_sorted[0]
@@ -588,16 +638,216 @@ def write_tile_file(
     cpu0: int,
     origins: list[tuple],
     labels: list[tuple[int, str, str]] | None = None,
+    sections: list[tuple[int, str]] | None = None,
 ) -> None:
     lines = list(header)
     if lines and lines[-1] != "":
         lines.append("")
-    lines += emit_4bpp(buf, cpu0, origins, labels)
+    lines += emit_4bpp(buf, cpu0, origins, labels, sections)
     write_lines(os.path.join(DATA, fname), lines)
 
 
-def shape_stream_name(cpu: int) -> str:
+# ix+0B pose -> stream label.  Shared pointer-table slots (6F/70=71, 81-84=85,
+# 95/96=97) pick the first named id on that stream.  Leftover unused / unidentified
+# ids stay actor_shape_%04x — see the actor_shape.asm header.
+SHAPE_ID_NAME = {
+    0x00: "shape_pickup_fall",
+    0x01: "shape_pickup",
+    0x03: "shape_fireball",
+    0x04: "shape_skull_pile_l",
+    0x05: "shape_skull_pile_r",
+    0x06: "shape_skull_pile_fe40_l",
+    0x07: "shape_skull_pile_fe40_r",
+    0x08: "shape_merman_green_walk_l0",
+    0x09: "shape_merman_green_walk_l1",
+    0x0A: "shape_merman_open",  # unused; open-mouth in spr_merman load
+    0x0B: "shape_merman_green_walk_r0",
+    0x0C: "shape_merman_green_walk_r1",
+    0x0E: "shape_merman_splash",
+    0x0F: "shape_merman_red_walk_l0",
+    0x10: "shape_merman_red_walk_l1",
+    0x11: "shape_merman_red_spit_l",
+    0x12: "shape_merman_red_walk_r0",
+    0x13: "shape_merman_red_walk_r1",
+    0x14: "shape_merman_red_spit_r",
+    0x15: "shape_merman_splash_s10",
+    0x16: "shape_flying_skull_l0",
+    0x17: "shape_flying_skull_l1",
+    0x18: "shape_flying_skull_r0",
+    0x19: "shape_flying_skull_r1",
+    0x1A: "shape_hanging_bat_hang",
+    0x1B: "shape_hanging_bat_fly_l0",
+    0x1C: "shape_hanging_bat_fly_l1",
+    0x1D: "shape_hanging_bat_fly_l2",
+    0x1E: "shape_hanging_bat_fly_r0",
+    0x1F: "shape_hanging_bat_fly_r1",
+    0x20: "shape_hanging_bat_fly_r2",
+    0x21: "shape_red_skel_walk_r0",
+    0x22: "shape_red_skel_walk_r1",
+    0x23: "shape_red_skel_walk_l0",
+    0x24: "shape_red_skel_walk_l1",
+    0x25: "shape_red_skel_wake",
+    0x26: "shape_red_skel_wait",
+    0x27: "shape_medusa_snake_l0",
+    0x28: "shape_medusa_snake_l1",
+    0x29: "shape_medusa_snake_r0",
+    0x2A: "shape_medusa_snake_r1",
+    0x2B: "shape_medusa_0",
+    0x2C: "shape_medusa_1",
+    0x33: "shape_mummy_walk_l0",
+    0x34: "shape_mummy_walk_l1",
+    0x35: "shape_mummy_walk_l2",
+    0x36: "shape_mummy_walk_r0",
+    0x37: "shape_mummy_walk_r1",
+    0x38: "shape_mummy_walk_r2",
+    0x39: "shape_mummy_bandage_0",
+    0x3A: "shape_mummy_bandage_1",
+    0x3B: "shape_zombie_walk_l0",
+    0x3C: "shape_zombie_walk_l1",
+    0x3D: "shape_zombie_walk_r0",
+    0x3E: "shape_zombie_walk_r1",
+    0x3F: "shape_dog_idle_near",
+    0x40: "shape_dog_run_l2",
+    0x41: "shape_dog_run_l0",
+    0x42: "shape_dog_run_l1",
+    0x43: "shape_dog_idle_far",
+    0x44: "shape_dog_run_r2",
+    0x45: "shape_dog_run_r0",
+    0x46: "shape_dog_run_r1",
+    0x47: "shape_white_skel_walk_l0",
+    0x48: "shape_white_skel_walk_l1",
+    0x49: "shape_white_skel_walk_r0",
+    0x4A: "shape_white_skel_walk_r1",
+    0x4B: "shape_bone_0",
+    0x4C: "shape_bone_1",
+    0x4D: "shape_bone_2",
+    0x4E: "shape_giant_bat_0",  # shot_bone's 4th frame also indexes this id
+    0x4F: "shape_giant_bat_1",
+    0x50: "shape_pikeman_walk_l0",
+    0x51: "shape_pikeman_walk_l1",
+    0x52: "shape_pikeman_walk_l2",
+    0x53: "shape_pikeman_walk_r0",
+    0x54: "shape_pikeman_walk_r1",
+    0x55: "shape_pikeman_walk_r2",
+    0x56: "shape_dracula_intro_0",
+    0x57: "shape_dracula_intro_1",
+    0x59: "shape_dracula_intro_1_l",
+    0x5B: "shape_dracula_stand_l",
+    0x5C: "shape_dracula_stand_l_open",
+    0x5D: "shape_dracula_stand_r",
+    0x5E: "shape_dracula_stand_r_open",
+    0x5F: "shape_axe_knight_walk_l0",
+    0x60: "shape_axe_knight_walk_l1",
+    0x61: "shape_axe_knight_walk_r0",
+    0x62: "shape_axe_knight_walk_r1",
+    0x63: "shape_axe_0",
+    0x64: "shape_axe_1",
+    0x65: "shape_axe_2",
+    0x66: "shape_axe_3",
+    0x67: "shape_hunchback_l0",
+    0x68: "shape_hunchback_l1",
+    0x69: "shape_igor_land_l",
+    0x6A: "shape_hunchback_r0",
+    0x6B: "shape_hunchback_r1",
+    0x6C: "shape_igor_land_r",
+    0x6D: "shape_roc_flap_0",
+    0x6E: "shape_roc_flap_1",
+    0x71: "shape_ghost_head_l0",
+    0x72: "shape_ghost_head_l1",
+    0x73: "shape_ghost_head_r0",
+    0x74: "shape_ghost_head_r1",
+    0x75: "shape_ghost_head_s15_r1",
+    0x79: "shape_frankenstein_0",
+    0x7A: "shape_frankenstein_1",
+    0x7B: "shape_frankenstein_2",
+    0x7C: "shape_grim_reaper",
+    0x7D: "shape_sickle_0",
+    0x7E: "shape_sickle_1",
+    0x7F: "shape_sickle_2",
+    0x80: "shape_sickle_3",
+    0x85: "shape_flame_0",
+    0x86: "shape_flame_1",
+    0x87: "shape_raven_fly_l0",
+    0x88: "shape_raven_fly_l1",
+    0x89: "shape_raven_perch",
+    0x8A: "shape_raven_fly_r0",
+    0x8B: "shape_raven_fly_r1",
+    0x8C: "shape_raven_perch_conv",
+    0x8D: "shape_roc_flap_2",
+    0x8F: "shape_orb_0",
+    0x90: "shape_orb_1",
+    0x91: "shape_orb_2",
+    0x92: "shape_intro_sky_a",
+    0x93: "shape_intro_sky_b",
+    0x94: "shape_intro_sky",
+    0x97: "shape_intro_simon_0",
+    0x98: "shape_intro_simon_1",
+    0x99: "shape_intro_simon_2",
+    0x9A: "shape_intro_simon_3",
+    0x9B: "shape_blob_0",
+    0x9C: "shape_blob_1",
+    0x9D: "shape_blob_fe00_0",
+    0x9E: "shape_blob_fe00_1",
+    0x9F: "shape_blob_fb80_0",
+    0xA0: "shape_blob_fb80_1",
+    0xA1: "shape_blob_fd00_0",
+    0xA2: "shape_blob_fd00_1",
+}
+
+
+def shape_stream_name(cpu: int, ids: list[int] | None = None) -> str:
+    if ids:
+        for i in ids:
+            if i in SHAPE_ID_NAME:
+                return SHAPE_ID_NAME[i]
     return "actor_shape_%04x" % cpu
+
+
+# Contiguous ix+0B ranges for section comments.  Word/byte order stays id /
+# CPU order (roc flap 2 and white-skeleton sit where the table puts them).
+SHAPE_GROUPS = (
+    (0x00, 0x01, "pickup"),
+    (0x02, 0x02, "unidentified (type 0x2C)"),
+    (0x03, 0x03, "fireball"),
+    (0x04, 0x07, "skull pile"),
+    (0x08, 0x15, "merman"),
+    (0x16, 0x19, "flying skull"),
+    (0x1A, 0x20, "hanging bat"),
+    (0x21, 0x26, "skeleton (red)"),
+    (0x27, 0x2C, "medusa"),
+    (0x2D, 0x32, "unused"),
+    (0x33, 0x3A, "mummy"),
+    (0x3B, 0x3E, "zombie"),
+    (0x3F, 0x46, "dog"),
+    (0x47, 0x4D, "skeleton (white + bone)"),
+    (0x4E, 0x4F, "giant bat"),
+    (0x50, 0x55, "pikeman"),
+    (0x56, 0x5E, "dracula"),
+    (0x5F, 0x62, "axe knight"),
+    (0x63, 0x66, "axe (thrown)"),
+    (0x67, 0x6C, "hunchback / igor"),
+    (0x6D, 0x6E, "roc"),
+    (0x6F, 0x75, "ghost head"),
+    (0x76, 0x78, "unused"),
+    (0x79, 0x7B, "frankenstein"),
+    (0x7C, 0x7C, "grim reaper"),
+    (0x7D, 0x80, "sickle"),
+    (0x81, 0x86, "flame"),
+    (0x87, 0x8C, "raven"),
+    (0x8D, 0x8D, "roc"),
+    (0x8E, 0x8E, "unused"),
+    (0x8F, 0x91, "orb"),
+    (0x92, 0x9A, "intro"),
+    (0x9B, 0xA2, "blob"),
+    (0xA3, 0xA7, "leftover"),
+)
+
+
+def _shape_group_at(sid: int) -> tuple[int, int, str]:
+    for lo, hi, title in SHAPE_GROUPS:
+        if lo <= sid <= hi:
+            return lo, hi, title
+    raise KeyError("shape id 0x%02X has no group" % sid)
 
 
 def _shape_id_note(ids: list[int]) -> str:
@@ -622,6 +872,9 @@ def format_actor_shapes(raw: bytes) -> list[str]:
     ptrs = [raw[i] | (raw[i + 1] << 8) for i in range(0, n * 2, 2)]
     assert min(ptrs) == first
     assert first == ACTOR_SHAPE_CPU + n * 2
+    assert SHAPE_GROUPS[0][0] == 0 and SHAPE_GROUPS[-1][1] == n - 1
+    for a, b in zip(SHAPE_GROUPS, SHAPE_GROUPS[1:]):
+        assert a[1] + 1 == b[0], (a, b)
     id_of: dict[int, list[int]] = {}
     for i, p in enumerate(ptrs):
         id_of.setdefault(p, []).append(i)
@@ -635,19 +888,40 @@ def format_actor_shapes(raw: bytes) -> list[str]:
         "; (dy,dx,pat) triples.  load_stage_tileset still copies 0xBF tiles from",
         "; tileset_s10 (0x9E73), so VRAM ids 0xB0-0xBE on stages 10-12 overlay",
         "; this table; nametables do not use those ids.  HUD tiles follow at 0xB9C8.",
+        "; Names live in tools/emit_identified_data.py SHAPE_ID_NAME (regen this",
+        "; file from there).  shape_* prefix avoids colliding with spr_* RLE.",
+        "; Leftover (return to): used but unidentified 0x02 / 0x5A / 0xA5-0xA7",
+        "; (credits/event types 0x2C and 0x2E); unused 0x0D 0x2D-0x32 0x58",
+        "; 0x76-0x78 0x8E 0xA3-0xA4.  0x0A is named (open-mouth merman) but unused.",
+        "; Shared slots: 0x6F/0x70 = ghost 0x71; 0x81-0x84 = flame 0x85;",
+        "; 0x95/0x96 = intro simon 0x97.  shot_bone's 4th frame is giant-bat 0x4E.",
+        "; Sections group by actor; defw / stream order is still id / CPU order.",
         "",
         "actor_shape_ptr:  ; 0xB473  word[shape id] -> stream",
     ]
-    for i in range(0, n, 4):
-        chunk = ptrs[i : i + 4]
-        names = ", ".join(shape_stream_name(p) for p in chunk)
-        lines.append("\tdefw %s  ; 0x%02X" % (names, i))
+    sid = 0
+    while sid < n:
+        lo, hi, title = _shape_group_at(sid)
+        assert lo == sid
+        lines.append("")
+        lines.append("; --- %s ---" % title)
+        while sid <= hi:
+            take = min(4, hi - sid + 1)
+            chunk = ptrs[sid : sid + take]
+            names = ", ".join(shape_stream_name(p, id_of[p]) for p in chunk)
+            lines.append("\tdefw %s  ; 0x%02X" % (names, sid))
+            sid += take
     lines.append("")
+    prev_title = None
     for s, e in zip(starts, starts[1:]):
         data = raw[s - ACTOR_SHAPE_CPU : e - ACTOR_SHAPE_CPU]
+        title = _shape_group_at(min(id_of[s]))[2]
+        if title != prev_title:
+            lines.append("; --- %s ---" % title)
+            prev_title = title
         lines.append(
             "%s:  ; 0x%04X  %s  %s"
-            % (shape_stream_name(s), s, _shape_id_note(id_of[s]), _stream_kind(data))
+            % (shape_stream_name(s, id_of[s]), s, _shape_id_note(id_of[s]), _stream_kind(data))
         )
         lines.extend(defb_lines(data))
         lines.append("")
@@ -1134,6 +1408,17 @@ RLE_NAMES = {
     0xBC5A: "spr_grim_reaper",
 }
 
+# Packed order is not grouping order: knife/cross, then skull pile /
+# flying skull, then gfx_rle_a3de, then axe.  Section comments only.
+RLE_GROUPS = (
+    (0xA066, "frontend / vdoor / fireball"),
+    (0xA24E, "thrown knife / cross"),
+    (0xA2E5, "skull pile / flying skull"),
+    (0xA3DE, "room extra"),
+    (0xA4C9, "thrown axe"),
+    (0xA54A, "enemies"),
+)
+
 PAL_NAMES = {
     0xBECD: "s00_palette",
     0xBEE3: "s01_palette",
@@ -1305,21 +1590,32 @@ def emit_seg9_10(rom: bytes) -> None:
         [(0x8000, "intro")],
         [(0x8000, "intro_tiles", "0x80 8x8 tiles for the intro walk-up")],
     )
+    bonus_hud = b9[0x1000:0x1A80]
+    assert len(bonus_hud) == len(BONUS_HUD_16X16) * TILE16
     write_tile_file(
         "bonus_hud_tiles.asm",
         [
             "; Bonus HUD 16x16 4bpp (seg9 0x9000): ids 1-20 then potion (id 22).",
             "; HUD init (seg0 after page_title_banks) blits 20 icons via",
             "; vram_blit_tile16 / l4a97h to Y=0x50, then potion to (X=80, Y=96).",
+            "; Names live in tools/emit_identified_data.py BONUS_HUD_16X16",
+            "; (regen this file from the ROM; do not hand-edit).  Id 21",
+            "; (slime) has no tile here; ids 23-30 are hud_weapon_key_tiles.",
         ]
         + pixnote16,
-        b9[0x1000:0x1A80],
+        bonus_hud,
         0x9000,
-        [(0x9000, "bonus", TILE16), (0x9A00, "potion", TILE16)],
         [
-            (0x9000, "bonus_hud_tiles", "bonus ids 1-20 (vram_blit_tile16)"),
-            (0x9A00, "bonus_hud_potion", "bonus id 22"),
+            (
+                cpu,
+                name[10:] if name.startswith("bonus_hud_") else name,
+                TILE16,
+            )
+            for cpu, name, _c in BONUS_HUD_16X16
         ],
+        [(0x9000, "bonus_hud_tiles", "bonus ids 1-20 (vram_blit_tile16)")]
+        + list(BONUS_HUD_16X16),
+        BONUS_HUD_GROUPS,
     )
     tail = b9[0x1A80:0x1AB0]
     assert len(tail) == 0x30
@@ -1431,6 +1727,7 @@ def emit_seg9_10(rom: bytes) -> None:
         0xA185: 0xFF00,
         0xA24E: 0xF8C0,
         0xA272: 0xF8C0,
+        0xA4C9: 0xF8C0,  # load_weapon_sprites; rooms also copy to FC00
         0xB0AA: 0xFA00,
     }
     cpu_s = 0x9D38
@@ -1449,9 +1746,13 @@ def emit_seg9_10(rom: bytes) -> None:
         "; Dest is sprite-generator VRAM (0xF800+).  Unidentified 0xB50B-0xB54A",
         "; is not a valid stream (decompressor overruns into spr_hanging_bat).",
         "; Preview: gfx/sprites/enemy_sprite_rle.png (`make gfx`); cell header = VRAM dest.",
+        "; Packed order sandwiches knife/cross, skull pile, flying skull, then",
+        "; the axe (load_weapon_sprites dest 0xF8C0; some rooms also load it at",
+        "; 0xFC00).  Do not split this file to group weapons — bytes stay here.",
         "",
     ]
     cpu = 0xA066
+    rle_group_at = dict(RLE_GROUPS)
     for start in starts:
         if start > cpu:
             gap = bytes(peek(rom, i) for i in range(cpu, start))
@@ -1468,7 +1769,7 @@ def emit_seg9_10(rom: bytes) -> None:
             0xB07A: "actor_blob_blue/_red/_white SAT CC outline",
             0xA0EA: "vertical door (load_vdoor_sprites)",
             0xA147: "title/frontend (VRAM 0xF9C0)",
-            0xA185: "VRAM 0xFF00 (fireball at +0x80 = SAT 0xF0)",
+            0xA185: "VRAM 0xFF00 (fireball SAT 0xF0; flame SAT 0xF4/0xF8)",
             0xA24E: "thrown knife",
             0xA272: "thrown cross",
             0xA2E5: "type 10 SAT (skull pile)",
@@ -1498,6 +1799,10 @@ def emit_seg9_10(rom: bytes) -> None:
             extra = "  ; " + extra_cmt[start]
         elif start in ORPHAN_RLE:
             extra = "  ; not in room scripts (orphan)"
+        if start in rle_group_at:
+            if rlines and rlines[-1] != "":
+                rlines.append("")
+            rlines.append("; --- %s ---" % rle_group_at[start])
         rlines.append(
             "%s:  ; 0x%04X  packed %d%s" % (rle_name(start), start, plen, extra)
         )
@@ -1511,14 +1816,26 @@ def emit_seg9_10(rom: bytes) -> None:
     assert cpu == 0xBDA7, hex(cpu)
     write_lines(os.path.join(DATA, "enemy_sprite_rle.asm"), rlines)
 
-    # --- 0xBDA7-0xBEA6 unidentified, then BEA7 palettes + 0xFF pad ---
-    unid = bytes(peek(rom, i) for i in range(0xBDA7, 0xBEA7))
-    ulines = [
-        "; Unidentified (seg10 0xBDA7-0xBEA6).  Not a valid RLE stream.",
-        "seg10_unid_bda7:  ; 0xBDA7",
-    ]
-    ulines.extend(defb_lines(unid))
-    write_lines(os.path.join(DATA, "seg10_bda7.asm"), ulines)
+    # --- 0xBDA7-0xBEA6 vendor 8x8 tiles, then BEA7 palettes + 0xFF pad ---
+    write_tile_file(
+        "vendor_tiles.asm",
+        [
+            "; Vendor 32x32 (seg10 0xBDA7): 8 x 8x8 4bpp tiles.  hud_cache_load",
+            "; (seg0 0x5494) pages title banks and vendor_cache_load copies these",
+            "; to 0xE800, replacing nibble 0xF with vendor_recolor_tbl[0..4], then",
+            "; vendor_blit_32 stamps a 4x4 of vendor_tile_ptr into page-1 Y=0xA0",
+            "; (five colour variants at X=0,32,64,96,128).  Idle blit is slot 3",
+            "; (white); whip reactions pick C70B.  Colour 0 is transparent (LMMM).",
+            "; Uncompressed 8x8 4bpp (SCREEN 5).  Each defb is one pixel-row",
+            "; (4 bytes, high nibble = left).  Eight rows = one tile (32 bytes).",
+            "; Preview: gfx/vendor.png (assembled 32x32 x5); gfx/tilesets/vendor_tiles.png",
+            "; (`make gfx`); cell header = CPU address.",
+        ],
+        bytes(peek(rom, i) for i in range(0xBDA7, 0xBEA7)),
+        0xBDA7,
+        [(0xBDA7, "vendor")],
+        [(0xBDA7, "vendor_tiles", "8 x 8x8; nibble 0xF is the cloak colour key")],
+    )
 
     slines = [
         "; Stage palette pointer table (seg10 0xBEA7) + palette_apply tables.",
@@ -1566,7 +1883,7 @@ def emit_seg9_10(rom: bytes) -> None:
             "data/room_gfx.asm",
             "data/room_palettes.asm",
             "data/enemy_sprite_rle.asm",
-            "data/seg10_bda7.asm",
+            "data/vendor_tiles.asm",
             "data/stage_palettes.asm",
         ],
     )

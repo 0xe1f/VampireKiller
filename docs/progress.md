@@ -237,7 +237,7 @@ Fully migrated banks (0-15) have no `.bin`.
       destroyed wall's bonus is emitted as a 0xC520 pickup actor.
     * 0xC419 = **last-collected-bonus id latch** (RESOLVED): `collect_bonus` (seg2
       0x8D33) writes A here as its first act; it's the bonus id (1 small heart, 0x18
-      staff, etc.), used to pick the pickup HUD/message. Not a toggle - it just holds
+      lockpick, etc.), used to pick the pickup HUD/message. Not a toggle - it just holds
       whatever was collected last.
 
 - Seventh session (whip brazier -> small heart undulates + falls -> collect, x2), via
@@ -368,7 +368,7 @@ Fully migrated banks (0-15) have no `.bin`.
     * **Yellow key** = bonus id **0x17 (23)**. Picked up from the 0xC500 pickup list
       (an 0x84 entry -> 0x00); sets inventory **0xC701 bit 1** (0xC701 0x01 -> 0x03,
       bit 0 was the earlier white key) and **0xC700 0x00 -> 0x01** (likely the yellow
-      key / staff *charge count* - Simon carries 1 key, a staff would be 3). Confirmed
+      key / lockpick *charge count* - Simon carries 1 key, a lockpick would be 3). Confirmed
       at idx 1478 and 1587.
     * **Chest open** (use key) at idx ~1662: consumes the key - **0xC701 0x03 -> 0x01**
       (bit 1 cleared) and **0xC700 0x01 -> 0x00**. The chest's reward latched earlier
@@ -525,7 +525,7 @@ Fully migrated banks (0-15) have no `.bin`.
       room 2 gate 09/0b specks.  Stage 15 0c/0d stay amber (real stairs).
       Dracula room 9 still `PERM_OVERRIDE`.
     * `collect_bonus_tbl` (seg2 0x8D45) converted from fake instructions to
-      `defw`; confirmed ids annotated (hearts, rosary, map, bibles, staff, keys,
+      `defw`; confirmed ids annotated (hearts, rosary, map, bibles, lockpick, keys,
       score bags, health pots).  Seg14 list-ids named (see game-notes
       "World structure"): 0x0d hunchback, 0x10 axe knight, 0x1F placed bat,
       0x21 placed merman; 0x05 dog confirmed.
@@ -930,7 +930,7 @@ Seg0 VDP layer named end to end: the command-engine primitives
 `glyph_expand_4bpp` -> `vram_blit_tile8`), and the HUD painters
 (`hud_draw_all`, `hud_panel_frames`, the bar frames).  Two stale claims in
 game-notes corrected while doing it: `hud_panel_frames` (0x454C) draws three
-`vdp_box` outlines rather than copying title graphics, and `sub_554fh` blits a
+`vdp_box` outlines rather than copying title graphics, and `vendor_blit_32` stamps a
 32x32 image as a 4x4 tile grid rather than assembling the sprite attribute
 table (that is seg1 `simon_sat_build` / `actor_sat_build`).
 
@@ -1286,6 +1286,12 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
 
 ## Working notes
 
+- Actor SAT streams (`data/actor_shape.asm`, from `SHAPE_ID_NAME` in
+  `tools/emit_identified_data.py`) are named `shape_*` where the pose is
+  confirmed. Return to leftovers: used but unidentified **0x02 / 0x5A /
+  0xA5–0xA7** (credits/event types 0x2C, 0x2E); unused **0x0D, 0x2D–0x32,
+  0x58, 0x76–0x78, 0x8E, 0xA3–0xA4**. 0x0A is named (`shape_merman_open`)
+  but nothing stores it.
 - Annotation style: favour per-opcode comments, not just block headers. A block
   header explaining a routine's purpose is welcome, but it must NOT replace
   inline comments on the individual instructions - annotate the important
@@ -1366,7 +1372,8 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   gm_stage_text, gm_player_text, gm_digit_entry, gm_digit_read, gm_bit_to_digit,
   gm_bcd_to_bin, gm_confirm_key, gm_apply_values, gm_stage_hub_tbl,
   gm_cursor_erase/_draw/_blit/_y, state_game_master_menu),
-  credits_font_load, credits_font_blit, hud_font_load, logo_font_load, load_weapon_sprites, load_vdoor_sprites,
+  credits_font_load, credits_font_blit, hud_font_load, hud_cache_load, vendor_cache_load,
+  vendor_recolor_copy, vendor_blit_32, vendor_draw, vendor_redraw_all, logo_font_load, load_weapon_sprites, load_vdoor_sprites,
   gfx_script_run, gfx_script_rle, gfx_script_copy, gfx_script_convert, room_gfx_load,
   load_stage_tileset, tileset_ptr, dracula_portrait_load,
   dracula_portrait_palette, main_tick, play_tick, rle_dec, rle_dec_addr,

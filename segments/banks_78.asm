@@ -19,4 +19,3 @@
     INCLUDE "data/tileset_s08_pad.asm"
 
     ASSERT $ == 0xC000
-

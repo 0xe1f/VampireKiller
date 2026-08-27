@@ -4,7 +4,7 @@
   gfx/sprites/<stem>.png  - packed 1bpp sprite asms (ASM_SPRITE_STEMS)
   gfx/tilesets/<stem>.png - 4bpp tileset asms
   gfx/fonts/<stem>.png    - 1bpp font asms (ASM_FONT_STEMS)
-  gfx/<name>.png          - derived sheets (composites, hazards)
+  gfx/<name>.png          - derived sheets (composites, hazards, vendor)
 
 Tileset cell header is the CPU address. Sprite-asm cell header is the VRAM
 dest. Font cell header is the hex glyph id. One 16x16 plane per sprite
@@ -427,6 +427,7 @@ def main():
     dump_enemy_sheet(data)
     dump_enemy_frames(data)
     dump_hazards(data)
+    dump_vendor(data)
     dump_asm_sprite_rles(data)
     dump_asm_tilesets(data)
 
@@ -435,7 +436,7 @@ def main():
 # Type 9 is the red skeleton (fast, no throw). Type 11 is the white skeleton
 # (kite + ledge hop + spinning bone). Type 16 shares that SAT layout
 # but stage 14+ VRAM is the axe knight (throws). Colour 0x45 = overlay index 5.
-# Type 12 is the small hovering raven (shape 0x89), not a bat.
+# Type 12 is the small perching raven (shape 0x89), not a bat.
 # Type 14 is skipped by the SAT builder (0x644C); its tick writes SAT itself.
 # Type 15 is the roc: 6-cell flyer (0x6D); init shares type 13's 0x67 then flaps.
 # Type 17 intro is 0x56 (2-cell); standing 0x5B is SAT head+cape, torso is a 32x32 blit.
@@ -552,7 +553,8 @@ SHAPE_OFS = {
 # The 32x32 middle is a SCREEN 5 LMMM (dracula_blit_torso) onto (X-16, Y=0x91)
 # from page-1 Y=0x80.  Those slots are packed 4bpp in seg13 (dracula_body_closed
 # at 0xB5A1 = cloak; dracula_body_open at 0xB719 = chest cavity).  The 16x16s
-# at page-1 Y=0xA0 are portrait eyes/mouth, not the figure.
+# at page-1 Y=0xA0 are portrait eyes/mouth, not the figure (that cache
+# holds the vendor 32x32s until event 6 overwrites it).
 DRACULA_BODY_FILE = 13 * 0x2000 + (0xB5A1 - 0xA000)
 DRACULA_BODY_OPEN_FILE = 13 * 0x2000 + (0xB719 - 0xA000)
 DRACULA_STAND = frozenset((0x5B, 0x5C, 0x5D, 0x5E))
@@ -1017,6 +1019,51 @@ def dump_hazards(data):
                       col_units=4)
     print("hazards.png              spike bar (stage 6 room 1) + its fragments")
 
+
+def dump_vendor(data):
+    """Vendor 32x32: 8 x 8x8 tiles at seg10 0xBDA7, assembled by
+    vendor_tile_ptr, with nibble 0xF recoloured from vendor_recolor_tbl.
+    Staged at page-1 Y=0xA0; vendor_draw LMMMs one slot onto the playfield.
+    Event-6 portrait parts overwrite that cache (no vendors in that room)."""
+    pal = vk_play_palette(data)
+    fo = _cpu_file(10, 0xBDA7, 0xA000)
+    src = data[fo:fo + 256]
+    ptrs = [_word(data, 0x1575 + i * 2) for i in range(16)]
+    fills = list(data[0x1595:0x159A])
+
+    def tile(addr):
+        if addr == 0xE900:
+            return bytes(32)
+        return src[addr - 0xE800:addr - 0xE800 + 32]
+
+    def assemble(fill):
+        img = [[0] * 32 for _ in range(32)]
+        for ty in range(4):
+            for tx in range(4):
+                t = tile(ptrs[ty * 4 + tx])
+                for r in range(8):
+                    row = t[r * 4:(r + 1) * 4]
+                    for c, b in enumerate(row):
+                        hi, lo = b >> 4, b & 0x0F
+                        if hi == 0x0F:
+                            hi = fill
+                        if lo == 0x0F:
+                            lo = fill
+                        img[ty * 8 + r][tx * 8 + c * 2] = hi
+                        img[ty * 8 + r][tx * 8 + c * 2 + 1] = lo
+        return img
+
+    def rgb(grid):
+        return [[pal[v] if v else OFF for v in row] for row in grid]
+
+    labels = ["0 HEARTS 32x32", "1 HIT 32x32", "2 FLASH 32x32",
+              "3 IDLE 32x32", "4 MOOD 32x32"]
+    cells = [rgb(assemble(c)) for c in fills]
+    render_packed_png(os.path.join(GFX, "vendor.png"), cells, labels=labels,
+                      col_units=10, groups=[list(range(5))])
+    print("vendor.png               5 recolored vendor 32x32s (C70B 0..4)")
+
+
 def dump_credits_font(data):
     """Uncompressed 8x8 1bpp ending-credits font (raw, not RLE)."""
     pal = vk_play_palette(data)
@@ -1447,7 +1494,8 @@ def _tileset_asm_palette(fname, data):
         _apply_palette_overlay(pal, tables["hud_fixed_palette"])
         _apply_palette_overlay(pal, tables["intro_palette"])
         return pal
-    if fname in ("hud_weapon_key_tiles.asm", "bonus_hud_tiles.asm"):
+    if fname in ("hud_weapon_key_tiles.asm", "bonus_hud_tiles.asm",
+                 "vendor_tiles.asm"):
         if data is not None:
             return vk_play_palette(data)
         pal = [(0, 0, 0)] * 16
@@ -1477,7 +1525,7 @@ def _asm_tileset_files():
              if fn.startswith("tileset_") and fn.endswith(".asm")]
     for extra in ("intro_tiles.asm", "title_tiles.asm", "bonus_hud_tiles.asm",
                   "hud_weapon_key_tiles.asm", "dracula_portrait.asm",
-                  "dracula_portrait_parts.asm"):
+                  "dracula_portrait_parts.asm", "vendor_tiles.asm"):
         if extra not in names and os.path.isfile(os.path.join(DATA_DIR, extra)):
             names.append(extra)
     return sorted(names)
@@ -1576,7 +1624,8 @@ def dump_asm_tilesets(data):
         c16 = [c for c, s in zip(cells, sizes) if s == 16]
         l16 = [lab for lab, s in zip(labels, sizes) if s == 16]
         if c8 and not c16:
-            render_png(out, c8, pal, cols=16, labels=l8, size=8, scale=8)
+            cols8 = 8 if fname == "vendor_tiles.asm" else 16
+            render_png(out, c8, pal, cols=cols8, labels=l8, size=8, scale=8)
         elif c16 and not c8:
             cols16 = 5 if fname == "bonus_hud_tiles.asm" else (
                 4 if fname in (

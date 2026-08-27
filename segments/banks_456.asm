@@ -21,4 +21,3 @@
     INCLUDE "data/hud_weapon_key_tiles.asm"
 
     ASSERT $ == 0xC000
-

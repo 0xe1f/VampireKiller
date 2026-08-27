@@ -5,7 +5,11 @@
 ; Dest is sprite-generator VRAM (0xF800+).  Unidentified 0xB50B-0xB54A
 ; is not a valid stream (decompressor overruns into spr_hanging_bat).
 ; Preview: gfx/sprites/enemy_sprite_rle.png (`make gfx`); cell header = VRAM dest.
+; Packed order sandwiches knife/cross, skull pile, flying skull, then
+; the axe (load_weapon_sprites dest 0xF8C0; some rooms also load it at
+; 0xFC00).  Do not split this file to group weapons — bytes stay here.
 
+; --- frontend / vdoor / fireball ---
 gfx_rle_a066:  ; 0xA066  packed 66
 	defb 0xa2
 	defb %00000000
@@ -286,7 +290,7 @@ gfx_rle_a147:  ; 0xA147  packed 62  ; title/frontend (VRAM 0xF9C0)
 	defb %10000000
 	defb %00000000
 	defb 0x00
-gfx_rle_a185:  ; 0xA185  packed 182  ; VRAM 0xFF00 (fireball at +0x80 = SAT 0xF0)
+gfx_rle_a185:  ; 0xA185  packed 182  ; VRAM 0xFF00 (fireball SAT 0xF0; flame SAT 0xF4/0xF8)
 	defb 0x9d
 	defb %00000011
 	defb %00000111
@@ -467,6 +471,8 @@ gfx_rle_a23b:  ; 0xA23B  packed 19
 	defb %01100000
 	defb 0x11, %00000000
 	defb 0x00
+
+; --- thrown knife / cross ---
 weapon_knife:  ; 0xA24E  packed 36  ; thrown knife
 	defb 0x06, %00000000
 	defb 0x84
@@ -605,7 +611,9 @@ weapon_cross:  ; 0xA272  packed 115  ; thrown cross
 	defb %00000000
 	defb %00000000
 	defb 0x00
-spr_skull_pile:  ; 0xA2E5  packed 130  ; type 10 SAT
+
+; --- skull pile / flying skull ---
+spr_skull_pile:  ; 0xA2E5  packed 130  ; type 10 SAT (skull pile)
 	defb 0xa8
 	defb %11111111
 	defb %11111100
@@ -734,7 +742,7 @@ spr_skull_pile:  ; 0xA2E5  packed 130  ; type 10 SAT
 	defb %00111100
 	defb %00000000
 	defb 0x00
-spr_flying_skull:  ; 0xA367  packed 119  ; type 7 SAT
+spr_flying_skull:  ; 0xA367  packed 119  ; type 7 SAT (flying skull)
 	defb 0x8d
 	defb %00011111
 	defb %00111110
@@ -850,6 +858,8 @@ spr_flying_skull:  ; 0xA367  packed 119  ; type 7 SAT
 	defb %00010000
 	defb %00000000
 	defb 0x00
+
+; --- room extra ---
 gfx_rle_a3de:  ; 0xA3DE  packed 235
 	defb 0x85
 	defb %00001111
@@ -1068,6 +1078,8 @@ gfx_rle_a3de:  ; 0xA3DE  packed 235
 	defb %00000000
 	defb %00000000
 	defb 0x00
+
+; --- thrown axe ---
 weapon_axe:  ; 0xA4C9  packed 129  ; thrown axe + room script FC00
 	defb 0x02, %00000000
 	defb 0x8d
@@ -1194,7 +1206,9 @@ weapon_axe:  ; 0xA4C9  packed 129  ; thrown axe + room script FC00
 	defb %00000000
 	defb %00000000
 	defb 0x00
-spr_skeleton:  ; 0xA54A  packed 252  ; types 9+11 SAT (red/white)
+
+; --- enemies ---
+spr_skeleton:  ; 0xA54A  packed 252  ; types 9+11 SAT (red/white skeleton)
 	defb 0x93
 	defb %00000000
 	defb %00011111
@@ -1433,7 +1447,7 @@ spr_skeleton:  ; 0xA54A  packed 252  ; types 9+11 SAT (red/white)
 	defb %11100000
 	defb %00000000
 	defb 0x00
-spr_mummy:  ; 0xA646  packed 481  ; type 20 SAT
+spr_mummy:  ; 0xA646  packed 481  ; type 20 SAT (mummy)
 	defb 0x84
 	defb %00000000
 	defb %00000011
@@ -1965,7 +1979,7 @@ gfx_rle_a827:  ; 0xA827  packed 111
 	defb %00000000
 	defb %00000000
 	defb 0x00
-spr_bone_dragon:  ; 0xA896  packed 187  ; type 14 SAT
+spr_bone_dragon:  ; 0xA896  packed 187  ; type 14 SAT (bone dragon)
 	defb 0x9e
 	defb %11111000
 	defb %11111111
@@ -2147,7 +2161,7 @@ spr_bone_dragon:  ; 0xA896  packed 187  ; type 14 SAT
 	defb %10000000
 	defb 0x04, %00000000
 	defb 0x00
-spr_hunchback:  ; 0xA951  packed 180  ; type 13 SAT
+spr_hunchback:  ; 0xA951  packed 180  ; type 13 SAT (hunchback)
 	defb 0x8b
 	defb %00111110
 	defb %01000111
@@ -2322,7 +2336,7 @@ spr_hunchback:  ; 0xA951  packed 180  ; type 13 SAT
 	defb %10100000
 	defb %00000000
 	defb 0x00
-spr_frankenstein:  ; 0xAA05  packed 426  ; type 21 SAT
+spr_frankenstein:  ; 0xAA05  packed 426  ; type 21 SAT (Frankenstein)
 	defb 0x8b
 	defb %00000000
 	defb %00001111
@@ -2685,7 +2699,7 @@ spr_frankenstein:  ; 0xAA05  packed 426  ; type 21 SAT
 	defb %00100000
 	defb %00000000
 	defb 0x00
-spr_roc:  ; 0xABAF  packed 308  ; type 15 SAT
+spr_roc:  ; 0xABAF  packed 308  ; type 15 SAT (roc)
 	defb 0x03, %00000000
 	defb 0x85
 	defb %00001100
@@ -2973,7 +2987,7 @@ spr_roc:  ; 0xABAF  packed 308  ; type 15 SAT
 	defb %00011110
 	defb 0x03, %00000000
 	defb 0x00
-spr_axe_knight:  ; 0xACE3  packed 258  ; type 16 SAT
+spr_axe_knight:  ; 0xACE3  packed 258  ; type 16 SAT (axe knight)
 	defb 0xa2
 	defb %00000001
 	defb %00000011
@@ -3228,7 +3242,7 @@ spr_axe_knight:  ; 0xACE3  packed 258  ; type 16 SAT
 	defb %01111110
 	defb %01111100
 	defb 0x00
-spr_pikeman:  ; 0xADE5  packed 251  ; type 6 SAT
+spr_pikeman:  ; 0xADE5  packed 251  ; type 6 SAT (pikeman)
 	defb 0x93
 	defb %00100010
 	defb %01110111
@@ -3815,7 +3829,7 @@ gfx_rle_af96:  ; 0xAF96  packed 187  ; not in room scripts (orphan)
 	defb %11000000
 	defb 0x05, %00000000
 	defb 0x00
-spr_blob:  ; 0xB051  packed 41  ; type 0x1A-0x1C fill (FE80/FE00/FB80/FD00)
+spr_blob:  ; 0xB051  packed 41  ; actor_blob_blue/_red/_white fill (FE80/FE00/FB80/FD00)
 	defb 0x07, %00000000
 	defb 0x83
 	defb %00000011
@@ -3851,7 +3865,7 @@ spr_blob:  ; 0xB051  packed 41  ; type 0x1A-0x1C fill (FE80/FE00/FB80/FD00)
 	defb %11111100
 	defb %00000000
 	defb 0x00
-spr_blob_cc:  ; 0xB07A  packed 48  ; type 0x1A-0x1C SAT CC outline
+spr_blob_cc:  ; 0xB07A  packed 48  ; actor_blob_blue/_red/_white SAT CC outline
 	defb 0x06, %00000000
 	defb 0x84
 	defb %00000011
@@ -3989,7 +4003,7 @@ gfx_rle_b0aa:  ; 0xB0AA  packed 118  ; frontend (ld de,gfx_rle_b0aa -> FA00)
 	defb %00011000
 	defb 0x16, %00000000
 	defb 0x00
-spr_ghost_head:  ; 0xB120  packed 120  ; type 8 SAT
+spr_ghost_head:  ; 0xB120  packed 120  ; type 8 SAT (ghost head)
 	defb 0x94
 	defb %00011111
 	defb %00111111
@@ -4177,7 +4191,7 @@ gfx_rle_b198:  ; 0xB198  packed 82
 	defb %11100000
 	defb %00000000
 	defb 0x00
-spr_medusa:  ; 0xB1EA  packed 510  ; type 19 SAT
+spr_medusa:  ; 0xB1EA  packed 510  ; type 19 SAT (Medusa)
 	defb 0x02, %00000000
 	defb 0x9e
 	defb %00000111
@@ -4676,7 +4690,7 @@ spr_medusa:  ; 0xB1EA  packed 510  ; type 19 SAT
 	defb %00000000
 	defb %00000000
 	defb 0x00
-spr_zombie:  ; 0xB3E8  packed 187  ; type 1 SAT
+spr_zombie:  ; 0xB3E8  packed 187  ; type 1 SAT (zombie)
 	defb 0x90
 	defb %01110000
 	defb %11111000
@@ -4957,7 +4971,7 @@ seg10_unid_b50b:  ; 0xB50B  64 bytes
 	defb 0x03,0x00,0x00,0xe0,0x30,0xc8,0xf8,0x78,0x30,0x66,0xcf,0x13,0x0b,0xce,0xc0,0xc0
 	defb 0x04,0x00,0x02,0x01,0x8a,0x02,0x03,0x03,0x01,0x00,0x20,0x30,0x00,0x01,0x01,0x04
 	defb 0x00,0x8b,0xc0,0xf0,0x70,0xa0,0xc0,0x80,0x06,0x0e,0x04,0x00,0x80,0x04,0x00,0x00
-spr_hanging_bat:  ; 0xB54B  packed 226  ; type 4 SAT
+spr_hanging_bat:  ; 0xB54B  packed 226  ; type 4 SAT (hanging bat)
 	defb 0x82
 	defb %00000010
 	defb %00001011
@@ -5167,7 +5181,7 @@ spr_hanging_bat:  ; 0xB54B  packed 226  ; type 4 SAT
 	defb %11111110
 	defb %00000000
 	defb 0x00
-spr_raven:  ; 0xB62D  packed 171  ; type 12 SAT
+spr_raven:  ; 0xB62D  packed 171  ; type 12 SAT (raven)
 	defb 0x9b
 	defb %00000001
 	defb %00000011
@@ -5328,7 +5342,7 @@ spr_raven:  ; 0xB62D  packed 171  ; type 12 SAT
 	defb %00000001
 	defb 0x03, %00000000
 	defb 0x00
-spr_giant_bat:  ; 0xB6D8  packed 350  ; type 18 SAT
+spr_giant_bat:  ; 0xB6D8  packed 350  ; type 18 SAT (giant bat)
 	defb 0x04, %00000000
 	defb 0x89
 	defb %00000001
@@ -5655,7 +5669,7 @@ spr_giant_bat:  ; 0xB6D8  packed 350  ; type 18 SAT
 	defb %11000000
 	defb 0x09, %00000000
 	defb 0x00
-spr_dracula:  ; 0xB836  packed 327  ; type 17 SAT (head/cape; body is packed 4bpp)
+spr_dracula:  ; 0xB836  packed 327  ; type 17 SAT (figure Dracula head/cape; body is 4bpp)
 	defb 0x0b, %00000000
 	defb 0x85
 	defb %11000000
@@ -5956,7 +5970,7 @@ spr_dracula:  ; 0xB836  packed 327  ; type 17 SAT (head/cape; body is packed 4bp
 	defb %00000000
 	defb %00000000
 	defb 0x00
-spr_merman:  ; 0xB97D  packed 316  ; types 2+3 SAT
+spr_merman:  ; 0xB97D  packed 316  ; types 2+3 SAT (merman)
 	defb 0x8b
 	defb %00001111
 	defb %00011011
@@ -6263,7 +6277,7 @@ spr_merman:  ; 0xB97D  packed 316  ; types 2+3 SAT
 	defb %00000010
 	defb %11111111
 	defb 0x00
-spr_dog:  ; 0xBAB9  packed 417  ; type 5 SAT
+spr_dog:  ; 0xBAB9  packed 417  ; type 5 SAT (dog)
 	defb 0x02, %00000000
 	defb 0x83
 	defb %00000100
@@ -6647,7 +6661,7 @@ spr_dog:  ; 0xBAB9  packed 417  ; type 5 SAT
 	defb %00000000
 	defb %00000000
 	defb 0x00
-spr_grim_reaper:  ; 0xBC5A  packed 333  ; type 22 SAT
+spr_grim_reaper:  ; 0xBC5A  packed 333  ; type 22 SAT (grim reaper)
 	defb 0x82
 	defb %00000111
 	defb %00001000

@@ -17,8 +17,9 @@ title_layout: start 0x4c3f end 0x4d0f type bytedata
 door_tile_ptr: start 0x5428 end 0x5434 type worddata
 door_tiles: start 0x5434 end 0x5494 type bytedata
 
-; HUD SAT colour/count record consumed by sub_54f7h (IX).
-data_5595: start 0x5595 end 0x559A type bytedata
+; Vendor 32x32 assembly: 4x4 tile pointers + 5 cloak-recolor bytes (IX).
+vendor_tile_ptr: start 0x5575 end 0x5595 type worddata
+vendor_recolor_tbl: start 0x5595 end 0x559A type bytedata
 ; Projectile weapon RLE pointers + sub_4745h convert records.
 weapon_sprite_ptr: start 0x55DE end 0x55F3 type bytedata
 

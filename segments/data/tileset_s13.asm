@@ -1,6 +1,7 @@
 ; Stages 13-15 tileset (seg7 0x8000).  s16 overlaps at 0x9640.
 ; Uncompressed 8x8 4bpp (SCREEN 5).  Each defb is one pixel-row
 ; (4 bytes, high nibble = left).  Eight rows = one tile (32 bytes).
+; Preview: gfx/tilesets/<stem>.png (`make gfx`); cell header = CPU address.
 ; load_stage_tileset blits 0xBF tiles from tileset_ptr[D000].
 ; Sets overlap; this file is the unique ROM slice, not a full copy.
 

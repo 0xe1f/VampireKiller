@@ -1,0 +1,19 @@
+title: Vampire Killer
+description: A player handbook for Konami's Vampire Killer (MSX2, 1986).
+url: https://0xe1f.github.io
+baseurl: /VampireKiller
+markdown: kramdown
+kramdown:
+  parse_block_html: true
+exclude:
+  - game-notes.md
+  - progress.md
+  - Gemfile
+  - Gemfile.lock
+  - vendor
+permalink: pretty
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default

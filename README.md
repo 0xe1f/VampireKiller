@@ -22,7 +22,10 @@ segments/           one file per paging window (fills through 0xC000)
   banks_ef.asm      banks e-f: scenery / PSG / Dracula portrait
   data/             metatiles, tilesets, fonts, 1bpp sprite RLE, PSG, gfx scripts
 tools/              helper scripts + symbol/block files (see below)
-docs/               notes (game behaviour, text encoding, sprites) + progress
+docs/               player handbook (Jekyll / GitHub Pages) + RE notes
+                    index.md is the handbook landing page; subpages and art
+                    live under docs/manual/. game-notes.md / progress.md are
+                    engineering notes (not published)
 gfx/                readable graphics catalogue (PNG sheets committed; `make gfx`)
                     sprites/ packed 1bpp sprite-asm sheets; tilesets/ 4bpp
                     playfield/title; fonts/ 1bpp glyph sheets; composites at gfx/ root
@@ -75,5 +78,10 @@ and a full-frame sheet per enemy (`gfx/sheet_enemy_zombie_01.png`, …).
 Packed 1bpp sprite asms dump to `gfx/sprites/<stem>.png`.
 Each 4bpp tileset asm has a sheet at `gfx/tilesets/<stem>.png`.
 
-See `docs/` for reverse-engineering notes and `docs/progress.md` for current
-status and next steps.
+**Player handbook** (controls, items, weapons, bestiary, maps): open
+`docs/index.md`, or after GitHub Pages is enabled,
+[0xe1f.github.io/VampireKiller](https://0xe1f.github.io/VampireKiller/).
+Regenerate handbook art with `make guide`.
+
+See `docs/game-notes.md` for reverse-engineering notes and `docs/progress.md`
+for current status and next steps.

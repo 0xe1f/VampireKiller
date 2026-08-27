@@ -6,6 +6,7 @@
 #   make gfx        (re)build PNG sheets in gfx/, gfx/sprites/, gfx/tilesets/, gfx/fonts/
 #   make music      render BGM WAVs from the ROM PSG bytecode (music/)
 #   make sfx        render sfx ids 0x01-0x1D into sfx/
+#   make guide      player-handbook portraits, annotated maps, stage pages
 #   make clean      remove build output
 #
 # Prerequisites (not committed, both gitignored - see README):
@@ -23,7 +24,7 @@ SRC      := VampireKiller.asm
 OUT      := VampireKiller.rom
 ORIGINAL := references/VampireKiller.rom
 
-.PHONY: all verify segments gfx music sfx clean
+.PHONY: all verify segments gfx music sfx guide clean
 
 all: $(SRC)
 	$(ASM) $(SRC)
@@ -43,6 +44,10 @@ music:
 
 sfx:
 	python3 tools/psgplay.py --sfx
+
+# Player handbook art + stage inventories under docs/manual/assets/.
+guide:
+	python3 tools/guide_assets.py
 
 verify: all
 	@cmp $(OUT) $(ORIGINAL) && echo "OK: $(OUT) is byte-identical to $(ORIGINAL)"

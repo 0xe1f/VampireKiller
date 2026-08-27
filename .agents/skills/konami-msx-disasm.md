@@ -31,8 +31,10 @@ Paths below are relative to this repo root.
 
 - Root: `<Game>.asm` (stitches segments via `PHASE`/`INCBIN`), `Makefile`,
   `README.md`, `.gitignore` (ignore `generated/`, built ROM, segment bins).
-- `segments/` — per-segment `.asm`; `.bin` only for banks still `INCBIN`'d
-  (VK: none left). Fully migrated banks have no `.bin`;
+- `segments/` — one `.asm` per paging window (VK: `banks_0123` 0–3 at
+  `PHASE 0x4000`, `banks_456`, `banks_78`, `banks_9a`, `banks_bcd`, `banks_ef`).
+  `.bin` only for banks still `INCBIN`'d (VK: none left).
+  Fully migrated banks have no `.bin`;
   `split-rom.sh` emits the leftovers and deletes migrated ones. Regen of a
   migrated bank uses the original ROM (`regen-seg.sh` slices it itself).
   All hand-authored disassembly metadata lives here: `bios.inc` (MSX BIOS entry
@@ -64,13 +66,15 @@ of `<Game>.asm`.
 
 1. `tools/regen-seg.sh <n> <org> [blocks]` → writes `generated/segNN.generated.asm`
    (listing comments already stripped) + `generated/segNN.raw.asm` (raw reference).
-2. Fold the clean disassembly into `segments/segNN.asm` by hand and annotate.
-   Switch `<Game>.asm` for that segment from `INCBIN` to `INCLUDE`.
+2. Fold the clean disassembly into the paging-window file (`banks_0123.asm`,
+   `banks_456.asm`, …) by hand and annotate.
+   Switch `<Game>.asm` for that window from `INCBIN` to `INCLUDE`.
    Once a bank has no remaining `INCBIN` slices, drop it from `split-rom.sh`
    and delete `segNN.bin`.
-   `PHASE` the bank to its CPU window.  Two banks that share a window (VK seg3
-   and seg13 both `PHASE 0xA000`) cannot reuse z80dasm `lxxxh`/`sub_xxxh` names —
-   give the second bank unique labels or the assembler will error on duplicates.
+   `PHASE` the window to its CPU base.  Two windows that share CPU addresses
+   (VK play bank 3 and map bank 13 both occupy 0xA000) cannot reuse z80dasm
+   `lxxxh`/`sub_xxxh` names — give the second unique labels or the assembler
+   will error on duplicates.
 3. Separate code vs data with a `segments/segNN.blocks` file (only changes
    rendering, never bytes). Mark mis-decoded tables and convert them to `db`.
   Keep unreversed graphics as `INCBIN` slices of the bank `.bin`, not a mass
@@ -84,7 +88,7 @@ of `<Game>.asm`.
   (hex tile-id labels, not ASCII chars) until the packer is byte-exact. Mixed
   banks (named tables + hex leftover slices). VK seg15 is music tails + env
   tables + 4bpp Dracula portrait.
-  VK seg14 is scenery
+  VK banks_ef is scenery
   lists + spawn masks + enemy lists + sound: emit the cracked tables as commented
   `defw`/`defb` once ids are named; packed PSG as labeled hex streams.
 4. `make verify` → must stay byte-identical.
@@ -131,7 +135,9 @@ of `<Game>.asm`.
   Position/control bytes stay as `defb`.
 - **Graphics**: usually custom RLE to VRAM (SCREEN 5 = 4bpp bitmap on MSX2, plus
   1bpp hardware sprites). Find the decompressor, then extract to editable assets
-  with the gfx pipeline; keep compressed bytes authoritative.
+  with the gfx pipeline; keep compressed bytes authoritative. Contact sheets
+  (one tile or 16×16 sprite plane per cell, header id, in-game palette) follow
+  `msx-gfx-sheets`.
 - **1bpp sheets in binary**: any uncompressed 1bpp glyph/tile sheet we identify
   is committed as `defb %xxxxxxxx` (MSB = left, one row per line) plus a PNG
   contact sheet labelled with hex tile ids. Same `%` form for packed 1bpp RLE

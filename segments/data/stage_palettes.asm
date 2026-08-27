@@ -1,27 +1,28 @@
 ; Stage palette pointer table (seg10 0xBEA7) + palette_apply tables.
+; Labels sNN_palette match tileset_sNN grouping (stage 2 has its own table).
 ; palette_hud_load loads hud_fixed_palette; title extras at 0xBF6F.
 stage_palette_ptr:
-	defw pal_becd  ; stage 0
-	defw pal_bee3  ; stage 1
-	defw pal_bef6  ; stage 2
-	defw pal_bee3  ; stage 3
-	defw pal_bf09  ; stage 4
-	defw pal_bf09  ; stage 5
-	defw pal_bf09  ; stage 6
-	defw pal_bf1c  ; stage 7
-	defw pal_bf1c  ; stage 8
-	defw pal_bf1c  ; stage 9
-	defw pal_bf2f  ; stage 10
-	defw pal_bf2f  ; stage 11
-	defw pal_bf2f  ; stage 12
-	defw pal_bf3c  ; stage 13
-	defw pal_bf3c  ; stage 14
-	defw pal_bf3c  ; stage 15
-	defw pal_bf4f  ; stage 16
-	defw pal_bf4f  ; stage 17
-	defw pal_bf62  ; stage 18
+	defw s00_palette  ; stage 0  courtyard
+	defw s01_palette  ; stage 1
+	defw s02_palette  ; stage 2
+	defw s01_palette  ; stage 3
+	defw s04_palette  ; stage 4
+	defw s04_palette  ; stage 5
+	defw s04_palette  ; stage 6
+	defw s07_palette  ; stage 7
+	defw s07_palette  ; stage 8
+	defw s07_palette  ; stage 9
+	defw s10_palette  ; stage 10
+	defw s10_palette  ; stage 11
+	defw s10_palette  ; stage 12
+	defw s13_palette  ; stage 13
+	defw s13_palette  ; stage 14
+	defw s13_palette  ; stage 15
+	defw s16_palette  ; stage 16
+	defw s16_palette  ; stage 17
+	defw s18_palette  ; stage 18  Dracula
 
-pal_becd:  ; 0xBECD
+s00_palette:  ; 0xBECD  courtyard (stage 0)
 	defb 0x04,0x41,0x02  ; idx 4
 	defb 0x05,0x50,0x04  ; idx 5
 	defb 0x07,0x00,0x02  ; idx 7
@@ -30,7 +31,7 @@ pal_becd:  ; 0xBECD
 	defb 0x0b,0x40,0x03  ; idx 11
 	defb 0x0d,0x33,0x03  ; idx 13
 	defb 0xff
-pal_bee3:  ; 0xBEE3
+s01_palette:  ; 0xBEE3  stages 1, 3
 	defb 0x05,0x04,0x00  ; idx 5
 	defb 0x07,0x00,0x02  ; idx 7
 	defb 0x09,0x30,0x00  ; idx 9
@@ -38,7 +39,7 @@ pal_bee3:  ; 0xBEE3
 	defb 0x0b,0x41,0x03  ; idx 11
 	defb 0x0d,0x22,0x02  ; idx 13
 	defb 0xff
-pal_bef6:  ; 0xBEF6
+s02_palette:  ; 0xBEF6  stage 2
 	defb 0x05,0x04,0x00  ; idx 5
 	defb 0x07,0x00,0x02  ; idx 7
 	defb 0x09,0x00,0x03  ; idx 9
@@ -46,7 +47,7 @@ pal_bef6:  ; 0xBEF6
 	defb 0x0b,0x41,0x03  ; idx 11
 	defb 0x0d,0x22,0x02  ; idx 13
 	defb 0xff
-pal_bf09:  ; 0xBF09
+s04_palette:  ; 0xBF09  stages 4-6
 	defb 0x04,0x30,0x02  ; idx 4
 	defb 0x06,0x52,0x04  ; idx 6
 	defb 0x09,0x43,0x03  ; idx 9
@@ -54,7 +55,7 @@ pal_bf09:  ; 0xBF09
 	defb 0x0b,0x22,0x02  ; idx 11
 	defb 0x0d,0x33,0x03  ; idx 13
 	defb 0xff
-pal_bf1c:  ; 0xBF1C
+s07_palette:  ; 0xBF1C  stages 7-9
 	defb 0x04,0x12,0x02  ; idx 4
 	defb 0x06,0x41,0x02  ; idx 6
 	defb 0x09,0x01,0x03  ; idx 9
@@ -62,13 +63,13 @@ pal_bf1c:  ; 0xBF1C
 	defb 0x0b,0x51,0x03  ; idx 11
 	defb 0x0d,0x22,0x02  ; idx 13
 	defb 0xff
-pal_bf2f:  ; 0xBF2F
+s10_palette:  ; 0xBF2F  stages 10-12
 	defb 0x09,0x22,0x02  ; idx 9
 	defb 0x0a,0x04,0x00  ; idx 10
 	defb 0x0b,0x27,0x03  ; idx 11
 	defb 0x0d,0x44,0x04  ; idx 13
 	defb 0xff
-pal_bf3c:  ; 0xBF3C
+s13_palette:  ; 0xBF3C  stages 13-15
 	defb 0x04,0x23,0x03  ; idx 4
 	defb 0x06,0x40,0x03  ; idx 6
 	defb 0x09,0x52,0x01  ; idx 9
@@ -76,7 +77,7 @@ pal_bf3c:  ; 0xBF3C
 	defb 0x0b,0x33,0x03  ; idx 11
 	defb 0x0d,0x22,0x02  ; idx 13
 	defb 0xff
-pal_bf4f:  ; 0xBF4F
+s16_palette:  ; 0xBF4F  stages 16-17
 	defb 0x04,0x11,0x05  ; idx 4
 	defb 0x06,0x22,0x02  ; idx 6
 	defb 0x09,0x50,0x03  ; idx 9
@@ -84,7 +85,7 @@ pal_bf4f:  ; 0xBF4F
 	defb 0x0b,0x33,0x03  ; idx 11
 	defb 0x0d,0x44,0x04  ; idx 13
 	defb 0xff
-pal_bf62:  ; 0xBF62
+s18_palette:  ; 0xBF62  stage 18 (Dracula)
 	defb 0x09,0x22,0x02  ; idx 9
 	defb 0x0a,0x44,0x04  ; idx 10
 	defb 0x0b,0x21,0x00  ; idx 11
@@ -110,7 +111,7 @@ hud_fixed_palette:  ; 0xBF88
 	defb 0x0e,0x77,0x07  ; idx 14
 	defb 0x0f,0x07,0x00  ; idx 15
 	defb 0xff
-pal_bfa1:  ; 0xBFA1
+intro_palette:  ; 0xBFA1  intro walk-up (after hud_fixed); overwrites 8 and 12
 	defb 0x04,0x60,0x04  ; idx 4
 	defb 0x05,0x12,0x03  ; idx 5
 	defb 0x06,0x42,0x03  ; idx 6

@@ -4,6 +4,7 @@
 ; Run/literal counts stay hex (byte-exact packed stream).
 ; Dest is sprite-generator VRAM (0xF800+).  Unidentified 0xB50B-0xB54A
 ; is not a valid stream (decompressor overruns into spr_hanging_bat).
+; Preview: gfx/sprites/enemy_sprite_rle.png (`make gfx`); cell header = VRAM dest.
 
 gfx_rle_a066:  ; 0xA066  packed 66
 	defb 0xa2

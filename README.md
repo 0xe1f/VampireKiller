@@ -12,15 +12,20 @@ ROM exactly, so the game can be understood and modified.
 ## What's here
 
 ```
-VampireKiller.asm   master file: stitches the 16 segments into the ROM image
-segments/           one file per 8 KiB segment
-  seg00..03.asm     code banks — INCLUDE'd, being annotated
-  seg04..10.asm     INCLUDE stitchers (tilesets, gfx scripts, palettes, RLE)
-  seg11..15.asm     map / scenery / fonts / PSG / portrait — INCLUDE'd
+VampireKiller.asm   master file: stitches paging windows into the ROM image
+segments/           one file per paging window (fills through 0xC000)
+  banks_0123.asm    banks 0-3: resident + play (32K @ 0x4000)
+  banks_456.asm     banks 4-6: tileset window (24K @ 0x6000)
+  banks_78.asm      banks 7-8: late tilesets / HUD font / ending
+  banks_9a.asm      banks 9-a: title gfx / palettes / enemy RLE
+  banks_bcd.asm     banks b-d: map tables / metatile defs / transitions
+  banks_ef.asm      banks e-f: scenery / PSG / Dracula portrait
   data/             metatiles, tilesets, fonts, 1bpp sprite RLE, PSG, gfx scripts
 tools/              helper scripts + symbol/block files (see below)
 docs/               notes (game behaviour, text encoding, sprites) + progress
 gfx/                readable graphics catalogue (PNG sheets committed; `make gfx`)
+                    sprites/ packed 1bpp sprite-asm sheets; tilesets/ 4bpp
+                    playfield/title; fonts/ 1bpp glyph sheets; composites at gfx/ root
 music/              BGM catalogue (WAV; `make music` from the ROM bytecode;
                     recognizable, not fully hardware-accurate yet)
 sfx/                SFX catalogue (WAV; `make sfx`; `05_whip.wav`, etc.)
@@ -67,6 +72,8 @@ Graphics: uncompressed playfield tilesets are hex `defb` (one 4-byte row per
 scanline). Sprites stay RLE-packed in source (`rleenc.py` is not byte-exact).
 `make gfx` writes PNG previews from the ROM, including `gfx/enemy_sheet.png`
 and a full-frame sheet per enemy (`gfx/sheet_enemy_zombie_01.png`, …).
+Packed 1bpp sprite asms dump to `gfx/sprites/<stem>.png`.
+Each 4bpp tileset asm has a sheet at `gfx/tilesets/<stem>.png`.
 
 See `docs/` for reverse-engineering notes and `docs/progress.md` for current
 status and next steps.

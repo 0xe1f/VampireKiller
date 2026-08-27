@@ -147,8 +147,11 @@ door_tile_joint_end: equ 0x5474	; 8x8 4bpp door bar segment, joint up one, last 
 load_weapon_sprites: equ 0x559a	; C416 2/3/4: RLE projectile patterns from seg10 to 0xF8C0
 weapon_sprite_ptr: equ 0x55de	; word[C416-2] knife/axe/cross streams
 load_vdoor_sprites: equ 0x55f3	; vertical-door extra patterns (C5AC==5) + door SAT
-load_simon_sprites: equ 0x56e8	; refresh Simon's 2 sprite cells (legs 0xA281/C42E, torso+whip 0xA2D1/C42F)
 load_stage_tileset: equ 0x5653	; blit tileset_ptr[D000] (0xBF 8x8 4bpp) to VRAM 0x8004
+load_intro_tileset: equ 0x5677	; blit intro_tiles (seg9 0x8000) via tileset_blit
+load_intro_sprites: equ 0x567f	; intro_simon_0..7 + intro_sky into sprite VRAM
+load_simon_sprites: equ 0x56e8	; refresh Simon's 2 sprite cells (legs 0xA281/C42E, torso+whip 0xA2D1/C42F)
+intro_palette_load: equ 0x573a	; HUD-fixed then intro_palette (0xBFA1)
 tileset_ptr: equ 0x5749	; word[stage 0..18] -> uncompressed tileset in seg4-8
 ; tileset_s00 @ 0x6000 (seg4) omitted: collides with mtile_rowbase (seg11)
 ; tileset_s13 @ 0x8000 (seg7) omitted: collides with scenery_list_ptr (seg14)
@@ -156,9 +159,21 @@ tileset_s01: equ 0x7220	; stages 1-3 (seg4, spills into seg5)
 tileset_s07: equ 0x8493	; stages 7-9 (seg5)
 tileset_s04: equ 0x95b3	; stages 4-6 (seg5, spills into seg6)
 tileset_s10: equ 0x9e73	; stages 10-12 (seg5, spills into seg6)
+actor_shape_ptr: equ 0xb473	; word[shape id 0..0xA7] -> SAT stream (seg6)
 tileset_s16: equ 0x9640	; stages 16-17 (seg7, spills into seg8)
 tileset_s18: equ 0xa4c0	; stage 18 (seg8)
-hud_weapon_key_tiles: equ 0xb9c8	; HUD keys/weapons 8x8 4bpp (seg6)
+hud_weapon_key_tiles: equ 0xb9c8	; HUD 16x16 bonus 0x17-0x1E; candle frames follow (seg6)
+hud_white_key: equ 0xba48	; bonus 0x18
+hud_chest: equ 0xbac8		; bonus 0x19
+hud_chain_whip: equ 0xbb48	; bonus 0x1A
+hud_knife: equ 0xbbc8		; bonus 0x1B
+hud_axe: equ 0xbc48		; bonus 0x1C
+hud_cross: equ 0xbcc8		; bonus 0x1D
+hud_holy_water: equ 0xbd48	; bonus 0x1E
+candle_0: equ 0xbdc8		; playfield candle flame 0 (l8991h A=0, VRAM Y=0x70)
+candle_1: equ 0xbe48		; playfield candle flame 1
+candle_2: equ 0xbec8		; playfield candle flame 2
+candle_3: equ 0xbf48		; playfield candle flame 3
 title_logo_jp_tiles: equ 0xaea0	; title kana glyphs (seg8)
 title_logo_en_tiles: equ 0xb260	; title CASTLEVANIA glyphs (seg8)
 title_castle_tiles: equ 0xac80	; 0x11 shared castle emblem glyphs (seg8)
@@ -308,6 +323,7 @@ object_list_lookup: equ 0x61a5	; HL -> this stage's packed object data in seg14
 object_list_clear: equ 0x61b0	; clear the 0xDB00 object list
 tile_string_draw: equ 0x6276	; tile-id stream at HL to screen pos DE (FF/FE)
 cell_event_set: equ 0x633a	; CE00 from l6376h[stage] if column matches
+intro_scene_build: equ 0x63da	; intro walk-up: intro_tiles + intro_palette + intro_simon/sky
 actor_state_reset: equ 0x6389	; clear C470-C6FF + actor/shot lists, reload room
 mem_clear_stride: equ 0x63b8	; zero B entries at HL, stride DE
 simon_block_clear: equ 0x63be	; clear 0xC420..0xC46F
@@ -565,6 +581,7 @@ simon_cell0_ptr: equ 0xA281	; 40 words, index 0xC42E (legs) -> RLE streams
 simon_cell1_ptr: equ 0xA2D1	; 36 words, index 0xC42F (torso/whip) -> RLE streams
 intro_simon: equ 0xA319		; first intro_simon RLE stream (VRAM 0xF800)
 intro_sky: equ 0xB895		; intro cloud/bat sprite stream (VRAM 0xFA00)
+title_jp_sprites: equ 0xBBF6	; JP title 1bpp RLE -> VRAM 0xF800 (22 x 16x16)
 logo_font: equ 0xBE59		; 52 x 8x8 1bpp Konami-logo glyphs, ids 01-34 (seg13)
 logo_font_ink2: equ 0xBEC1	; logo_font ids 0E-1A (ink 2)
 logo_font_ink3: equ 0xBF29	; logo_font ids 1B-34 (ink 3; wraps to Y=8 at id 20)
@@ -605,8 +622,18 @@ mtile_defs_s18: equ 0x9AC1	; stage 18 (tail in seg13 0xA000-0xA040)
 ; ---- Vampire Killer gfx-script bank (segment 9 @ 0x8000 / 10 @ 0xA000) --
 room_gfx_ptr: equ 0x9AB0	; word[stage-1] -> 4 bytes/room {script, palette}
 stage_palette_ptr: equ 0xBEA7	; word[stage 0..18] -> palette_apply table
+s00_palette: equ 0xBECD		; courtyard (stage 0)
+s01_palette: equ 0xBEE3		; stages 1, 3
+s02_palette: equ 0xBEF6		; stage 2
+s04_palette: equ 0xBF09		; stages 4-6
+s07_palette: equ 0xBF1C		; stages 7-9
+s10_palette: equ 0xBF2F		; stages 10-12
+s13_palette: equ 0xBF3C		; stages 13-15
+s16_palette: equ 0xBF4F		; stages 16-17
+s18_palette: equ 0xBF62		; stage 18 (Dracula)
 hud_fixed_palette: equ 0xBF88	; indices 0,1,2,3,8,12,14,15
 title_extra_palette: equ 0xBF6F	; title extras (dracula_portrait_palette)
+intro_palette: equ 0xBFA1	; intro walk-up overlay (after HUD-fixed; writes 4-13)
 weapon_knife: equ 0xA24E	; thrown knife RLE (load_weapon_sprites)
 weapon_axe: equ 0xA4C9	; thrown axe RLE
 weapon_cross: equ 0xA272	; thrown cross RLE

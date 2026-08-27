@@ -4,7 +4,7 @@
 ; id 0x00 is blank).  Different sheet from hud_font: logo ids 0x2C-
 ; 0x2E are wordmark cells, not HUD '<' '=' '>'.  Each defb is one
 ; row, MSB = left pixel.
-; Preview: gfx/font_logo.png.  Source: data/font_logo.asm.
+; Preview: gfx/fonts/font_logo.png.  Source: data/font_logo.asm.
 logo_font:  ; 0xBE59  ink 1 at (8,0); ids 01-0D
 ; 0x01
 	defb %00000111

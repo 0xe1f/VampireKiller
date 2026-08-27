@@ -11,7 +11,7 @@
 #                                  as a temporary byte/address reference.
 #   generated/segNN.generated.asm  the same disassembly with those listing comments
 #                                  stripped - fold THIS into the committed
-#                                  segments/segNN.asm.
+#                                  banks_*.asm window that contains that bank.
 #
 # The committed segNN.asm must never contain z80dasm's trailing address/opcode
 # comments.  z80dasm can only emit them or not, so we always generate the full

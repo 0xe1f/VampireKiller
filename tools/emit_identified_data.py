@@ -23,8 +23,34 @@ from rledec import decompress  # noqa: E402
 
 COLS = 16
 TILE = 32
+TILE16 = 128  # vram_blit_tile16: 16 rows of 8 bytes
 NTILES = 0xBF
 TILESET_BYTES = NTILES * TILE  # 0x17E0
+
+# HUD init copy (seg0 after page_tileset_banks): 8 x 16x16 item icons at
+# 0xB9C8 -> VRAM Y=0x60 X=96 (bonus 0x17-0x1E), then 4 candle flames at
+# 0xBDC8 -> Y=0x70 (playfield, l8991h A=0..3).  Each entry is one 16x16.
+HUD_16X16 = [
+    (0xB9C8, "hud_yellow_key", "bonus 0x17"),
+    (0xBA48, "hud_white_key", "bonus 0x18"),
+    (0xBAC8, "hud_chest", "bonus 0x19"),
+    (0xBB48, "hud_chain_whip", "bonus 0x1A"),
+    (0xBBC8, "hud_knife", "bonus 0x1B"),
+    (0xBC48, "hud_axe", "bonus 0x1C"),
+    (0xBCC8, "hud_cross", "bonus 0x1D"),
+    (0xBD48, "hud_holy_water", "bonus 0x1E"),
+    (0xBDC8, "candle_0", "playfield flame 0 (l8991h A=0, Y=0x70)"),
+    (0xBE48, "candle_1", "playfield flame 1"),
+    (0xBEC8, "candle_2", "playfield flame 2"),
+    (0xBF48, "candle_3", "playfield flame 3"),
+]
+
+# Seg6 SAT layout after the s10 tileset tail: word[shape id] -> stream.
+# Packed against the first stream; HUD tiles start at 0xB9C8.
+ACTOR_SHAPE_CPU = 0xB473
+ACTOR_SHAPE_HUD = 0xB9C8  # hud_weapon_key_tiles
+# 0x80/81/82: one pattern byte per slot of the fixed dy/dx lists in actor_sat_build.
+SHAPE_PREFIX_NPAT = {0x80: 4, 0x81: 2, 0x82: 6}
 
 
 def load_rom() -> bytes:
@@ -104,9 +130,9 @@ def emit_rle_1bpp(packed: bytes) -> list[str]:
     return lines
 
 
-def pix4_row(four: bytes) -> str:
-    """One SCREEN 5 8-pixel row as 4 bytes (high nibble = left)."""
-    return "\tdefb " + ",".join("0x%02x" % b for b in four)
+def pix4_row(row: bytes) -> str:
+    """One SCREEN 5 pixel-row (4 bytes = 8px, 8 bytes = 16px; high nibble = left)."""
+    return "\tdefb " + ",".join("0x%02x" % b for b in row)
 
 
 # HUD/title font: 48 x 8x8 1bpp at seg8 0xBD80 (ASCII '0'..'_').
@@ -134,7 +160,7 @@ def emit_hud_font(rom: bytes) -> None:
         "; (seg0 0x53BD) expands these via glyph_blit_run to page 1 at Y=0x40,",
         "; ink 0x0E.  Drawing is HMMM from that atlas (sub_4aeeh, Y += 0x38).",
         "; Each defb is one row, MSB = left pixel.  Not the credits font.",
-        "; Preview: gfx/font_hud.png.  Source: data/font_hud.asm.",
+        "; Preview: gfx/fonts/font_hud.png.  Source: data/font_hud.asm.",
         "hud_font:",
         "",
     ]
@@ -173,7 +199,7 @@ def emit_credits_font(rom: bytes) -> None:
         "; and credits.  Loaded by credits_font_load (seg0 0x53E5) from credits_init.",
         "; First 14 at VRAM dest DE=0x8040 (digits 0-9, then . ' : ,); A-Z at",
         "; DE=0x0848.  Each defb is one row, MSB = left pixel.",
-        "; Preview: gfx/font_credits.png.  Source: data/font_credits.asm.",
+        "; Preview: gfx/fonts/font_credits.png.  Source: data/font_credits.asm.",
         "credits_font:",
     ]
     for i, ch in enumerate(CREDITS_FONT_CHARS):
@@ -218,7 +244,7 @@ def emit_logo_font(rom: bytes) -> None:
         "; id 0x00 is blank).  Different sheet from hud_font: logo ids 0x2C-",
         "; 0x2E are wordmark cells, not HUD '<' '=' '>'.  Each defb is one",
         "; row, MSB = left pixel.",
-        "; Preview: gfx/font_logo.png.  Source: data/font_logo.asm.",
+        "; Preview: gfx/fonts/font_logo.png.  Source: data/font_logo.asm.",
     ]
     off = 0
     for first_id, count, label, note in LOGO_FONT_GROUPS:
@@ -255,39 +281,78 @@ def append_mtile_def(lines: list[str], chunk: bytes, comment: str) -> None:
 def emit_4bpp(
     buf: bytes,
     cpu0: int,
-    origins: list[tuple[int, str]],
+    origins: list[tuple],
     labels: list[tuple[int, str, str]] | None = None,
 ) -> list[str]:
-    """Emit 8x8 4bpp tiles as hex pixel-rows.  labels: (cpu, name, comment)."""
-    lab = {cpu: (name, comment) for cpu, name, comment in (labels or [])}
-    orig_sorted = sorted(origins) or [(cpu0, "raw")]
+    """Emit 4bpp tiles as hex pixel-rows.  origins: (cpu, name) or
+    (cpu, name, nbytes) with nbytes 32 (8x8) or 128 (16x16).  labels:
+    (cpu, name, comment); several labels may share a cpu."""
+    lab: dict[int, list[tuple[str, str]]] = {}
+    for cpu, name, comment in labels or []:
+        lab.setdefault(cpu, []).append((name, comment))
+    orig_norm = []
+    for o in origins or [(cpu0, "raw")]:
+        orig_norm.append((o[0], o[1], o[2] if len(o) > 2 else TILE))
+    orig_sorted = sorted(orig_norm)
     lines: list[str] = []
     i = 0
     while i < len(buf):
         cpu = cpu0 + i
-        if cpu in lab:
-            name, comment = lab[cpu]
+        for name, comment in lab.get(cpu, []):
             lines.append("%s:  ; 0x%04X  %s" % (name, cpu, comment))
-        origin, tname = orig_sorted[0]
-        for o, n in orig_sorted:
+        origin, tname, tsize = orig_sorted[0]
+        for o, n, z in orig_sorted:
             if o <= cpu:
-                origin, tname = o, n
+                origin, tname, tsize = o, n, z
+        row_bytes = 8 if tsize == TILE16 else 4
+        nrows = tsize // row_bytes
         rel = cpu - origin
         left = len(buf) - i
-        if rel >= 0 and rel % TILE == 0 and left >= TILE:
-            tid = rel // TILE
-            if tid < NTILES:
+        if rel >= 0 and rel % tsize == 0 and left >= tsize:
+            tid = rel // tsize
+            if tsize == TILE16:
+                extra = "%s 16x16 0x%02X" % (tname, tid)
+            elif tid < NTILES:
                 extra = "%s tile 0x%02X" % (tname, tid)
             else:
                 extra = "%s +0x%02X (past 0xBF blit)" % (tname, tid)
             lines.append("; 0x%04X  %s" % (cpu, extra))
-            for r in range(8):
-                lines.append(pix4_row(buf[i + r * 4 : i + r * 4 + 4]))
-            i += TILE
+            for r in range(nrows):
+                o0 = i + r * row_bytes
+                lines.append(pix4_row(buf[o0 : o0 + row_bytes]))
+            i += tsize
             continue
-        if left >= 4:
-            lines.append(pix4_row(buf[i : i + 4]) + "  ; 0x%04X" % cpu)
-            i += 4
+        # File starts (or resumes) mid-tile: emit the rest of this tile as
+        # short rows, then the next tile boundary can use the full form.
+        if rel > 0 and rel % tsize != 0:
+            take = min(tsize - (rel % tsize), left)
+            tid = rel // tsize
+            if tsize == TILE16:
+                extra = "%s 16x16 0x%02X" % (tname, tid)
+            elif tid < NTILES:
+                extra = "%s tile 0x%02X" % (tname, tid)
+            else:
+                extra = "%s +0x%02X (past 0xBF blit)" % (tname, tid)
+            lines.append("; 0x%04X  rest of %s" % (cpu, extra))
+            j = 0
+            while j < take:
+                n = min(row_bytes, take - j)
+                chunk = buf[i + j : i + j + n]
+                addr = cpu + j
+                if n == row_bytes:
+                    lines.append(pix4_row(chunk) + "  ; 0x%04X" % addr)
+                else:
+                    lines.append(
+                        "\tdefb "
+                        + ",".join("0x%02x" % b for b in chunk)
+                        + "  ; 0x%04X" % addr
+                    )
+                j += n
+            i += take
+            continue
+        if left >= row_bytes:
+            lines.append(pix4_row(buf[i : i + row_bytes]) + "  ; 0x%04X" % cpu)
+            i += row_bytes
         else:
             chunk = buf[i:]
             lines.append(
@@ -521,7 +586,7 @@ def write_tile_file(
     header: list[str],
     buf: bytes,
     cpu0: int,
-    origins: list[tuple[int, str]],
+    origins: list[tuple],
     labels: list[tuple[int, str, str]] | None = None,
 ) -> None:
     lines = list(header)
@@ -531,11 +596,76 @@ def write_tile_file(
     write_lines(os.path.join(DATA, fname), lines)
 
 
-def emit_tileset_banks(rom: bytes) -> None:
-    """Split overlapping tilesets into data/ files; segs become INCLUDE stitchers.
+def shape_stream_name(cpu: int) -> str:
+    return "actor_shape_%04x" % cpu
 
-    Sets overlap and spill across banks, so files are non-overlapping ROM
-    slices, not complete 0xBF-tile copies.
+
+def _shape_id_note(ids: list[int]) -> str:
+    if len(ids) == 1:
+        return "id 0x%02X" % ids[0]
+    if ids == list(range(ids[0], ids[-1] + 1)):
+        return "ids 0x%02X-0x%02X" % (ids[0], ids[-1])
+    return "ids " + ",".join("0x%02X" % i for i in ids)
+
+
+def _stream_kind(data: bytes) -> str:
+    n = SHAPE_PREFIX_NPAT.get(data[0])
+    if n is not None:
+        return "0x%02X + %d pats" % (data[0], n)
+    return "%d x (dy,dx,pat)" % (len(data) // 3)
+
+
+def format_actor_shapes(raw: bytes) -> list[str]:
+    """raw = seg6[0xB473:0xB9C8].  Table is packed against the first stream."""
+    first = raw[0] | (raw[1] << 8)
+    n = (first - ACTOR_SHAPE_CPU) // 2
+    ptrs = [raw[i] | (raw[i + 1] << 8) for i in range(0, n * 2, 2)]
+    assert min(ptrs) == first
+    assert first == ACTOR_SHAPE_CPU + n * 2
+    id_of: dict[int, list[int]] = {}
+    for i, p in enumerate(ptrs):
+        id_of.setdefault(p, []).append(i)
+    starts = sorted(id_of) + [ACTOR_SHAPE_HUD]
+
+    lines = [
+        "; Actor SAT shape streams (seg6 0xB473-0xB9C7).  actor_sat_build pages",
+        "; this bank and looks up ix+0B in actor_shape_ptr (word[0..0xA7]).",
+        "; A leading 0x80/0x81/0x82 selects a fixed (dy,dx) list in seg1; the",
+        "; following bytes are SAT patterns.  Otherwise the stream is explicit",
+        "; (dy,dx,pat) triples.  load_stage_tileset still copies 0xBF tiles from",
+        "; tileset_s10 (0x9E73), so VRAM ids 0xB0-0xBE on stages 10-12 overlay",
+        "; this table; nametables do not use those ids.  HUD tiles follow at 0xB9C8.",
+        "",
+        "actor_shape_ptr:  ; 0xB473  word[shape id] -> stream",
+    ]
+    for i in range(0, n, 4):
+        chunk = ptrs[i : i + 4]
+        names = ", ".join(shape_stream_name(p) for p in chunk)
+        lines.append("\tdefw %s  ; 0x%02X" % (names, i))
+    lines.append("")
+    for s, e in zip(starts, starts[1:]):
+        data = raw[s - ACTOR_SHAPE_CPU : e - ACTOR_SHAPE_CPU]
+        lines.append(
+            "%s:  ; 0x%04X  %s  %s"
+            % (shape_stream_name(s), s, _shape_id_note(id_of[s]), _stream_kind(data))
+        )
+        lines.extend(defb_lines(data))
+        lines.append("")
+    if lines[-1] == "":
+        lines.pop()
+    return lines
+
+
+def emit_actor_shapes(rom: bytes) -> None:
+    b6 = bank(rom, 6)
+    raw = b6[ACTOR_SHAPE_CPU - 0xA000 : ACTOR_SHAPE_HUD - 0xA000]
+    write_lines(os.path.join(DATA, "actor_shape.asm"), format_actor_shapes(raw))
+
+
+def emit_tileset_banks(rom: bytes) -> None:
+    """Unique tileset byte ranges into data/ files; banks 4-6 and 7-8 are
+    one PHASE / one stitch file each (banks_456.asm, banks_78.asm).
+    Files are non-overlapping ROM slices, not complete 0xBF-tile copies.
     """
     b4 = bank(rom, 4)
     b5 = bank(rom, 5)
@@ -546,6 +676,7 @@ def emit_tileset_banks(rom: bytes) -> None:
     pixnote = [
         "; Uncompressed 8x8 4bpp (SCREEN 5).  Each defb is one pixel-row",
         "; (4 bytes, high nibble = left).  Eight rows = one tile (32 bytes).",
+        "; Preview: gfx/tilesets/<stem>.png (`make gfx`); cell header = CPU address.",
     ]
     slicenote = pixnote + [
         "; load_stage_tileset blits 0xBF tiles from tileset_ptr[D000].",
@@ -562,19 +693,15 @@ def emit_tileset_banks(rom: bytes) -> None:
     )
     write_tile_file(
         "tileset_s01.asm",
-        ["; Stages 1-3 tileset start (seg4 0x7220).  Continues in tileset_s01_cont."]
+        [
+            "; Stages 1-3 tileset (0x7220-0x82BF).  Crosses 0x8000 (seg4 into",
+            "; seg5); staff roll follows at 0x82C0.",
+        ]
         + slicenote,
-        b4[0x1220:],
+        b4[0x1220:] + b5[0:0x02C0],
         0x7220,
         [(0x7220, "s01")],
-        [(0x7220, "tileset_s01", "stages 1-3; continues into seg5")],
-    )
-    write_tile_file(
-        "tileset_s01_cont.asm",
-        ["; tileset_s01 continued (seg5 0x8000-0x82BF).  Staff text follows."] + slicenote,
-        b5[0:0x02C0],
-        0x8000,
-        [(0x7220, "s01")],
+        [(0x7220, "tileset_s01", "stages 1-3; 0xBF tiles; s00 overlaps at 0x7220")],
     )
     write_tile_file(
         "tileset_s07.asm",
@@ -586,42 +713,61 @@ def emit_tileset_banks(rom: bytes) -> None:
     )
     write_tile_file(
         "tileset_s04.asm",
-        ["; Stages 4-6 tileset start (seg5 0x95B3).  Continues in tileset_s10_cont."]
+        [
+            "; Stages 4-6 tileset unique prefix (seg5 0x95B3-0x9E73).",
+            "; The 0xBF blit continues through tileset_s10 (shared bytes).",
+        ]
         + slicenote,
         b5[0x15B3:0x1E73],
         0x95B3,
         [(0x95B3, "s04")],
-        [(0x95B3, "tileset_s04", "stages 4-6; spills into seg6")],
+        [(0x95B3, "tileset_s04", "stages 4-6; tail overlaps tileset_s10")],
     )
     write_tile_file(
         "tileset_s10.asm",
-        ["; Stages 10-12 tileset start (seg5 0x9E73).  Continues in tileset_s10_cont."]
-        + slicenote,
-        b5[0x1E73:],
-        0x9E73,
-        [(0x9E73, "s10")],
-        [(0x9E73, "tileset_s10", "stages 10-12; spills into seg6")],
-    )
-    write_tile_file(
-        "tileset_s10_cont.asm",
         [
-            "; tileset_s10 continued (seg6 0xA000-0xB9C7), including s04 tail overlap",
-            "; then leftover bytes before HUD keys/weapons.",
+            "; Stages 10-12 tileset (0x9E73-0xB472).  Crosses 0xA000 (seg5 into",
+            "; seg6).  Also the tail of s04's 0xBF blit.  Last pixel 0xB472;",
+            "; actor_shape_ptr follows at 0xB473.",
         ]
         + slicenote,
-        b6[0:0x19C8],
-        0xA000,
+        b5[0x1E73:] + b6[0 : ACTOR_SHAPE_CPU - 0xA000],
+        0x9E73,
         [(0x95B3, "s04"), (0x9E73, "s10")],
+        [(0x9E73, "tileset_s10", "stages 10-12; s04 overlaps; 176 tiles then SAT")],
     )
-    write_tile_file(
-        "hud_weapon_key_tiles.asm",
-        ["; HUD keys/weapons (seg6 0xB9C8), copied to VRAM 0xD9C8 after page_tileset_banks."]
-        + pixnote,
-        b6[0x19C8:],
+    emit_actor_shapes(rom)
+    pixnote16 = [
+        "; Uncompressed 16x16 4bpp (SCREEN 5).  Each defb is one pixel-row",
+        "; (8 bytes, high nibble = left).  Sixteen rows = one tile (128 bytes).",
+        "; Preview: gfx/tilesets/<stem>.png (`make gfx`); cell header = CPU address.",
+    ]
+    hud_tiles = b6[0x19C8:0x1FC8]
+    hud_pad = b6[0x1FC8:]
+    assert len(hud_tiles) == len(HUD_16X16) * TILE16
+    assert hud_pad == b"\xff" * (0x2000 - 0x1FC8)
+    hlines = [
+        "; HUD 16x16 4bpp (seg6 0xB9C8): bonus ids 0x17-0x1E (keys, chest,",
+        "; chain/knife/axe/cross, holy water) then 4 candle flame frames.",
+        "; HUD init (seg0 after page_tileset_banks) blits 8 icons to VRAM",
+        "; Y=0x60 X=96, then B=5 from candle_0 to Y=0x70 X=0 (4 playfield",
+        "; flames; the 5th slot is 0xFF pad).  Leather whip is a separate",
+        "; source at (80, 0x70), not this bank.",
+    ] + pixnote16 + [""]
+    hlines += emit_4bpp(
+        hud_tiles,
         0xB9C8,
-        [(0xB9C8, "hud")],
-        [(0xB9C8, "hud_weapon_key_tiles", "HUD keys/weapons 8x8 4bpp")],
+        [
+            (cpu, name[4:] if name.startswith("hud_") else name, TILE16)
+            for cpu, name, _c in HUD_16X16
+        ],
+        [(0xB9C8, "hud_weapon_key_tiles", "8 item icons + 4 candle flames")]
+        + list(HUD_16X16),
     )
+    hlines.append("")
+    hlines.append("; 0xFF pad to end of seg6 (0xBFC8).")
+    hlines.extend(defb_lines(hud_pad))
+    write_lines(os.path.join(DATA, "hud_weapon_key_tiles.asm"), hlines)
     write_tile_file(
         "tileset_s13.asm",
         ["; Stages 13-15 tileset (seg7 0x8000).  s16 overlaps at 0x9640."] + slicenote,
@@ -632,38 +778,45 @@ def emit_tileset_banks(rom: bytes) -> None:
     )
     write_tile_file(
         "tileset_s16.asm",
-        ["; Stages 16-17 tileset start (seg7 0x9640).  Continues in tileset_s16_cont."]
+        [
+            "; Stages 16-17 tileset (0x9640-0xA4BF).  Crosses 0xA000 (seg7 into",
+            "; seg8); stage 18 tileset follows at 0xA4C0.",
+        ]
         + slicenote,
-        b7[0x1640:],
+        b7[0x1640:] + b8[0:0x04C0],
         0x9640,
         [(0x9640, "s16")],
-        [(0x9640, "tileset_s16", "stages 16-17; spills into seg8")],
-    )
-    write_tile_file(
-        "tileset_s16_cont.asm",
-        ["; tileset_s16 continued (seg8 0xA000-0xA4BF)."] + slicenote,
-        b8[0:0x04C0],
-        0xA000,
-        [(0x9640, "s16")],
+        [(0x9640, "tileset_s16", "stages 16-17; 0xBF tiles")],
     )
     write_tile_file(
         "tileset_s18.asm",
         [
-            "; Stage 18 tileset (seg8 0xA4C0) plus title glyphs overlaid on high ids:",
-            "; castle 0xAC80 (0x11), kana 0xAEA0 (0x1E), CASTLEVANIA 0xB260 (0x59).",
-            "; HUD/title 1bpp font follows in font_hud.asm at 0xBD80.",
+            "; Stage 18 tileset unique prefix (seg8 0xA4C0-0xAC7F).",
+            "; load_stage_tileset's 0xBF blit continues through title_tiles.asm.",
         ]
         + slicenote,
-        b8[0x04C0:0x1D80],
+        b8[0x04C0:0x0C80],
         0xA4C0,
+        [(0xA4C0, "s18")],
+        [(0xA4C0, "tileset_s18", "stage 18 (Dracula); tail is title_tiles")],
+    )
+    write_tile_file(
+        "title_tiles.asm",
         [
-            (0xA4C0, "s18"),
+            "; Title-screen 8x8 4bpp (seg8 0xAC80-0xBD7F).  High ids of the",
+            "; stage-18 tileset: castle, kana, then VAMPIRE KILLER.",
+            "; title_load_tiles blits these after page_tileset_late.",
+            "; HUD/title 1bpp font follows in font_hud.asm at 0xBD80.",
+        ]
+        + pixnote,
+        b8[0x0C80:0x1D80],
+        0xAC80,
+        [
             (0xAC80, "castle"),
             (0xAEA0, "jp"),
             (0xB260, "en"),
         ],
         [
-            (0xA4C0, "tileset_s18", "stage 18 (Dracula); 0xBF tiles"),
             (0xAC80, "title_castle_tiles", "shared castle emblem (title_load_tiles)"),
             (0xAEA0, "title_logo_jp_tiles", "title kana glyphs"),
             (0xB260, "title_logo_en_tiles", "title CASTLEVANIA glyphs"),
@@ -683,65 +836,43 @@ def emit_tileset_banks(rom: bytes) -> None:
         for inc in includes:
             lines.append('    INCLUDE "%s"' % inc)
             lines.append("")
+        lines.append("    ASSERT $ == 0xC000")
         write_lines(path, lines)
 
     stitch(
-        os.path.join(SEGS, "seg04.asm"),
+        os.path.join(SEGS, "banks_456.asm"),
         [
             "; ===========================================================================",
-            ";  SEGMENT 4 - tileset bank, paged at 0x6000 by page_tileset_banks (page 1b).",
-            ";  Pixel source: data/tileset_s00.asm + data/tileset_s01.asm.",
-            "; ===========================================================================",
-        ],
-        ["data/tileset_s00.asm", "data/tileset_s01.asm"],
-    )
-    stitch(
-        os.path.join(SEGS, "seg05.asm"),
-        [
-            "; ===========================================================================",
-            ";  SEGMENT 5 - tileset bank, paged at 0x8000 by page_tileset_banks / credits_keyframe.",
-            ";  s01 tail, staff roll (unused high tile ids), then s07 / s04 / s10.",
+            ";  banks 4-6 - 24K tileset window @ 0x6000-0xBFFF (page_tileset_banks).",
+            ";  Courtyard, stages 1-12 tilesets, staff roll, actor SAT, HUD icons.",
+            ";  tileset_s01 crosses 0x8000; tileset_s10 crosses 0xA000.",
             "; ===========================================================================",
         ],
         [
-            "data/tileset_s01_cont.asm",
+            "data/tileset_s00.asm",
+            "data/tileset_s01.asm",
             "credits_staff.asm",
             "data/tileset_s07.asm",
             "data/tileset_s04.asm",
             "data/tileset_s10.asm",
+            "data/actor_shape.asm",
+            "data/hud_weapon_key_tiles.asm",
         ],
     )
     stitch(
-        os.path.join(SEGS, "seg06.asm"),
+        os.path.join(SEGS, "banks_78.asm"),
         [
             "; ===========================================================================",
-            ";  SEGMENT 6 - tileset bank, paged at 0xA000 by page_tileset_banks (page 2b).",
-            ";  s10 tail, then HUD weapon/key tiles at 0xB9C8.",
-            "; ===========================================================================",
-        ],
-        ["data/tileset_s10_cont.asm", "data/hud_weapon_key_tiles.asm"],
-    )
-    stitch(
-        os.path.join(SEGS, "seg07.asm"),
-        [
-            "; ===========================================================================",
-            ";  SEGMENT 7 - late-game tileset bank, paged at 0x8000 by page_tileset_late",
-            ";  (stage >= 13 overlays the 0x8000 window).",
-            "; ===========================================================================",
-        ],
-        ["data/tileset_s13.asm", "data/tileset_s16.asm"],
-    )
-    stitch(
-        os.path.join(SEGS, "seg08.asm"),
-        [
-            "; ===========================================================================",
-            ";  SEGMENT 8 - late-game tileset + title glyphs + ending paragraph.",
-            ";  Paged at 0xA000 by page_tileset_late (tiles) and credits_keyframe (text).",
+            ";  banks 7-8 - 16K late-game window @ 0x8000-0xBFFF (page_tileset_late).",
+            ";  Stages 13-18 tilesets, title 4bpp glyphs, HUD font, ending text.",
+            ";  tileset_s16 crosses 0xA000; s18's 0xBF blit continues through title_tiles.",
             "; ===========================================================================",
         ],
         [
-            "data/tileset_s16_cont.asm",
+            "data/tileset_s13.asm",
+            "data/tileset_s16.asm",
             "data/tileset_s18.asm",
+            "data/title_tiles.asm",
             "data/font_hud.asm",
             "credits_ending.asm",
             "data/tileset_s08_pad.asm",
@@ -780,7 +911,8 @@ def emit_simon_rle(rom: bytes) -> None:
     """Labeled packed RLE streams at simon_cell0/1_ptr + intro_simon + orphans.
 
     Covers CPU 0xA319-0xB5A1 exactly.  intro_sky is a separate file (0xB895).
-    0xB5A1-0xB894 is figure Dracula body (dracula_body_closed/open); 0xBBF6-0xBE58 is hex leftover; logo_font at 0xBE59.
+    0xB5A1-0xB894 is figure Dracula body (dracula_body.asm); title_jp_sprites
+    at 0xBBF6; logo_font at 0xBE59.
     """
     b13 = 13 * 0x2000
     cell0 = _words(rom, b13 + (0xA281 - 0xA000), 40)
@@ -802,7 +934,7 @@ def emit_simon_rle(rom: bytes) -> None:
         "; Pointers: simon_cell0_ptr (0xA281), simon_cell1_ptr (0xA2D1),",
         "; intro load at 0x5682 (intro_simon_0..7).  Six orphan streams are",
         "; the second 16x16 plane after a listed frame; not in those tables.",
-        "; PNG previews: gfx/intro_simon, gfx/simon_cell0, gfx/simon_cell1.",
+        "; PNG preview: gfx/sprites/simon_rle.png (`make gfx`); cell header = VRAM dest.",
         "",
     ]
     cpu = 0xA319
@@ -832,7 +964,7 @@ def emit_simon_rle(rom: bytes) -> None:
     assert sky_end - sky_fo == 0x00CE
     lines = [
         "; Intro sky RLE (seg13 0xB895), loaded to VRAM 0xFA00.",
-        "; 8 cloud patterns + 2-frame bat flap.  gfx/intro_sky.",
+        "; 8 cloud patterns + 2-frame bat flap.  gfx/sprites/intro_sky.png (`make gfx`).",
         "; Pixel bytes are defb %xxxxxxxx (MSB=left); counts stay hex.",
         "intro_sky:",
     ]
@@ -841,7 +973,7 @@ def emit_simon_rle(rom: bytes) -> None:
 
 
 def emit_seg13_gaps(rom: bytes) -> None:
-    """Figure-Dracula 32x32 body (packed 4bpp) plus the unidentified tail."""
+    """Figure-Dracula 32x32 body (packed 4bpp) plus JP title sprite RLE."""
     b13 = 13 * 0x2000
     closed = rom[b13 + (0xB5A1 - 0xA000) : b13 + (0xB719 - 0xA000)]
     opened = rom[b13 + (0xB719 - 0xA000) : b13 + (0xB895 - 0xA000)]
@@ -858,17 +990,29 @@ def emit_seg13_gaps(rom: bytes) -> None:
     lines.extend(defb_lines(closed))
     lines.append("dracula_body_open:  ; 0xB719  chest-open (shape 0x5C)")
     lines.extend(defb_lines(opened))
-    write_lines(os.path.join(DATA, "seg13_b5a1.asm"), lines)
+    write_lines(os.path.join(DATA, "dracula_body.asm"), lines)
 
-    tail = rom[b13 + (0xBBF6 - 0xA000) : b13 + (0xBE59 - 0xA000)]
-    assert len(tail) == 0x0263
+    fo = b13 + (0xBBF6 - 0xA000)
+    logo_fo = b13 + (0xBE59 - 0xA000)
+    dest = rom[fo] | (rom[fo + 1] << 8)
+    assert dest == 0xF800
+    _out, _base, end_fo = decompress(rom, fo + 2, dest)
+    packed = rom[fo + 2 : end_fo]
+    pad = rom[end_fo:logo_fo]
+    assert pad == b"\x00"
     lines = [
-        "; Remainder of seg13 after spot_tbl (0xBBF6-0xBE58). Unreversed.",
-        "; logo_font follows in font_logo.asm at 0xBE59.",
-        "seg13_tail_bbf6:  ; 0xBBF6",
+        "; Japanese title sprites (seg13 0xBBF6). Packed 1bpp.  Only caller is",
+        "; title_load_tiles JP path (rle_dec_addr -> VRAM 0xF800).  title_sat_init",
+        "; places 11 SAT pairs (colour 8 then 2; palette index 2 forced black).",
+        "; Pixel bytes are defb %xxxxxxxx (MSB=left); counts stay hex.",
+        "; Preview: gfx/sprites/title_jp_sprites.png (`make gfx`); cell header = VRAM dest.",
+        "title_jp_sprites:  ; 0xBBF6",
+        "\tdefb 0x00, 0xf8  ; VRAM dest 0xF800 (rle_dec_addr)",
     ]
-    lines.extend(defb_lines(tail))
-    write_lines(os.path.join(DATA, "seg13_bbf6.asm"), lines)
+    lines.extend(emit_rle_1bpp(packed))
+    lines.append("; 0x00 pad to logo_font (0xBE59).")
+    lines.append("\tdefb 0x00")
+    write_lines(os.path.join(DATA, "title_jp_sprites.asm"), lines)
     emit_logo_font(rom)
 
 
@@ -991,9 +1135,32 @@ RLE_NAMES = {
 }
 
 PAL_NAMES = {
+    0xBECD: "s00_palette",
+    0xBEE3: "s01_palette",
+    0xBEF6: "s02_palette",
+    0xBF09: "s04_palette",
+    0xBF1C: "s07_palette",
+    0xBF2F: "s10_palette",
+    0xBF3C: "s13_palette",
+    0xBF4F: "s16_palette",
+    0xBF62: "s18_palette",
     0xBF6F: "title_extra_palette",
     0xBF88: "hud_fixed_palette",
-    0xBFA1: "pal_bfa1",
+    0xBFA1: "intro_palette",
+}
+
+# Extra comment after "0xXXXX" on the label line (stage grouping, intro note).
+PAL_NOTES = {
+    0xBECD: "courtyard (stage 0)",
+    0xBEE3: "stages 1, 3",
+    0xBEF6: "stage 2",
+    0xBF09: "stages 4-6",
+    0xBF1C: "stages 7-9",
+    0xBF2F: "stages 10-12",
+    0xBF3C: "stages 13-15",
+    0xBF4F: "stages 16-17",
+    0xBF62: "stage 18 (Dracula)",
+    0xBFA1: "intro walk-up (after hud_fixed); overwrites 8 and 12",
 }
 
 # Packed streams not referenced by room_gfx_ptr scripts (fill AEE0-B051).
@@ -1077,6 +1244,9 @@ def emit_pal_bytes(rom: bytes, start: int, end: int) -> list[str]:
             lines.extend(defb_lines(chunk))
             break
         extra = "" if rows else "  empty (just 0xFF)"
+        note = PAL_NOTES.get(cpu)
+        if note:
+            extra = extra + "  " + note if extra else "  " + note
         lines.append("%s:  ; 0x%04X%s" % (name, cpu, extra))
         for idx, rb, g in rows:
             lines.append("\tdefb 0x%02x,0x%02x,0x%02x  ; idx %d" % (idx, rb, g, idx))
@@ -1108,24 +1278,46 @@ def emit_seg9_10(rom: bytes) -> None:
     b10 = bank(rom, 10)
     nrooms = [rom[2 * 0x2000 + (0x95FD - 0x8000) + s] for s in range(19)]
 
-    # --- frontend 4bpp 0x8000-0x9A80 + 0x9A80-0x9AB0 tail ---
+    # --- intro walk-up 8x8 0x8000-0x9000; bonus HUD 16x16 0x9000-0x9A80 ---
+    pixnote8 = [
+        "; Uncompressed 8x8 4bpp (SCREEN 5).  Each defb is one pixel-row",
+        "; (4 bytes, high nibble = left).  Eight rows = one tile (32 bytes).",
+        "; Preview: gfx/tilesets/intro_tiles.png (`make gfx`); cell header = CPU address.",
+    ]
+    pixnote16 = [
+        "; Uncompressed 16x16 4bpp (SCREEN 5).  Each defb is one pixel-row",
+        "; (8 bytes, high nibble = left).  Sixteen rows = one tile (128 bytes).",
+        "; Preview: gfx/tilesets/bonus_hud_tiles.png (`make gfx`); cell header = CPU address.",
+    ]
     write_tile_file(
-        "frontend_tiles.asm",
+        "intro_tiles.asm",
         [
-            "; Frontend / HUD 8x8 4bpp (seg9 0x8000).  load after page_title_banks:",
-            "; `ld hl,frontend_tiles` / tileset_blit copies 0xBF tiles (to 0x97E0).",
-            "; Bonus HUD ids 1-20 reuse tile 0x80+ (0x9000); potion at 0x9A00.",
+            "; Intro cutscene 8x8 4bpp (seg9 0x8000): Simon walking up to the castle",
+            "; (fence/gate, moon, distant castle, garden wall).  load_intro_tileset",
+            "; (seg0 0x5677) pages title banks and tileset_blit copies 0xBF tiles to",
+            "; VRAM 0x8004, overlapping bonus_hud_tiles (VRAM ids 0x80+).",
+            "; Palette is intro_palette_load (HUD-fixed, then intro_palette at",
+            "; 0xBFA1) — not title_extra_palette.",
         ]
-        + [
-            "; Uncompressed 8x8 4bpp (SCREEN 5).  Each defb is one pixel-row",
-            "; (4 bytes, high nibble = left).  Eight rows = one tile (32 bytes).",
-        ],
-        b9[0:0x1A80],
+        + pixnote8,
+        b9[0:0x1000],
         0x8000,
-        [(0x8000, "frontend"), (0x9000, "bonus"), (0x9A00, "potion")],
+        [(0x8000, "intro")],
+        [(0x8000, "intro_tiles", "0x80 8x8 tiles for the intro walk-up")],
+    )
+    write_tile_file(
+        "bonus_hud_tiles.asm",
         [
-            (0x8000, "frontend_tiles", "0xBF tiles for title/HUD blit"),
-            (0x9000, "bonus_hud_tiles", "bonus ids 1-20 (16x16 = 4 tiles each)"),
+            "; Bonus HUD 16x16 4bpp (seg9 0x9000): ids 1-20 then potion (id 22).",
+            "; HUD init (seg0 after page_title_banks) blits 20 icons via",
+            "; vram_blit_tile16 / l4a97h to Y=0x50, then potion to (X=80, Y=96).",
+        ]
+        + pixnote16,
+        b9[0x1000:0x1A80],
+        0x9000,
+        [(0x9000, "bonus", TILE16), (0x9A00, "potion", TILE16)],
+        [
+            (0x9000, "bonus_hud_tiles", "bonus ids 1-20 (vram_blit_tile16)"),
             (0x9A00, "bonus_hud_potion", "bonus id 22"),
         ],
     )
@@ -1256,6 +1448,7 @@ def emit_seg9_10(rom: bytes) -> None:
         "; Run/literal counts stay hex (byte-exact packed stream).",
         "; Dest is sprite-generator VRAM (0xF800+).  Unidentified 0xB50B-0xB54A",
         "; is not a valid stream (decompressor overruns into spr_hanging_bat).",
+        "; Preview: gfx/sprites/enemy_sprite_rle.png (`make gfx`); cell header = VRAM dest.",
         "",
     ]
     cpu = 0xA066
@@ -1329,13 +1522,17 @@ def emit_seg9_10(rom: bytes) -> None:
 
     slines = [
         "; Stage palette pointer table (seg10 0xBEA7) + palette_apply tables.",
+        "; Labels sNN_palette match tileset_sNN grouping (stage 2 has its own table).",
         "; palette_hud_load loads hud_fixed_palette; title extras at 0xBF6F.",
         "stage_palette_ptr:",
     ]
+    pal_ptr_note = {0: "courtyard", 18: "Dracula"}
     for st in range(19):
         cpu_p = word_at(rom, 0xBEA7 + st * 2)
+        extra = pal_ptr_note.get(st)
         slines.append(
-            "\tdefw %s  ; stage %d" % (pal_name(cpu_p), st)
+            "\tdefw %s  ; stage %d%s"
+            % (pal_name(cpu_p), st, ("  " + extra) if extra else "")
         )
     slines.append("")
     slines.extend(emit_pal_bytes(rom, 0xBECD, 0xBFC0))
@@ -1351,31 +1548,22 @@ def emit_seg9_10(rom: bytes) -> None:
         for inc in includes:
             out.append('    INCLUDE "%s"' % inc)
             out.append("")
+        out.append("    ASSERT $ == 0xC000")
         write_lines(path, out)
 
     stitch(
-        os.path.join(SEGS, "seg09.asm"),
+        os.path.join(SEGS, "banks_9a.asm"),
         [
             "; ===========================================================================",
-            ";  SEGMENT 9 - front-end gfx bank, paged at 0x8000 by page_title_banks.",
-            ";  HUD/frontend tiles, room_gfx_ptr + scripts, pal_9ffe prefix.",
+            ";  banks 9-a - 16K front-end window @ 0x8000-0xBFFF (page_title_banks).",
+            ";  Intro tiles, bonus HUD, room gfx-scripts, palettes, enemy/weapon RLE.",
             "; ===========================================================================",
         ],
         [
-            "data/frontend_tiles.asm",
+            "data/intro_tiles.asm",
+            "data/bonus_hud_tiles.asm",
             "data/spike_bar.asm",
             "data/room_gfx.asm",
-        ],
-    )
-    stitch(
-        os.path.join(SEGS, "seg10.asm"),
-        [
-            "; ===========================================================================",
-            ";  SEGMENT 10 - front-end gfx bank, paged at 0xA000 by page_title_banks.",
-            ";  Room palettes, enemy/weapon RLE, stage palettes.",
-            "; ===========================================================================",
-        ],
-        [
             "data/room_palettes.asm",
             "data/enemy_sprite_rle.asm",
             "data/seg10_bda7.asm",
@@ -1512,65 +1700,62 @@ def emit_seg15(rom: bytes) -> None:
     write_lines(os.path.join(DATA, "psg_seg15.asm"), lines)
 
     n_face_tiles = 8 + 2 + 2 + 1 + 0x6C  # 121
-    portrait = slurp(0xABF8, n_face_tiles * TILE)
-    unused_n = 38
-    unused = slurp(0xBB18, unused_n * TILE)
+    n_blank = 6
+    portrait = slurp(0xABF8, (n_face_tiles + n_blank) * TILE)
+    parts = slurp(0xBBD8, 8 * TILE16)
     pad = slurp(0xBFD8, 0xC000 - 0xBFD8)
     assert pad == b"\xff" * (0xC000 - 0xBFD8)
-    assert 0xABF8 + len(portrait) == 0xBB18
-    assert 0xBB18 + len(unused) == 0xBFD8
+    assert 0xABF8 + len(portrait) == 0xBBD8
+    assert 0xBBD8 + len(parts) == 0xBFD8
 
+    write_tile_file(
+        "dracula_portrait.asm",
+        [
+            "; Dracula portrait 8x8 4bpp (seg15 0xABF8): frame pieces then 108",
+            "; face tiles, blit by dracula_portrait_load (seg0 0x5887) then",
+            "; H-mirror.  6 blank 8x8 at 0xBB18 (gap before the 16x16 parts).",
+            "; Uncompressed 8x8 4bpp (SCREEN 5).  Each defb is one pixel-row",
+            "; (4 bytes, high nibble = left).  Eight rows = one tile (32 bytes).",
+            "; Preview: gfx/tilesets/dracula_portrait.png (`make gfx`); cell header = CPU address.",
+        ],
+        portrait,
+        0xABF8,
+        [(0xABF8, "portrait"), (0xBB18, "unused")],
+        [
+            (0xABF8, "dracula_frame_abf8", "8 tiles -> VRAM 0x8018"),
+            (0xACF8, "dracula_frame_acf8", "2 tiles -> VRAM 0x8040"),
+            (0xAD38, "dracula_frame_ad38", "2 tiles -> VRAM 0x8060"),
+            (0xAD78, "dracula_frame_ad78", "1 tile -> VRAM 0x8070 / mirror"),
+            (0xAD98, "dracula_face", "108 tiles -> VRAM 0x8078"),
+            (0xBB18, "dracula_unused_bb18", "6 blank 8x8; 16x16 parts follow"),
+        ],
+    )
     plines = [
-        "; Dracula portrait (seg15).  Uncompressed 8x8 4bpp, blit by",
-        "; dracula_portrait_load (seg0 0x5887): frame pieces then 108 face",
-        "; tiles, then H-mirror.  6 blank 8x8 at 0xBB18, then 8 x 16x16",
-        "; eye/mouth 16x16s at 0xBBD8 (page-1 Y=0xA0).  0xFF pad to end of bank.",
+        "; Dracula portrait 16x16 4bpp (seg15 0xBBD8): 4 eye + 4 mouth tiles.",
+        "; dracula_portrait_parts_load / _mirror (l4a97h) blit to page-1 Y=0xA0;",
+        "; mouth copies are H-mirrored to X=128.",
+        "; Uncompressed 16x16 4bpp (SCREEN 5).  Each defb is one pixel-row",
+        "; (8 bytes, high nibble = left).  Sixteen rows = one tile (128 bytes).",
+        "; Preview: gfx/tilesets/dracula_portrait_parts.png (`make gfx`); cell header = CPU address.",
         "",
     ]
     plines.extend(
         emit_4bpp(
-            portrait,
-            0xABF8,
-            [(0xABF8, "portrait")],
+            parts,
+            0xBBD8,
+            [(0xBBD8, "eye", TILE16), (0xBDD8, "mouth", TILE16)],
             [
-                (0xABF8, "dracula_frame_abf8", "8 tiles -> VRAM 0x8018"),
-                (0xACF8, "dracula_frame_acf8", "2 tiles -> VRAM 0x8040"),
-                (0xAD38, "dracula_frame_ad38", "2 tiles -> VRAM 0x8060"),
-                (0xAD78, "dracula_frame_ad78", "1 tile -> VRAM 0x8070 / mirror"),
-                (0xAD98, "dracula_face", "108 tiles -> VRAM 0x8078"),
-            ],
-        )
-    )
-    plines.append("")
-    plines.extend(
-        emit_4bpp(
-            unused,
-            0xBB18,
-            [(0xBB18, "unused"), (0xBBD8, "parts")],
-            [
-                (0xBB18, "dracula_unused_bb18", "6 blank 8x8; eye/mouth 16x16s follow"),
-                (0xBBD8, "dracula_portrait_parts", "8 x 16x16 4bpp eyes/mouth -> page-1 Y=0xA0"),
-                (0xBDD8, "dracula_portrait_parts_hi", "tiles 4-7 (mouth); H-mirrored to X=128"),
+                (0xBBD8, "dracula_portrait_parts", "4 x 16x16 eyes -> page-1 Y=0xA0"),
+                (0xBDD8, "dracula_portrait_parts_hi", "4 x 16x16 mouth; H-mirrored to X=128"),
             ],
         )
     )
     plines.append("")
     plines.append("; 0xFF pad to end of seg15 (0xBFD8).")
     plines.extend(defb_lines(pad))
-    write_lines(os.path.join(DATA, "dracula_portrait.asm"), plines)
-
-    stitch_lines = [
-        "; ===========================================================================",
-        ";  SEGMENT 15 - paged at 0xA000 by int_handler / play_sound (with seg14",
-        ";  at 0x8000).  Music tails, env tables, Dracula portrait.",
-        "; ===========================================================================",
-        "",
-        '    INCLUDE "data/psg_seg15.asm"',
-        "",
-        '    INCLUDE "data/dracula_portrait.asm"',
-        "",
-    ]
-    write_lines(os.path.join(SEGS, "seg15.asm"), stitch_lines)
+    write_lines(os.path.join(DATA, "dracula_portrait_parts.asm"), plines)
+    # Banks 14-15 are one PHASE in VampireKiller.asm; INCLUDEs live at the
+    # end of banks_ef.asm (hand-maintained).
 
 
 def main() -> None:

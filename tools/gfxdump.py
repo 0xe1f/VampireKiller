@@ -1,48 +1,38 @@
 #!/usr/bin/env python3
-"""Build the readable graphics catalogue in gfx/ from gfx/manifest.tsv.
+"""Build PNG graphics sheets in gfx/ from identified asm / ROM tables.
 
-For each manifest entry it decompresses the RLE stream(s) (via rledec), writes:
-  gfx/<name>.bin  - the decompressed raw pixels (feed to tools/rleenc.py to
-                    re-pack an edited version)
-  gfx/<name>.txt  - ASCII-art preview (16x16 1bpp sprites or 4bpp tiles); this
-                    is the definitive human-readable source
-  gfx/<name>.png  - scaled PNG sheet of the same tiles, for extra clarity
-and regenerates gfx/index.md summarising every entry.
+  gfx/sprites/<stem>.png  - packed 1bpp sprite asms (ASM_SPRITE_STEMS)
+  gfx/tilesets/<stem>.png - 4bpp tileset asms
+  gfx/fonts/<stem>.png    - 1bpp font asms (ASM_FONT_STEMS)
+  gfx/<name>.png          - derived sheets (composites, hazards)
 
-manifest.tsv columns (tab-separated; '#' comment lines and blanks ignored):
-  name    sources                 dest     kind      planes   notes
-where 'sources' is a comma-separated list of hex ROM file offsets that are
-decompressed and concatenated (each stream ends at its own 0x00), 'dest' is the
-VRAM destination (informational), 'kind' is 'sprite16' or 'tile4', and 'planes'
-is the number of consecutive 1bpp planes OR-combined into one visible multicolor
-sprite (1 = plain monochrome). The .png composites planes; the .txt does not.
+Tileset cell header is the CPU address. Sprite-asm cell header is the VRAM
+dest. Font cell header is the hex glyph id. One 16x16 plane per sprite
+cell (no CC overlay). Composited SAT poses (enemy_sheet, sheet_enemy_*)
+live in gfx/.
 
 Usage:  tools/gfxdump.py            (run from the repo root)
 """
-import os, sys
+import os, re, sys
 sys.path.insert(0, os.path.dirname(__file__))
 import rledec, gfxview, pngwrite
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROM = os.path.join(ROOT, "VampireKiller.rom")
 GFX = os.path.join(ROOT, "gfx")
+SPRITE_DIR = os.path.join(GFX, "sprites")
+TILESET_DIR = os.path.join(GFX, "tilesets")
+FONT_DIR = os.path.join(GFX, "fonts")
+# Asm sheets only. Composites / hazards go in GFX.
+ASM_SPRITE_STEMS = frozenset(
+    ("enemy_sprite_rle", "simon_rle", "intro_sky", "title_jp_sprites"))
+ASM_FONT_STEMS = frozenset(("font_credits", "font_hud", "font_logo"))
 
 # Sheet PNG appearance.
 SCALE = 6                       # pixels per source pixel
 GAP = 2                         # gap (in scaled px) between tiles
 BG = (0x20, 0x28, 0x30)         # canvas / gap colour
 OFF = (0x30, 0x3a, 0x44)        # sprite "off" pixel (shows tile bounds)
-FG = (0xe8, 0xe8, 0xe8)         # sprite "on" pixel (1-plane sprites)
-# Illustrative colours for OR-combined sprite planes (NOT the game's real
-# palette, which lives in the per-line sprite colour table). Index = plane
-# bitmask: bit0 = plane 0 set, bit1 = plane 1 set, ...
-PLANE_COLS = [OFF, (0x6f, 0xb8, 0xff), (0xe8, 0xe8, 0xe8), (0xff, 0xdd, 0x55),
-              (0xff, 0x7a, 0x7a), (0x8a, 0xff, 0x9a), (0xc9, 0x8a, 0xff), FG]
-# Generic 16-colour palette for 4bpp tile previews (index 0 = transparent-ish).
-PAL4 = [(0x00, 0x00, 0x00), (0x20, 0x20, 0x20), (0x24, 0x6b, 0x3a), (0x4c, 0xa8, 0x5e),
-        (0x55, 0x4c, 0xd8), (0x76, 0x71, 0xe6), (0xb5, 0x4a, 0x3f), (0x5c, 0xc8, 0xe6),
-        (0xd8, 0x55, 0x4c), (0xf6, 0x8a, 0x82), (0xc8, 0xc0, 0x5e), (0xdc, 0xd4, 0x94),
-        (0x3b, 0x8e, 0x33), (0xb5, 0x62, 0xb5), (0xcc, 0xcc, 0xcc), (0xff, 0xff, 0xff)]
 
 # MSX2 palette encoding: port 9A gets (0rrr0bbb, 00000ggg), 3-bit channels.
 # Expand 0-7 -> 0-255 the same way openMSX does.
@@ -128,14 +118,9 @@ def vk_playfield_palette(data, stage, room):
     return pal
 
 def tile_grids(buf, kind):
-    """Return a list of 16x16 grids of colour indices (sprite16: 0/1)."""
+    """Return a list of 8x8 or 16x16 grids of 4bpp colour indices."""
     grids = []
-    if kind == "sprite16":
-        step = 32
-        for i in range(0, len(buf) - step + 1, step):
-            rows = gfxview.sprite16_1bpp(buf[i:i + step])
-            grids.append([[1 if ch == "#" else 0 for ch in r] for r in rows])
-    elif kind == "tile8":
+    if kind == "tile8":
         step = 32
         for i in range(0, len(buf) - step + 1, step):
             chunk = buf[i:i + step]
@@ -163,20 +148,6 @@ def tile_grids(buf, kind):
         raise SystemExit("unknown kind %r" % kind)
     return grids
 
-def combine_planes(grids, planes):
-    """Group 'planes' consecutive 1bpp grids into one grid of plane-bitmask
-    values (bit i set if plane i has a pixel there)."""
-    cells = []
-    for base in range(0, len(grids) - planes + 1, planes):
-        cell = [[0] * 16 for _ in range(16)]
-        for p in range(planes):
-            g = grids[base + p]
-            for y in range(16):
-                for x in range(16):
-                    if g[y][x]:
-                        cell[y][x] |= (1 << p)
-        cells.append(cell)
-    return cells
 
 def _hex_id(n):
     """Two-digit hex as drawn on sheets (matches defb / equ values)."""
@@ -195,9 +166,10 @@ def render_png(path, cells, palette, cols=8, labels=None, lab_scale=2, size=16,
     above each tile with a 3x5 bitmap id, same treatment as the minimap
     renderer in roomperm.py (`contact_sheet`).  `size` is the tile edge in
     source pixels (8 for glyphs/tilesets, 16 for HUD/Simon sprites).  `scale`
-    defaults to SCALE (6); 8x8 glyphs use 12 so cells match 16x16 HUD tiles."""
+    defaults to SCALE (6); 8x8 glyphs use 12 so cells match 16x16 HUD tiles.
+    Returns (W, H, rgb) or None.  `path` None skips the write."""
     if not cells:
-        return
+        return None
     scale = SCALE if scale is None else scale
     lab_h = _label_band(labels, lab_scale)
     rows_of = (len(cells) + cols - 1) // cols
@@ -215,7 +187,30 @@ def render_png(path, cells, palette, cols=8, labels=None, lab_scale=2, size=16,
         _blit_cell(buf, W, grid, palette, x0, y0, scale, lab_h,
                    None if not labels or idx >= len(labels) else labels[idx],
                    lab_scale, size, size)
-    pngwrite.write_rgb(path, W, H, bytes(buf))
+    rgb = bytes(buf)
+    if path:
+        pngwrite.write_rgb(path, W, H, rgb)
+    return W, H, rgb
+
+
+def _stack_rgb(path, parts):
+    """Stack (W, H, rgb) buffers vertically, padding to the widest."""
+    parts = [p for p in parts if p]
+    if not parts:
+        return
+    W = max(p[0] for p in parts)
+    H = sum(p[1] for p in parts)
+    out = bytearray(W * H * 3)
+    for i in range(W * H):
+        out[i * 3], out[i * 3 + 1], out[i * 3 + 2] = BG
+    y = 0
+    for w, h, rgb in parts:
+        for row in range(h):
+            dst = ((y + row) * W) * 3
+            src = row * w * 3
+            out[dst:dst + w * 3] = rgb[src:src + w * 3]
+        y += h
+    pngwrite.write_rgb(path, W, H, bytes(out))
 
 
 def _blit_cell(buf, W, grid, palette, x0, y0, scale, lab_h, label, lab_scale,
@@ -421,86 +416,19 @@ def render_packed_png(path, cells, labels=None, lab_scale=2, scale=None,
                    label, lab_scale)
     pngwrite.write_rgb(path, W, H, bytes(buf))
 
-def render_sheet(buf, kind, cols=8):
-    lines = []
-    if kind == "sprite16":
-        size, step, fn = 16, 32, gfxview.sprite16_1bpp
-    elif kind == "tile4":
-        size, step, fn = 16, 128, lambda d: gfxview.tile_4bpp(d, 16)
-    else:
-        raise SystemExit("unknown kind %r" % kind)
-    tiles = [fn(buf[i:i + step]) for i in range(0, len(buf) - step + 1, step)]
-    for base in range(0, len(tiles), cols):
-        group = tiles[base:base + cols]
-        for r in range(size):
-            lines.append("  ".join(g[r] for g in group))
-        lines.append("")
-    return "\n".join(lines)
-
 def main():
     os.makedirs(GFX, exist_ok=True)
+    os.makedirs(SPRITE_DIR, exist_ok=True)
+    os.makedirs(FONT_DIR, exist_ok=True)
     data = open(ROM, "rb").read()
-    manifest = os.path.join(GFX, "manifest.tsv")
-    rows = []
-    for raw in open(manifest):
-        line = raw.rstrip("\n")
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        name, sources, dest, kind, planes, notes = (line.split("\t") + [""] * 6)[:6]
-        planes = int(planes) if planes.strip() else 1
-        srcs = [int(s, 0) for s in sources.split(",")]
-        buf = bytearray()
-        comp = 0
-        for s in srcs:
-            out, base, end = rledec.decompress(data, s, int(dest, 0))
-            buf += out
-            comp += end - s
-        open(os.path.join(GFX, name + ".bin"), "wb").write(buf)
-        header = ("# %s\n# sources: %s\n# vram dest: %s   kind: %s   planes: %d\n"
-                  "# %d compressed bytes -> %d decompressed\n# %s\n\n"
-                  % (name, sources, dest, kind, planes, comp, len(buf), notes))
-        open(os.path.join(GFX, name + ".txt"), "w").write(header + render_sheet(buf, kind))
-
-        grids = tile_grids(buf, kind)
-        if kind == "sprite16" and planes > 1:
-            cells = combine_planes(grids, planes)
-            palette = PLANE_COLS
-            pcols = 8
-        elif kind == "sprite16":
-            cells = grids
-            palette = [OFF, FG]
-            pcols = 8
-        else:
-            cells = grids
-            palette = PAL4
-            pcols = 8
-        render_png(os.path.join(GFX, name + ".png"), cells, palette, pcols)
-        rows.append((name, sources, dest, kind, planes, comp, len(buf), notes))
-        print("%-22s %5d -> %5d bytes  %s x%d planes" % (name, comp, len(buf), kind, planes))
-
-    with open(os.path.join(GFX, "index.md"), "w") as f:
-        f.write("# Graphics catalogue\n\n")
-        f.write("Generated by `tools/gfxdump.py` from `gfx/manifest.tsv`. Each entry has a\n")
-        f.write("`.bin` (decompressed pixels), a `.txt` (definitive ASCII-art source) and a\n")
-        f.write("`.png` (scaled preview). To mod a\n")
-        f.write("sprite: edit the `.bin`, re-pack with `tools/rleenc.py`, and patch the\n")
-        f.write("resulting stream into the ROM (the untouched original bytes stay in the\n")
-        f.write("committed build, so `make verify` remains byte-exact until you patch).\n\n")
-        f.write("| name | preview | sources (file offset) | vram dest | kind | planes | packed | raw | notes |\n")
-        f.write("|------|---------|-----------------------|-----------|------|-------:|-------:|----:|-------|\n")
-        for name, sources, dest, kind, planes, comp, raw, notes in rows:
-            f.write("| %s | ![%s](%s.png) | `%s` | `%s` | %s | %d | %d | %d | %s |\n"
-                    % (name, name, name, sources, dest, kind, planes, comp, raw, notes))
-
-    dump_bonus_hud(data)
     dump_credits_font(data)
     dump_hud_font(data)
     dump_logo_font(data)
     dump_enemy_sheet(data)
     dump_enemy_frames(data)
     dump_hazards(data)
-    dump_script_rle(data)
-    dump_tilesets(data)
+    dump_asm_sprite_rles(data)
+    dump_asm_tilesets(data)
 
 # First *recognisable* pose (ix+0B) for entity_tbl types 1-22.
 # Type 9's spawn state uses 0x26 (2-cell wait, legs only); the walk frame is 0x21.
@@ -644,7 +572,8 @@ def dump_enemy_sheet(data):
     1bpp sprite patterns the per-room gfx script RLE-loads into VRAM 0xF800+.
     Type 17 also blits the 32x32 4bpp cloak from dracula_body_closed.
     Each frame is cropped to its SAT occupancy (16x16 / 16x32 / …) and the
-    mixed sizes are packed instead of a uniform 64x64 grid."""
+    mixed sizes are packed instead of a uniform 64x64 grid.
+    Written to gfx/enemy_sheet.png (not gfx/sprites/)."""
     types = list(range(1, 23)) + [0x1A, 0x1B, 0x1C]
     cells = []
     vram_cache = {}
@@ -1042,23 +971,6 @@ def _rle_src_file(cpu):
         return _cpu_file(9, cpu, 0x8000)
     return None
 
-def dump_bonus_hud(data):
-    """Uncompressed HUD bonus tiles (not in manifest.tsv — they are raw 4bpp,
-    not RLE).  Two labelled sheets: ids 01-14 and ids 16-1E (hex)."""
-    pal = vk_play_palette(data)
-
-    def cells_at(off, n):
-        return tile_grids(data[off:off + n * 128], "tile4")
-
-    ids_1_20 = cells_at(0x13000, 20)
-    items = cells_at(0x13A00, 1) + cells_at(0xD9C8, 8)
-    render_png(os.path.join(GFX, "bonus_hud_sheet.png"), ids_1_20, pal, cols=5,
-               labels=[_hex_id(i) for i in range(1, 21)])
-    render_png(os.path.join(GFX, "bonus_hud_items.png"), items, pal, cols=3,
-               labels=[_hex_id(i) for i in range(22, 31)])
-    print("bonus_hud_sheet.png      ids 01-14")
-    print("bonus_hud_items.png      ids 16-1E")
-
 # seg14 credits_font @ CPU 0x8824 (file 0x1C824): 40 x 8x8 1bpp, MSB = left.
 # Order: 0-9 . ' : , then A-Z.  Colour 0x0E is the C register
 # credits_font_load passes (SCREEN 5 ink).  Loaded by credits_init for the
@@ -1106,17 +1018,17 @@ def dump_hazards(data):
     print("hazards.png              spike bar (stage 6 room 1) + its fragments")
 
 def dump_credits_font(data):
-    """Uncompressed 8x8 1bpp ending-credits font (not in manifest.tsv — raw, not RLE)."""
+    """Uncompressed 8x8 1bpp ending-credits font (raw, not RLE)."""
     pal = vk_play_palette(data)
     raw = data[CREDITS_FONT_FILE:CREDITS_FONT_FILE + 40 * 8]
     cells = []
     for i in range(40):
         glyph = raw[i * 8:(i + 1) * 8]
         cells.append([[(row >> (7 - x)) & 1 for x in range(8)] for row in glyph])
-    render_png(os.path.join(GFX, "font_credits.png"), cells, [OFF, pal[14]],
+    render_png(os.path.join(FONT_DIR, "font_credits.png"), cells, [OFF, pal[14]],
                cols=10, size=8, scale=12,
                labels=[_hex_id(ord(c)) for c in CREDITS_FONT_CHARS])
-    print("font_credits.png         40 x 8x8 1bpp (0-9 . ' : , A-Z)")
+    print("fonts/font_credits.png   40 x 8x8 1bpp (0-9 . ' : , A-Z)")
 
 # seg8 hud_font @ CPU 0xBD80 (file 0x11D80): 48 x 8x8 1bpp, MSB = left.
 # ASCII '0'..'_' (vk ids 0x20+).  hud_font_load ink 0x0E.  Not credits_font.
@@ -1124,17 +1036,17 @@ HUD_FONT_FILE = 8 * 0x2000 + 0x1D80
 HUD_FONT_CHARS = "".join(chr(c) for c in range(0x30, 0x60))
 
 def dump_hud_font(data):
-    """Uncompressed 8x8 1bpp HUD/title font (not in manifest.tsv — raw, not RLE)."""
+    """Uncompressed 8x8 1bpp HUD/title font (raw, not RLE)."""
     pal = vk_play_palette(data)
     raw = data[HUD_FONT_FILE:HUD_FONT_FILE + 48 * 8]
     cells = []
     for i in range(48):
         glyph = raw[i * 8:(i + 1) * 8]
         cells.append([[(row >> (7 - x)) & 1 for x in range(8)] for row in glyph])
-    render_png(os.path.join(GFX, "font_hud.png"), cells, [OFF, pal[14]],
+    render_png(os.path.join(FONT_DIR, "font_hud.png"), cells, [OFF, pal[14]],
                cols=16, size=8, scale=12,
                labels=[_hex_id(0x20 + i) for i in range(48)])
-    print("font_hud.png             48 x 8x8 1bpp ('0'-'_')")
+    print("fonts/font_hud.png       48 x 8x8 1bpp ('0'-'_')")
 
 # seg13 logo_font @ CPU 0xBE59 (file 0x1BE59): 52 x 8x8 1bpp, MSB = left.
 # Tile ids 0x01-0x34 (id 0x00 is blank at X=0).  logo_font_load three inks
@@ -1142,106 +1054,550 @@ def dump_hud_font(data):
 LOGO_FONT_FILE = 13 * 0x2000 + 0x1E59
 
 def dump_logo_font(data):
-    """Uncompressed 8x8 1bpp boot Konami-logo font (not in manifest.tsv — raw, not RLE)."""
+    """Uncompressed 8x8 1bpp boot Konami-logo font (raw, not RLE)."""
     pal = vk_play_palette(data)
     raw = data[LOGO_FONT_FILE:LOGO_FONT_FILE + 52 * 8]
     cells = []
     for i in range(52):
         glyph = raw[i * 8:(i + 1) * 8]
         cells.append([[(row >> (7 - x)) & 1 for x in range(8)] for row in glyph])
-    render_png(os.path.join(GFX, "font_logo.png"), cells, [OFF, pal[14]],
+    render_png(os.path.join(FONT_DIR, "font_logo.png"), cells, [OFF, pal[14]],
                cols=16, size=8, scale=12,
                labels=[_hex_id(0x01 + i) for i in range(52)])
-    print("font_logo.png            52 x 8x8 1bpp (Konami logo ids 01-34)")
+    print("fonts/font_logo.png      52 x 8x8 1bpp (Konami logo ids 01-34)")
 
-def dump_script_rle(data):
-    """Unique gfx-script cmd-0 RLE streams targeting sprite VRAM (0xF800+).
-    room_gfx_ptr 9AB0[stage-1] -> 4 bytes/room {script, palette}; scripts in
-    seg9 ~0x9D38+. Derived sheet, not in manifest.tsv (like enemy_sheet)."""
-    unique_src = {}
-    scripts = set()
-    n_cmd1 = n_other = 0
-    dests = set()
+# Packed 1bpp streams in enemy_sprite_rle.asm (seg10).  Label comment
+# "type N SAT" maps to entity_tbl for SAT colours + room playfield palette.
+SPRITE_RLE_TYPE = {
+    "spr_zombie": 1, "spr_merman": 2, "spr_hanging_bat": 4, "spr_dog": 5,
+    "spr_pikeman": 6, "spr_flying_skull": 7, "spr_ghost_head": 8,
+    "spr_skeleton": 11, "spr_skull_pile": 10, "spr_raven": 12,
+    "spr_hunchback": 13, "spr_bone_dragon": 14, "spr_roc": 15,
+    "spr_axe_knight": 16, "spr_dracula": 17, "spr_giant_bat": 18,
+    "spr_medusa": 19, "spr_mummy": 20, "spr_frankenstein": 21,
+    "spr_grim_reaper": 22, "spr_blob": 0x1A, "spr_blob_cc": 0x1A,
+}
+# Streams not in room gfx-scripts (load_weapon_sprites / load_vdoor / frontend).
+SPRITE_RLE_DEST = {
+    0xA0EA: 0xF900, 0xA147: 0xF9C0, 0xA185: 0xFF00,
+    0xA24E: 0xF8C0, 0xA272: 0xF8C0, 0xA4C9: 0xF8C0, 0xB0AA: 0xFA00,
+}
+# load_intro_sprites: intro_simon_0..7 at F800 + n*0x40.
+INTRO_SIMON_DEST = {
+    0xA319: 0xF800, 0xA351: 0xF840, 0xA38C: 0xF880, 0xA3CA: 0xF8C0,
+    0xA40B: 0xF900, 0xA447: 0xF940, 0xA480: 0xF980, 0xA4BC: 0xF9C0,
+}
+SIMON_RLE_ORPHANS = (0xA671, 0xA6E4, 0xA759, 0xAF78, 0xAFEA, 0xB05F)
+_RE_RLE_HDR = re.compile(
+    r"^(\w+):\s*;\s*0x([0-9A-Fa-f]{4})"
+)
+_RE_BARE_LABEL = re.compile(r"^(\w+):\s*$")
+_RE_DEFB_TOK = re.compile(r"0x([0-9A-Fa-f]{2})|%([01]{8})")
+
+
+def _parse_asm_sprite_rle(path, default_cpu=None):
+    """Yield (name, cpu, packed_bytes) for each packed stream in the asm."""
+    streams, name, cpu, buf = [], None, None, bytearray()
+
+    def flush():
+        nonlocal name, cpu, buf
+        if name is not None and buf:
+            streams.append((name, cpu, bytes(buf)))
+        name, cpu, buf = None, None, bytearray()
+
+    for line in open(path):
+        hdr = _RE_RLE_HDR.match(line)
+        if hdr:
+            flush()
+            if "unid" in hdr.group(1):
+                continue
+            name = hdr.group(1)
+            cpu = int(hdr.group(2), 16)
+            continue
+        bare = _RE_BARE_LABEL.match(line)
+        if bare:
+            flush()
+            if default_cpu is not None:
+                name = bare.group(1)
+                cpu = default_cpu
+            continue
+        if re.match(r"^\w+:", line):
+            flush()
+            continue
+        if name is None or not _RE_DEFB.match(line):
+            continue
+        payload = line.split(";")[0]
+        for tok in _RE_DEFB_TOK.finditer(payload):
+            if tok.group(1):
+                buf.append(int(tok.group(1), 16))
+            else:
+                buf.append(int(tok.group(2), 2))
+    flush()
+    return streams
+
+
+def _sprite_rle_dests(data):
+    dest_of = dict(SPRITE_RLE_DEST)
     for stage in range(1, 19):
         for room in range(_stage_nrooms(data, stage)):
             script, _pal = _room_record(data, stage, room)
             if script is None or not (0x8000 <= script <= 0xBFFF):
                 continue
-            scripts.add(script)
             for cmd, src, dest, _extra in _iter_script(data, script):
-                if cmd == 0:
-                    dests.add(dest)
-                    src_off = _rle_src_file(src)
-                    if src_off is not None and dest >= 0xF800:
-                        unique_src.setdefault(src_off, dest)
-                elif cmd == 1:
-                    n_cmd1 += 1
-                else:
-                    n_other += 1
+                if cmd == 0 and dest >= 0xF800:
+                    dest_of.setdefault(src, dest)
+    return dest_of
+
+
+def _sat_plane_map(data, typ, vram_cache):
+    """Pattern VRAM address -> SAT colour index for all poses of typ."""
+    vram_info = _vram_info_for_type(data, typ, vram_cache)
+    if vram_info is None:
+        return vk_play_palette(data), {}, None
+    _vram, stage, room = vram_info
+    pal = vk_playfield_palette(data, stage, room)
+    if typ == 17:
+        _apply_palette_overlay(pal, load_palette_table(data, 0x15F88))
+        _apply_palette_overlay(pal, load_palette_table(data, 0x15F6F))
+    ncells = data[_cpu_file(1, 0x605E, 0x6000) + typ]
+    cmap = {}
+    frames = ENEMY_FRAMES.get(typ, (ENEMY_SHAPE_ID.get(typ),))
+    if frames is None:
+        frames = (None,)
+    converts = []
+    script, _ = _room_record(data, stage, room)
+    if script:
+        for cmd, src, dest, extra in _iter_script(data, script):
+            if cmd == 1:
+                converts.append((src, dest, extra))
+    for sid in frames:
+        if typ == 14:
+            parts, colors = _type14_parts(sid)
+        else:
+            if sid is None or not ncells:
+                continue
+            parts = _parse_shape(data, sid, ncells)
+            colors = _type_colors(data, typ, ncells)
+            if typ == 17 and sid in DRACULA_STAND:
+                colors = [0x02, 0x48] * 4
+        for i, (_dy, _dx, pat) in enumerate(parts):
+            col = colors[i] if i < len(colors) else 0x02
+            idx = col & 0x0F
+            if idx:
+                cmap[0xF800 + pat * 8] = idx
+    for src, dest, count in converts:
+        for i in range(count):
+            d, s = dest + i * 32, src + i * 32
+            if d in cmap and s not in cmap:
+                cmap[s] = cmap[d]
+            if s in cmap and d not in cmap:
+                cmap[d] = cmap[s]
+    return pal, cmap, (stage, room)
+
+
+def _weapon_plane_map(name, dest, pal):
+    """Thrown-weapon SAT: knife/axe 02 then 0C, cross 0F/0E."""
+    cmap = {}
+    if name == "weapon_cross":
+        cols = (0x0F, 0x0E, 0x0F, 0x0E)
+    else:
+        n = 2 if name == "weapon_knife" else 4
+        cols = tuple(0x02 if i % 2 == 0 else 0x0C for i in range(n))
+    for i, idx in enumerate(cols):
+        cmap[dest + i * 32] = idx
+    return pal, cmap
+
+
+def _paint_plane(raw, pal, idx):
+    """One 16x16 1bpp pattern in a single SAT colour."""
+    spr = gfxview.sprite16_1bpp(raw)
+    rgb = pal[idx] if idx else OFF
+    return [[rgb if ch == "#" else OFF for ch in row] for row in spr]
+
+
+def _simon_rle_dests(data):
+    dest_of = dict(INTRO_SIMON_DEST)
+    base = _cpu_file(13, 0xA281, 0xA000)
+    for i in range(40):
+        dest_of.setdefault(_word(data, base + i * 2), 0xF800)
+    base = _cpu_file(13, 0xA2D1, 0xA000)
+    for i in range(36):
+        dest_of.setdefault(_word(data, base + i * 2), 0xF840)
+    for cpu in SIMON_RLE_ORPHANS:
+        dest_of.setdefault(cpu, 0xF820)
+    return dest_of
+
+
+def _enemy_colour_maps(data, streams, dest_of, vram_cache, type_maps, hud_pal):
+    """Per-stream (pal, cmap) for enemy_sprite_rle.asm."""
+    out = []
+    for name, cpu, packed in streams:
+        dest = dest_of.get(cpu, 0xF800)
+        typ = SPRITE_RLE_TYPE.get(name)
+        if name.startswith("weapon_") and dest == 0xF8C0:
+            pal, cmap = _weapon_plane_map(name, dest, hud_pal)
+        elif typ is not None:
+            if typ not in type_maps:
+                type_maps[typ] = _sat_plane_map(data, typ, vram_cache)
+            pal, cmap, _room = type_maps[typ]
+        else:
+            pal, cmap = hud_pal, {}
+            try:
+                dec, base, _end = rledec.decompress(packed, 0, dest)
+            except Exception:
+                out.append((pal, cmap))
+                continue
+            best, hit = None, 0
+            for t in list(range(1, 23)) + [0x18, 0x1A, 0x1B, 0x1C]:
+                if t not in type_maps:
+                    type_maps[t] = _sat_plane_map(data, t, vram_cache)
+                _p, cm, _r = type_maps[t]
+                n = sum(1 for a in cm if base <= a < base + len(dec))
+                if n > hit:
+                    best, hit = t, n
+            if best is not None and hit:
+                pal, cmap, _room = type_maps[best]
+        out.append((pal, cmap))
+    return out
+
+
+def _dump_sprite_rle_asm(data, fname, dest_of, pal_for, idx_for, default_cpu=None,
+                         skip_prefix=0, force_pal2_black=False):
+    """One sheet: every 32-byte plane, labelled with VRAM dest."""
+    path = os.path.join(DATA_DIR, fname)
+    if not os.path.isfile(path):
+        return
+    streams = _parse_asm_sprite_rle(path, default_cpu=default_cpu)
     cells, labels = [], []
-    for src_off, dest in sorted(unique_src.items()):
+    n_skip = 0
+    for i, (name, cpu, packed) in enumerate(streams):
+        if skip_prefix:
+            packed = packed[skip_prefix:]
+        dest = dest_of.get(cpu, 0xF800)
         try:
-            out, _base, _end = rledec.decompress(data, src_off, dest)
+            out, base, _end = rledec.decompress(packed, 0, dest)
         except Exception:
+            n_skip += 1
             continue
-        grids = tile_grids(out, "sprite16")
-        if not grids:
+        pal = pal_for
+        cmap = idx_for
+        if not callable(idx_for):
+            pal = pal_for[i]
+            cmap = idx_for[i]
+        if force_pal2_black:
+            pal = list(pal)
+            pal[2] = (0, 0, 0)
+        for off in range(0, len(out) - 31, 32):
+            addr = base + off
+            if callable(cmap):
+                idx = cmap(addr, off)
+            else:
+                idx = cmap.get(addr, 14)
+            cells.append(_paint_plane(bytes(out[off:off + 32]), pal, idx))
+            labels.append("%04X" % addr)
+    stem = os.path.splitext(fname)[0]
+    render_png(os.path.join(SPRITE_DIR, stem + ".png"), cells, [OFF],
+               cols=8, labels=labels, size=16, scale=8)
+    print("%-28s %d streams, %d cells (skip %d)"
+          % (stem + ".png", len(streams), len(cells), n_skip))
+
+
+def dump_asm_sprite_rles(data):
+    """One sheet per packed 1bpp sprite asm (same idea as dump_asm_tilesets).
+
+    Output is gfx/sprites/<stem>.png for the four asms in ASM_SPRITE_STEMS.
+    One cell per 32-byte plane, header = VRAM dest.  No CC overlay.
+    """
+    hud = vk_play_palette(data)
+    vram_cache, type_maps = {}, {}
+
+    dest_of = _sprite_rle_dests(data)
+    path = os.path.join(DATA_DIR, "enemy_sprite_rle.asm")
+    streams = _parse_asm_sprite_rle(path)
+    maps = _enemy_colour_maps(data, streams, dest_of, vram_cache, type_maps, hud)
+    _dump_sprite_rle_asm(
+        data, "enemy_sprite_rle.asm", dest_of,
+        [m[0] for m in maps], [m[1] for m in maps])
+
+    simon_dest = _simon_rle_dests(data)
+    def simon_idx(addr, off):
+        return 1 if (off // 32) % 2 == 0 else 2
+    _dump_sprite_rle_asm(data, "simon_rle.asm", simon_dest, hud, simon_idx)
+
+    intro_pal = vk_intro_palette(data)
+    _dump_sprite_rle_asm(
+        data, "intro_sky.asm", {0xB895: 0xFA00}, intro_pal,
+        lambda addr, off: 14, default_cpu=0xB895)
+
+    def title_idx(addr, off):
+        return 8 if (off // 32) % 2 == 0 else 2
+    _dump_sprite_rle_asm(
+        data, "title_jp_sprites.asm", {0xBBF6: 0xF800}, hud, title_idx,
+        skip_prefix=2, force_pal2_black=True)
+
+
+# 8x8 4bpp tileset dumps live in segments/data/*.asm.  make gfx writes one
+# sheet per file to gfx/tilesets/<stem>.png; cell header is the CPU address
+# (4 hex digits, no 0x — roomperm.draw_text treats lowercase x as multiply).
+DATA_DIR = os.path.join(ROOT, "segments", "data")
+_RE_DEFB = re.compile(r"^\s*defb\b", re.I)
+_RE_HEXB = re.compile(r"0x([0-9A-Fa-f]{2})\b")
+_RE_ADDR_LABEL = re.compile(r"^\s*\w+:\s*;\s*0x([0-9A-Fa-f]{4})\b")
+_RE_ADDR_CMT = re.compile(r"^\s*;\s*0x([0-9A-Fa-f]{4})\b")
+_RE_ADDR_INLINE = re.compile(r";\s*0x([0-9A-Fa-f]{4})\b")
+# Full 8x8 tile headers (`s07 tile 0x00`).  "rest of s10 tile 0x0C" prefixes
+# are skipped: do not use a lookahead after `\s+` (backtracking would still match).
+_RE_TILE_HDR = re.compile(r"^\s*;\s*0x([0-9A-Fa-f]{4})\s+(.*)")
+
+_ASM_PAL_CACHE = None
+
+
+def vk_intro_palette(data):
+    """Intro walk-up palette: HUD-fixed, then intro_palette (0xBFA1) over 4-13
+    (including 8 and 12).  Not title_extra_palette."""
+    pal = [(0, 0, 0)] * 16
+    _apply_palette_overlay(pal, load_palette_table(data, 0x15F88))
+    _apply_palette_overlay(pal, load_palette_table(data, 0x15FA1))
+    return pal
+
+
+def _asm_palette_tables():
+    """label -> 16-colour overlay, parsed from stage_palettes.asm."""
+    global _ASM_PAL_CACHE
+    if _ASM_PAL_CACHE is not None:
+        return _ASM_PAL_CACHE
+    tables = {}
+    current = None
+    buf = bytearray()
+
+    def flush():
+        nonlocal current, buf
+        if current is not None and buf:
+            tables[current] = load_palette_table(bytes(buf), 0)
+        current = None
+        buf = bytearray()
+
+    path = os.path.join(DATA_DIR, "stage_palettes.asm")
+    for line in open(path):
+        m = re.match(r"^([A-Za-z_][\w]*):", line)
+        if m:
+            flush()
+            current = m.group(1)
             continue
-        cells.append(grids[0])
-        labels.append("%X" % dest)
-        for extra in grids[1:4]:
-            cells.append(extra)
-            labels.append("")
-    render_png(os.path.join(GFX, "script_rle.png"), cells, [OFF, FG],
-               cols=8, labels=labels)
-    print("script_rle.png           %d unique cmd-0 streams from %d scripts "
-          "(label=VRAM dest; cmd1=%d other=%d dests=%s)"
-          % (len(unique_src), len(scripts), n_cmd1, n_other,
-             ",".join("%04X" % d for d in sorted(dests))))
+        if current is None or not _RE_DEFB.match(line):
+            continue
+        payload = line.split(";")[0]
+        for hx in _RE_HEXB.findall(payload):
+            buf.append(int(hx, 16))
+    flush()
+    _ASM_PAL_CACHE = tables
+    return tables
 
-# Unique tileset_ptr sources: first stage that uses each CPU pointer.
-# 0xBF uncompressed 8x8 4bpp tiles, blit by load_stage_tileset to VRAM 0x8004.
-TILESET_UNIQUE = (
-    (0, 0x6000),
-    (1, 0x7220),
-    (4, 0x95B3),
-    (7, 0x8493),
-    (10, 0x9E73),
-    (13, 0x8000),
-    (16, 0x9640),
-    (18, 0xA4C0),
-)
-NTILES = 0xBF
 
-def _tileset_file(stage, cpu):
-    if stage >= 13:
-        if 0xA000 <= cpu < 0xC000:
-            return _cpu_file(8, cpu, 0xA000)
-        if 0x8000 <= cpu < 0xA000:
-            return _cpu_file(7, cpu, 0x8000)
-        return _cpu_file(4, cpu, 0x6000)
-    if 0xA000 <= cpu < 0xC000:
-        return _cpu_file(6, cpu, 0xA000)
-    if 0x8000 <= cpu < 0xA000:
-        return _cpu_file(5, cpu, 0x8000)
-    return _cpu_file(4, cpu, 0x6000)
+def _stage_palette_labels():
+    """19 entries of stage_palette_ptr (defw sNN_palette)."""
+    labels = []
+    in_ptr = False
+    path = os.path.join(DATA_DIR, "stage_palettes.asm")
+    for line in open(path):
+        if line.startswith("stage_palette_ptr:"):
+            in_ptr = True
+            continue
+        if not in_ptr:
+            continue
+        m = re.match(r"\s*defw\s+(\w+)", line)
+        if m:
+            labels.append(m.group(1))
+            continue
+        break
+    return labels
 
-def dump_tilesets(data):
-    """8 unique playfield tilesets (uncompressed 8x8 4bpp). Derived, not in
-    manifest.tsv. Label = hex tile id 00..BE as used in metatile defs.
-    Pixel rooms that paint these tiles: tools/roomperm.py --all --pixels
-    (gfx/stage_sNN.png)."""
-    for stage, cpu in TILESET_UNIQUE:
-        fo = _tileset_file(stage, cpu)
-        n = min(NTILES, max(0, (len(data) - fo) // 32))
-        raw = data[fo:fo + n * 32]
-        cells = tile_grids(raw, "tile8")
-        pal = vk_stage_palette(data, stage)
-        name = "tileset_s%02d.png" % stage
-        labels = [_hex_id(i) for i in range(len(cells))]
-        render_png(os.path.join(GFX, name), cells, pal, cols=16,
-                   labels=labels, size=8, scale=8)
-        print("%-22s stage %d cpu %04X  %d x 8x8 4bpp" % (name, stage, cpu, len(cells)))
+
+def _bios_plus_hud(tables):
+    pal = [(msx2_channel(r), msx2_channel(g), msx2_channel(b))
+           for r, g, b in MSX2_DEFAULT_RGB]
+    _apply_palette_overlay(pal, tables["hud_fixed_palette"])
+    return pal
+
+
+def _tileset_asm_palette(fname, data):
+    """Playfield sheets use the stage palette; intro / HUD / portrait are special."""
+    m = re.match(r"tileset_s(\d+)", fname)
+    if m:
+        stage = int(m.group(1))
+        if data is not None:
+            return vk_stage_palette(data, stage)
+        tables = _asm_palette_tables()
+        pal = _bios_plus_hud(tables)
+        labels = _stage_palette_labels()
+        if 0 <= stage < len(labels):
+            _apply_palette_overlay(pal, tables[labels[stage]])
+        return pal
+    tables = _asm_palette_tables()
+    if fname == "title_tiles.asm":
+        if data is not None:
+            return load_palette_table(data, 0x15F88)
+        pal = [(0, 0, 0)] * 16
+        _apply_palette_overlay(pal, tables["hud_fixed_palette"])
+        return pal
+    if fname == "intro_tiles.asm":
+        if data is not None:
+            return vk_intro_palette(data)
+        pal = [(0, 0, 0)] * 16
+        _apply_palette_overlay(pal, tables["hud_fixed_palette"])
+        _apply_palette_overlay(pal, tables["intro_palette"])
+        return pal
+    if fname in ("hud_weapon_key_tiles.asm", "bonus_hud_tiles.asm"):
+        if data is not None:
+            return vk_play_palette(data)
+        pal = [(0, 0, 0)] * 16
+        _apply_palette_overlay(pal, tables["title_extra_palette"])
+        _apply_palette_overlay(pal, tables["hud_fixed_palette"])
+        return pal
+    if fname in ("dracula_portrait.asm", "dracula_portrait_parts.asm"):
+        if data is not None:
+            pal = vk_play_palette(data)
+            _apply_palette_overlay(pal, load_palette_table(data, 0x15F6F))
+            return pal
+        pal = _bios_plus_hud(tables)
+        _apply_palette_overlay(pal, tables["title_extra_palette"])
+        return pal
+    # Fallback: HUD-fixed then title extras (0xBF6F pink/flesh).
+    if data is not None:
+        pal = vk_play_palette(data)
+        _apply_palette_overlay(pal, load_palette_table(data, 0x15F6F))
+        return pal
+    pal = _bios_plus_hud(tables)
+    _apply_palette_overlay(pal, tables["title_extra_palette"])
+    return pal
+
+
+def _asm_tileset_files():
+    names = [fn for fn in os.listdir(DATA_DIR)
+             if fn.startswith("tileset_") and fn.endswith(".asm")]
+    for extra in ("intro_tiles.asm", "title_tiles.asm", "bonus_hud_tiles.asm",
+                  "hud_weapon_key_tiles.asm", "dracula_portrait.asm",
+                  "dracula_portrait_parts.asm"):
+        if extra not in names and os.path.isfile(os.path.join(DATA_DIR, extra)):
+            names.append(extra)
+    return sorted(names)
+
+
+def parse_asm_tile8(path):
+    """4bpp tiles in an asm file, driven by `; 0xXXXX  …` headers.
+
+    `… tile …` is one 8x8 (32 bytes); `… 16x16 …` is one 16x16 (128 bytes,
+    vram_blit_tile16).  `rest of …` prefixes and trailing incomplete tiles
+    count as leftover so a continuation that starts mid-tile aligns to the
+    first complete tile, not the file start.
+    """
+    cells, labels, sizes = [], [], []
+    leftover = 0
+    kind = None  # 8 or 16
+    cpu = None
+    pending = bytearray()
+
+    def flush_incomplete():
+        nonlocal leftover, pending, kind, cpu
+        leftover += len(pending)
+        pending = bytearray()
+        kind = None
+        cpu = None
+
+    def emit_if_ready():
+        nonlocal leftover, pending, kind, cpu
+        need = 32 if kind == 8 else 128
+        if kind is None or len(pending) < need:
+            return
+        raw = bytes(pending[:need])
+        pending = bytearray(pending[need:])
+        if kind == 8:
+            cells.extend(tile_grids(raw, "tile8"))
+        else:
+            cells.extend(tile_grids(raw, "tile4"))
+        labels.append("%04X" % cpu)
+        sizes.append(kind)
+        leftover += len(pending)
+        pending = bytearray()
+        kind = None
+        cpu = None
+
+    with open(path) as f:
+        for line in f:
+            th = _RE_TILE_HDR.match(line)
+            if th:
+                rest = th.group(2).strip().lower()
+                if rest.startswith("rest of"):
+                    flush_incomplete()
+                    continue
+                if "16x16" in rest:
+                    flush_incomplete()
+                    kind = 16
+                    cpu = int(th.group(1), 16)
+                    continue
+                if "tile" in rest:
+                    flush_incomplete()
+                    kind = 8
+                    cpu = int(th.group(1), 16)
+                    continue
+            if not _RE_DEFB.match(line):
+                continue
+            payload = line.split(";")[0]
+            row = [int(hx, 16) for hx in _RE_HEXB.findall(payload)]
+            if not row:
+                continue
+            if kind is None:
+                leftover += len(row)
+                continue
+            pending.extend(row)
+            emit_if_ready()
+    leftover += len(pending)
+    return cells, labels, leftover, sizes
+
+
+def dump_asm_tilesets(data):
+    """One sheet per tileset asm. Cell header = CPU address.
+
+    Uniform 8x8 files stay a 16-column grid.  16x16 files (bonus HUD)
+    use an 8-column (or 5-column) grid.  Mixed files stack an 8x8 band
+    above a 16x16 band.
+    """
+    os.makedirs(TILESET_DIR, exist_ok=True)
+    for fname in _asm_tileset_files():
+        path = os.path.join(DATA_DIR, fname)
+        cells, labels, leftover, sizes = parse_asm_tile8(path)
+        if not cells:
+            print("%-28s (no complete tiles)" % fname)
+            continue
+        pal = _tileset_asm_palette(fname, data)
+        out = os.path.join(TILESET_DIR, os.path.splitext(fname)[0] + ".png")
+        c8 = [c for c, s in zip(cells, sizes) if s == 8]
+        l8 = [lab for lab, s in zip(labels, sizes) if s == 8]
+        c16 = [c for c, s in zip(cells, sizes) if s == 16]
+        l16 = [lab for lab, s in zip(labels, sizes) if s == 16]
+        if c8 and not c16:
+            render_png(out, c8, pal, cols=16, labels=l8, size=8, scale=8)
+        elif c16 and not c8:
+            cols16 = 5 if fname == "bonus_hud_tiles.asm" else (
+                4 if fname in (
+                    "dracula_portrait_parts.asm",
+                    "hud_weapon_key_tiles.asm",
+                ) else 8)
+            render_png(out, c16, pal, cols=cols16, labels=l16, size=16, scale=8)
+        else:
+            _stack_rgb(out, [
+                render_png(None, c8, pal, cols=16, labels=l8, size=8, scale=8),
+                render_png(None, c16, pal, cols=8, labels=l16, size=16, scale=8),
+            ])
+        extra = "  +%d leftover bytes" % leftover if leftover else ""
+        rel = os.path.relpath(out, ROOT)
+        if c16 and c8:
+            desc = "%3d 8x8 + %2d 16x16" % (len(c8), len(c16))
+        elif c16:
+            desc = "%3d 16x16" % len(c16)
+        else:
+            desc = "%3d tiles" % len(c8)
+        print("%-36s %s  %s%s" % (rel, desc, labels[0], extra))
 
 if __name__ == "__main__":
     main()

@@ -1,10 +1,11 @@
-; Stages 4-6 tileset start (seg5 0x95B3).  Continues in tileset_s10_cont.
+; Stages 4-6 tileset unique prefix (seg5 0x95B3-0x9E73).
+; The 0xBF blit continues through tileset_s10 (shared bytes).
 ; Uncompressed 8x8 4bpp (SCREEN 5).  Each defb is one pixel-row
 ; (4 bytes, high nibble = left).  Eight rows = one tile (32 bytes).
 ; load_stage_tileset blits 0xBF tiles from tileset_ptr[D000].
 ; Sets overlap; this file is the unique ROM slice, not a full copy.
 
-tileset_s04:  ; 0x95B3  stages 4-6; spills into seg6
+tileset_s04:  ; 0x95B3  stages 4-6; tail overlaps tileset_s10
 ; 0x95B3  s04 tile 0x00
 	defb 0x24,0xa4,0xc6,0x44
 	defb 0x46,0xac,0x66,0x6a

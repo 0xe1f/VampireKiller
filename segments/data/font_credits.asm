@@ -2,7 +2,7 @@
 ; and credits.  Loaded by credits_font_load (seg0 0x53E5) from credits_init.
 ; First 14 at VRAM dest DE=0x8040 (digits 0-9, then . ' : ,); A-Z at
 ; DE=0x0848.  Each defb is one row, MSB = left pixel.
-; Preview: gfx/font_credits.png.  Source: data/font_credits.asm.
+; Preview: gfx/fonts/font_credits.png.  Source: data/font_credits.asm.
 credits_font:
 ; '0'
 	defb %01111100

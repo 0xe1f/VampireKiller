@@ -2,8 +2,8 @@
 # All banks (0-15) are source; no .bin.
 segments/*.bin
 
-# ROM-derived graphics dumps - regenerate with `make gfx` (manifest is committed).
-# PNGs (sprite sheets, minimaps) ARE tracked so they're viewable without a rebuild.
+# ROM-derived scratch — never commit.
+# PNGs (gfx/, gfx/sprites/, gfx/tilesets/, gfx/fonts/, minimaps) ARE tracked so they're viewable without a rebuild.
 gfx/*.bin
 gfx/*.txt
 gfx/index.md

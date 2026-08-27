@@ -11,9 +11,10 @@ not yet confirmed in code is marked *(unconfirmed)*.
    character-set nibble (low nibble of `0x002B`; 0 = Japanese, non-zero =
    international/other). `title_build` (seg0 0x4D4E) and `title_load_tiles`
    (0x5A02) both branch on it. A Japanese machine draws the kana
-   **"Akumajo Dracula"** (`title_logo_jp` 0x4C5A + glyphs at seg8 0xAEA0);
-   any other machine draws **"VAMPIRE KILLER"** (`title_logo_intl` 0x4CA0 +
-   glyphs at seg8 0xB260). The castle emblem (`title_castle` 0x4C3F) is shared.
+   **"Akumajo Dracula"** (`title_logo_jp` 0x4C5A + `title_logo_jp_tiles` and
+   SAT from `title_jp_sprites`); any other machine draws **"VAMPIRE KILLER"**
+   (`title_logo_intl` 0x4CA0 + `title_logo_en_tiles`). Castle and both logo
+   tilesets live in `title_tiles.asm`; the JP SAT stream is bank 13.
    This is the ROM's only region difference (confirmed by rendering both
    tilesets straight from the ROM).
 3. **Title input** (`frontend_input`, seg0 0x4398) runs after logo / title /
@@ -30,7 +31,11 @@ not yet confirmed in code is marked *(unconfirmed)*.
    - No start on the title: `state_title` counts down `0xC004` (first frame
      wraps 0→255, ~4s at 60 Hz), then `title_set_color2` and `inc 0xC000` →
      **attract** (state 2).
-4. Game start plays an **intro animation**: Simon arriving at the castle.
+4. Game start plays an **intro animation**: Simon walking up to the castle
+   (fence/gate, moon, distant castle, garden wall). Tileset is `intro_tiles`
+   (seg9 0x8000), loaded by `load_intro_tileset`; colours from `intro_palette_load`
+   (HUD-fixed, then `intro_palette` at 0xBFA1 — not the title extras). Sprites
+   are `intro_simon` + `intro_sky`. Map is `mtile_stream_c41a` (`0xC41A`).
 5. Play proceeds through the **courtyard**, then the **castle interior**.
 
 ## Game Master cartridge (hidden cheat features)
@@ -165,7 +170,7 @@ type 18 in a boss room) use the shared meter `0xC418`; the rest die when
 | 0x1C | `actor_blob_white` | Same tick; hub 2 (stages 7–9). SAT `0E 42`. |
 
 Per-frame `ix+1` machines (DISPATCH_A or `dec a`/`jr z`) are named in
-`segments/seg03.asm`: raven wait/coast/hover/pick/strafe, dog idle/run/air,
+`segments/banks_0123.asm` (bank 3): raven wait/coast/hover/pick/strafe, dog idle/run/air,
 bone dragon form/idle/spit, red skeleton wake/walk/pause, hunchback
 wait/drop/crouch/jump/hide, blob hatch/fall/pause/hop, merman
 fall/walk/spit, hanging bat hang/swoop/bob, skull pile idle/windup/recover.
@@ -246,7 +251,7 @@ The world is a hierarchy: **hub → stage → room**.
   jump. *Runtime:* held as **0xC701 bit 0**. Spent by `door_interact` (seg1 0x771F)
   when Simon overlaps the door (`res 0,(0xC701)`; courtyard / stage 0 opens freely).
 - **Every stage 0–18 has exactly one white-key door, from one table.** Seg13
-  **`door_tbl` at 0xBB61** (now `segments/seg13.asm`): 19 records of 3 bytes `(room | vert<<7), Y, X`.
+  **`door_tbl` at 0xBB61** (now `segments/banks_bcd.asm`): 19 records of 3 bytes `(room | vert<<7), Y, X`.
   `door_load_coords` (0xBB37) indexes it by stage `0xD000`; if `0xD001` matches
   the room nibble it writes **`0xC5AD = Y`, `0xC5AE = X`** (`ld (0xC5AD),hl` with
   L=Y, H=X — **not** X then Y) and arms **`0xC5AC`** (`0xFF` if bit7 / vertical so
@@ -491,7 +496,7 @@ expansion on room entry; `seg1 map_cell_at` (0x7d36) reads it for collision.
 
 Storage (during the build the mapper pages bank 0x0b->0x6000, 0x0c->0x8000,
 0x0d->0xA000, then restores banks 1/2/3).  Banks 0x0B/0x0C are source in
-`segments/seg11.asm` / `seg12.asm`:
+`segments/banks_bcd.asm`:
 - **`mtile_rowbase`** - byte table at bank 0x0b **0x6000**; index = rowbase[row]+col.
   Rooms in a world row = rowbase[row+1]-rowbase[row] (row 1 / stage 1 = 8 rooms;
   stage 18 uses `minimap_room_count` because the next byte is not a count).
@@ -542,7 +547,7 @@ stage 0 room 2 gate) were 09 counted solid because 05-08 decoration was treated
 as a surface; the 01-04 adjacency rule clears them.
 
 **Room-to-room connectivity (CONFIRMED, byte-exact + runtime-validated).** The
-transition graph is a per-stage table in seg13 (`segments/seg13.asm`): `conn_ptr` word table at **0xB9D3**
+transition graph is a per-stage table in bank 13 (`segments/banks_bcd.asm`): `conn_ptr` word table at **0xB9D3**
 (19 entries, one pointer per stage 0xD000 0..18). For a room it points at a 2-byte
 record = **4 nibbles: up, down, left, right** = the DESTINATION room index for
 that exit (`0xF` = blocked). On an edge/stair transition the engine looks this up
@@ -567,7 +572,7 @@ changed by the connectivity path - vertical moves stay within the stage.
   reproduces the true portal/loop stages (8's vertical loop, 12/13 portals, Dracula's
   stage 18). The old BFS reconstruction has been dropped.
 
-**Stage-12 spots (`spot_tbl` at 0xBBCD, in `segments/seg13.asm`).** `door_load`
+**Stage-12 spots (`spot_tbl` at 0xBBCD, in `segments/banks_bcd.asm`).** `door_load`
 (0xBB31, via `door_load_paged`) also runs `spot_load_coords` (0xBB9A): a 0xFF-ended
 list of `(stage, dest<<4|room, Y, X)`. The current ROM has 10 records, all stage
 12, in two-way pairs (0↔3, 1↔4, 2↔11, 5↔8, 7↔10). A match arms **0xC5B1=1**,
@@ -742,7 +747,7 @@ Weapon behaviour (ROM):
   vendor dagger (despawn-on-hit, two slots). Axe vs cross is **3 = axe
   (`0x1C`), 4 = cross (`0x1D`)** from throw speed + vendor stock (the cross is
   the one for sale; type 4 is the faster ±5 boomerang). HUD tiles agree
-  (`gfx/bonus_hud_items.png`, bottom row): axe is a hand-axe, cross is the
+  (`gfx/tilesets/hud_weapon_key_tiles.png`): axe is a hand-axe, cross is the
   diagonal four-arm cross with a **blue** fill (palette index 15, same slot as
   the thrown SAT `0x0F`). Type 3's lose path hardcodes a `0x1C` world drop —
   that is this weapon's own bonus id, not a second item.
@@ -753,8 +758,7 @@ Weapon behaviour (ROM):
 - On death (`sub_70e3h`) `C416` is cleared to 0. Missing a cross/axe catch also
   returns to leather (`lose_weapon` 0x8E9A) without waiting for death.
 - Thrown-weapon **patterns** come from seg10 via `load_weapon_sprites` (0x559A)
-  / `weapon_sprite_ptr` (0x55DE). Sheets: `gfx/weapon_knife.png`,
-  `weapon_axe.png`, `weapon_cross.png`.
+  / `weapon_sprite_ptr` (0x55DE). Sheet: `gfx/sprites/enemy_sprite_rle.png`.
 
 Other pickups replace the weapon:
 
@@ -817,7 +821,7 @@ duration"; the ROM is slightly more generous than that.
 **How.** Whip the hourglass **once**. `l8c4bh` (seg2 **0x8C4B**) rewrites the
 pickup type (`ix+4`) from **0x0A → 0x0B**, nudges it up 8 pixels (`sub_8c36h`),
 and the 4bpp blit switches to the sideways graphic (the tile next to the upright
-hourglass in `gfx/bonus_hud_sheet.png`). Collecting that form
+hourglass in `gfx/tilesets/bonus_hud_tiles.png`). Collecting that form
 runs `bonus_tipped_hourglass` (id **11**, 0x8DFC) which does only
 `set 2,(0xC431)`. Whip it a **second** time and `ix+6` is set to 1, so the
 pickup despawns on the next tick — the item is gone.
@@ -854,8 +858,8 @@ of `0xC431`, so this flag, boots, and wings go together. It survives room and
 stage changes.
 
 - **Life orbs / potion** restore `0xC415` (not heart currency). **7** small orb
-  = +8 (1/4 of the 32-point bar). **22** is a **bottle/potion** (first tile of
-  `gfx/bonus_hud_items.png`; vendor price-tbl id `0x16`) that instant-fills +32. Same full-bar
+  = +8 (1/4 of the 32-point bar). **22** is a **bottle/potion** (`bonus_hud_potion`
+  on `gfx/tilesets/bonus_hud_tiles.png`; vendor price-tbl id `0x16`) that instant-fills +32. Same full-bar
   end state as picking up the boss orb, but a different graphic and collect
   path — the descending boss orb is `actor_orb`, not this bonus id.
 - **Shields** — **3** red (`C701` bit 4): facing the hit takes table damage
@@ -907,15 +911,14 @@ tiles from VRAM page 1. Loaded at the HUD init copy (seg0 ~0x548C):
 
 | ids | CPU source | ROM file | VRAM dest | dump |
 |-----|------------|----------|-----------|------|
-| 1–20 | seg9 `0x9000` | `0x13000` | Y=`0x50`, then Y=`0x60` X=0..48 | `gfx/bonus_hud_sheet.png` |
+| 1–20 | seg9 `0x9000` | `0x13000` | Y=`0x50`, then Y=`0x60` X=0..48 | `gfx/tilesets/bonus_hud_tiles.png` |
 | 21 (slime) | — | — | no dedicated tile | — |
-| 22 (potion) | seg9 `0x9A00` | `0x13A00` | Y=`0x60` X=80 | `gfx/bonus_hud_items.png` (3×3) |
-| 23–30 | seg6 `0xB9C8` (after `page_tileset_banks`) | `0xD9C8` | Y=`0x60` X=96..208 | same grid, tiles 1–8 |
+| 22 (potion) | seg9 `0x9A00` | `0x13A00` | Y=`0x60` X=80 | same sheet (`bonus_hud_potion`) |
+| 23–30 | seg6 `0xB9C8` (after `page_tileset_banks`) | `0xD9C8` | Y=`0x60` X=96..208 | `gfx/tilesets/hud_weapon_key_tiles.png` |
 
-`bonus_hud_sheet.png` is ids `01`–`14` in order (5×4). `bonus_hud_items.png` is a 3×3
-of ids **`16`–`1E`**: potion, yellow key, white key, chest, chain whip, knife, **axe**,
-**cross**, holy water. Each cell is labelled with its bonus id in hex
-(same 3×5 glyphs as the minimap renderer).
+`bonus_hud_tiles.png` is ids `01`–`14` then the potion (5 columns, CPU-address
+headers). `hud_weapon_key_tiles.png` is ids **`17`–`1E`**: yellow key, white key,
+chest, chain whip, knife, **axe**, **cross**, holy water, then candle flames.
 
 **Palette.** `palette_set` writes one MSX2 entry (A=index, D=`0rrr0bbb`, E=`00000ggg`);
 `palette_apply` walks an (index, rb, g)+ table ending in `0xFF`. `palette_hud_load` loads the
@@ -1070,7 +1073,7 @@ Shared physics header (`actor_integrate` 0x99C0, velocity helpers in seg3):
 | +06 | physics alive (`actor_integrate` skips if 0; spawn writes 0, init usually sets 1) |
 | +07 / +08 | signed Y velocity |
 | +09 / +0A | signed X velocity |
-| +0B | pose / shape id (seg6 word table 0xB473 while that bank is paged) |
+| +0B | pose / shape id (`actor_shape_ptr` / seg6 word table while that bank is paged) |
 | +0C | timer |
 | +0D | HP from `actor_hp_tbl` (0x60E9; spawn indexes as 0x60E8+type) |
 | +0E | flags. **bit 0 = hittable** this frame (`rra`/`jr nc` in whip/proj tests; `res 0` on a hit). **bit 2** = rearm hittable (`actors_rearm_hittable`). Spawn writes 7. |
@@ -1126,7 +1129,7 @@ note the real glyph in a comment.
   (e.g. `ld hl,0x930b` / `0xb70b` at 0x4557/0x4562) - so sprite/tile BITMAPS live
   in the graphics segments (4-15), not seg00.
 - Actor SAT comes from the C800/D700 slot: pose `ix+0B` selects a seg6 shape
-  stream at 0xB473; `actor_sat_build` writes Y/X/pattern into the 5-byte cells
+  stream via `actor_shape_ptr`; `actor_sat_build` writes Y/X/pattern into the 5-byte cells
   at `slot|0x20`. See [Actors (C800 / D700)](#actors-c800--d700).
 - Pixel patterns are 1bpp RLE into VRAM 0xF800+ (per-room gfx scripts), not a
   Metal Gear-style 32-byte pattern array in ROM.
@@ -1164,17 +1167,17 @@ ASCII `'0'`–`'_'`), one `defb %xxxxxxxx` row per scanline in
 `segments/data/font_hud.asm`. `hud_font_load` (seg0 0x53BD, from
 `title_build`) expands them via `glyph_blit_run` (ink C=0x0E) onto VRAM
 page 1 at Y=`0x40`. Drawing is HMMM from that atlas (`sub_4aeeh`, source Y
-+= `0x38`). Sheet: `gfx/font_hud.png` (`make gfx`). The 8x8 1bpp
++= `0x38`). Sheet: `gfx/fonts/font_hud.png` (`make gfx`). The 8x8 1bpp
 ending-credits glyphs are a different sheet in `segments/data/font_credits.asm`:
 seg14 `credits_font` (0x8824: digits 0-9 then `. ' : ,`) and `credits_font_az`
 (0x8894: A-Z). `credits_font_load` (seg0 0x53E5) is called from `credits_init`
-and blits them via `glyph_blit_run` (ink C=0x0E). Sheet: `gfx/font_credits.png`.
+and blits them via `glyph_blit_run` (ink C=0x0E). Sheet: `gfx/fonts/font_credits.png`.
 The boot Konami logo is a third 1bpp sheet: seg13 `logo_font` (0xBE59: 52 × 8×8,
 tile ids `0x01`–`0x34`) in `segments/data/font_logo.asm`. `logo_font_load`
 (seg0 0x5316, from `konami_logo_draw`) blits three ink groups onto page 0 at
 Y=0; `tile_string_draw` copies them with no HUD `+0x38`. Logo ids `0x2C`–
 `0x2E` are wordmark cells, not `hud_font` `'<'` `'='` `'>'`. Sheet:
-`gfx/font_logo.png`.
+`gfx/fonts/font_logo.png`.
 
 ### PSG driver (seg14)
 
@@ -1208,7 +1211,7 @@ Segment 0 is the resident **kernel/orchestrator** only: interrupt handler, frame
 tick + state dispatch, graphics/RLE loaders, bank switching, and the
 entity-dispatch shell at 0x5FD0. All 14 `main_state_tbl` handlers live in seg0
 (0x417D-0x441B) but are thin - they call out into banked ROM:
-- state 0 (logo): `call 0x6253`   state 3 (in-game): `call 0x63DA`
+- state 0 (logo): `call 0x6253`   state 3 (intro): `intro_scene_build` 0x63DA
 - per-entity behaviour (player/enemy AI) via `entity_tbl` -> 0xA000+ (spawn
   init). Per-frame C800 ticks go through `actor_type_tick` / `actor_tick_tbl`
   (seg2 0x9942; most entries skip the spawn-init/splash). Boss-clear after
@@ -1245,9 +1248,8 @@ bitmap). Set in `video_init`: `ld a,5 / call CHGMOD (0x005f)`. Consequences:
   is 4bpp - the sprites are never 4bpp.
   Evidence: seg13/0xA319 patterns alternate sparse/dense pixel counts
   (52,164, 49,145, ...), each sparse plane nearly a subset of the next dense
-  one - so `intro_simon` is 8 two-plane sprites, not 16 frames. The
-  catalogue's `planes` column composites planes in the `.png` preview while the
-  `.txt`/`.bin` keep each plane separate for editing.
+  one - so `intro_simon` is 8 two-plane sprites, not 16 frames. PNG previews
+  keep each plane as its own cell so dest ids stay 1:1 with the stream.
 
 The 16-colour VDP palette is programmed by `palette_set` / `palette_apply`. Eight indices
 (0, 1, 2, 3, 8, 12, 14, 15) are fixed by `palette_hud_load` (seg10 `0xBF88`) and never
@@ -1300,7 +1302,7 @@ paged into page 1b / 2a / 2b. Helper routines (each also shadows the value at
 0xF0F1-0xF0F3 for int_handler to restore):
 - `page_map_banks` -> seg 11 @ 0x6000, seg 12 @ 0x8000, seg 13 @ 0xA000  (level/sprite gfx)
 - `page_title_banks` -> seg  9 @ 0x8000, seg 10 @ 0xA000                   (front-end/title gfx)
-- `page_tileset_banks` -> seg  4 @ 0x6000, seg  5 @ 0x8000, seg  6 @ 0xA000  (tileset banks; HUD keys/weapons at 0xB9C8)
+- `page_tileset_banks` -> seg  4 @ 0x6000, seg  5 @ 0x8000, seg  6 @ 0xA000  (tileset banks; `actor_shape_ptr` at 0xB473, HUD keys/weapons at 0xB9C8)
 - `page_play_banks` -> seg  1 @ 0x6000, seg  2 @ 0x8000, seg  3 @ 0xA000  (default/game banks)
 
 So a page-2b source `0xAxxx` read right after `page_map_banks` maps to file offset
@@ -1327,8 +1329,10 @@ sources** plus weapons/vdoor/orphans live in `data/enemy_sprite_rle.asm`
 counts stay hex). Every dest is sprite-generator VRAM (`FA00`, `FB80`, `FBC0`, `FC00`,
 `FC80`, `FD00`, `FD40`, `FE00`, `FE40`, `FE80`, `FEC0`) — not Simon (`F800`) or
 projectile weapons (`F8C0`). Playfield tilesets are a separate load (seg4-6 via
-`page_tileset_banks`), not these scripts. `make gfx` writes `gfx/script_rle.png` (up to
-four 16×16 cells per unique stream, labelled by dest). Seg13 `0xA319+` is
+`page_tileset_banks`), not these scripts. Packed 1bpp sprite asms dump to
+`gfx/sprites/<stem>.png` (`enemy_sprite_rle`, `simon_rle`, `intro_sky`,
+`title_jp_sprites`): every 16×16 plane, SAT colour, labelled by VRAM dest.
+Seg13 `0xA319+` is
 `intro_simon` then the `simon_cell0/1` streams, not leftover enemy art.
 
 ### Playfield tilesets
@@ -1341,15 +1345,24 @@ X=8 on page 1, so nametable id 0 samples unloaded VRAM (blank / colour 0) and
 id N is ROM tile N−1 (`tile_atlas_pos`: SX=(A&0x1F)*8, SY=(A&0xE0)>>2). The
 playfield drawer (`0x4F98`) paints 22 rows from `0xD140` (map rows 2–23).
 Eight unique sources (courtyard; stages 1-3 / 4-6 / 7-9 / 10-12 / 13-15 /
-16-17; Dracula). `make gfx` writes `gfx/tileset_s00.png` … `tileset_s18.png`
-(labelled by ROM tile index `00`–`BE`) and `gfx/stage_sNN.png` (nametable
+16-17; Dracula). Sets overlap in ROM, so each `segments/data/tileset_*.asm`
+is a unique byte range, not a full 0xBF-tile copy (s04's blit continues
+through `tileset_s10`). `page_tileset_banks` maps segs 4–6 as one 24K
+window, so spilling sets are one file (`tileset_s01` crosses 0x8000,
+`tileset_s10` crosses 0xA000); segs 7–8 are the same for `tileset_s16`.
+`make gfx` writes one sheet per 4bpp tileset asm under `gfx/tilesets/`
+(same stem as the `.asm`; cell header is the CPU address). Playfield files
+and `intro_tiles` are 8×8 (32 bytes/tile). `bonus_hud_tiles` (seg9 `0x9000`)
+and `dracula_portrait_parts` (seg15 `0xBBD8`) and `hud_weapon_key_tiles`
+(seg6 `0xB9C8`) are 16×16 (`vram_blit_tile16`, 128 bytes each). Pixel rooms: `gfx/stage_sNN.png` (nametable
 ids, HUD rows cropped). Event 6 (`dracula_portrait_load` 0x5887) then overlays
 seg15 frame tiles plus 108 face tiles at atlas ids 0x1E–0x89, H-mirrors them
 to 0x8A–0xF5, and V-mirrors the frame for the bottom edge. Tileset banks 4–8
 are labeled source (`tileset_s00` at 0x6000, overlapping/spilling sets in
-`segments/data/tileset_sNN.asm`, `hud_weapon_key_tiles` at 0xB9C8). Each 8×8
-tile is eight `defb` rows (4 bytes = 8 pixels; high nibble = left). `make gfx`
-PNG previews are derived, not the assemble source.
+`segments/data/tileset_sNN.asm`, `actor_shape_ptr` at 0xB473, `hud_weapon_key_tiles` at 0xB9C8). Each 8×8
+tile is eight `defb` rows (4 bytes = 8 pixels; high nibble = left); each 16×16
+is sixteen 8-byte rows. `make gfx` PNG previews are derived, not the assemble
+source.
 
 ### Tools for the graphics pipeline
 
@@ -1368,46 +1381,46 @@ PNG previews are derived, not the assemble source.
 The committed build stays byte-exact because identified graphics are stored as
 the original bytes (labeled `defb` for uncompressed tilesets / metatiles; packed
 1bpp sprite RLE with `%xxxxxxxx` pixel rows; hex PSG / unidentified slices).
-Editable PNG copies live in `gfx/`, generated by
-`tools/gfxdump.py` from `gfx/manifest.tsv` (run `make gfx`):
-- `gfx/<name>.bin` - decompressed raw pixels (edit these)
-- `gfx/<name>.txt` - ASCII-art preview (definitive human-readable source)
-- `gfx/<name>.png` - scaled PNG sheet, for extra clarity (via the dependency-free
-  writer `tools/pngwrite.py`)
-- `gfx/index.md`   - table of all catalogued sets (embeds the PNG previews)
-Only `gfx/manifest.tsv` is committed; the dumps are ROM-derived and regenerated.
-To mod a sprite: edit its `.bin`, re-pack with `tools/rleenc.py`, and patch the
-stream into the ROM (the base build stays byte-exact until you patch).
+PNG copies live in `gfx/`, generated by `tools/gfxdump.py` (`make gfx`):
+- `gfx/<name>.png` - derived sheets (composites, hazards)
+- `gfx/fonts/<stem>.png` - 1bpp font asms (`font_credits`, `font_hud`,
+  `font_logo`)
+- `gfx/sprites/<stem>.png` - packed 1bpp sprite-asm sheets only
+  (`enemy_sprite_rle`, `simon_rle`, `intro_sky`, `title_jp_sprites`)
+- `gfx/tilesets/<stem>.png` - 4bpp tileset sheets
+PNG sheets are committed; the packed/uncompressed bytes in `segments/data/`
+are the assemble source.
 
-Catalogued so far (extend `manifest.tsv` as more sets are identified):
-- `intro_simon` - seg13, 8 streams 0x1A319-0x1A4BC, 8 two-plane Simon sprites
-  (intro: Simon arriving at the castle).
-- `intro_sky` - seg13, 0x1B895, 8 cloud patterns + a 2-frame bat flap.
-- `simon_cell0` - seg13, 40 two-plane frames via pointer table 0xA281 (indexed by
-  0xC42E). Simon's **lower body** (legs): walk/jump/crouch/climb poses.
-- `simon_cell1` - seg13, 36 frames via pointer table 0xA2D1 (indexed by 0xC42F).
-  Simon's **upper body**: torso/head/arm and the **whip** (whip-crack arcs).
-- `weapon_knife` / `weapon_axe` / `weapon_cross` - seg10 streams from
-  `weapon_sprite_ptr` (seg0 0x55DE, was l55deh). `load_weapon_sprites` (0x559A)
-  RLE-decompresses to VRAM 0xF8C0 then `gfx_script_convert` converts 1bpp quadrants.
-  Knife = 2 patterns (one two-plane sprite); axe/cross = 4 (two frames).
-  In-game SAT for Simon's body is `simon_sat_cell0/1` (seg1 0x798C/0x79DC).
-- `font_credits.png` - 40 x 8x8 1bpp ending-credits glyphs from seg14
+Catalogued so far:
+- `intro_simon` / `simon_cell0` / `simon_cell1` / `intro_sky` — packed streams
+  in `data/simon_rle.asm` and `data/intro_sky.asm` (sheets
+  `gfx/sprites/simon_rle.png`, `gfx/sprites/intro_sky.png`). Intro: 8 two-plane
+  Simon sprites then clouds/bat at VRAM 0xFA00. Cell 0 = legs (`0xA281` /
+  `0xC42E`); cell 1 = torso/whip (`0xA2D1` / `0xC42F`).
+- `weapon_knife` / `weapon_axe` / `weapon_cross` - seg10 streams in
+  `data/enemy_sprite_rle.asm` (`weapon_sprite_ptr`, seg0 0x55DE).
+  `load_weapon_sprites` (0x559A) RLE-decompresses to VRAM 0xF8C0 then
+  `gfx_script_convert` converts 1bpp quadrants. Knife = 2 patterns; axe/cross
+  = 4. In-game SAT for Simon's body is `simon_sat_cell0/1` (seg1 0x798C/0x79DC).
+- `gfx/fonts/font_credits.png` - 40 x 8x8 1bpp ending-credits glyphs from seg14
   `credits_font` (`data/font_credits.asm`; 0-9 `. ' : ,` A-Z). Raw, not RLE;
   loaded by `credits_init`.
-- `font_hud.png` - 48 x 8x8 1bpp HUD/title glyphs from seg8 `hud_font`
+- `gfx/fonts/font_hud.png` - 48 x 8x8 1bpp HUD/title glyphs from seg8 `hud_font`
   (`data/font_hud.asm`; `'0'`–`'_'`). Raw, not RLE; loaded by `hud_font_load`
   from `title_build`.
-- `font_logo.png` - 52 x 8x8 1bpp boot Konami-logo glyphs from seg13 `logo_font`
+- `gfx/sprites/title_jp_sprites.png` - every 16×16 plane in
+  `data/title_jp_sprites.asm`. JP `title_load_tiles` only (`rle_dec_addr` to
+  VRAM 0xF800). SAT colour 8 (hud_fixed red) or 2 (forced black), not stacked.
+- `gfx/fonts/font_logo.png` - 52 x 8x8 1bpp boot Konami-logo glyphs from seg13 `logo_font`
   (`data/font_logo.asm`; tile ids `01`–`34`). Raw, not RLE; loaded by
   `logo_font_load` from `konami_logo_draw`. Not `hud_font` (overlapping ids
   `2C`–`2E` are a different bitmap).
-- `enemy_sheet.png` - one labelled frame per `entity_tbl` type `01`–`22`, plus
+- `gfx/enemy_sheet.png` - one labelled frame per `entity_tbl` type `01`–`22`, plus
   candle-blob recolours **1A/1B/1C** (`make gfx`). Each frame is cropped to
   the SAT cells it actually occupies (16×16, 16×32, 32×16, … — type `16` is
   40×48) and packed, rather than a uniform 64×64 cell. The label is
   `HH WxH` (hex type id, decimal SAT size in source pixels).
-  Layout from the seg6 shape table at 0xB473 (`ix+0B`); pixels from the per-room
+  Layout from `actor_shape_ptr` (`ix+0B`); pixels from the per-room
   gfx-script RLE into VRAM 0xF800+ (plus the 0x4745 1bpp convert). Two-plane SAT
   colours with CC (`0x40`) OR the colour indices (2+4→6). Palette is the
   playfield sequence: HUD-fixed (`palette_hud_load`) + `0xBEA7[stage]` + the per-room
@@ -1431,9 +1444,8 @@ Catalogued so far (extend `manifest.tsv` as more sets are identified):
   `0x67`. Types **0x1A/0x1B/0x1C** are `actor_blob_blue` / `_red` / `_white`
   (`spr_blob` fill / `spr_blob_cc` outline at FE80+; SAT `0F 42` / `08 42` /
   `0E 42` — HUD-fixed indices 15/8/14), appended as **1A/1B/1C**.
-  Boss types use the event-room tileset. Not in `manifest.tsv`
-  (derived, like the HUD bonus sheets).
-- `sheet_enemy_<name>_<id>.png` - every `ix+0B` pose for one actor (same
+  Boss types use the event-room tileset. Derived (`make gfx`).
+- `gfx/sheet_enemy_<name>_<id>.png` - every `ix+0B` pose for one actor (same
   compositor as `enemy_sheet.png`). Filename id is the hex type (`sheet_enemy_axe_knight_10`);
   the cell label is the hex shape id only (no `WxH`). Type 14 labels are SAT
   head patterns (`80` idle / `70` spit); Frankenstein and the bone dragon
@@ -1450,12 +1462,25 @@ Catalogued so far (extend `manifest.tsv` as more sets are identified):
   `enemy_sheet.png` (packed mixed sizes, `NAME WxH` labels, `OFF` filling the
   object's rectangle), but the pixels are 4bpp *background* data read straight
   from seg9 rather than composited sprite planes. Palette is stage 6 room 1's
-  playfield sequence. Derived, not in `manifest.tsv`.
-- `script_rle.png` - unique per-room gfx-script cmd-0 RLE streams (30 sources,
-  21 scripts). First up-to-four 16×16 cells per stream, labelled by VRAM dest.
-  Derived; same `make gfx` pass as `enemy_sheet.png`.
-- `tileset_s00.png` … `tileset_s18.png` - 8 unique playfield tilesets (0xBF
-  8×8 4bpp tiles, labelled with hex tile id `00`–`BE` as in metatile defs). Shared across 3-stage hubs.
+  playfield sequence. Derived (`make gfx`).
+- `gfx/fonts/<stem>.png` - 1bpp glyph asms (`font_credits`, `font_hud`,
+  `font_logo`). Cell header is the hex tile id. HUD-fixed ink 14.
+  Same `make gfx` pass.
+- `gfx/sprites/<stem>.png` - one sheet per packed 1bpp sprite asm
+  (`enemy_sprite_rle`, `simon_rle`, `intro_sky`, `title_jp_sprites`).
+  Cell header is the VRAM dest. One 16×16 plane per cell (no CC overlay).
+  Enemy streams use that actor's SAT index in the room playfield palette;
+  Simon is HUD-fixed 1 (peach) / 2 (grey); intro sky is intro-palette white;
+  JP title is SAT 8 / 2. Same `make gfx` pass as the tileset sheets.
+- `tilesets/<stem>.png` - one sheet per 4bpp tileset asm
+  (`tileset_s00.asm` → `tilesets/tileset_s00.png`, plus `tileset_s08_pad`,
+  `intro_tiles`, `bonus_hud_tiles`, `hud_weapon_key_tiles`,
+  `dracula_portrait`, `dracula_portrait_parts`). Cell header is the CPU
+  address (4 hex digits).
+  Playfield files use that stage's palette; intro uses `intro_palette_load`;
+  bonus HUD and HUD keys/weapons use HUD-fixed; portrait uses HUD-fixed then
+  `0xBF6F`. 8×8 files are every 32-byte tile; `bonus_hud_tiles`,
+  `hud_weapon_key_tiles`, and `dracula_portrait_parts` are 16×16.
 - `stage_sNN.png` - per-stage pixel rooms (`roomperm.py --pixels`):
   nametable id N → ROM tile N−1 (id 0 blank — blit starts at VRAM 0x8004),
   per-room playfield palette, HUD rows cropped. `make gfx` emits these

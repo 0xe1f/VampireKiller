@@ -1,5 +1,5 @@
 ; Intro sky RLE (seg13 0xB895), loaded to VRAM 0xFA00.
-; 8 cloud patterns + 2-frame bat flap.  gfx/intro_sky.
+; 8 cloud patterns + 2-frame bat flap.  gfx/sprites/intro_sky.png (`make gfx`).
 ; Pixel bytes are defb %xxxxxxxx (MSB=left); counts stay hex.
 intro_sky:
 	defb 0x02, %00000000

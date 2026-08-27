@@ -3,7 +3,7 @@
 #   make segments   drop leftover .bin files (all banks are source)
 #   make            assemble VampireKiller.asm -> VampireKiller.rom
 #   make verify     assemble, then byte-compare against the original ROM
-#   make gfx        (re)build the readable graphics catalogue in gfx/
+#   make gfx        (re)build PNG sheets in gfx/, gfx/sprites/, gfx/tilesets/, gfx/fonts/
 #   make music      render BGM WAVs from the ROM PSG bytecode (music/)
 #   make sfx        render sfx ids 0x01-0x1D into sfx/
 #   make clean      remove build output
@@ -32,8 +32,8 @@ all: $(SRC)
 segments:
 	tools/split-rom.sh
 
-# Decompress the graphics streams listed in gfx/manifest.tsv into readable
-# .bin/.txt dumps (ROM-derived, not committed). Also emit stage pixel sheets.
+# Rebuild PNG sheets from identified asm / ROM tables (`tools/gfxdump.py`)
+# plus per-stage pixel rooms (`tools/roomperm.py --all --pixels`).
 gfx:
 	python3 tools/gfxdump.py
 	python3 tools/roomperm.py --all --pixels

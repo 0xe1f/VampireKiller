@@ -4,7 +4,7 @@
 ; (seg0 0x53BD) expands these via glyph_blit_run to page 1 at Y=0x40,
 ; ink 0x0E.  Drawing is HMMM from that atlas (sub_4aeeh, Y += 0x38).
 ; Each defb is one row, MSB = left pixel.  Not the credits font.
-; Preview: gfx/font_hud.png.  Source: data/font_hud.asm.
+; Preview: gfx/fonts/font_hud.png.  Source: data/font_hud.asm.
 hud_font:
 
 ; '0'

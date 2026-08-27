@@ -23,14 +23,15 @@
 ;
 ;  --- File layout --------------------------------------------------------
 ;  The .rom is the 16 segments concatenated (segment N at file offset N*0x2000).
-;  This source is being converted segment-by-segment from raw `incbin` into
-;  commented disassembly.  Segments 0-3 and 11-14 are INCLUDE'd; tileset
-;  banks 4-8 stitch `data/tileset_*.asm` (hex 4bpp rows); segs 9-10 are
-;  gfx scripts / palettes / enemy+weapon RLE; metatile streams/defs and
-;  Simon/intro RLE live in `segments/data/`; ending
-;  text is sliced from seg8 (`credits_ending.asm`) and staff from seg5
-;  (`credits_staff.asm`).  Seg15 is music tails / env tables / Dracula
-;  portrait.  Segs 9-10 are labeled gfx-script / palette / RLE.
+;  Source is one file per paging window (each fills through CPU 0xC000):
+;    banks_0123  play 32K @ 0x4000           (banks 0-3; 0 is always mapped)
+;    banks_456   tilesets 24K @ 0x6000       (banks 4-6)
+;    banks_78    late tilesets 16K @ 0x8000  (banks 7-8)
+;    banks_9a    title gfx 16K @ 0x8000      (banks 9-10)
+;    banks_bcd   map 24K @ 0x6000            (banks 11-13)
+;    banks_ef    sound/portrait 16K @ 0x8000 (banks 14-15)
+;  Data lives in `segments/data/`; ending text is `credits_ending.asm`,
+;  staff is `credits_staff.asm`.
 ;  `PHASE` sets each block's runtime address while the output stays contiguous.
 ; ===========================================================================
 
@@ -71,78 +72,32 @@
         defb 0xFF
     ENDM
 
-; --- segment 0 : resident bank, runs at 0x4000-0x5FFF (DISASSEMBLED) ---------
+; --- banks 0-3 : 32K play window @ 0x4000 (fixed 0 + page_play_banks) ------
     PHASE 0x4000
-    INCLUDE "segments/seg00.asm"
+    INCLUDE "segments/banks_0123.asm"
     DEPHASE
 
-; --- segment 1 : initial 0x6000-0x7FFF (DISASSEMBLY IN PROGRESS) -------------
+; --- banks 4-6 : 24K tileset window @ 0x6000 (page_tileset_banks) -----------
     PHASE 0x6000
-    INCLUDE "segments/seg01.asm"
+    INCLUDE "segments/banks_456.asm"
     DEPHASE
 
-; --- segment 2 : initial 0x8000-0x9FFF (DISASSEMBLY IN PROGRESS) -------------
+; --- banks 7-8 : 16K late-game window @ 0x8000 (page_tileset_late) ----------
     PHASE 0x8000
-    INCLUDE "segments/seg02.asm"
+    INCLUDE "segments/banks_78.asm"
     DEPHASE
 
-; --- segment 3 : initial 0xA000-0xBFFF (DISASSEMBLY IN PROGRESS) -------------
-    PHASE 0xA000
-    INCLUDE "segments/seg03.asm"
+; --- banks 9-a : 16K front-end window @ 0x8000 (page_title_banks) ----------
+    PHASE 0x8000
+    INCLUDE "segments/banks_9a.asm"
     DEPHASE
 
-; --- segments 4..8 : playfield tilesets (labeled 8x8 4bpp) -----------------
-; Paged by page_tileset_banks (seg 4/5/6) and page_tileset_late (seg 7/8, stage >= 13).
-; Sets overlap and spill across banks; labels mark tileset_ptr starts.
-; Staff / ending text are INCLUDE'd from the middle of seg5 / seg8;
-; HUD/title 1bpp font is data/font_hud.asm at the end of the title tiles;
-; ending-credits 1bpp font is data/font_credits.asm in seg14; boot Konami-logo
-; 1bpp font is data/font_logo.asm at the end of seg13.
+; --- banks b-d : 24K map window @ 0x6000 (page_map_banks) ------------------
     PHASE 0x6000
-    INCLUDE "segments/seg04.asm"
+    INCLUDE "segments/banks_bcd.asm"
     DEPHASE
+
+; --- banks e-f : 16K sound/portrait window @ 0x8000 (page_sound_banks) -----
     PHASE 0x8000
-    INCLUDE "segments/seg05.asm"
-    DEPHASE
-    PHASE 0xA000
-    INCLUDE "segments/seg06.asm"
-    DEPHASE
-    PHASE 0x8000
-    INCLUDE "segments/seg07.asm"
-    DEPHASE
-    PHASE 0xA000
-    INCLUDE "segments/seg08.asm"
-    DEPHASE
-
-; --- segments 9, 10 : gfx-script / palette / enemy+weapon RLE (labeled) ----
-    PHASE 0x8000
-    INCLUDE "segments/seg09.asm"
-    DEPHASE
-    PHASE 0xA000
-    INCLUDE "segments/seg10.asm"
-    DEPHASE
-
-; --- segment 11 : bank 0x0B @ 0x6000 (room-map tables + metatile streams) ---
-    PHASE 0x6000
-    INCLUDE "segments/seg11.asm"
-    DEPHASE
-
-; --- segment 12 : bank 0x0C @ 0x8000 (per-stage metatile defs) --------------
-    PHASE 0x8000
-    INCLUDE "segments/seg12.asm"
-    DEPHASE
-
-; --- segment 13 : bank 0x0D @ 0xA000 (transition brain + door_tbl) -----------
-    PHASE 0xA000
-    INCLUDE "segments/seg13.asm"
-    DEPHASE
-
-; --- segment 14 : bank 0x0E @ 0x8000 (object lists + credits font + PSG) ---
-    PHASE 0x8000
-    INCLUDE "segments/seg14.asm"
-    DEPHASE
-
-; --- segment 15 : bank 0x0F @ 0xA000 (music tails + Dracula portrait) --------
-    PHASE 0xA000
-    INCLUDE "segments/seg15.asm"
+    INCLUDE "segments/banks_ef.asm"
     DEPHASE

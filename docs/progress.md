@@ -9,14 +9,14 @@ The entire ROM should ultimately live in the repo as source: every byte is eithe
 `.asm` or a data form that builds back into `.asm`/the ROM (e.g. our `gfx/` PNG+txt
 -> RLE pipeline, the `vk`/`cr` text macros) - **no committed binaries in the final
 state** (like Konamiman's Metal Gear disassembly, which has zero `incbin`).
-VK has no remaining `INCBIN`: every bank is `INCLUDE`'d source (code banks 0-3
-and 11-14 still being annotated; data banks 4-10 and 15 are labeled dumps).
-Seg14 is scenery / object-list / spawn-mask / `font_credits.asm` / PSG-driver source
-(packed streams labeled hex); tileset banks 4-8 and metatile streams/defs are
-labeled `.asm` (`tileset_s00`..`s18`, `mtile_stream_sNN_rNN`); Simon/intro sprite
-RLE is labeled packed streams (`intro_simon_0`..`7`, `simon_rle_xxxx`, `intro_sky`).
-Segs 9-10 are labeled gfx-script / palette / enemy+weapon RLE. Seg15 is labeled
-music tails / env tables / Dracula portrait (`psg_seg15.asm`, `dracula_portrait.asm`).
+VK has no remaining `INCBIN`: every bank is `INCLUDE`'d source. One assemble
+file per paging window (`banks_0123`, `banks_456`, `banks_78`, `banks_9a`,
+`banks_bcd`, `banks_ef`), each filling through CPU 0xC000. Tilesets and
+metatile streams/defs are labeled `.asm` (`tileset_s00`..`s18`,
+`mtile_stream_sNN_rNN`); Simon/intro sprite RLE is labeled packed streams
+(`intro_simon_0`..`7`, `simon_rle_xxxx`, `intro_sky`). Seg14 holds scenery /
+object lists / `font_credits.asm` / the PSG driver, then bank 15 music tails
+and the Dracula portrait (`psg_seg15.asm`, `dracula_portrait.asm`).
 Fully migrated banks (0-15) have no `.bin`.
 
 ## Done
@@ -77,7 +77,8 @@ Fully migrated banks (0-15) have no `.bin`.
     - 0x62ed: full screen builder - clears state, paints tiles (seg2 helpers),
       sets cell event, unpacks scenery (scenery_load), loads object list
       (object_list_load) + spawns actors (l61c2h).
-    - 0x63da: centre view (0xC425/0xC427 = 0x80), hide sprites, redraw chain.
+    - `intro_scene_build` (0x63DA): Simon at 0x80,0x80, load intro tileset /
+      palette / simon+sky sprites, hide SAT, redraw. Used by state_intro.
     - `cell_event_set` (0x633a): set current cell event 0xCE00 from l6376h[row]
       (byte = column<<4 | event; event 6 has an immediate handler).
     - `actor_state_reset` (0x6389): reset object/actor state (clears 0xC470..0xC6FF +
@@ -1055,7 +1056,8 @@ use `room_event_ce10` → C409.
 1. Sprites/graphics: playfield tilesets mapped. `load_stage_tileset` (0x5653)
    blits `tileset_ptr[D000]` (0xBF uncompressed 8x8 4bpp tiles) to VRAM 0x8004.
    8 unique sources (hubs of 3 stages; s0 and s18 unique). `make gfx` writes
-   `gfx/tileset_s00.png` … `tileset_s18.png`. Pixel room sheets:
+   one sheet per tileset asm under `gfx/tilesets/` (cell header = CPU address).
+   Pixel room sheets:
    `tools/roomperm.py --all --pixels` → `gfx/stage_sNN.png` (nametable
    id N = ROM tile N−1, id 0 blank; HUD rows cropped). Banks 4–8 are labeled
    source (`tileset_s00`..`s18`). Packed Simon/intro RLE is `segments/data/simon_rle.asm`
@@ -1430,13 +1432,13 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   boss_clear_orb, boss_clear_orb_wait, boss_clear_heal, boss_clear_done;
   seg13: conn_lookup, conn_load_permits, conn_room_record, conn_ptr, door_load,
   door_load_coords, door_tbl, spot_load_coords, spot_tbl, simon_cell0_ptr,
-  simon_cell1_ptr, intro_simon, intro_sky, logo_font, logo_font_ink2,
+  simon_cell1_ptr, intro_simon, intro_sky, title_jp_sprites, logo_font, logo_font_ink2,
   logo_font_ink3;
   seg11/12: mtile_rowbase, mtile_roomptr, mtile_stream_c41a, mtile_streams,
   mtile_defbase, mtile_defs_s00..s18, mtile_def_c41a.
   tilesets: tileset_s00..s18 (in-source; s00/s13 omitted from msx.sym — CPU
   window collides with mtile_rowbase / scenery_list_ptr), hud_weapon_key_tiles,
-  title_logo_jp_tiles, title_logo_en_tiles, title_castle_tiles, hud_font,
+  title_logo_jp_tiles, title_logo_en_tiles, title_castle_tiles (`title_tiles.asm`), hud_font,
   hud_font_solid, hud_tile_bf00, logo_font, logo_font_ink2, logo_font_ink3.
   seg14: scenery_list_ptr, scenery_list_s00, scenery_list_h0..h5,
   spawn_bitmask_ptr, spawn_mask_s00..s18, object_list_ptr,
@@ -1447,6 +1449,7 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   `spawn_actor` `ld c` sites.
 - After any edit, run `make verify` before moving on.
 - Reusable methodology (for disassembling OTHER Konami MSX games later) lives in
-  workspace skills at `.agents/skills/` (`konami-msx-disasm`, `msx-runtime-tracing`).
+  workspace skills at `.agents/skills/` (`konami-msx-disasm`, `msx-runtime-tracing`,
+  `msx-gfx-sheets`).
   When we discover a generally-useful pattern/tool/gotcha, fold it into those skills
   (keep them lean - they load every session) and keep VK-specific findings here.

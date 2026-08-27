@@ -5,7 +5,7 @@
 ; Pointers: simon_cell0_ptr (0xA281), simon_cell1_ptr (0xA2D1),
 ; intro load at 0x5682 (intro_simon_0..7).  Six orphan streams are
 ; the second 16x16 plane after a listed frame; not in those tables.
-; PNG previews: gfx/intro_simon, gfx/simon_cell0, gfx/simon_cell1.
+; PNG preview: gfx/sprites/simon_rle.png (`make gfx`); cell header = VRAM dest.
 
 intro_simon_0:  ; 0xA319  packed 56; intro_simon + reused by cell ptrs
 	defb 0x07, %00000000

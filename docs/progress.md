@@ -220,7 +220,7 @@ Fully migrated banks (0-15) have no `.bin`.
       bits are sub-weapons that cost hearts (seg1 l713dh shifts 0xC701 and does
       `call c,holy_water_use` on bit 3 / `call c,hourglass_use` on bit 6); bit 7 is a
       timed item (seg2 0x95C0-area counts 0xC70F down then `res 7,(0xC701)`).  The
-      per-life reset sub_70e3h (seg1 0x70E3) keeps only bit 7 (`and 0x80`), so the
+      per-life reset inv_reset_life (seg1 0x70E3) keeps only bit 7 (`and 0x80`), so the
       white key etc. are lost on death but the bit-7 item persists.  Other bytes seen:
       0xC704 = vendor item, 0xC706 = vendor timer, 0xC707 = price, 0xC708 = item id
       (seg2 0x94C0 vendor-purchase compares 0xC417 hearts >= 0xC707 price).
@@ -351,8 +351,8 @@ Fully migrated banks (0-15) have no `.bin`.
       1, NOT 5 - see Twelfth session; the state-5 blip at idx 1074 was a hurt/other,
       not the plain jump.)
     * **Whip-on-stairs -> heart** seen in actor slot 0xC800: **0x1E** destruction
-      flame at the whip (+0x0C counts 0x10->0, idx 1177..1189), then a **0x26**
-      reward-spawn actor with **+0x0E = 0x02** (= the bonus id that later collected),
+      flame at the whip (+0x0C counts 0x10->0, idx 1177..1189), then an
+      **actor_reward** (0x26) with **+0x0E = 0x02** (= the bonus id that later collected),
       which settles into the pickup list as an **0x84** entry. (Slot type 0x04 cycles
       through this slot too but its role here is unconfirmed.) Collected at idx 1295
       from **0xC530** (pickup entries are stride 0x10): 0xC417 hearts **0x25 -> 0x30
@@ -388,7 +388,7 @@ Fully migrated banks (0-15) have no `.bin`.
     * **Score (0xC405-0xC407) unchanged the whole take (00 82 00)** - confirms large
       heart = **+0 points**, empty candle = 0, and the fled dog = 0 (not killed).
     * **Large heart** = bonus id **0x02**, **0xC417 hearts 0x15 -> 0x20 (BCD, +5)** at
-      idx 2069; spawned via the 0x26 reward actor in slot 0xC880 (idx 2035..2052).
+      idx 2069; spawned via `actor_reward` in slot 0xC880 (idx 2035..2052).
     * **Dog** = actor slot 0xC800 type **0x05** (`enemy_dog_tick`). Timeline: Simon
       approaches from the left (X 0x51->0x83); dog runs toward him (dogX +0x05
       0xC0->0x74), oscillates, then after Simon's jump (state 1, idx ~2126..2141) it
@@ -1087,7 +1087,7 @@ use `room_event_ce10` → C409.
    global classification (validated only on stage 1) misfires elsewhere. Settled
    so far:
    - **Stairs = climbable tiles 0x0c (one way) / 0x0d (mirror) ONLY** - this is
-     what the engine's stair-step code tests (seg1 sub_7ce2h=0x0d, sub_7d0ch=0x0c).
+     what the engine's stair-step code tests (seg1 stair_probe_up_right=0x0d, stair_probe_up_left=0x0c).
      `06`/`07` are NOT stairs: they are decoration (stage 1 pairs each step with a
      06/07 half -> its unique 2-wide "fat" stairs; other stages draw 1-wide 0c/0d;
      stage 10 uses 06/07 as background wallpaper = the old "stair noise"). `06/07`
@@ -1196,7 +1196,7 @@ Known live RAM map (runtime-confirmed this session):
          (chain whip lost), 0xC417 hearts 0x12 -> 0x05 (death penalty / restore).
   0xC416 equipped weapon/whip ID (0=leather, 1=chain, ...; cp 2/4/5 in attack
          code; reset via xor a at seg1 ~0x7148)
-  0xC417 HEARTS, packed BCD, cap 0x99 (draw: seg0 sub_456dh -> VRAM 0xC000;
+  0xC417 HEARTS, packed BCD, cap 0x99 (draw: seg0 draw_hearts_hud -> VRAM 0xC000;
          add:  seg0 0x4596 add a,b/daa/clamp99;  spend-5: holy_water_use 0x7154
          and hourglass_use 0x7166, each sub 5/daa).  Confirmed +1 small heart, +5 large heart.
   0xC410 LIVES, packed BCD (drawn by seg0 sub_4575h -> VRAM 0xE400); held at
@@ -1363,7 +1363,7 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   the emitted ROM; `make verify` catches any inconsistency.  Keep the original ROM
   address in the block-header comment (e.g. `(seg0 0x5F24)`) so names still line up
   with WATCH-log PCs, and add the same name to `segments/msx.sym` so regen emits it.
-  Renamed so far - seg0: draw_hearts_hud/draw_lives_hud/draw_health_bar/
+  Renamed so far - seg0: draw_hearts_hud/draw_lives_hud/hud_draw_digit/draw_health_bar/
   draw_enemy_meter, restore_health/damage_health/spawn_actor(+_init),
   advance_stage, room_map_build, zombie_generator, merman_generator,
   merman_generator_3, hanging_bat_generator, flying_skull_generator, ghost_head_generator,
@@ -1387,10 +1387,11 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   vdp_hmmc, vram_blit_tile8/_tile16/_tile_run, glyph_blit, glyph_blit_run,
   glyph_expand_4bpp, tile_atlas_pos, blit_advance_x, hud_draw_all,
   draw_stage_hud, hud_panel_frames, hud_bars_redraw, health_bar_redraw,
-  health_bar_frame, enemy_meter_frame;
+  health_bar_frame, enemy_meter_frame, intro_actors_frame,
+  intro_spawn_sky, intro_spawn_sky_ab, intro_spawn_simon;
   seg1: simon_action_tick, simon_walk_left/right, simon_jump_tick, simon_mirror_frames,
   simon_crouch, simon_stairs, simon_fall, simon_hurt, simon_dying,
-  simon_portal_wait, simon_attack_tick, whip_tick, projectile_tick,
+  simon_portal_wait, simon_attack_tick, simon_attack_start, whip_tick, projectile_tick,
   knife_tick, cross_tick, axe_tick, tile_layout_draw, holy_water_use,
   holy_water_tick, map_cell_at, tile_is_solid, row_solid_thresh,
   set_stage_boundary, door_interact, door_try_open, door_open_walk,
@@ -1401,7 +1402,9 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   actor_sat_emit, c800_sat_build/emit, shot_sat_build/emit, frame_vram_refresh,
   object_list_load/unpack/lookup/clear, tile_string_draw, cell_event_set,
   actor_state_reset, mem_clear_stride, simon_block_clear, sprites_hide,
-  simon_spawn_pos, pattern_phase_upload, pattern_shadow_blit, room_edge_detect;
+  simon_spawn_pos, pattern_phase_upload, pattern_shadow_blit, room_edge_detect,
+  inv_reset_life, simon_wall_right/left, stair_probe_up_right/left,
+  stair_probe_down_right/left;
   seg2: door_proximity, door_anim_tick, door_begin_open, spot_proximity,
   collect_bonus_tbl, bonus_holy_water, yellow_shield_tick, projectile_hit_actors,
   actor_vs_whip/simon/proj, shot_vs_simon/proj/shield/whip, overlap_simon/whip/projectile/shield,
@@ -1417,7 +1420,8 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   actor_type_tick, actor_tick_tbl, vendor_outcome_tbl, vendor_hit_latch,
   vendor_leave, award_kill_score, collect_bonus_apply, inv_or_c701/c702,
   hud_weapon_icon, hud_bonus_refresh, spawn_rate_gate, spawn_pick_pos,
-  minimap_build, minimap_room_pos, minimap_stage_ptr, minimap_room_count;
+  minimap_build, minimap_room_pos, minimap_stage_ptr, minimap_room_count,
+  actor_pickup_init, actor_reward_init/go, merman_splash_init;
   seg3: room_event_tick, shot_kind_type, mummy_bandage_init, shot_sickle_init, shot_axe_init,
   enemy_zombie_tick, enemy_dog_tick, enemy_merman_tick,
   enemy_hanging_bat_tick, enemy_flying_skull_tick, enemy_ghost_head_tick,
@@ -1454,9 +1458,9 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   spawn_bitmask_ptr, spawn_mask_s00..s18, object_list_ptr,
   object_list_h0..h5, credits_font, credits_font_az, sound_tick, sound_idle,
   sound_ch_a/b/c, sound_sfx, sound_cmd_*, sound_sfx_*, sfx_ptr, sfx_tbl, music_ptr.
-  Actor type `equ`s: `segments/actors.inc` (`actor_zombie`..`actor_pickup`,
-  `obj_next_room`/`obj_end_stream`); used in the packed object list and confirmed
-  `spawn_actor` `ld c` sites.
+  Actor type `equ`s: `segments/actors.inc` (`actor_zombie`..`actor_intro_simon`,
+  `actor_dracula_bat/_head/_chunk`, `obj_next_room`/`obj_end_stream`); used in
+  the packed object list and confirmed `spawn_actor` `ld c` sites.
 - After any edit, run `make verify` before moving on.
 - Reusable methodology (for disassembling OTHER Konami MSX games later) lives in
   workspace skills at `.agents/skills/` (`konami-msx-disasm`, `msx-runtime-tracing`,

@@ -93,7 +93,8 @@ COLS, ROWS = 32, 24
 PLAY_TOP = 2                    # rows 0-1 = HUD
 STAIRS = {0x0c, 0x0d}   # the CLIMBABLE diagonal tiles (0c one way, 0d the mirror);
                         # this is what the engine's stair-step routines actually
-                        # test (seg1 sub_7ce2h checks 0x0d, sub_7d0ch checks 0x0c).
+                        # test (seg1 stair_probe_up_right checks 0x0d,
+                        # stair_probe_up_left checks 0x0c).
 DECOR = {0x05, 0x06, 0x07, 0x08}     # passable decoration, never solid or climbable:
                                      # 05/08 = the inert 2-tile pair; 06/07 = the
                                      # decorative half of stage 1's 2-wide stairs

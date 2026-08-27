@@ -378,7 +378,7 @@ l41ech:
 	jp l41c9h
 l41fbh:
 	djnz l4222h
-	call sub_4e9ah
+	call intro_actors_frame
 	ld hl,0c004h
 	ld a,(0c003h)
 l4206h:
@@ -917,13 +917,14 @@ l457fh:
 	rra
 	rra
 	rra
-	call sub_458fh
+	call hud_draw_digit
 	ld a,(hl)              ; low nibble (ones digit)
-	call sub_458fh
+	call hud_draw_digit
 	dec hl
 	djnz l457fh
 	ret
-sub_458fh:
+; hud_draw_digit (seg0 0x458F): low nibble of A -> HUD numeral tile 0x20+ at DE.
+hud_draw_digit:
 	and 00fh               ; digit 0..9
 	add a,020h             ; -> numeral tile code
 	call sub_4aeeh
@@ -2445,30 +2446,39 @@ l4e82h:
 	nop
 	ld c,h
 	ld hl,0ff01h
-sub_4e9ah:
+; intro_actors_frame (seg0 0x4E9A): intro C800 tick + SAT + pattern blit.
+; Called from state_intro while Simon walks up to the castle.
+intro_actors_frame:
 	call c800_tick
 	call c800_sat_build
 	call c800_sat_emit
 	jp pattern_shadow_blit
-	ld c,027h
+; intro_spawn_sky (seg0 0x4EA6): one actor_intro_sky at (X=0xE0, Y=0x48).
+intro_spawn_sky:
+	ld c,actor_intro_sky
 	ld de,0e048h
 	jp spawn_actor
+intro_sky_init:
 	ld (ix+006h),001h
-	ld (ix+00bh),094h
+	ld (ix+00bh),094h      ; shape_intro_sky
 	ld (ix+00eh),a
 	ret
+intro_sky_go:
 	xor a
 	ld (ix+008h),a
 	ld (ix+007h),a
 	ld de,0ffe0h
 l4ec4h:
 	jp actor_set_xvel
-	ld c,028h
+; intro_spawn_sky_ab (seg0 0x4EC7): sky_a at (0x90,0x38) and sky_b at (0x30,0x68).
+intro_spawn_sky_ab:
+	ld c,actor_intro_sky_a
 	ld de,09038h
 	call spawn_actor
-	ld c,029h
+	ld c,actor_intro_sky_b
 	ld de,03068h
 	jp spawn_actor
+intro_sky_ab_init:
 	ld hl,0ffe0h
 	ld de,00000h
 	bit 0,(ix+000h)
@@ -2480,26 +2490,30 @@ l4ee9h:
 	ex de,hl
 	call actor_set_xvel
 	ld (ix+006h),001h
-	ld (ix+00bh),092h
+	ld (ix+00bh),092h      ; shape_intro_sky_a
 	xor a
 	ld (ix+010h),a
 	ld (ix+00eh),a
 	ret
+intro_sky_ab_go:
 	inc (ix+010h)
 	ld a,(ix+010h)
 	cp 004h
 	ret nz
 	ld (ix+010h),000h
 	inc (ix+011h)
-	ld (ix+00bh),092h
+	ld (ix+00bh),092h      ; shape_intro_sky_a
 	bit 0,(ix+011h)
 	ret z
-	ld (ix+00bh),093h
+	ld (ix+00bh),093h      ; shape_intro_sky_b
 	ret
-	ld c,02ah
+; intro_spawn_simon (seg0 0x4F1E): one actor_intro_simon at (X=0xF0, Y=0xC0).
+intro_spawn_simon:
+	ld c,actor_intro_simon
 	ld de,0f0c0h
 	jp spawn_actor
-	ld (ix+00bh),098h
+intro_simon_init:
+	ld (ix+00bh),098h      ; shape_intro_simon_1
 	xor a
 	ld (ix+001h),a
 	ld (ix+013h),a
@@ -2507,6 +2521,7 @@ l4ee9h:
 	ld (ix+00eh),a
 	ld (ix+006h),001h
 	ret
+intro_simon_go:
 	ld a,(ix+001h)
 	dec a
 	jr z,l4f5eh
@@ -5050,7 +5065,7 @@ entity_tbl:
 	defw enemy_mummy_tick   ; actor_mummy
 	defw enemy_frankenstein_tick ; actor_frankenstein
 	defw enemy_grim_reaper_tick ; actor_grim_reaper
-	defb 047h
+	defb 047h              ; type 0x17 lo; hi is data_6000[0] -> 0x6A47
 entity_tbl_end:
 
 ; ===========================================================================
@@ -5065,62 +5080,36 @@ entity_tbl_end:
 
 ; BLOCK 'data_6000' (start 0x6000 end 0x6030)
 ; Spawn-init overflow of entity_tbl (seg0 0x5FD3). The table is odd-aligned:
-; type 23 reads 0x5FFF (047h) + 0x6000, type 24 starts at 0x6001. Confirmed
-; when page 1b is seg1: 0x18 Igor igor_tick 0xBAE4, 0x19-0x1C enemy_blob_tick
-; 0xB4D9, 0x1E flame_init 0x9B67, 0x1F
-; enemy_placed_bat_init 0xB0D5, 0x21 enemy_placed_merman_init 0xA2CE,
-; 0x23 hunchback 0xB219, 0x24 heart 0x9BA2, 0x2C dracula_bat_init 0x6A64,
-; 0x2D dracula_head_init 0xACEF, 0x2E dracula_chunk_init 0x69C3.
-; Do not word-align this block.
+; type 0x17 reads 0x5FFF (047h) + 0x6000 (06ah) = 0x6A47. Type 0x18 starts
+; at 0x6001. Do not word-align this block (the first byte is a high-byte
+; leftover). Types 0x1D / 0x25 / 0x2B are spawn_nop (ret at 0x602F).
 data_6000_start:
-	defb 06ah
-	defb 0e4h
-	defb 0bah
-	defb 0d9h
-	defb 0b4h
-	defb 0d9h
-	defb 0b4h
-	defb 0d9h
-	defb 0b4h
-	defb 0d9h
-	defb 0b4h
-	defb 02fh
-	defb 060h
-	defb 067h
-	defb 09bh
-	defb 0d5h
-	defb 0b0h
-	defb 06dh
-	defb 09ch
-	defb 0ceh
-	defb 0a2h
-	defb 07eh
-	defb 0b7h
-	defb 019h
-	defb 0b2h
-	defb 0a2h
-	defb 09bh
-	defb 02fh
-	defb 060h
-	defb 0cbh
-	defb 09bh
-	defb 0aeh
-	defb 04eh
-	defb 0d7h
-	defb 04eh
-	defb 0d7h
-	defb 04eh
-	defb 026h
-	defb 04fh
-	defb 02fh
-	defb 060h
-	defb 064h
-	defb 06ah
-	defb 0efh
-	defb 0ach
-	defb 0c3h
-	defb 069h
-	defb 0c9h
+	defb 06ah              ; type 0x17 hi (lo 047h at 0x5FFF) -> 0x6A47
+	defw igor_tick         ; 0x18 actor_igor
+	defw enemy_blob_tick   ; 0x19 (same tick; not in hatch table)
+	defw enemy_blob_tick   ; 0x1A actor_blob_blue
+	defw enemy_blob_tick   ; 0x1B actor_blob_red
+	defw enemy_blob_tick   ; 0x1C actor_blob_white
+	defw spawn_nop         ; 0x1D unused
+	defw flame_init        ; 0x1E actor_flame
+	defw enemy_placed_bat_init ; 0x1F
+	defw merman_splash_init ; 0x20
+	defw enemy_placed_merman_init ; 0x21
+	defw actor_orb_tick    ; 0x22 actor_orb
+	defw enemy_hunchback_tick ; 0x23 actor_roc_drop
+	defw actor_pickup_init ; 0x24
+	defw spawn_nop         ; 0x25 unused
+	defw actor_reward_init ; 0x26
+	defw intro_sky_init    ; 0x27 actor_intro_sky
+	defw intro_sky_ab_init ; 0x28 actor_intro_sky_a
+	defw intro_sky_ab_init ; 0x29 actor_intro_sky_b
+	defw intro_simon_init  ; 0x2A
+	defw spawn_nop         ; 0x2B unused
+	defw dracula_bat_init  ; 0x2C
+	defw dracula_head_init ; 0x2D
+	defw dracula_chunk_init ; 0x2E
+spawn_nop:
+	ret
 data_6000_end:
 ; actor_sat_patterns (seg1 0x6030) - copy SAT colour/attr bytes from the
 ;  word table at actor_sat_pat_ptr (caller DE = 0x608B, indexed by type) into
@@ -5690,7 +5679,7 @@ l62d1h:
 	ld (0c415h),a          ; Simon health = full (0x20)
 	ld a,080h
 	ld (0c418h),a          ; enemy/boss energy meter = full (0x80)
-	call sub_70e3h
+	call inv_reset_life
 	call hud_cache_load
 	call 0576fh
 l62eah:
@@ -5863,10 +5852,10 @@ intro_scene_build:
 	call load_intro_sprites
 	call sprites_hide         ; hide all hardware sprites
 l63f1h:
-	call 04ea6h
+	call intro_spawn_sky
 l63f4h:
-	call 04ec7h
-	call 04f1eh
+	call intro_spawn_sky_ab
+	call intro_spawn_simon
 	call 047dbh
 	call 0451ah
 	call 04f8ah
@@ -6267,12 +6256,12 @@ event_dracula_theme:
 	call play_sound            ; trigger action 0x88
 	ld a,080h
 	ld (0c418h),a
-	call 045ech
+	call draw_enemy_meter
 l662dh:
 	call sub_698bh
-	ld c,017h
-	ld de,08049h           ; source table in seg2 (0x8049)
-	call 05f24h
+	ld c,017h              ; type 0x17: no SAT, tick_nop, +50000
+	ld de,08049h           ; X=0x80, Y=0x49
+	call spawn_actor
 	call 057bbh
 	xor a
 	ld (0ce36h),a          ; reset the pair of progress counters
@@ -6837,6 +6826,8 @@ l6a3bh:
 	ld a,(0ce13h)
 	and a
 	ret
+; type 0x17 spawn (seg1 0x6A47): no SAT (actor_sat_build skips it), physics
+; off, +0E=5 hittable. event_dracula_theme spawns one at (0x80,0x49).
 	ld (ix+00eh),005h
 	ld (ix+006h),000h
 tick_nop:
@@ -7044,12 +7035,12 @@ l6bbch:
 	rla
 	ld d,000h
 	jr c,l6bd3h            ; negative step -> travelling left
-	call sub_7bb0h         ; wall to the right?
+	call simon_wall_right         ; wall to the right?
 	ret c
 	ld d,001h
 	jr l6bd9h
 l6bd3h:
-	call sub_7c0ch         ; wall to the left?
+	call simon_wall_left         ; wall to the left?
 	ret c
 	ld d,0ffh
 l6bd9h:
@@ -7059,10 +7050,10 @@ l6bd9h:
 	ret
 l6be1h:                        ; UP while grounded: try stairs
 	ex af,af'
-	call sub_7ce2h
+	call stair_probe_up_right
 	ld bc,00001h
 	jr z,l6bf5h
-	call sub_7d0ch
+	call stair_probe_up_left
 	ld bc,00101h
 	jr z,l6bf5h
 	ex af,af'
@@ -7086,10 +7077,10 @@ l6c0ah:
 	ld (0c426h),a
 	ret
 l6c17h:
-	call sub_7c92h
+	call stair_probe_down_right
 	ld bc,00002h
 	jr z,l6bf5h
-	call sub_7cbah
+	call stair_probe_down_left
 	ld bc,00102h
 	jr z,l6bf5h
 	ld a,002h
@@ -7107,7 +7098,7 @@ simon_walk_left:               ; (0x6C36) face left (0xC42C=1), try -X
 	cp 010h
 	ret c
 l6c47h:
-	call sub_7c0ch
+	call simon_wall_left
 	ret c
 	ld a,(0c431h)
 	and 008h               ; boots (id 12): faster walk
@@ -7126,7 +7117,7 @@ simon_walk_right:              ; (0x6C5A) face right (0xC42C=0), try +X
 	cp 0f0h
 	ret nc
 l6c6ah:
-	call sub_7bb0h
+	call simon_wall_right
 	ret c
 	ld a,(0c431h)
 	and 008h               ; boots (id 12): faster walk
@@ -7722,7 +7713,9 @@ l70c6h:
 	ld (0d010h),a
 	ld (0d001h),a
 	ld (0c413h),a          ; leave play (death)
-sub_70e3h:
+; inv_reset_life (seg1 0x70E3): new-life / death fallthrough. Keep C701 bit7
+; (map); clear weapon, keys, holy water, hourglass, C431/32, C441/42, C700/02.
+inv_reset_life:
 	ld a,(0c701h)
 	and 080h               ; keep map (bit7); holy water/hourglass/keys go
 	ld (0c701h),a
@@ -7748,10 +7741,12 @@ simon_portal_wait:             ; 7 (0x7102) pad crouch+UP: wait, then warp
 ; simon_attack_tick (0x7114): SPACE starts whip or C416>=2 throw; then whip
 ; phase + projectile_tick (C450/C460). Jump+dir is holy water / hourglass.
 simon_attack_tick:
-	call sub_711dh
+	call simon_attack_start
 	call whip_tick
 	jp projectile_tick
-sub_711dh:
+; simon_attack_start (seg1 0x711D): SPACE new-press starts whip (or throw if
+; C416>=2). If SPACE is not new, jump+dir uses holy water / hourglass.
+simon_attack_start:
 	ld a,(0c006h)
 	and 010h               ; SPACE/trig new-press
 	jr z,l713dh
@@ -9393,7 +9388,8 @@ map_solid_pair:
 	ld d,a
 	call map_cell_at
 	jp tile_is_solid
-sub_7bb0h:
+; simon_wall_right (seg1 0x7BB0): probe +X from Simon Y/X (BC=0x0802, A=0).
+simon_wall_right:
 	ld a,(0c425h)
 	ld e,a
 	ld a,(0c427h)
@@ -9447,7 +9443,8 @@ l7c02h:
 	ld e,a
 	call map_cell_at
 	jp tile_is_solid
-sub_7c0ch:
+; simon_wall_left (seg1 0x7C0C): probe -X from Simon Y/X (BC=0x0802, A=0).
+simon_wall_left:
 	ld a,(0c425h)
 	ld e,a
 	ld a,(0c427h)
@@ -9529,7 +9526,9 @@ l7c7ah:
 row_solid_thresh:
 	defb 002h,004h,004h,004h,004h,004h,004h,004h,004h,004h
 	defb 009h,009h,009h,004h,004h,004h,009h,009h,008h
-sub_7c92h:
+; stair_probe_down_right (seg1 0x7C92): DOWN from ground. Tile 0x04; snap X +8.
+; Event 6 skips (returns NZ). Z = boarded; C435/C421 get 2 / 0.
+stair_probe_down_right:
 	ld a,(0ce00h)
 	cp 006h
 	jr nz,l7c9bh
@@ -9557,7 +9556,8 @@ l7c9bh:
 	ld (bc),a
 	xor a
 	ret
-sub_7cbah:
+; stair_probe_down_left (seg1 0x7CBA): DOWN from ground. Tile 0x03; snap X -8.
+stair_probe_down_left:
 	ld a,(0ce00h)
 	cp 006h
 	jr nz,l7cc3h
@@ -9585,7 +9585,9 @@ l7cc3h:
 	ld (bc),a
 	xor a
 	ret
-sub_7ce2h:
+; stair_probe_up_right (seg1 0x7CE2): UP from ground. Tile 0x0D; snap X +8.
+; Event 6 skips. Z = boarded; C435/C421 get 1 / 0.
+stair_probe_up_right:
 	ld a,(0ce00h)
 	cp 006h
 	jr nz,l7cebh
@@ -9614,7 +9616,8 @@ l7cebh:
 	ld (bc),a
 	xor a
 	ret
-sub_7d0ch:
+; stair_probe_up_left (seg1 0x7D0C): UP from ground. Tile 0x0C; snap X -8.
+stair_probe_up_left:
 	ld a,(0ce00h)
 	cp 006h
 	jr nz,l7d15h
@@ -11665,7 +11668,7 @@ sub_89c6h:
 	ld c,actor_flame
 	jr l89ddh
 l89dbh:
-	ld c,026h
+	ld c,actor_reward
 l89ddh:
 	xor a
 	call 05f26h
@@ -14284,8 +14287,8 @@ actor_freeze_check:
 ; Separate from spawn-time entity_tbl: most entries are a later instruction of
 ; the same enemy_*_tick (skip spawn pose / splash / fly-in). Types 0x17 and
 ; 0x1D are `ret` (no per-frame work). 0x1F shares type 4; 0x21 shares 2/3;
-; 0x23 shares type 13 (hunchback). 0x2C is dracula_bat_go; 0x2D is
-; dracula_head_go (gravity); 0x2E is ret.
+; 0x23 shares type 13 (hunchback). 0x26 is actor_reward_go; 0x27-0x2A are
+; intro SAT. 0x2C is dracula_bat_go; 0x2D is dracula_head_go; 0x2E is ret.
 actor_type_tick:
 	ld a,(ix+000h)
 	dec a
@@ -14327,8 +14330,13 @@ actor_tick_tbl:
 	defw actor_orb_go       ; 34
 	defw hunchback_go       ; 35 roc_drop
 	defw actor_pickup_go    ; 36
-	defb 0a5h,099h,025h,09ch,0bah,04eh,000h,04fh
-	defb 000h,04fh,03ch,04fh,0a5h,099h
+	defw tick_nop_seg2      ; 37 type 0x25 unused
+	defw actor_reward_go    ; 38 actor_reward
+	defw intro_sky_go       ; 39 actor_intro_sky
+	defw intro_sky_ab_go    ; 40 actor_intro_sky_a
+	defw intro_sky_ab_go    ; 41 actor_intro_sky_b
+	defw intro_simon_go     ; 42 actor_intro_simon
+	defw tick_nop_seg2      ; 43 type 0x2B unused
 	defw dracula_bat_go     ; 44 actor_dracula_bat
 	defw dracula_head_go    ; 45 actor_dracula_head
 	defw dracula_chunk_go   ; 46 actor_dracula_chunk
@@ -14567,10 +14575,10 @@ l9b0dh:
 l9b1ah:
 	push bc
 	call sub_9b29h
-	ld c,026h
+	ld c,actor_reward
 	call spawn_actor
 	pop bc
-	ld (ix+01fh),c
+	ld (ix+01fh),c         ; +0x1F = bonus id (drop gate for the pickup)
 	scf
 	ret
 sub_9b29h:
@@ -14664,6 +14672,7 @@ l9b88h:
 	ld e,(ix+003h)          ; DE = flame position (+0x03 / +0x05)
 	ld d,(ix+005h)
 	jp spawn_actor          ; spawn the settled pickup at that spot
+actor_pickup_init:             ; (seg2 0x9BA2) fall + sway; pose 0x00
 	ld (ix+00eh),002h
 	ld (ix+00ch),001h
 	ld (ix+006h),001h
@@ -14676,6 +14685,9 @@ l9b88h:
 	ld (ix+00bh),000h
 	ld (ix+07eh),000h
 	ret
+; actor_reward_init (seg2 0x9BCB) - candle/chest drop. Physics off, pose 0x01,
+; +0C=0x14. Tick (actor_reward_go) sparkles, falls, then drop_spawn with +0x1F.
+actor_reward_init:
 	ld (ix+00ch),014h
 	ld (ix+006h),000h
 	ld (ix+00eh),002h
@@ -14714,6 +14726,9 @@ l9c12h:
 	and 0f8h
 	ld d,a
 	jp drop_spawn
+; actor_reward_go (seg2 0x9C25): sparkle SAT colour, then fall, then
+; drop_spawn with B = +0x1F (the bonus id).
+actor_reward_go:
 	ld hl,l9c60h
 	ld a,(0c003h)
 	and 003h
@@ -14745,6 +14760,9 @@ sub_9c64h:
 	ld e,(ix+003h)
 	ld d,(ix+005h)
 	jp map_solid_pair
+; merman_splash_init (seg2 0x9C6D) - actor_merman_splash spawn. Pose 0x0E
+; (0x15 on stage 10), then hop.
+merman_splash_init:
 	ld (ix+00eh),000h
 	ld c,00eh
 	ld a,(0d000h)

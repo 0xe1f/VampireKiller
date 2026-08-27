@@ -132,6 +132,7 @@ reset_run_state: equ 0x44cd	; wipe run work RAM (0xC405..0xDFFF) + seed defaults
 run_seed_tbl: equ 0x44f0	; new-game C410..C412: lives=3, STAGE=0, C412=1
 add_score_c0: equ 0x44f3	; ld c,0 then add_score (jp here with DE=amount)
 draw_hearts_hud: equ 0x456d	; draw HEART counter (0xC417, BCD) to HUD
+hud_draw_digit: equ 0x458f	; low nibble of A -> HUD numeral tile 0x20+ at DE
 add_hearts: equ 0x459b	; add B hearts to 0xC417 (BCD, clamp 99); B=1 small, B=5 large
 spend_hearts: equ 0x45a7	; subtract B hearts from 0xC417 (BCD, floor 0)
 draw_lives_hud: equ 0x4575	; draw LIVES counter (0xC410, BCD) to HUD
@@ -320,6 +321,16 @@ ghost_head_generator: equ 0x9ddc	; room_spawner bit5: ghost head type 08
 roc_generator: equ 0x9dee	; room_spawner bit6: roc type 0x0F (drops 0x23)
 spawn_actor: equ 0x5f24	; alloc a free actor slot (7 @ 0xC800, stride 0x80) + init
 spawn_actor_init: equ 0x5f7e	; init tail of spawn_actor
+intro_actors_frame: equ 0x4e9a	; intro: C800 tick + SAT + pattern_shadow_blit
+intro_spawn_sky: equ 0x4ea6	; actor_intro_sky at (0xE0, 0x48)
+intro_sky_init: equ 0x4eae	; type 0x27 spawn: pose 0x94
+intro_sky_go: equ 0x4eba	; type 0x27 tick: leftward drift
+intro_spawn_sky_ab: equ 0x4ec7	; actor_intro_sky_a at (0x90,0x38), _b at (0x30,0x68)
+intro_sky_ab_init: equ 0x4ed7	; types 0x28/0x29 spawn: pose 0x92
+intro_sky_ab_go: equ 0x4f00	; types 0x28/0x29 tick: toggle pose 0x92/0x93
+intro_spawn_simon: equ 0x4f1e	; actor_intro_simon at (0xF0, 0xC0)
+intro_simon_init: equ 0x4f26	; type 0x2A spawn: pose 0x98
+intro_simon_go: equ 0x4f3c	; type 0x2A tick
 
 ; ---- Vampire Killer banked routines (segment 1 @ 0x6000) -----------------
 konami_logo_draw: equ 0x6209	; draw Konami logo + seed the top-to-bottom wipe
@@ -340,6 +351,7 @@ pattern_phase_upload: equ 0x6591	; phase-selected pattern rows to VRAM 0xF400
 pattern_shadow_blit: equ 0x65ab	; copy 0xD400 shadow (0x280 bytes) to VRAM 0xF400
 room_edge_detect: equ 0x7682	; set C41B pending exit from Simon vs screen edges
 actor_sat_patterns: equ 0x6030	; copy SAT colour/attr init into slot|0x20 cells
+spawn_nop: equ 0x602f	; unused spawn-init (types 0x1D/0x25/0x2B): ret
 actor_sat_assign: equ 0x604f	; store SAT index D at cell E of slot|0x20
 actor_spr_count: equ 0x605f	; byte[type]; spawn indexes as 0x605E+type
 actor_sat_pat_ptr: equ 0x608d	; word[type] -> colour/attr stream; spawn uses 0x608B
@@ -389,7 +401,9 @@ simon_fall: equ 0x6f44	; C420=4
 simon_hurt: equ 0x6f8c	; C420=5
 simon_dying: equ 0x709a	; C420=6
 simon_portal_wait: equ 0x7102	; C420=7: wait C42D after crouch+UP on pad, then C41B=0xFF
+inv_reset_life: equ 0x70e3	; new-life/death: keep C701 bit7 (map); clear weapon/keys/sub
 simon_attack_tick: equ 0x7114	; try/start whip + tick + emit SAT
+simon_attack_start: equ 0x711d	; SPACE new-press: whip or throw; jump+dir holy water/hourglass
 whip_tick: equ 0x71e7	; dispatch 0xC422 whip phase
 whip_slots_clear: equ 0x751a	; zero 0xC450 whip slots + hide SAT
 simon_mirror_frames: equ 0x7666	; facing-left: C42E/C42F += 0x0A/0x0F
@@ -422,7 +436,13 @@ row_solid_thresh: equ 0x7c7f	; per-world-row solidity threshold byte table
 map_cell_at: equ 0x7d36	; A = room tile id under pixel (D=X,E=Y) from the 0xD100 map
 map_solid_pair: equ 0x7b9f	; carry if (D,E) or (D-10,E) is solid (enemy floor)
 probe_wall_right: equ 0x7bc5	; A=1 wall probe +X; BC from caller (often 0x0808)
+simon_wall_right: equ 0x7bb0	; probe +X from Simon Y/X (BC=0x0802, A=0)
 probe_wall_left: equ 0x7c21	; A=1 wall probe -X; BC from caller (often 0x0808)
+simon_wall_left: equ 0x7c0c	; probe -X from Simon Y/X (BC=0x0802, A=0)
+stair_probe_down_right: equ 0x7c92	; DOWN stairs: tile 0x04, snap X +8
+stair_probe_down_left: equ 0x7cba	; DOWN stairs: tile 0x03, snap X -8
+stair_probe_up_right: equ 0x7ce2	; UP stairs: tile 0x0D, snap X +8
+stair_probe_up_left: equ 0x7d0c	; UP stairs: tile 0x0C, snap X -8
 door_interact: equ 0x771f	; white-key door tick: proximity vs C5AD/Y,C5AE/X; spend 0xC701 bit0
 door_state_tbl: equ 0x7725	; C5AC DISPATCH_A: idle / try_open / open_walk
 door_try_open: equ 0x7731	; armed: proximity + spend key
@@ -569,6 +589,11 @@ minimap_coord_tbl: equ 0x975e	; word[code] -> packed minimap coord (hi=X 0x20+0x
 minimap_room_count: equ 0x95fd	; byte[stage] = room count (incl. stage 18/Dracula = 10)
 flame_init: equ 0x9b67	; seed a destruction-flame effect (frame 0x85, timer 0x10)
 flame_tick: equ 0x9b78	; flame flicker 0x85/0x86; on expiry spawn 0x24 pickup
+actor_pickup_init: equ 0x9ba2	; type 0x24 spawn: fall + sway, pose 0x00
+actor_reward_init: equ 0x9bcb	; type 0x26 spawn: physics off, pose 0x01, timer 0x14
+actor_pickup_go: equ 0x9be0	; type 0x24 tick: undulate, land -> drop_spawn
+actor_reward_go: equ 0x9c25	; type 0x26 tick: sparkle, fall, drop_spawn with +0x1F
+merman_splash_init: equ 0x9c6d	; type 0x20 spawn: pose 0x0E (0x15 on stage 10)
 actors_tick: equ 0x98ec	; if D010==0: room_spawner then c800_tick
 c800_tick: equ 0x98f3	; tick all 7 C800 actor slots
 shot_sat_build: equ 0x9917	; 8 x shot shape streams -> actor SAT

@@ -168,6 +168,8 @@ type 18 in a boss room) use the shared meter `0xC418`; the rest die when
 | 0x1A | `actor_blob_blue` | Candle blob. Bonus-21 slime hatches this if left to land. First in stage 4 (hub 1). 1 HP, 2 SAT cells (shape `0x9B`/`0x9C`). SAT `0F 42`. Sprites `spr_blob` / `spr_blob_cc`. |
 | 0x1B | `actor_blob_red` | Same tick; hub 3+ (stages 10+). SAT `08 42`. |
 | 0x1C | `actor_blob_white` | Same tick; hub 2 (stages 7–9). SAT `0E 42`. |
+| 0x26 | `actor_reward` | Candle/chest drop. Sparkles, falls, then `drop_spawn` with bonus id in `+0x1F`. Not on the enemy sheet. |
+| 0x27–0x2A | intro SAT | `actor_intro_sky` / `_sky_a` / `_sky_b` / `_simon`. Spawned by `intro_scene_build`; poses `0x94`, `0x92`/`0x93`, `0x98`. |
 
 Per-frame `ix+1` machines (DISPATCH_A or `dec a`/`jr z`) are named in
 `segments/banks_0123.asm` (bank 3): raven wait/coast/hover/pick/strafe, dog idle/run/air,
@@ -755,7 +757,7 @@ Weapon behaviour (ROM):
   `l7e60h` (`04 08 08 04 04 04 10`); chain/axe/cross use `l7e67h`
   (`06 0C 0C 06 06 06 18`). Index = enemy type − 0x11. Type 0x17 with weapon
   ≥ 2 quarters the hit.
-- On death (`sub_70e3h`) `C416` is cleared to 0. Missing a cross/axe catch also
+- On death (`inv_reset_life`) `C416` is cleared to 0. Missing a cross/axe catch also
   returns to leather (`lose_weapon` 0x8E9A) without waiting for death.
 - Thrown-weapon **patterns** come from seg10 via `load_weapon_sprites` (0x559A)
   / `weapon_sprite_ptr` (0x55DE). Packed order in `data/enemy_sprite_rle.asm`
@@ -790,7 +792,7 @@ Sub-items / consumables:
 
 Holy water is a **sub-weapon bit**, not a whip replacement. Bonus id **`0x1E`**
 (`bonus_holy_water` 0x8D94) ORs **`C701` bit 3**. It never writes `C416`, so
-SPACE is still whatever whip/knife/cross/axe you have. Death (`sub_70e3h`)
+SPACE is still whatever whip/knife/cross/axe you have. Death (`inv_reset_life`)
 keeps only `C701` bit 7 (map); the vial is lost. Vendor row **`0x1E`** is this
 item (30 / 10 / 50 hearts).
 
@@ -856,7 +858,7 @@ gets the long 240-frame no-spawn window if the flag is set.
 score bags) and the persistent inventory bits (boots, wings, candle, map, bibles,
 keys, lockpick, shields).
 
-**How long it lasts.** Until death. The life-lost reset (`sub_70e3h`) zeros all
+**How long it lasts.** Until death. The life-lost reset (`inv_reset_life`) zeros all
 of `0xC431`, so this flag, boots, and wings go together. It survives room and
 stage changes.
 
@@ -1151,7 +1153,7 @@ Text is stored as **tile codes = ASCII - 0x10** (so decode with `+0x10`).
 Cross-checked against the Metal Gear disassembly (which stores text as plain
 ASCII); Vampire Killer offsets HUD/title text by 0x10 because `hud_font`
 (seg8 0xBD80) is the ASCII range `'0'`–`'_'` uploaded at atlas ids 0x20+.
-Digits '0'-'9' = tiles 0x20-0x29 (confirmed by the score renderer `sub_458fh`:
+Digits '0'-'9' = tiles 0x20-0x29 (confirmed by the score renderer `hud_draw_digit`:
 `and 0x0F / add 0x20`). `0x00` = space/blank (HMMM from VRAM (0,0), the
 ink-0 blit of `hud_font_solid`); `0xFE` and `0xFF` are line/record control
 bytes; other high bytes (0x48,0xA0,0x58,0xD1...) are VDP position/attribute

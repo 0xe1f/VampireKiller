@@ -1036,6 +1036,8 @@ sprites `spr_blob` / `spr_blob_cc`; sheet **1A/1B/1C**). Dracula `ix+1` and tors
 blit named (`dracula_save_bg` / `dracula_blit_torso`; 32x32s are packed
 4bpp `dracula_body_closed`/`open` at page-1 Y=0x80). Portrait eye/mouth
 16x16s are `dracula_portrait_parts` at Y=0xA0.
+Event 6 extras: `actor_dracula_bat` 0x2C, `actor_dracula_head` 0x2D
+(intro SAT 0x57/0x59, arc away after summon), `actor_dracula_chunk` 0x2E.
 s18r9 collision uses event-6 threshold 6 (`tile_is_solid` l7c7ah). Leftover
 fake `DISPATCH_A`
 in-lines converted to `defw` (seg1 `sub_6875h` / 0x6AB4). Seg2 hit-class
@@ -1288,10 +1290,11 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
 
 - Actor SAT streams (`data/actor_shape.asm`, from `SHAPE_ID_NAME` in
   `tools/emit_identified_data.py`) are named `shape_*` where the pose is
-  confirmed. Return to leftovers: used but unidentified **0x02 / 0x5A /
-  0xA5–0xA7** (credits/event types 0x2C, 0x2E); unused **0x0D, 0x2D–0x32,
-  0x58, 0x76–0x78, 0x8E, 0xA3–0xA4**. 0x0A is named (`shape_merman_open`)
-  but nothing stores it.
+  confirmed. Unused (no store): **0x0D, 0x2D–0x32, 0x58, 0x76–0x78, 0x8E,
+  0xA3–0xA4**. 0x0A is named (`shape_merman_open`) but nothing stores it.
+  Event 6: **0x02 / 0xA5** robe and **0xA6** open / **0xA7** closed head
+  (`actor_dracula_bat`); **0x57 / 0x59** flying SAT head (`actor_dracula_head`);
+  **0x5A** = `actor_dracula_chunk`.
 - Annotation style: favour per-opcode comments, not just block headers. A block
   header explaining a routine's purpose is welcome, but it must NOT replace
   inline comments on the individual instructions - annotate the important

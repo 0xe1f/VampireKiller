@@ -366,7 +366,14 @@ credits_script_ptr: equ 0x6795	; 43 words -> seg8 ending + seg5 staff keyframes
 credits_wipe: equ 0x6831	; FILVRM 0x80 at (CE33-2)<<7 (clear scrolled-off line)
 event_dracula: equ 0x65b7	; CE00=6: 11-step CE01 machine -> CE40 credits
 event_dracula_init: equ 0x65d3
+event_dracula_chunks: equ 0x65fa	; CE01=2: six defeat chunks, then wait 0x78
 event_vscroll: equ 0x6848	; if CE34 set, write CE33 to VDP R23 (credits v-scroll)
+dracula_spawn_chunks: equ 0x6856	; six actor_dracula_chunk around (CE0F, Y=0x98)
+dracula_chunk_go: equ 0x6874	; type 0x2E tick: ret (integrate only)
+dracula_chunk_init: equ 0x69c3	; type 0x2E spawn: shape 0x5A + l69ebh velocity
+event_dracula_spawn_bat: equ 0x6a50	; CE36==2: one actor_dracula_bat at (0x80,0x98)
+dracula_bat_init: equ 0x6a64	; type 0x2C spawn: robe 0x02, fall, home on Simon
+dracula_bat_go: equ 0x6aa3	; type 0x2C tick: robe 0x02/0xA5, head open/closed, then bat fly
 player_tick: equ 0x6b06	; door + simon_action + attack + edge detector + timers
 simon_action_tick: equ 0x6b40	; Simon per-frame action-state machine (0xC420)
 simon_grounded: equ 0x6b59	; C420=0 walk/idle
@@ -682,15 +689,26 @@ enemy_merman_tick: equ 0xa2e7	; actor_merman_green / actor_merman_red
 merman_pick_frame: equ 0xa4ba	; merman stand pose from facing + type bit0
 enemy_ghost_head_tick: equ 0xa502	; entity type 8 (ghost head)
 enemy_pikeman_tick: equ 0xa57a	; entity type 6 (pikeman)
+actor_set_pose: equ 0xa636	; ix+0B = (HL)[C]
+simon_y_overlap: equ 0xa63e	; NZ if Simon Y is within ±8 of actor Y
 enemy_raven_tick: equ 0xa677	; entity type 12 (raven hover-flight)
 enemy_zombie_tick: equ 0xa93b	; entity type 1 (walking zombie)
 enemy_dog_tick: equ 0xa863	; entity type 5 (sitting dog)
 enemy_bone_dragon_tick: equ 0xaad4	; entity type 14 (bone dragon, custom SAT)
 enemy_dracula_tick: equ 0xab29	; entity type 17 (Dracula)
 enemy_dracula_go: equ 0xab49	; ix+1: intro/drop/idle/fire/rise/teleport/summon
+dracula_head_init: equ 0xacef	; type 0x2D spawn: intro head 0x57/0x59, arc away from Simon
+dracula_head_go: equ 0xad19	; type 0x2D tick: gravity +0x50/frame
+shot_pool_clear: equ 0xad1f	; free B slots from D700 (B from c800_tick remaining)
+c800_pool_clear: equ 0xad26	; free 7 C800 slots (no caller)
+actor_set_pose_facing: equ 0xad3e	; ix+0B = (HL)[C] or [C+2] if Simon is to the right
+dracula_sat_color: equ 0xad4c	; 8 SAT colours from dracula_sat_cols
+dracula_sat_hide: equ 0xad62	; colour 0 on all 8 SAT cells
+dracula_sat_hide_body: equ 0xad68	; colour 0 on cells 4-7 (lower cape)
+dracula_sat_color_from: equ 0xad74	; C = (HL+D), then dracula_sat_write_color
+dracula_sat_write_color: equ 0xad79	; write C to ix+E, next cell
 dracula_save_bg: equ 0xad87	; HMMM 32x32 playfield under Dracula to page-1 (0x80,0x80)
 dracula_blit_torso: equ 0xad9a	; LMMM/HMMM 32x32 from page-1 Y=0x80 onto (X-16,0x91)
-actor_set_pose_facing: equ 0xad3e	; ix+0B = (HL)[C] or [C+2] if Simon is to the right
 enemy_axe_knight_tick: equ 0xade5	; entity type 16 (axe knight)
 enemy_red_skeleton_tick: equ 0xaf51	; entity type 9 (red skeleton, no throw)
 enemy_flying_skull_tick: equ 0xb068	; entity type 7 (flying skull)

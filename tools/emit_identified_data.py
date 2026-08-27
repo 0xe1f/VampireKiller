@@ -648,11 +648,12 @@ def write_tile_file(
 
 
 # ix+0B pose -> stream label.  Shared pointer-table slots (6F/70=71, 81-84=85,
-# 95/96=97) pick the first named id on that stream.  Leftover unused / unidentified
-# ids stay actor_shape_%04x — see the actor_shape.asm header.
+# 95/96=97) pick the first named id on that stream.  Unused holes stay
+# actor_shape_%04x — see the actor_shape.asm header.
 SHAPE_ID_NAME = {
     0x00: "shape_pickup_fall",
     0x01: "shape_pickup",
+    0x02: "shape_dracula_robe_0",
     0x03: "shape_fireball",
     0x04: "shape_skull_pile_l",
     0x05: "shape_skull_pile_r",
@@ -732,6 +733,7 @@ SHAPE_ID_NAME = {
     0x56: "shape_dracula_intro_0",
     0x57: "shape_dracula_intro_1",
     0x59: "shape_dracula_intro_1_l",
+    0x5A: "shape_dracula_chunk",
     0x5B: "shape_dracula_stand_l",
     0x5C: "shape_dracula_stand_l_open",
     0x5D: "shape_dracula_stand_r",
@@ -792,6 +794,9 @@ SHAPE_ID_NAME = {
     0xA0: "shape_blob_fb80_1",
     0xA1: "shape_blob_fd00_0",
     0xA2: "shape_blob_fd00_1",
+    0xA5: "shape_dracula_robe_1",
+    0xA6: "shape_dracula_head_open",
+    0xA7: "shape_dracula_head_closed",
 }
 
 
@@ -807,7 +812,7 @@ def shape_stream_name(cpu: int, ids: list[int] | None = None) -> str:
 # CPU order (roc flap 2 and white-skeleton sit where the table puts them).
 SHAPE_GROUPS = (
     (0x00, 0x01, "pickup"),
-    (0x02, 0x02, "unidentified (type 0x2C)"),
+    (0x02, 0x02, "dracula robe"),
     (0x03, 0x03, "fireball"),
     (0x04, 0x07, "skull pile"),
     (0x08, 0x15, "merman"),
@@ -839,7 +844,9 @@ SHAPE_GROUPS = (
     (0x8F, 0x91, "orb"),
     (0x92, 0x9A, "intro"),
     (0x9B, 0xA2, "blob"),
-    (0xA3, 0xA7, "leftover"),
+    (0xA3, 0xA4, "unused"),
+    (0xA5, 0xA5, "dracula robe"),
+    (0xA6, 0xA7, "dracula head"),
 )
 
 
@@ -890,9 +897,10 @@ def format_actor_shapes(raw: bytes) -> list[str]:
         "; this table; nametables do not use those ids.  HUD tiles follow at 0xB9C8.",
         "; Names live in tools/emit_identified_data.py SHAPE_ID_NAME (regen this",
         "; file from there).  shape_* prefix avoids colliding with spr_* RLE.",
-        "; Leftover (return to): used but unidentified 0x02 / 0x5A / 0xA5-0xA7",
-        "; (credits/event types 0x2C and 0x2E); unused 0x0D 0x2D-0x32 0x58",
-        "; 0x76-0x78 0x8E 0xA3-0xA4.  0x0A is named (open-mouth merman) but unused.",
+        "; Unused (no store): 0x0D 0x2D-0x32 0x58 0x76-0x78 0x8E 0xA3-0xA4.",
+        "; 0x0A is named (open-mouth merman) but unused.  Event 6: 0x02/0xA5",
+        "; are robe, 0xA6 open / 0xA7 closed head (actor_dracula_bat); 0x57/0x59",
+        "; are the flying SAT head (actor_dracula_head); 0x5A is actor_dracula_chunk.",
         "; Shared slots: 0x6F/0x70 = ghost 0x71; 0x81-0x84 = flame 0x85;",
         "; 0x95/0x96 = intro simon 0x97.  shot_bone's 4th frame is giant-bat 0x4E.",
         "; Sections group by actor; defw / stream order is still id / CPU order.",

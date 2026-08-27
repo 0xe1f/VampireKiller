@@ -5069,7 +5069,9 @@ entity_tbl_end:
 ; when page 1b is seg1: 0x18 Igor igor_tick 0xBAE4, 0x19-0x1C enemy_blob_tick
 ; 0xB4D9, 0x1E flame_init 0x9B67, 0x1F
 ; enemy_placed_bat_init 0xB0D5, 0x21 enemy_placed_merman_init 0xA2CE,
-; 0x23 hunchback 0xB219, 0x24 heart 0x9BA2. Do not word-align this block.
+; 0x23 hunchback 0xB219, 0x24 heart 0x9BA2, 0x2C dracula_bat_init 0x6A64,
+; 0x2D dracula_head_init 0xACEF, 0x2E dracula_chunk_init 0x69C3.
+; Do not word-align this block.
 data_6000_start:
 	defb 06ah
 	defb 0e4h
@@ -6211,7 +6213,7 @@ event_dracula:
 	call DISPATCH_A
 	defw event_dracula_init    ; 0  seed C0D0 (0x11 entries)
 	defw event_dracula_wait    ; 1  wait CE16, re-run dracula_blit_torso
-	defw event_dracula_sparks  ; 2  sub_6856h; CE02 = 0x78
+	defw event_dracula_chunks  ; 2  dracula_spawn_chunks; CE02 = 0x78
 	defw event_dracula_quiet   ; 3  wait CE02 and C800==0, play_sound 0
 	defw event_dracula_theme   ; 4  BGM 0x88, bar=0x80, falls into l662dh
 	defw event_dracula_rise    ; 5  sub_68cbh until CE36==2
@@ -6238,10 +6240,10 @@ event_dracula_wait:
 	ld (0ce0eh),a
 	call dracula_blit_torso
 	jp event_ce01_next
-event_dracula_sparks:
+event_dracula_chunks:
 	xor a
-	ld (0ce12h),a
-	call sub_6856h
+	ld (0ce12h),a          ; chunk velocity-table index
+	call dracula_spawn_chunks
 	ld a,078h
 	ld (0ce02h),a          ; frame timer = 0x78
 	jp event_ce01_next
@@ -6293,7 +6295,7 @@ event_dracula_fork:
 	call sub_67ebh         ; 0xCE15 == 0 path
 	call sub_6875h
 	call sub_681fh
-	jp l6a50h
+	jp event_dracula_spawn_bat
 l666eh:
 	call l69a7h            ; 0xCE15 != 0 path
 	call sub_6817h
@@ -6580,11 +6582,13 @@ event_vscroll:
 	ld b,a
 	ld c,017h              ; VDP R23
 	jp WRTVDP
-sub_6856h:
+; dracula_spawn_chunks (seg1 0x6856): six actor_dracula_chunk (type 0x2E)
+; around (CE0F, Y=0x98) after figure Dracula dies. shape_dracula_chunk; tick is ret.
+dracula_spawn_chunks:
 	ld b,006h
 l6858h:
 	push bc
-	ld c,02eh
+	ld c,actor_dracula_chunk
 	ld a,r
 	and 00fh
 	sub 008h
@@ -6596,9 +6600,10 @@ l6858h:
 	and 00fh
 	add a,098h
 	ld e,a
-	call 05f24h
+	call spawn_actor
 	pop bc
 	djnz l6858h
+dracula_chunk_go:              ; type 0x2E tick: integrate only
 	ret
 sub_6875h:
 	ld a,(0ce35h)
@@ -6749,11 +6754,14 @@ l69a7h:
 	ld bc,01010h
 	ld a,001h
 	jp vdp_hmmm
+; dracula_chunk_init (seg1 0x69C3) - actor_dracula_chunk spawn. Physics on,
+; shape_dracula_chunk, then Y/X vel from l69ebh[CE12++] (6 direction pairs).
+dracula_chunk_init:
 	xor a
-	ld (ix+07eh),a
-	ld (ix+00eh),a
-	ld (ix+006h),001h
-	ld (ix+00bh),05ah
+	ld (ix+07eh),a         ; ignore whip freeze
+	ld (ix+00eh),a         ; not hittable
+	ld (ix+006h),001h      ; physics on
+	ld (ix+00bh),05ah      ; shape_dracula_chunk
 	ld hl,0ce12h
 	ld a,(hl)
 	inc (hl)
@@ -6833,21 +6841,26 @@ l6a3bh:
 	ld (ix+006h),000h
 tick_nop:
 	ret
-l6a50h:
+; event_dracula_spawn_bat (seg1 0x6A50): when CE36==2 and C003&7==0, one
+; actor_dracula_bat at (X=0x80, Y=0x98).
+event_dracula_spawn_bat:
 	ld a,(0ce36h)
 	cp 002h
 	ret nz
 	ld a,(0c003h)
 	and 007h
 	ret nz
-	ld c,02ch
+	ld c,actor_dracula_bat
 	ld de,08098h
-	jp 05f24h
-	ld (ix+006h),001h
-	ld (ix+00ch),008h
-	ld (ix+011h),000h
+	jp spawn_actor
+; dracula_bat_init (seg1 0x6A64) - actor_dracula_bat spawn. Fall (Yvel 0x0300),
+; home X at Simon. Poses robe 0x02/0xA5, then head open 0xA6 / closed 0xA7, then hanging_bat fly.
+dracula_bat_init:
+	ld (ix+006h),001h      ; physics on
+	ld (ix+00ch),008h      ; 8 frames at pose 0
+	ld (ix+011h),000h      ; fly-pose timer
 l6a70h:
-	ld (ix+00bh),002h
+	ld (ix+00bh),002h      ; shape_dracula_robe_0
 	ld de,00300h
 	call actor_set_yvel
 	ld hl,0cf32h
@@ -6856,45 +6869,39 @@ l6a70h:
 	and 007h
 	ld de,l6a93h
 	call lookup_word_tbl
-	ld a,(0c427h)
+	ld a,(0c427h)          ; Simon X
 	sub (ix+005h)
 	call c,neg_de
 	jp actor_set_xvel
 l6a93h:
-	nop
-	ld bc,00280h
-	add a,b
-	ld bc,00200h
-	ld b,b
-	ld (bc),a
-	ld b,b
-	ld bc,00300h
-	ret nz
-	ld bc,l7eddh
-	ld bc,004feh
-	ld de,0ffd0h
+	defw 00100h,00280h,00180h,00200h
+	defw 00240h,00140h,00300h,001c0h
+dracula_bat_go:                ; (0x6AA3)
+	ld a,(ix+001h)
+	cp 004h
+	ld de,0ffd0h           ; gravity unless state 4
 	call nz,actor_add_yvel
 	ld a,(ix+001h)
 	call DISPATCH_A
-	defw l6abeh
-	defw l6aceh
-	defw l6ae6h
-	defw l6af2h
-	defw sub_6b00h
+	defw l6abeh            ; 0  wait 8, robe 0xA5
+	defw l6aceh            ; 1  wait 8, head open 0xA6 / closed 0xA7
+	defw l6ae6h            ; 2  wait 0x18
+	defw l6af2h            ; 3  hanging_bat fly (one rra)
+	defw sub_6b00h         ; 4  keep flying
 l6abeh:
 	dec (ix+00ch)
 	ret nz
-	ld (ix+00bh),0a5h
+	ld (ix+00bh),0a5h      ; shape_dracula_robe_1
 	ld (ix+00ch),008h
 	inc (ix+001h)
 	ret
 l6aceh:
 	dec (ix+00ch)
 	ret nz
-	bit 7,(ix+00ah)
-	ld a,0a6h
+	bit 7,(ix+00ah)        ; Xvel sign
+	ld a,0a6h              ; shape_dracula_head_open
 	jr nz,l6adbh
-	inc a
+	inc a                  ; shape_dracula_head_closed
 l6adbh:
 	ld (ix+00bh),a
 	ld (ix+00ch),008h
@@ -6915,7 +6922,7 @@ l6af2h:
 	ret
 sub_6b00h:
 	ld a,(ix+011h)
-	jp 0b164h
+	jp 0b164h              ; hanging_bat fly pose, one rra (type 4 uses three)
 ; player_tick (seg1 0x6B06): per-frame player update during play.
 ; 0xCE11 (boss-orb collected) freezes input; then door, Simon action, attack
 ; (skipped while the door anims 2/3/5), edge detector, and the timer bank.
@@ -14277,7 +14284,8 @@ actor_freeze_check:
 ; Separate from spawn-time entity_tbl: most entries are a later instruction of
 ; the same enemy_*_tick (skip spawn pose / splash / fly-in). Types 0x17 and
 ; 0x1D are `ret` (no per-frame work). 0x1F shares type 4; 0x21 shares 2/3;
-; 0x23 shares type 13 (hunchback).
+; 0x23 shares type 13 (hunchback). 0x2C is dracula_bat_go; 0x2D is
+; dracula_head_go (gravity); 0x2E is ret.
 actor_type_tick:
 	ld a,(ix+000h)
 	dec a
@@ -14320,8 +14328,10 @@ actor_tick_tbl:
 	defw hunchback_go       ; 35 roc_drop
 	defw actor_pickup_go    ; 36
 	defb 0a5h,099h,025h,09ch,0bah,04eh,000h,04fh
-	defb 000h,04fh,03ch,04fh,0a5h,099h,0a3h,06ah
-	defb 019h,0adh,074h,068h
+	defb 000h,04fh,03ch,04fh,0a5h,099h
+	defw dracula_bat_go     ; 44 actor_dracula_bat
+	defw dracula_head_go    ; 45 actor_dracula_head
+	defw dracula_chunk_go   ; 46 actor_dracula_chunk
 tick_nop_seg2:
 	ret
 actors_rearm_hittable:         ; (0x99A6) if actor +0E bit2, set bit0 (C800 then shots)
@@ -15982,7 +15992,7 @@ actor_set_xvel:
 	ld (ix+00ah),d
 	ret
 ; enemy_pikeman_tick (seg3 0xA57A) - type 06 walking spear knight. Turns at
-; ledges/walls; walks toward Simon when Y overlaps (±8 via sub_a63eh). 4 HP,
+; ledges/walls; walks toward Simon when Y overlaps (±8 via simon_y_overlap). 4 HP,
 ; 200 pts. No projectile. Shape 0x50.
 enemy_pikeman_tick:
 	ld (ix+006h),001h
@@ -16029,7 +16039,7 @@ la5d7h:
 	bit 7,(ix+00ah)
 	jp nz,la613h
 la5e3h:
-	call sub_a63eh
+	call simon_y_overlap
 	jr nc,la605h
 	bit 0,(ix+011h)
 	jr nz,la609h
@@ -16063,7 +16073,7 @@ la616h:
 	add a,004h
 la62bh:
 	ld c,a
-	jr la636h
+	jr actor_set_pose
 la62eh:
 	ld d,b
 	ld d,c
@@ -16073,13 +16083,15 @@ la62eh:
 	ld d,h
 	ld d,l
 	ld d,h
-la636h:
+; actor_set_pose (seg3 0xA636): ix+0B = (HL)[C].
+actor_set_pose:
 	ld b,000h
 	add hl,bc
 	ld a,(hl)
 	ld (ix+00bh),a
 	ret
-sub_a63eh:
+; simon_y_overlap (seg3 0xA63E): NZ if Simon Y is within ±8 of actor Y.
+simon_y_overlap:
 	ld a,(0c425h)
 	sub (ix+003h)
 	add a,008h
@@ -16826,7 +16838,7 @@ dracula_idle:
 	call actor_set_pose_facing
 	call dracula_sat_color
 	bit 0,(ix+00ch)
-	call nz,sub_ad68h
+	call nz,dracula_sat_hide_body
 	call dracula_torso_from_shape
 	dec (ix+00ch)
 	ret nz
@@ -16871,7 +16883,7 @@ lac1ah:
 dracula_rise:
 	dec (ix+00ch)
 	ret nz
-	call sub_ad62h
+	call dracula_sat_hide
 	ld a,005h
 	ld (0ce0eh),a
 	ld a,(ix+003h)
@@ -16910,7 +16922,7 @@ dracula_idle_post:
 	call actor_set_pose_facing
 	call dracula_sat_color
 	bit 0,(ix+00ch)
-	call nz,sub_ad62h
+	call nz,dracula_sat_hide
 	call dracula_torso_from_shape
 	dec (ix+00ch)
 	ret nz
@@ -16925,58 +16937,66 @@ dracula_pose_idle:
 dracula_summon:
 	call dracula_torso_select
 	xor a
-	ld (ix+025h),a
+	ld (ix+025h),a         ; hide SAT colours (cells 0-3)
 	ld (ix+02ah),a
 	ld (ix+02fh),a
 	ld (ix+034h),a
-	ld (ix+00eh),a
+	ld (ix+00eh),a         ; not hittable
 	ld (ix+00ch),03ch
 	inc (ix+001h)
-	call sub_ad1fh
+	call shot_pool_clear
 	ld a,(ix+003h)
 	sub 02bh
-	ld e,a
-	ld d,(ix+005h)
-	ld c,02dh
+	ld e,a                 ; Y - 0x2B
+	ld d,(ix+005h)         ; X
+	ld c,actor_dracula_head
 	jp spawn_actor
 dracula_done:
 	dec (ix+00ch)
 	ret nz
 	ld a,001h
-	ld (0ce16h),a
+	ld (0ce16h),a          ; event_dracula_wait
 	call dracula_torso_hide
 	jp actor_free
-	ld (ix+006h),001h
-	ld (ix+00eh),000h
-	ld (ix+07eh),000h
-	ld a,(0c427h)
+; dracula_head_init (seg3 0xACEF) - actor_dracula_head spawn. Intro SAT
+; head (0x57 / 0x59) arcs away from Simon (Yvel -0x0300, then gravity).
+dracula_head_init:
+	ld (ix+006h),001h      ; physics on
+	ld (ix+00eh),000h      ; not hittable
+	ld (ix+07eh),000h      ; no whip-freeze
+	ld a,(0c427h)          ; Simon X
 	cp (ix+005h)
-	ld c,057h
-	ld de,00300h
+	ld c,057h              ; shape_dracula_intro_1
+	ld de,00300h           ; +X if Simon is left (away)
 	jr c,lad0dh
-	ld de,0fd00h
-	ld c,059h
+	ld de,0fd00h           ; -X
+	ld c,059h              ; shape_dracula_intro_1_l
 lad0dh:
 	ld (ix+00bh),c
 	call actor_set_xvel
-	ld de,0fd00h
+	ld de,0fd00h           ; launch up
 	jp actor_set_yvel
+dracula_head_go:               ; (0xAD19) gravity +0x50 / frame
 	ld de,00050h
 	jp actor_add_yvel
-sub_ad1fh:
+; shot_pool_clear (seg3 0xAD1F): free B slots from D700. summon does not
+; load B; c800_tick left it as remaining C800 count (pushed around the tick).
+shot_pool_clear:
 	push ix
 	ld ix,0d700h
-	jr lad2fh
+	jr shot_pool_free_loop
+; c800_pool_clear (seg3 0xAD26): free all 7 C800 slots. No caller.
+c800_pool_clear:
 	push ix
 	ld ix,0c800h
 	ld b,007h
-lad2fh:
+shot_pool_free_loop:
 	push bc
 	call actor_free
 	ld de,00080h
 	add ix,de
 	pop bc
-	djnz lad2fh
+	djnz shot_pool_free_loop
 	pop ix
 	ret
 ; actor_set_pose_facing (0xAD3E): ix+0B = (HL)[C] or (HL)[C+2] if Simon is
@@ -16984,39 +17004,41 @@ lad2fh:
 actor_set_pose_facing:
 	ld a,(0c427h)
 	cp (ix+005h)
-	jp c,la636h
+	jp c,actor_set_pose
 	inc c
 lad48h:
 	inc c
-	jp la636h
+	jp actor_set_pose
 dracula_sat_color:
 	ld b,008h
 	ld de,00025h
 lad51h:
 	ld hl,dracula_sat_cols
-	call sub_ad74h
+	call dracula_sat_color_from
 	djnz lad51h
 	ret
 dracula_sat_cols:
 	defb 002h,048h,002h,048h,002h,048h,002h,048h
-sub_ad62h:
+; dracula_sat_hide (0xAD62): colour 0 on all 8 cells (rise / idle_post flicker).
+dracula_sat_hide:
 	ld b,008h
 	ld e,025h
 	jr lad6ch
-sub_ad68h:
+; dracula_sat_hide_body (0xAD68): colour 0 on cells 4-7 (lower cape; idle flicker).
+dracula_sat_hide_body:
 	ld b,004h
 	ld e,039h
 lad6ch:
 	ld c,000h
 lad6eh:
-	call sub_ad79h
+	call dracula_sat_write_color
 	djnz lad6eh
 	ret
-sub_ad74h:
+dracula_sat_color_from:
 	ld a,d
 	call ADD_HL_A
 	ld c,(hl)
-sub_ad79h:
+dracula_sat_write_color:
 	push ix
 	pop hl
 	ld a,e
@@ -17490,7 +17512,7 @@ lb15fh:
 	ld a,(ix+011h)
 	rra
 	rra
-	rra
+	rra                    ; type 0x2C jumps to 0xB164 (one rra only)
 	inc (ix+011h)
 	and 003h
 	ld hl,lb17eh
@@ -17581,7 +17603,7 @@ sub_b1eeh:
 	ld (ix+011h),000h
 lb210h:
 	ld hl,lb216h
-	jp la636h
+	jp actor_set_pose
 lb216h:
 	ld l,l
 	ld l,(hl)

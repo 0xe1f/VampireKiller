@@ -7,9 +7,10 @@
 ; this table; nametables do not use those ids.  HUD tiles follow at 0xB9C8.
 ; Names live in tools/emit_identified_data.py SHAPE_ID_NAME (regen this
 ; file from there).  shape_* prefix avoids colliding with spr_* RLE.
-; Leftover (return to): used but unidentified 0x02 / 0x5A / 0xA5-0xA7
-; (credits/event types 0x2C and 0x2E); unused 0x0D 0x2D-0x32 0x58
-; 0x76-0x78 0x8E 0xA3-0xA4.  0x0A is named (open-mouth merman) but unused.
+; Unused (no store): 0x0D 0x2D-0x32 0x58 0x76-0x78 0x8E 0xA3-0xA4.
+; 0x0A is named (open-mouth merman) but unused.  Event 6: 0x02/0xA5
+; are robe, 0xA6 open / 0xA7 closed head (actor_dracula_bat); 0x57/0x59
+; are the flying SAT head (actor_dracula_head); 0x5A is actor_dracula_chunk.
 ; Shared slots: 0x6F/0x70 = ghost 0x71; 0x81-0x84 = flame 0x85;
 ; 0x95/0x96 = intro simon 0x97.  shot_bone's 4th frame is giant-bat 0x4E.
 ; Sections group by actor; defw / stream order is still id / CPU order.
@@ -19,8 +20,8 @@ actor_shape_ptr:  ; 0xB473  word[shape id] -> stream
 ; --- pickup ---
 	defw shape_pickup_fall, shape_pickup  ; 0x00
 
-; --- unidentified (type 0x2C) ---
-	defw actor_shape_b5cc  ; 0x02
+; --- dracula robe ---
+	defw shape_dracula_robe_0  ; 0x02
 
 ; --- fireball ---
 	defw shape_fireball  ; 0x03
@@ -77,7 +78,7 @@ actor_shape_ptr:  ; 0xB473  word[shape id] -> stream
 
 ; --- dracula ---
 	defw shape_dracula_intro_0, shape_dracula_intro_1, actor_shape_b7cc, shape_dracula_intro_1_l  ; 0x56
-	defw actor_shape_b7d2, shape_dracula_stand_l, shape_dracula_stand_l_open, shape_dracula_stand_r  ; 0x5A
+	defw shape_dracula_chunk, shape_dracula_stand_l, shape_dracula_stand_l_open, shape_dracula_stand_r  ; 0x5A
 	defw shape_dracula_stand_r_open  ; 0x5E
 
 ; --- axe knight ---
@@ -135,9 +136,14 @@ actor_shape_ptr:  ; 0xB473  word[shape id] -> stream
 	defw shape_blob_0, shape_blob_1, shape_blob_fe00_0, shape_blob_fe00_1  ; 0x9B
 	defw shape_blob_fb80_0, shape_blob_fb80_1, shape_blob_fd00_0, shape_blob_fd00_1  ; 0x9F
 
-; --- leftover ---
-	defw actor_shape_b9b9, actor_shape_b9bc, actor_shape_b9bf, actor_shape_b9c2  ; 0xA3
-	defw actor_shape_b9c5  ; 0xA7
+; --- unused ---
+	defw actor_shape_b9b9, actor_shape_b9bc  ; 0xA3
+
+; --- dracula robe ---
+	defw shape_dracula_robe_1  ; 0xA5
+
+; --- dracula head ---
+	defw shape_dracula_head_open, shape_dracula_head_closed  ; 0xA6
 
 ; --- pickup ---
 shape_pickup_fall:  ; 0xB5C3  id 0x00  2 x (dy,dx,pat)
@@ -146,8 +152,8 @@ shape_pickup_fall:  ; 0xB5C3  id 0x00  2 x (dy,dx,pat)
 shape_pickup:  ; 0xB5C9  id 0x01  0x81 + 2 pats
 	defb 0x81,0xec,0xec
 
-; --- unidentified (type 0x2C) ---
-actor_shape_b5cc:  ; 0xB5CC  id 0x02  0x81 + 2 pats
+; --- dracula robe ---
+shape_dracula_robe_0:  ; 0xB5CC  id 0x02  0x81 + 2 pats
 	defb 0x81,0x78,0x7c
 
 ; --- fireball ---
@@ -430,7 +436,7 @@ actor_shape_b7cc:  ; 0xB7CC  id 0x58  0x81 + 2 pats
 shape_dracula_intro_1_l:  ; 0xB7CF  id 0x59  0x81 + 2 pats
 	defb 0x81,0x88,0x8c
 
-actor_shape_b7d2:  ; 0xB7D2  id 0x5A  0x81 + 2 pats
+shape_dracula_chunk:  ; 0xB7D2  id 0x5A  0x81 + 2 pats
 	defb 0x81,0x68,0x6c
 
 shape_dracula_stand_l:  ; 0xB7D5  id 0x5B  8 x (dy,dx,pat)
@@ -655,18 +661,20 @@ shape_blob_fd00_0:  ; 0xB9B3  id 0xA1  0x81 + 2 pats
 shape_blob_fd00_1:  ; 0xB9B6  id 0xA2  0x81 + 2 pats
 	defb 0x81,0xa4,0xdc
 
-; --- leftover ---
+; --- unused ---
 actor_shape_b9b9:  ; 0xB9B9  id 0xA3  1 x (dy,dx,pat)
 	defb 0xf1,0xf8,0xec
 
 actor_shape_b9bc:  ; 0xB9BC  id 0xA4  1 x (dy,dx,pat)
 	defb 0xf1,0xf8,0xf0
 
-actor_shape_b9bf:  ; 0xB9BF  id 0xA5  0x81 + 2 pats
+; --- dracula robe ---
+shape_dracula_robe_1:  ; 0xB9BF  id 0xA5  0x81 + 2 pats
 	defb 0x81,0x80,0x84
 
-actor_shape_b9c2:  ; 0xB9C2  id 0xA6  0x81 + 2 pats
+; --- dracula head ---
+shape_dracula_head_open:  ; 0xB9C2  id 0xA6  0x81 + 2 pats
 	defb 0x81,0x88,0x8c
 
-actor_shape_b9c5:  ; 0xB9C5  id 0xA7  0x81 + 2 pats
+shape_dracula_head_closed:  ; 0xB9C5  id 0xA7  0x81 + 2 pats
 	defb 0x81,0x90,0x94

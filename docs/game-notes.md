@@ -1084,7 +1084,7 @@ Shared physics header (`actor_integrate` 0x99C0, velocity helpers in seg3):
 | +06 | physics alive (`actor_integrate` skips if 0; spawn writes 0, init usually sets 1) |
 | +07 / +08 | signed Y velocity |
 | +09 / +0A | signed X velocity |
-| +0B | pose / shape id (`actor_shape_ptr` / seg6 word table while that bank is paged). Named streams are `shape_*` in `data/actor_shape.asm`. Leftover ids to return to: used but unidentified **0x02 / 0x5A / 0xA5–0xA7**; unused **0x0D, 0x2D–0x32, 0x58, 0x76–0x78, 0x8E, 0xA3–0xA4**. |
+| +0B | pose / shape id (`actor_shape_ptr` / seg6 word table while that bank is paged). Named streams are `shape_*` in `data/actor_shape.asm`. Unused (no store): **0x0D, 0x2D–0x32, 0x58, 0x76–0x78, 0x8E, 0xA3–0xA4**. Event 6: **0x02 / 0xA5** robe and **0xA6** open / **0xA7** closed head (`actor_dracula_bat`); **0x57 / 0x59** flying SAT head (`actor_dracula_head`); **0x5A** `actor_dracula_chunk`. |
 | +0C | timer |
 | +0D | HP from `actor_hp_tbl` (0x60E9; spawn indexes as 0x60E8+type) |
 | +0E | flags. **bit 0 = hittable** this frame (`rra`/`jr nc` in whip/proj tests; `res 0` on a hit). **bit 2** = rearm hittable (`actors_rearm_hittable`). Spawn writes 7. |
@@ -1449,7 +1449,11 @@ Catalogued so far:
   4bpp `dracula_body_closed` / `dracula_body_open` (seg13 0xB5A1 / 0xB719)
   loaded to page-1 Y=`0x80` by `dracula_body_load`. The 16×16s at page-1 Y=`0xA0`
   (`dracula_portrait_parts`) are the wall portrait's eyes and mouth — closed
-  during the figure fight, then animated after he dies. `make gfx` composites
+  during the figure fight, then animated after he dies. Event 6 also spawns
+  **type 0x2E** `actor_dracula_chunk` (six debris chunks after type 17 dies; shape `0x5A`), **type
+  0x2D** `actor_dracula_head` (intro SAT head `0x57`/`0x59` arcs away after `dracula_summon`), and **type
+  0x2C** `actor_dracula_bat` (robe `0x02` / `0xA5`, then head `0xA6` open /
+  `0xA7` closed, then hanging-bat fly `0x1B–0x20`). `make gfx` composites
   the standing cloak into `enemy_sheet.png`.
   Type **21** is Frankenstein (`0x79`); type 13/24 share the hunchback pose
   `0x67`. Types **0x1A/0x1B/0x1C** are `actor_blob_blue` / `_red` / `_white`
@@ -1464,7 +1468,7 @@ Catalogued so far:
   FE00 pair); `06`/`07` are the same art at FE40. Raven includes `8C` (convert
   of `89`). Blob `0x9D–0xA2` are dest retargets of `0x9B/0x9C`.
   Igor (`actor_igor`, type `18`) gets his own sheet; he is not on the group
-  sheet. Same `make gfx` pass.
+  sheet. Defeat chunk `0x5A` is on the type-17 sheet. Same `make gfx` pass.
 - `hazards.png` - environmental hazards: things that damage Simon but are not
   actors, so they never appear on `enemy_sheet.png`. The stage 6 room 1 spike
   bars are the **only** one in the game — every other damage source is an enemy

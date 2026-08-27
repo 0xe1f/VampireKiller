@@ -45,3 +45,6 @@ actor_placed_merman:     equ 0x21  ; red spit, already on the platform (stage 10
 actor_orb:               equ 0x22  ; boss-clear orb
 actor_roc_drop:          equ 0x23  ; roc projectile (hunchback tick)
 actor_pickup:            equ 0x24  ; settled / falling heart pickup
+actor_dracula_bat:       equ 0x2C  ; event 6: drop, then hanging-bat fly
+actor_dracula_head:      equ 0x2D  ; event 6: SAT head arc after dracula_summon
+actor_dracula_chunk:     equ 0x2E  ; event 6: six debris chunks after type 17 dies

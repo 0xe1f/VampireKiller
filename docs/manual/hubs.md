@@ -20,6 +20,6 @@ Maps, item lists, and who lives where: the stage pages. Common advice (find a wh
 | Block 5 | [13]({{ '/manual/stages/13/' | relative_url }}) · [14]({{ '/manual/stages/14/' | relative_url }}) · [15]({{ '/manual/stages/15/' | relative_url }}) | [Grim Reaper]({{ '/manual/bestiary/#grim-reaper' | relative_url }}) | stages 13–15 |
 | Block 6 | [16]({{ '/manual/stages/16/' | relative_url }}) · [17]({{ '/manual/stages/17/' | relative_url }}) · [18]({{ '/manual/stages/18/' | relative_url }}) | [Dracula]({{ '/manual/bestiary/#dracula' | relative_url }}) | 16–17, then 10's theme |
 
-Gold outlines on the maps are breakable walls. Red is the white-key door. Teal pads (stage 12) are warps. Candles show their contents; chests show theirs.
+Gold outlines on the maps are breakable walls. Red is the white-key door. Teal pads (stage 12) are warps — the number is the destination room. Candles show their contents; chests show theirs.
 
 [Soundtrack]({{ '/manual/soundtrack/' | relative_url }}) if you would rather listen than walk.

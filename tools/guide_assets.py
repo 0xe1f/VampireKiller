@@ -308,9 +308,10 @@ def dump_icons(data, named):
         if bid in by_id:
             write_icon(os.path.join(IMG, "weapons", slug + ".png"), by_id[bid], pal)
     flame = named.get("candle_0")
-    if flame:
+    brazier = named.get("candle_2")
+    if flame is not None:
         write_icon(os.path.join(IMG, "items", "candle-flame.png"), flame, pal)
-    return by_id, pal
+    return by_id, pal, flame, brazier
 
 
 def dump_enemies(data):
@@ -499,9 +500,58 @@ def outline_rect(buf, W, H, x0, y0, w, h, rgb, t=2):
                     buf[o:o + 3] = bytes(rgb)
 
 
+def blit_badge(buf, W, H, x0, y0, rgb_grid, scale):
+    """Item icon centred in a 16x16 (game px) filled circle."""
+    d = 16 * scale
+    fill, rim = (10, 12, 18), GOLD
+    r = (d - 1) * 0.5
+    r2, rim2 = r * r, (r - max(1.5, scale * 0.85)) ** 2
+    for yy in range(d):
+        dy = yy - r
+        for xx in range(d):
+            dist = (xx - r) * (xx - r) + dy * dy
+            if dist > r2:
+                continue
+            px, py = x0 + xx, y0 + yy
+            if not (0 <= px < W and 0 <= py < H):
+                continue
+            o = (py * W + px) * 3
+            buf[o:o + 3] = bytes(rim if dist > rim2 else fill)
+    if not rgb_grid or not rgb_grid[0]:
+        return
+    ih, iw = len(rgb_grid), len(rgb_grid[0])
+    tw, th = iw * scale, ih * scale
+    ix = x0 + (d - tw) // 2
+    iy = y0 + (d - th) // 2
+    skip = {gfxdump.OFF, BG, (0, 0, 0)}
+    for y, row in enumerate(rgb_grid):
+        for x, col in enumerate(row):
+            if col in skip:
+                continue
+            dx = ix + x * scale + (scale - 1) * 0.5 - (x0 + r)
+            dy = iy + y * scale + (scale - 1) * 0.5 - (y0 + r)
+            if dx * dx + dy * dy > r2:
+                continue
+            for yy in range(scale):
+                py = iy + y * scale + yy
+                if not 0 <= py < H:
+                    continue
+                for xx in range(scale):
+                    px = ix + x * scale + xx
+                    if 0 <= px < W:
+                        o = (py * W + px) * 3
+                        buf[o:o + 3] = bytes(col)
+
+
 def cell_px(cx, cy, scale):
-    """Scenery cell (16px) -> pixel in the cropped playfield buffer."""
-    return cx * 16 * scale, (cy * 2 - roomperm.PLAY_TOP) * 8 * scale
+    """Scenery cell (16px) -> pixel in the cropped playfield buffer.
+
+    scenery_pos_xy stores (X,Y)=(cx,cy)*16. map_cell_at drops the 16px HUD
+    margin before the nametable row, so a naive (Y - HUD) blit sits one
+    cell too low — inside the floor the object stands on.
+    """
+    nt_row = cy * 2 - 2
+    return cx * 16 * scale, (nt_row - roomperm.PLAY_TOP) * 8 * scale
 
 
 def stamp_block(rom, buf, W, H, stage, room, cx, cy, scale):
@@ -530,12 +580,13 @@ def icon_rgb(grid, pal):
     return to_rgb(crop_grid(grid, pad=0), pal)
 
 
-def render_annotated(rom, data, stage, by_id, pal, enemy_grids, spike_grid=None):
+def render_annotated(rom, data, stage, by_id, pal, enemy_grids,
+                     spike_grid=None, candle=None, brazier=None):
     n = roomperm.minimap_room_count(rom, stage)
     scenery = scenery_for_stage(rom, stage)
     entry = roomperm.door_table_entry(rom, stage)
     spots = [s for s in roomperm.parse_spots(rom) if s["stage"] == stage]
-    flame = by_id.get(14)
+    stand = brazier if stage == 0 else candle
     images = []
     for col in range(n):
         grid = roomperm.decode_room(rom, stage, col)
@@ -545,37 +596,37 @@ def render_annotated(rom, data, stage, by_id, pal, enemy_grids, spike_grid=None)
         for cx, cy, attr, extra in recs:
             kind, bonus, hidden = classify(attr, extra)
             x0, y0 = cell_px(cx, cy, SCALE_MAP)
+            g = by_id.get(bonus)
             if kind == "block":
                 stamp_block(rom, buf, W, H, stage, col, cx, cy, SCALE_MAP)
-                g = by_id.get(bonus)
                 if g is not None:
-                    rgb = icon_rgb(g, pal)
-                    blit_rgb(buf, W, H, x0 + 8 * SCALE_MAP, y0 + 8 * SCALE_MAP,
-                             rgb, SCALE_MAP)
+                    blit_badge(buf, W, H, x0 + 8 * SCALE_MAP, y0 + 8 * SCALE_MAP,
+                               icon_rgb(g, pal), SCALE_MAP)
             elif kind == "candle":
-                if flame is not None:
-                    blit_rgb(buf, W, H, x0, y0, icon_rgb(flame, pal), SCALE_MAP)
-                g = by_id.get(bonus)
+                if stand is not None:
+                    blit_rgb(buf, W, H, x0, y0, icon_rgb(stand, pal), SCALE_MAP)
                 if g is not None and bonus:
-                    blit_rgb(buf, W, H, x0 + 8 * SCALE_MAP, y0,
-                             icon_rgb(g, pal), max(1, SCALE_MAP))
-            elif kind in ("floor", "chest"):
-                g = by_id.get(25 if kind == "chest" else bonus)
-                if kind == "chest" and 25 in by_id:
+                    bx = x0 + 16 * SCALE_MAP
+                    if bx + 16 * SCALE_MAP > W:
+                        bx = x0 - 16 * SCALE_MAP
+                    blit_badge(buf, W, H, bx, y0, icon_rgb(g, pal), SCALE_MAP)
+            elif kind == "chest":
+                if 25 in by_id:
                     blit_rgb(buf, W, H, x0, y0, icon_rgb(by_id[25], pal), SCALE_MAP)
-                    g = by_id.get(bonus)
-                    if g is not None:
-                        blit_rgb(buf, W, H, x0 + 10 * SCALE_MAP, y0,
-                                 icon_rgb(g, pal), max(1, SCALE_MAP))
-                elif g is not None:
-                    blit_rgb(buf, W, H, x0, y0, icon_rgb(g, pal), SCALE_MAP)
-            elif kind == "vendor":
-                # small gold mark; full vendor sprite is large
-                outline_rect(buf, W, H, x0, y0, 16 * SCALE_MAP, 16 * SCALE_MAP,
-                             (200, 200, 240), t=2)
-                g = by_id.get(bonus)
                 if g is not None:
-                    blit_rgb(buf, W, H, x0, y0, icon_rgb(g, pal), SCALE_MAP)
+                    bx = x0 + 16 * SCALE_MAP
+                    if bx + 16 * SCALE_MAP > W:
+                        bx = x0 - 16 * SCALE_MAP
+                    blit_badge(buf, W, H, bx, y0, icon_rgb(g, pal), SCALE_MAP)
+            elif kind == "floor":
+                if g is not None:
+                    blit_badge(buf, W, H, x0, y0, icon_rgb(g, pal), SCALE_MAP)
+            elif kind == "vendor":
+                if g is not None:
+                    blit_badge(buf, W, H, x0, y0, icon_rgb(g, pal), SCALE_MAP)
+                else:
+                    outline_rect(buf, W, H, x0, y0, 16 * SCALE_MAP, 16 * SCALE_MAP,
+                                 (200, 200, 240), t=2)
         for sid, bit7, ox, oy in roomperm.decode_objects(rom, stage, col):
             slug = OBJECT_SLUG.get(sid)
             eg = enemy_grids.get(slug) if slug else None
@@ -594,13 +645,32 @@ def render_annotated(rom, data, stage, by_id, pal, enemy_grids, spike_grid=None)
                          dx * 8 * SCALE_MAP,
                          (dy - roomperm.PLAY_TOP) * 8 * SCALE_MAP,
                          dw * 8 * SCALE_MAP, dh * 8 * SCALE_MAP, DOOR_RGB, t=2)
-        for s in spots:
-            if s["room"] != col:
-                continue
-            sx = (s["x"] // 8) * 8 * SCALE_MAP
-            sy = (s["y"] // 8 - roomperm.PLAY_TOP) * 8 * SCALE_MAP
-            outline_rect(buf, W, H, sx, sy, 16 * SCALE_MAP, 8 * SCALE_MAP,
-                         SPOT_RGB, t=2)
+        for tx, dy, dw, dh, dest in roomperm.spot_table_rects(
+                spots, stage, col, grid):
+            sx = tx * 8 * SCALE_MAP
+            sy = (dy - roomperm.PLAY_TOP) * 8 * SCALE_MAP
+            outline_rect(buf, W, H, sx, sy,
+                         dw * 8 * SCALE_MAP, dh * 8 * SCALE_MAP, SPOT_RGB, t=2)
+            tw = len(str(dest)) * 4 * SCALE_MAP
+            th = 5 * SCALE_MAP
+            pad = SCALE_MAP
+            tx_text = sx + dw * 8 * SCALE_MAP + 3 * SCALE_MAP
+            if tx_text + tw + pad > W:
+                tx_text = max(pad, sx - tw - 3 * SCALE_MAP)
+            ty_text = sy + max(0, (dh * 8 * SCALE_MAP - th) // 2)
+            bx0, by0 = tx_text - pad, ty_text - pad
+            bw, bh = tw + 2 * pad, th + 2 * pad
+            for yy in range(bh):
+                py = by0 + yy
+                if not 0 <= py < H:
+                    continue
+                for xx in range(bw):
+                    px = bx0 + xx
+                    if 0 <= px < W:
+                        o = (py * W + px) * 3
+                        buf[o:o + 3] = bytes((10, 12, 18))
+            roomperm.draw_text(buf, W, tx_text, ty_text, str(dest),
+                               SCALE_MAP, SPOT_RGB)
         if stage == 6 and col == 1 and spike_grid is not None:
             pal6 = gfxdump.vk_playfield_palette(rom.rom, 6, 1)
             rgb = icon_rgb(spike_grid, pal6)
@@ -775,7 +845,7 @@ def main():
     named = {}
     named.update(named_b)
     named.update(named_h)
-    by_id, pal = dump_icons(data, named)
+    by_id, pal, candle, brazier = dump_icons(data, named)
     print("enemies")
     enemy_grids = dump_enemies(data)
     print("vendor / hazards")
@@ -787,7 +857,8 @@ def main():
     print("stage maps")
     for stage in range(19):
         scenery = scenery_for_stage(rom, stage)
-        render_annotated(rom, data, stage, by_id, pal, enemy_grids, spike_grid)
+        render_annotated(rom, data, stage, by_id, pal, enemy_grids, spike_grid,
+                         candle, brazier)
         emit_stage_page(rom, stage, scenery)
     copy_audio()
     print("done")

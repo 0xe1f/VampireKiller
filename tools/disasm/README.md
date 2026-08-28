@@ -38,3 +38,6 @@ root. Override with `ROM=path` or `romscan.py --rom path`.
 
 Runtime tracing (instrumented CocoaMSX, `snapdiff.py`) lives in
 `~/code/cocoamsx-disasm`, not this directory.
+
+Agent skills (copy with this directory for a new game): `msx-regen`,
+`msx-romscan`, `msx-konami-gfx` under `.agents/skills/`.

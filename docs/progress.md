@@ -1500,7 +1500,8 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   the packed object list and confirmed `spawn_actor` `ld c` sites.
 - After any edit, run `make verify` before moving on.
 - Reusable methodology (for disassembling OTHER Konami MSX games later) lives in
-  workspace skills at `.agents/skills/` (`konami-msx-disasm`,
-  `msx-gfx-sheets`). Runtime tracing lives in `~/code/cocoamsx-disasm`.
+  workspace skills at `.agents/skills/` (`konami-msx-disasm`, `msx-regen`,
+  `msx-romscan`, `msx-konami-gfx`, `msx-gfx-sheets`). Runtime tracing lives in
+  `~/code/cocoamsx-disasm`.
   When we discover a generally-useful pattern/tool/gotcha, fold it into those skills
   (keep them lean - they load every session) and keep VK-specific findings here.

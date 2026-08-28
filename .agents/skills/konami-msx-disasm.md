@@ -331,41 +331,35 @@ game and give per-stage/per-room feedback; fix the classification, re-render.
 
 ## Rooting out logic (static analysis)
 
-`tools/disasm/romscan.py` automates the two look-ups we do constantly:
+Use the `msx-romscan` skill (`tools/disasm/romscan.py`). Do not grep leftover
+`.bin` files or write ad-hoc xref python.
 
-- `romscan xref 0xADDR [--segs a,b]` — every reference to an address, split into
-  **`code`** (real `call`/`jp`/`jr`/`djnz`, absolute + relative) vs **`data?`**
-  (bare little-endian word match). The `code`/`data?` split is the whole point: a
-  word match is often a pointer-table entry but can be a coincidence inside a data
-  curve — verify before trusting it.
-- `romscan table 0xADDR --words N [--index-base 1]` (or `--bytes N`) — decode a
-  dispatch/jump table into its entries; `--index-base 1` mirrors a `dec a`
-  dispatcher so the printed indices match the real ids.
+Gotchas:
 
-Gotchas this encodes (learned the hard way):
-
-- **Search source-only banks too.** Migrated banks have no `.bin`, so grepping
-  `segments/*.bin` misses them. `romscan` reads each bank straight from the ROM.
-  A routine that looks "never referenced" in leftover bins is often driven from
-  seg0.
-- **Cross-bank calls are normal.** The resident bank (0x4000-0x7FFF, always mapped)
-  freely `call`s into whatever is paged at 0x8000/0xA000. When the callee is a named
-  label, use it across banks — sjasmplus resolves the global label to the exact
-  address, so `call vendor_make_offer` from seg0 stays byte-exact. Add a comment
-  noting the callee's bank.
+- **Search source-only banks too.** Migrated banks have no `.bin`. `romscan`
+  reads each bank from the ROM. A routine that looks "never referenced" in
+  leftover bins is often driven from seg0.
+- **Cross-bank calls are normal.** The resident bank (0x4000-0x7FFF) freely
+  `call`s into whatever is paged at 0x8000/0xA000. Named labels stay byte-exact;
+  comment the callee's bank.
 - "No `code` xref" ≠ dead code: an entry can be reached via a **stored/computed
   pointer** (handler written into an object field) rather than a static transfer.
 
 ## Cost discipline
 
-- Prefer the existing tools over ad-hoc shell. Reuse `regen-seg.sh`,
-  `romscan.py` (don't re-hand-roll xref/table-decode python each time).
+- Prefer the existing tools over ad-hoc shell. Reuse `regen-seg.sh` (`msx-regen`)
+  and `romscan.py` (`msx-romscan`); don't re-hand-roll xref/table-decode python.
 - Don't read whole 5 KLOC segment files linearly; use Grep/semantic search to the
   region of interest.
 - Batch independent shell/reads in one turn. `make verify` is fast (<1 s) — run it
   freely.
 
-## Companion
+## Companion skills
+
+- `msx-regen` — `regen-seg.sh`, `seg_sym.py`, `strip-listing.py`, `split-rom.sh`
+- `msx-romscan` — xref / jump-table decode
+- `msx-konami-gfx` — RLE + ASCII `gfxview.py` (not labelled PNG sheets)
+- `msx-gfx-sheets` — `gfxdump.py` contact sheets
 
 Runtime tracing (instrumented CocoaMSX, snapshot diffs) lives in
 `~/code/cocoamsx-disasm`, not this repo.

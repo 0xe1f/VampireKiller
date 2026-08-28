@@ -9,8 +9,8 @@
 ; file from there).  shape_* prefix avoids colliding with spr_* RLE.
 ; Pose ids (ix+0B) are pose_* in segments/poses.inc; do not reuse
 ; shape_* as equ names (those are the SAT stream labels).
-; Unused (no store): 0x0D 0x2D-0x32 0x58 0x76-0x78 0x8E 0xA3-0xA4.
-; 0x0A is named (open-mouth merman) but unused.  Event 6: 0x02/0xA5
+; Unused (no store): 0x0A 0x0D 0x2D-0x32 0x76-0x78 0x8E 0xA3-0xA4.
+; 0x58 is intro_0 left (dracula_intro stores 0x56+2).  Event 6: 0x02/0xA5
 ; are robe, 0xA6 open / 0xA7 closed head (actor_dracula_bat); 0x57/0x59
 ; are the flying SAT head (actor_dracula_head); 0x5A is actor_dracula_chunk.
 ; Shared slots: 0x6F/0x70 = ghost 0x71; 0x81-0x84 = flame 0x85;
@@ -33,7 +33,7 @@ actor_shape_ptr:  ; 0xB473  word[shape id] -> stream
 
 ; --- merman ---
 	defw shape_merman_green_walk_l0, shape_merman_green_walk_l1, shape_merman_open, shape_merman_green_walk_r0  ; 0x08
-	defw shape_merman_green_walk_r1, actor_shape_b602, shape_merman_splash, shape_merman_red_walk_l0  ; 0x0C
+	defw shape_merman_green_walk_r1, shape_merman_red_walk_l0_dup, shape_merman_splash, shape_merman_red_walk_l0  ; 0x0C
 	defw shape_merman_red_walk_l1, shape_merman_red_spit_l, shape_merman_red_walk_r0, shape_merman_red_walk_r1  ; 0x10
 	defw shape_merman_red_spit_r, shape_merman_splash_s10  ; 0x14
 
@@ -52,9 +52,9 @@ actor_shape_ptr:  ; 0xB473  word[shape id] -> stream
 	defw shape_medusa_snake_l0, shape_medusa_snake_l1, shape_medusa_snake_r0, shape_medusa_snake_r1  ; 0x27
 	defw shape_medusa_0, shape_medusa_1  ; 0x2B
 
-; --- unused ---
-	defw actor_shape_b6a2, actor_shape_b6a5, actor_shape_b6a8, actor_shape_b6ab  ; 0x2D
-	defw actor_shape_b6ae, actor_shape_b6b1  ; 0x31
+; --- hunchback / igor (unused) ---
+	defw shape_hunchback_l1_dup, shape_hunchback_l0_dup, shape_igor_land_l_dup, shape_hunchback_r1_dup  ; 0x2D
+	defw shape_hunchback_r0_dup, shape_igor_land_r_dup  ; 0x31
 
 ; --- mummy ---
 	defw shape_mummy_walk_l0, shape_mummy_walk_l1, shape_mummy_walk_l2, shape_mummy_walk_r0  ; 0x33
@@ -79,7 +79,7 @@ actor_shape_ptr:  ; 0xB473  word[shape id] -> stream
 	defw shape_pikeman_walk_r1, shape_pikeman_walk_r2  ; 0x54
 
 ; --- dracula ---
-	defw shape_dracula_intro_0, shape_dracula_intro_1, actor_shape_b7cc, shape_dracula_intro_1_l  ; 0x56
+	defw shape_dracula_intro_0, shape_dracula_intro_1, shape_dracula_intro_0_l, shape_dracula_intro_1_l  ; 0x56
 	defw shape_dracula_chunk, shape_dracula_stand_l, shape_dracula_stand_l_open, shape_dracula_stand_r  ; 0x5A
 	defw shape_dracula_stand_r_open  ; 0x5E
 
@@ -100,8 +100,8 @@ actor_shape_ptr:  ; 0xB473  word[shape id] -> stream
 	defw shape_ghost_head_l0, shape_ghost_head_l0, shape_ghost_head_l0, shape_ghost_head_l1  ; 0x6F
 	defw shape_ghost_head_r0, shape_ghost_head_r1, shape_ghost_head_s15_r1  ; 0x73
 
-; --- unused ---
-	defw actor_shape_b89a, actor_shape_b89d, actor_shape_b8a0  ; 0x76
+; --- hunchback / igor (copy) ---
+	defw shape_hunchback_l1_b, shape_igor_land_l_b, shape_hunchback_r0_b  ; 0x76
 
 ; --- frankenstein ---
 	defw shape_frankenstein_0, shape_frankenstein_1, shape_frankenstein_2  ; 0x79
@@ -121,10 +121,7 @@ actor_shape_ptr:  ; 0xB473  word[shape id] -> stream
 	defw shape_raven_fly_r1, shape_raven_perch_conv  ; 0x8B
 
 ; --- roc ---
-	defw shape_roc_flap_2  ; 0x8D
-
-; --- unused ---
-	defw actor_shape_b936  ; 0x8E
+	defw shape_roc_flap_2, shape_roc_flap_3  ; 0x8D
 
 ; --- orb ---
 	defw shape_orb_0, shape_orb_1, shape_orb_2  ; 0x8F
@@ -138,8 +135,8 @@ actor_shape_ptr:  ; 0xB473  word[shape id] -> stream
 	defw shape_blob_0, shape_blob_1, shape_blob_fe00_0, shape_blob_fe00_1  ; 0x9B
 	defw shape_blob_fb80_0, shape_blob_fb80_1, shape_blob_fd00_0, shape_blob_fd00_1  ; 0x9F
 
-; --- unused ---
-	defw actor_shape_b9b9, actor_shape_b9bc  ; 0xA3
+; --- pickup / fireball (unused) ---
+	defw shape_pickup_single, shape_fireball_single  ; 0xA3
 
 ; --- dracula robe ---
 	defw shape_dracula_robe_1  ; 0xA5
@@ -191,7 +188,7 @@ shape_merman_green_walk_r0:  ; 0xB5F8  id 0x0B  0x80 + 4 pats
 shape_merman_green_walk_r1:  ; 0xB5FD  id 0x0C  0x80 + 4 pats
 	defb 0x80,0x68,0x6c,0x78,0x7c
 
-actor_shape_b602:  ; 0xB602  id 0x0D  0x80 + 4 pats
+shape_merman_red_walk_l0_dup:  ; 0xB602  id 0x0D  0x80 + 4 pats
 	defb 0x80,0x80,0x84,0x88,0x8c
 
 shape_merman_splash:  ; 0xB607  id 0x0E  1 x (dy,dx,pat)
@@ -293,23 +290,23 @@ shape_medusa_1:  ; 0xB68A  id 0x2C  8 x (dy,dx,pat)
 	defb 0xe1,0xf0,0x60,0xe1,0xf0,0x64,0xe1,0x00,0x68,0xe1,0x00,0x6c,0xf1,0xf0,0x70,0xf1
 	defb 0xf0,0x74,0xf1,0x00,0x78,0xf1,0x00,0x7c
 
-; --- unused ---
-actor_shape_b6a2:  ; 0xB6A2  id 0x2D  0x81 + 2 pats
+; --- hunchback / igor (unused) ---
+shape_hunchback_l1_dup:  ; 0xB6A2  id 0x2D  0x81 + 2 pats
 	defb 0x81,0xb0,0xb4
 
-actor_shape_b6a5:  ; 0xB6A5  id 0x2E  0x81 + 2 pats
+shape_hunchback_l0_dup:  ; 0xB6A5  id 0x2E  0x81 + 2 pats
 	defb 0x81,0xa8,0xac
 
-actor_shape_b6a8:  ; 0xB6A8  id 0x2F  0x81 + 2 pats
+shape_igor_land_l_dup:  ; 0xB6A8  id 0x2F  0x81 + 2 pats
 	defb 0x81,0xb8,0xbc
 
-actor_shape_b6ab:  ; 0xB6AB  id 0x30  0x81 + 2 pats
+shape_hunchback_r1_dup:  ; 0xB6AB  id 0x30  0x81 + 2 pats
 	defb 0x81,0xc8,0xcc
 
-actor_shape_b6ae:  ; 0xB6AE  id 0x31  0x81 + 2 pats
+shape_hunchback_r0_dup:  ; 0xB6AE  id 0x31  0x81 + 2 pats
 	defb 0x81,0xc0,0xc4
 
-actor_shape_b6b1:  ; 0xB6B1  id 0x32  0x81 + 2 pats
+shape_igor_land_r_dup:  ; 0xB6B1  id 0x32  0x81 + 2 pats
 	defb 0x81,0xd0,0xd4
 
 ; --- mummy ---
@@ -432,7 +429,7 @@ shape_dracula_intro_0:  ; 0xB7C6  id 0x56  0x81 + 2 pats
 shape_dracula_intro_1:  ; 0xB7C9  id 0x57  0x81 + 2 pats
 	defb 0x81,0x58,0x5c
 
-actor_shape_b7cc:  ; 0xB7CC  id 0x58  0x81 + 2 pats
+shape_dracula_intro_0_l:  ; 0xB7CC  id 0x58  0x81 + 2 pats
 	defb 0x81,0x90,0x94
 
 shape_dracula_intro_1_l:  ; 0xB7CF  id 0x59  0x81 + 2 pats
@@ -527,14 +524,14 @@ shape_ghost_head_r1:  ; 0xB894  id 0x74  0x81 + 2 pats
 shape_ghost_head_s15_r1:  ; 0xB897  id 0x75  0x81 + 2 pats
 	defb 0x81,0xa8,0xac
 
-; --- unused ---
-actor_shape_b89a:  ; 0xB89A  id 0x76  0x81 + 2 pats
+; --- hunchback / igor (copy) ---
+shape_hunchback_l1_b:  ; 0xB89A  id 0x76  0x81 + 2 pats
 	defb 0x81,0xb0,0xb4
 
-actor_shape_b89d:  ; 0xB89D  id 0x77  0x81 + 2 pats
+shape_igor_land_l_b:  ; 0xB89D  id 0x77  0x81 + 2 pats
 	defb 0x81,0xb8,0xbc
 
-actor_shape_b8a0:  ; 0xB8A0  id 0x78  0x81 + 2 pats
+shape_hunchback_r0_b:  ; 0xB8A0  id 0x78  0x81 + 2 pats
 	defb 0x81,0xc0,0xc4
 
 ; --- frankenstein ---
@@ -600,8 +597,7 @@ shape_roc_flap_2:  ; 0xB924  id 0x8D  6 x (dy,dx,pat)
 	defb 0xe7,0xf0,0x40,0xe7,0xf0,0x44,0xe1,0x00,0x68,0xe1,0x00,0x6c,0xf1,0x00,0x70,0xf1
 	defb 0x00,0x74
 
-; --- unused ---
-actor_shape_b936:  ; 0xB936  id 0x8E  6 x (dy,dx,pat)
+shape_roc_flap_3:  ; 0xB936  id 0x8E  6 x (dy,dx,pat)
 	defb 0xe1,0xf1,0xa0,0xe1,0xf1,0xa4,0xf1,0xf1,0xd8,0xf1,0xf1,0xdc,0xe7,0x01,0x78,0xe7
 	defb 0x01,0x7c
 
@@ -663,11 +659,11 @@ shape_blob_fd00_0:  ; 0xB9B3  id 0xA1  0x81 + 2 pats
 shape_blob_fd00_1:  ; 0xB9B6  id 0xA2  0x81 + 2 pats
 	defb 0x81,0xa4,0xdc
 
-; --- unused ---
-actor_shape_b9b9:  ; 0xB9B9  id 0xA3  1 x (dy,dx,pat)
+; --- pickup / fireball (unused) ---
+shape_pickup_single:  ; 0xB9B9  id 0xA3  1 x (dy,dx,pat)
 	defb 0xf1,0xf8,0xec
 
-actor_shape_b9bc:  ; 0xB9BC  id 0xA4  1 x (dy,dx,pat)
+shape_fireball_single:  ; 0xB9BC  id 0xA4  1 x (dy,dx,pat)
 	defb 0xf1,0xf8,0xf0
 
 ; --- dracula robe ---

@@ -40,7 +40,8 @@ Fully migrated banks (0-15) have no `.bin`.
 - Graphics: identified video mode as **SCREEN 5** (4bpp bitmap) in `video_init`;
   classified the banks (code = seg 0-3, graphics = seg 4-15). Added
   `tools/disasm/gfxview.py` (1bpp/4bpp ASCII-art viewer).
-- PSG catalogue: `make music` / `make sfx` (`tools/psgplay.py`) render BGM and
+- PSG catalogue: `make music` / `make sfx` (`tools/psgplay.py` →
+  `tools/disasm/psgplay.py`) render BGM and
   sfx ids 1–0x1D to `music/` and `sfx/` (`{id}_{name}.wav`). Stream labels in
   `data/psg_sfx.asm` / `psg_music.asm` use those stems (`sfx_*`,
   `music_*_{a,b,c}`); 0x89 is Simon death, 0x8B is GAME OVER.
@@ -77,19 +78,22 @@ Fully migrated banks (0-15) have no `.bin`.
     datasets (6 hubs of 3 stages; row->hub table at seg0 0x5E71). See "Eighth session".
   - `lookup_word_tbl` (0x6549): generic word-table lookup (DE=table, A=index).
   - Screen/level build cluster (annotated):
-    - 0x62d7: arms mode bytes 0xC415=0x20/0xC418=0x80, then jp seg0 0x53BD.
-    - 0x62ed: full screen builder - clears state, paints tiles (seg2 helpers),
-      sets cell event, unpacks scenery (scenery_load), loads object list
-      (object_list_load) + spawns actors (object_list_spawn).
+    - `play_hud_reset` (0x62D7): health=0x20, enemy_meter=0x80, `inv_reset_life`,
+      `hud_cache_load`, `load_shared_sprites`, `hud_font_load`. Death respawn,
+      intro-to-play, and attract/game-start.
+    - `play_screen_build` (0x62ED): tileset, `stage_palette_load`, Simon spawn,
+      scenery; then `play_screen_redraw` (0x62FC, also attract/room-trans):
+      hide SAT, actor reset, room gfx, Simon sprites, map, event, objects.
     - `intro_scene_build` (0x63DA): Simon at 0x80,0x80, load intro tileset /
       palette / simon+sky sprites, hide SAT, redraw. Used by state_intro.
-    - `cell_event_set` (0x633a): set current cell event 0xCE00 from l6376h[row]
-      (byte = column<<4 | event; event 6 has an immediate handler).
+    - `cell_event_set` (0x633a): set current cell event 0xCE00 from
+      `cell_event_tbl[stage]` (byte = room<<4 | event; event 6 has an
+      immediate handler). Table is `defb` at 0x6376.
     - `actor_state_reset` (0x6389): reset object/actor state (clears 0xC470..0xC6FF +
       subsystems); `simon_block_clear` clears 0xC420..0xC46F; `sprites_hide` hides all 32
       sprites (Y=0xE0 in 0xD600 shadow); `mem_clear_stride` strided memory clear.
     - `simon_spawn_pos` (0x6409): set screen position 0xC425/0xC427/flag 0xC42C from
-      per-row table l6426h (2 bytes/row).
+      `simon_spawn_tbl` (2 bytes/stage, `defb` at 0x6426).
   - Actor->sprite rendering (annotated):
     - `actor_sat_build` (0x644C): one actor's hardware sprites from its shape
       stream; pages seg 6 (sprite shapes) into 0xA000, looks shape up in word
@@ -111,17 +115,19 @@ Fully migrated banks (0-15) have no `.bin`.
     - event_dracula (0x65b7): event sub-state machine, DISPATCH_A on 0xCE01 (11
       handlers, inline word table now decoded to defw). 0xCE02 = per-step timer;
       the last handler clears 0xCE00 and raises 0xCE40 (done).
-    - sub_66c1h (0x66c1): post-event machine, DISPATCH_A on (0xCE40-1) (4
-      handlers). Drives the cutscene script player, then bumps the progress /
+    - `credits_tick` (0x66c1): post-event machine, DISPATCH_A on (0xCE40-1) (4
+      handlers). Drives the credits script player, then bumps the progress /
       difficulty tier 0xD012 (incremented per level-advance, capped at 3) and
       resets VDP R23 (vertical offset) to 0.  0xD012 is read by enemy handlers to
       scale behaviour (e.g. actor_set_xvel_speedup adds 0xD012*32 to enemy speed).
       NOTE: VK does not scroll (room-based); 0xD012 is a speed/difficulty ramp.
-    - Cutscene sequencer: sub_6719h resets it; sub_6736h/sub_673fh advance a
-      timeline tick 0xCE33 (every 4th frame); sub_674ah pages seg 8 + seg 5 and
-      fires the keyframe due at the current tick from the script indexed by
-      0xCE31 in script_ptr_6795 (entries {tick, action}; 0xFF action = end).
-      Ramp table l6804h (triangle, 19 entries) animates via sub_67ebh/0x481b.
+    - Credits sequencer: `credits_init` resets it; `credits_frame` /
+      `credits_clock` advance a timeline tick 0xCE33 (every 4th frame);
+      `credits_keyframe` pages seg 8 + seg 5 and fires the keyframe due at the
+      current tick from the script indexed by 0xCE31 in `credits_script_ptr`
+      (entries {tick, action}; 0xFF action = end).  Ramp table
+      `credits_ramp_tbl` (triangle, 19 entries) animates via
+      `credits_palette_ramp` / `palette_set`.
   - Data tables marked in seg01.blocks this session: the two event dispatch
     tables (0x65bd, 0x66c8), script_ptr_6795 (0x6795-0x67ea), ramp_tbl_6804.
   - Remaining seg1 play-tick callees named: `event_vscroll` (0x6848),
@@ -140,8 +146,9 @@ Fully migrated banks (0-15) have no `.bin`.
   (later moved to `~/code/cocoamsx-disasm`):
   - `tools/CocoaMSX` submodule (branch `disasm-tracing`) builds with the opt-in
     `disasmtrace` module (exec/write/bank logging tagged with the paged ROM
-    segment). Build: `tools/disasm/build-cocoamsx.sh`; run + capture: `tools/disasm/trace-run.sh`
-    (env: EXEC / WATCH addr ranges, LOG). Log lands in `generated/` (gitignored).
+    segment). Build / run from `~/code/cocoamsx-disasm/tools/disasm/`
+    (`build-cocoamsx.sh`, `trace-run.sh`; env: EXEC / WATCH, LOG). Log lands in
+    the game repo `generated/` (gitignored).
   - Apple Silicon crash fix: CocoaMSX's immediate-mode GL (`glBegin(GL_QUADS)` in
     `CMMsxDisplayView renderScreen`) segfaults inside Apple's Metal-backed GL shim
     (`AppleMetalOpenGLRenderer`/`AGXMetal`) on the first frame draw. Worked around by
@@ -194,7 +201,7 @@ Fully migrated banks (0-15) have no `.bin`.
     CORRECTION: 0xC425/0xC427/0xC42C were previously guessed (statically) to be
     a "view/camera position + flag".  They are Simon's Y / X / facing - there is
     no camera (room-based, non-scrolling).  Fixed the labels in seg01.asm at the
-    0x63DA redraw and simon_spawn_pos (per-room spawn Y/X/facing from l6426h).
+    0x63DA redraw and simon_spawn_pos (per-room spawn Y/X/facing from simon_spawn_tbl).
   - Fourth/fifth sessions (whip braziers, collect pickups, change rooms):
     * 0xD001 = current room/screen index.  Walking into the next room bumped it
       0 -> 1 -> 2, always written by seg13 (0x0D) at 0xB98A, so seg13 owns room
@@ -1133,8 +1140,8 @@ use `room_event_ce10` → C409.
      object-list tables graduated from INCBIN (`scenery_list_ptr`,
      `spawn_bitmask_ptr`, `object_list_ptr` in `segments/seg14.asm`). The rest of
      the bank is now source too: `credits_font` / `sound_tick` / `sfx_tbl` /
-     `music_ptr`, with packed PSG streams as labeled hex (some music tails
-     in seg15).  `collect_bonus_tbl` ids are annotated in seg02.
+     `music_ptr`, with packed PSG streams as labeled hex (`music_phrases` at
+     0xA820 are ED-call bodies in seg15).  `collect_bonus_tbl` ids are annotated in seg02.
 
 ## Next tracing session (resume plan)
 
@@ -1185,19 +1192,19 @@ add/confirm the point value in the annotation (and here).  (Impl: F9 is caught i
 `#ifdef DISASMTRACE` and swallowed; disasmTraceRequestSnapshot() sets a flag that
 R800's fetch loop honours at the next opcode via the CPU's own RAM reader.)
 
-Highest-value next capture - pin the persistent inventory/counters, which sit
-BELOW 0xC420 and every movement watch so far has missed:
-  WATCH=c400-c41f,c470-c4ff,c800-c8ff,d000-d0ff   EXEC=  (off)
-Then, from a fresh start, whip the first courtyard brazier (heart++), take one
-hit, and note the on-screen hearts/score/lives/weapon so each byte in 0xC40x can
-be labelled.  Weapon type is in this block too (leather -> chain whip changed a
-byte we never watched).
+Highest-value next capture is leftover SAT shape ids (task 4), not inventory:
+those C40x bytes are already `ram.inc`. Death and bosses are named from static
+analysis (`state_death` / `death_respawn` / `death_game_over`; CE01 machines
+`event_giant_bat` … `event_dracula`; `boss_clear_*`). A live CocoaMSX take is
+only needed to confirm CE01/CE10 timing, not to discover the machines.
 
-After that, trigger the still-dark machinery:
-  * death: WATCH=c000-c004,c408-c41f,ce00-ce4f  -> lights up a state 6-13 handler
-    and possibly the 0x65b7 event machine (0xCE01), which has NEVER run in any
-    normal-play trace (logo/title/attract/intro/stage/room/level).
-  * boss fight: same WATCH plus the cutscene player - best shot at 0x65b7/0x66c1.
+  * death: WATCH=c000-c004,c408-c41f,ce00-ce4f — pit or HP=0. Expect C000=6,
+    then `play_hud_reset` and C000=4 if lives remain, else BGM game-over and
+    C000=7. Fatal hit already traced (`simon_dying`, lives−1, HP refill).
+  * boss: Game Master menu → stage 3 (or 6/9/12/15/18), walk to the last
+    room. Same WATCH plus CE10. Giant bat is the shortest: s3r5, event 1,
+    `event_giant_bat_spawn` then `_wait` → `boss_clear_arm`. Dracula (s18r9)
+    is the only path that raises CE40 → `credits_tick`.
 
 Known live RAM map (runtime-confirmed this session):
   0xC000 primary state  0xC001 sub-state  0xC003 frame ctr  0xC004 phase timer
@@ -1317,9 +1324,11 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   `tools/emit_identified_data.py`) are named `shape_*` where the pose is
   confirmed. ix+0B ids are `pose_*` in `segments/poses.inc` (same stems,
   different prefix — `shape_*` is already the stream label). Unused (no
-  store): **0x0D, 0x2D–0x32, 0x58, 0x76–0x78, 0x8E,
-  0xA3–0xA4**. 0x0A is named (`shape_merman_open` / `pose_merman_open`) but
-  nothing stores it.
+  store): **0x0A, 0x0D, 0x2D–0x32, 0x76–0x78, 0x8E,
+  0xA3–0xA4** (named from SAT bytes / neighbouring sheets; 0x0A open-mouth
+  merman, 0x0D copy of red walk l0, 0x2D–0x32 / 0x76–0x78 unused
+  hunchback/igor copies, 0x8E fourth roc flap, 0xA3/0xA4 single-cell pickup
+  / fireball). **0x58** is intro_0 left (`dracula_intro` stores 0x56+2).
   Event 6: **0x02 / 0xA5** robe and **0xA6** open / **0xA7** closed head
   (`actor_dracula_bat`); **0x57 / 0x59** flying SAT head (`actor_dracula_head`);
   **0x5A** = `actor_dracula_chunk`.
@@ -1358,11 +1367,11 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   hex once a bank is off `.bin`. Do not mass-convert a whole unknown bank to
   opaque `db`.
 - File placement (STANDING PRACTICE): all hand-authored disassembly metadata lives
-  in `segments/` (`bios.inc`, `*.inc` type ids, `msx.sym`, `seg*.blocks`) - anything
+  in `segments/` (`bios.inc`, `ram.inc`, `*.inc` type ids, `msx.sym`, `seg*.blocks`) - anything
   needed to reassemble or to regenerate the disassembly faithfully. `tools/disasm/`
   is the reusable MSX kit; other `tools/` scripts are game-specific. `generated/`
   is gitignored derived scratch (never author
-  there). How they're consumed: `bios.inc` and the type-id `.inc`s are `INCLUDE`d
+  there). How they're consumed: `bios.inc`, `ram.inc`, and the type-id `.inc`s are `INCLUDE`d
   by the build (symbol equates, not emitted); `msx.sym` is the name catalog,
   `seg*.blocks` the code/data maps. `regen-seg.sh` runs `tools/disasm/seg_sym.py` so
   z80dasm `-S` gets a *per-bank* view of `msx.sym` (flat file, banked ROM).
@@ -1419,7 +1428,12 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   draw_stage_hud, hud_panel_frames, hud_bars_redraw, health_bar_redraw,
   health_bar_frame, enemy_meter_frame, intro_actors_frame,
   intro_spawn_sky, intro_spawn_sky_ab, intro_spawn_simon, intro_simon_stride,
-  spawn_actor_ab;
+  spawn_actor_ab, restore_enemy_meter, hurt_simon_1, heal_simon_1,
+  damage_enemy_1, stage_palette_load, load_shared_sprites, play_hud_reset,
+  play_screen_build, play_screen_redraw, cell_event_tbl, simon_spawn_tbl,
+  spawn_rate_reset, spawn_rate_init_tbl, death_respawn, death_game_over,
+  main_state_tbl, state_logo/title/attract/intro/stage_bridge/play/death/
+  game_over/room_trans/stage_exit/vendor/game_master_menu;
   seg1: simon_action_tick, simon_walk_left/right, simon_jump_tick, simon_mirror_frames,
   simon_crouch, simon_stairs, simon_stair_frames_up/down, simon_fall, simon_hurt, simon_dying,
   simon_portal_wait, simon_attack_tick, simon_attack_start, simon_attack_end, whip_tick, projectile_tick,
@@ -1480,8 +1494,9 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   enemy_frankenstein_tick, enemy_grim_reaper_tick, enemy_placed_merman_init,
   enemy_placed_bat_init, event_giant_bat, event_medusa, event_mummies,
   event_frankenstein, event_grim_reaper, event_dracula, event_ce01_next,
-  boss_clear_arm, aim_at_simon, aim_octant, aim_scale, MUL_H_E, room_event_ce10, boss_clear_cull, boss_clear_wait,
-  boss_clear_orb, boss_clear_orb_wait, boss_clear_heal, boss_clear_done,
+  boss_clear_arm, aim_at_simon, aim_octant, aim_scale, MUL_H_E,   room_event_ce10, boss_clear_cull, boss_clear_wait,
+  boss_clear_orb, boss_clear_orb_wait, boss_clear_orb_got, boss_clear_heal, boss_clear_done,
+  orb_sat_s3, orb_sat_rest,
   actor_flip_xvel, ADD_HL_A_SIGNED, actor_halt_if_rightward/leftward, simon_dx_abs,
   actor_snap_y8, actor_wall_ahead, play_sound_alive, map_solid_at, actor_wall_right/left,
   skull_pile_face, skull_pile_sat_pat, merman_walk_period, raven_flap, raven_pick_vel,
@@ -1502,14 +1517,15 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   seg14: scenery_list_ptr, scenery_list_s00, scenery_list_h0..h5,
   spawn_bitmask_ptr, spawn_mask_s00..s18, object_list_ptr,
   object_list_h0..h5, credits_font, credits_font_az, sound_tick, sound_idle,
-  sound_ch_a/b/c, sound_sfx, sound_cmd_*, sound_sfx_*, sfx_ptr, sfx_tbl, music_ptr.
+  sound_ch_a/b/c, sound_sfx, sound_cmd_*, sound_sfx_*, sfx_ptr, sfx_tbl, music_ptr,
+  music_phrases / music_phrase_*.
   Actor type `equ`s: `segments/actors.inc` (`actor_zombie`..`actor_intro_simon`,
   `actor_dracula_bat/_head/_chunk`, `obj_next_room`/`obj_end_stream`, spawn
   bitmask bits); also `items.inc`, `weapon.inc`, `sfx.inc`, `poses.inc`,
-  `scenery.inc`. Used in packed scenery / spawn / object lists. Skip-for-later
-  (RAM `equ`s, play-bank immediates, `event.inc`/`dir.inc`, `sfx_tbl` left
-  next to the driver, door 8×8 tiles, emit of the new tables): see
-  `docs/game-notes.md` “Deferred constants”.
+  `scenery.inc`, `ram.inc`. Data files and the play banks (`banks_0123`,
+  `banks_bcd`) use them at confirmed sites. Skip-for-later (`event.inc` /
+  `dir.inc`, `sfx_tbl` left next to the driver, door 8×8 tiles, emit of the
+  new tables): see `docs/game-notes.md` “Deferred constants”.
 - After any edit, run `make verify` before moving on.
 - Reusable methodology (for disassembling OTHER Konami MSX games later) lives in
   workspace skills at `.agents/skills/` (`konami-msx-disasm`, `msx-regen`,

@@ -60,11 +60,11 @@
 ;  state_play treats any nonzero C41B as a pending exit (1-4 or 0xFF).
 ; ---------------------------------------------------------------------------
 conn_lookup:
-	ld a,(0c41bh)
+	ld a,(exit_dir)
 	inc a
 	jr z,conn_from_spot    ; was 0xFF -> use 0xC5B4
 	call conn_room_record  ; HL -> 2-byte record for D000/D001
-	ld de,0c41bh
+	ld de,exit_dir
 	ld a,(de)
 	ld b,a
 	xor a
@@ -86,12 +86,12 @@ conn_nibble:
 	cp 00fh
 	ret z                  ; blocked (0xF): NC, D001 unchanged
 conn_write_room:
-	ld (0d001h),a          ; destination room
+	ld (room),a          ; destination room
 	scf
 	ret
 conn_from_spot:
 	xor a
-	ld (0c41bh),a
+	ld (exit_dir),a
 	ld a,(0c5b4h)          ; dest room from spot_tbl high nibble
 	jr conn_write_room
 
@@ -108,7 +108,7 @@ add_hl_a_s13:
 ; (up/down/left/right).  0xF becomes 0xFF so edge tests can `inc a; jr z`.
 conn_load_permits:
 	call conn_room_record
-	ld de,0c41ch
+	ld de,permit_up
 	ld b,004h
 conn_permit_loop:
 	ld a,(hl)
@@ -135,7 +135,7 @@ conn_permit_next:
 
 ; conn_room_record (seg13 0xB9BD): HL = conn_ptr[D000] + 2*D001.
 conn_room_record:
-	ld a,(0d000h)
+	ld a,(stage)
 	ld hl,conn_ptr
 	add a,a
 	call add_hl_a_s13
@@ -143,7 +143,7 @@ conn_room_record:
 	inc hl
 	ld h,(hl)
 	ld l,a
-	ld a,(0d001h)
+	ld a,(room)
 	add a,a
 	call add_hl_a_s13
 	ret
@@ -158,7 +158,7 @@ door_load:
 ; write Y,X to C5AD,C5AE (ld (C5AD),hl with L=Y H=X) and arm C5AC
 ; (0xFF if byte0 bit7 / vertical blit; 0x04 courtyard / open doorway).
 door_load_coords:
-	ld a,(0d000h)
+	ld a,(stage)
 	ld hl,door_tbl
 	ld b,a
 	add a,a
@@ -168,7 +168,7 @@ door_load_coords:
 	ld b,a
 	and 00fh
 	ld c,a                 ; room nibble
-	ld a,(0d001h)
+	ld a,(room)
 	cp c
 	ret nz                 ; this room has no door
 	inc hl
@@ -193,7 +193,7 @@ door_arm_c5ac:
 ; nibble at C5B4 (consumed by conn_from_spot when C41B==0xFF).  Current table
 ; is stage 12 only; pairs are two-way (0<->3, 1<->4, 2<->11, 5<->8, 7<->10).
 spot_load_coords:
-	ld de,(0d000h)         ; E=stage D000, D=room D001
+	ld de,(stage)         ; E=stage D000, D=room D001
 	ld hl,spot_tbl
 spot_scan:
 	ld a,(hl)

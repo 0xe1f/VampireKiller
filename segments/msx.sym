@@ -166,8 +166,10 @@ load_stage_tileset: equ 0x5653	; blit tileset_ptr[D000] (0xBF 8x8 4bpp) to VRAM 
 load_intro_tileset: equ 0x5677	; blit intro_tiles (seg9 0x8000) via tileset_blit
 load_intro_sprites: equ 0x567f	; intro_simon_0..7 + intro_sky into sprite VRAM
 load_simon_sprites: equ 0x56e8	; refresh Simon's 2 sprite cells (legs 0xA281/C42E, torso+whip 0xA2D1/C42F)
+stage_palette_load: equ 0x5714	; HUD-fixed + stage_palette_ptr[stage]
 intro_palette_load: equ 0x573a	; HUD-fixed then intro_palette (0xBFA1)
 tileset_ptr: equ 0x5749	; word[stage 0..18] -> uncompressed tileset in seg4-8
+load_shared_sprites: equ 0x576f	; fireball/flame gfx_rle_a185 @ FF00 + gfx_rle_a147 @ F9C0
 ; tileset_s00 @ 0x6000 (seg4) omitted: collides with mtile_rowbase (seg11)
 ; tileset_s13 @ 0x8000 (seg7) omitted: collides with scenery_list_ptr (seg14)
 tileset_s01: equ 0x7220	; stages 1-3 (seg4, spills into seg5)
@@ -302,8 +304,27 @@ health_bar_redraw: equ 0x45c0	; health frame + draw_health_bar
 enemy_meter_frame: equ 0x45c6	; clear + border the enemy meter panel (66x6)
 health_bar_frame: equ 0x45cf	; clear + border the health bar panel (66x6)
 add_score: equ 0x44f5	; add C:D:E (BCD hi:mid:lo) to the 3-byte score at 0xC405-0xC407
+main_state_tbl: equ 0x4161	; 14 handlers indexed by C000
+state_logo: equ 0x417d	; 0 Konami logo
+state_title: equ 0x41a0	; 1 title screen
+state_attract: equ 0x41ab	; 2 attract / demo
+state_intro: equ 0x41d1	; 3 intro walk-up
+state_stage_bridge: equ 0x422c	; 4 build cell, enter play
+state_play: equ 0x4257	; 5 in-stage play
+state_death: equ 0x4294	; 6 lives? death_respawn : death_game_over
+death_respawn: equ 0x429b	; play_hud_reset, replay BGM, main state 4
+death_game_over: equ 0x42ab	; BGM 0x8B, then state_game_over
+state_game_over: equ 0x42b2	; 7 GAME OVER / F5 continue
 state_hub_advance: equ 0x4324	; C409: boss-clear/credits -> hub++ then advance_stage
+state_room_trans: equ 0x437e	; 9 C41B: conn_lookup_paged then play_screen_redraw
+state_stage_exit: equ 0x438e	; 10 C408: spend white key, advance_stage
 state_pause: equ 0x43e1	; C40A: F1 freeze; F1 again resumes play
+state_vendor: equ 0x43f7	; 12 C40C whip-hit vendor
+state_game_master_menu: equ 0x441b	; 13 GM cartridge menu
+restore_enemy_meter: equ 0x461f	; 0xC418 += B, clamp to 0x80
+hurt_simon_1: equ 0x4655	; B=1 then damage_health
+heal_simon_1: equ 0x4658	; B=1 then restore_health (boss_clear_heal)
+damage_enemy_1: equ 0x465d	; B=1 then damage_enemy
 damage_enemy: equ 0x4643	; 0xC418 enemy/boss energy -= B (floored at 0)
 hurt_simon_contact: equ 0x8173	; Simon -= 2*l81d5h[type].odd on enemy contact (shield halves)
 hurt_simon_spikes: equ 0x85ad	; Simon -= 8/16 from a C580 spike bar (16 descending, 8 retracting)
@@ -434,13 +455,18 @@ object_list_spawn: equ 0x61c2	; spawn actors from the visible room's 0xDB00 slot
 object_list_spawn_loop: equ 0x61e2	; one of 4 slots
 object_list_spawn_next: equ 0x6200	; advance to the next 4-byte slot
 tile_string_draw: equ 0x6276	; tile-id stream at HL to screen pos DE (FF/FE)
-cell_event_set: equ 0x633a	; CE00 from l6376h[stage] if column matches
+play_hud_reset: equ 0x62d7	; full HP/meter, inv_reset_life, HUD caches, shared sprites, font
+play_screen_build: equ 0x62ed	; tileset, palette, spawn, scenery, then play_screen_redraw
+play_screen_redraw: equ 0x62fc	; sprites_hide onward (room change / attract)
+cell_event_set: equ 0x633a	; CE00 from cell_event_tbl[stage] if room matches
+cell_event_tbl: equ 0x6376	; 19 bytes: room<<4 | event; 0xFF = none
 intro_scene_build: equ 0x63da	; intro walk-up: intro_tiles + intro_palette + intro_simon/sky
 actor_state_reset: equ 0x6389	; clear C470-C6FF + actor/shot lists, reload room
 mem_clear_stride: equ 0x63b8	; zero B entries at HL, stride DE
 simon_block_clear: equ 0x63be	; clear 0xC420..0xC46F
 sprites_hide: equ 0x63cc	; hide all 32 hardware sprites (Y=0xE0)
-simon_spawn_pos: equ 0x6409	; Simon Y/X/facing from l6426h[stage]
+simon_spawn_pos: equ 0x6409	; Simon Y/X/facing from simon_spawn_tbl[stage]
+simon_spawn_tbl: equ 0x6426	; 19 x {Y|facing, X}
 pattern_phase_upload: equ 0x6591	; phase-selected pattern rows to VRAM 0xF400
 pattern_shadow_blit: equ 0x65ab	; copy 0xD400 shadow (0x280 bytes) to VRAM 0xF400
 room_edge_detect: equ 0x7682	; set C41B pending exit from Simon vs screen edges
@@ -846,6 +872,8 @@ actor_integrate: equ 0x99c0	; add velocity (+0x07/08 Y, +0x09/0A X) to position
 actor_cull_offscreen: equ 0x99ec	; free actor if pixel pos left the play area
 actor_free: equ 0x99fd	; clear slot + hide SAT cells at slot|0x20
 spawn_rate_gate: equ 0x9cca	; CF00 counter vs difficulty-scaled threshold
+spawn_rate_reset: equ 0x9cb0	; seed 7 CF00 spawn-rate slots from spawn_rate_init_tbl
+spawn_rate_init_tbl: equ 0x9cc2	; 7 (+1 pad) initial CF00 values
 spawn_rate_zombie: equ 0x9d4a	; 8-byte zombie spawn-rate thresholds
 merman_spawn_x: equ 0x9d8e	; 8 merman spawn X candidates
 spawn_rate_merman: equ 0x9d96	; merman spawn-rate thresholds
@@ -938,8 +966,12 @@ boss_clear_cull: equ 0xb6e0	; CE10=0: actors_kill_all + timer
 boss_clear_wait: equ 0xb6ea	; CE10=1/4: wait CE02
 boss_clear_orb: equ 0xb6f4	; CE10=2: spawn actor_orb
 boss_clear_orb_wait: equ 0xb70d	; CE10=3: wait CE11/CE14, music 0x8C
-boss_clear_heal: equ 0xb73d	; CE10=5: refill HP (jp 0x4658)
+boss_clear_orb_got: equ 0xb72c	; CE11 set: stop + bgm_boss_defeated
+boss_clear_heal: equ 0xb73d	; CE10=5: refill HP via heal_simon_1
 boss_clear_done: equ 0xb758	; CE10=6: hide SAT, C409, clear CE00
+orb_sat_s3: equ 0xb801	; orb SAT colours, stage 3 (3 x 5)
+orb_sat_rest: equ 0xb810	; orb SAT colours, other bosses
+orb_frames: equ 0xb85a	; spin poses 0x8F/90/91/90
 event_mummies: equ 0xb85e	; CE00=3: spawn two mummies, wait CE15
 event_frankenstein: equ 0xba2d	; CE00=4: spawn Frank + Igor, wait CE15
 event_grim_reaper: equ 0xbbfa	; CE00=5: spawn reaper + 4 sickles
@@ -1283,3 +1315,47 @@ music_8e_credits_a: equ 0xa6c4
 music_8e_credits_b: equ 0xa764
 music_8e_credits_c: equ 0xa7fe
 music_8f_silence: equ 0xa81f
+music_phrases: equ 0xa820		; ED-call / EE-return BGM phrase pool (not in music_ptr)
+music_phrase_a820: equ 0xa820
+music_phrase_a830: equ 0xa830
+music_phrase_a837: equ 0xa837
+music_phrase_a847: equ 0xa847
+music_phrase_a85c: equ 0xa85c
+music_phrase_a863: equ 0xa863
+music_phrase_a884: equ 0xa884
+music_phrase_a8a9: equ 0xa8a9
+music_phrase_a8b4: equ 0xa8b4
+music_phrase_a8bf: equ 0xa8bf
+music_phrase_a8c8: equ 0xa8c8
+music_phrase_a8d1: equ 0xa8d1
+music_phrase_a8dc: equ 0xa8dc
+music_phrase_a8e4: equ 0xa8e4
+music_phrase_a8eb: equ 0xa8eb
+music_phrase_a8f3: equ 0xa8f3
+music_phrase_a8fa: equ 0xa8fa
+music_phrase_a90f: equ 0xa90f
+music_phrase_a924: equ 0xa924
+music_phrase_a92b: equ 0xa92b
+music_phrase_a930: equ 0xa930
+music_phrase_a936: equ 0xa936
+music_phrase_a94a: equ 0xa94a
+music_phrase_a950: equ 0xa950
+music_phrase_a95e: equ 0xa95e
+music_phrase_a968: equ 0xa968
+music_phrase_a975: equ 0xa975
+music_phrase_a97a: equ 0xa97a
+music_phrase_a982: equ 0xa982
+music_phrase_a98a: equ 0xa98a
+music_phrase_a993: equ 0xa993
+music_phrase_a999: equ 0xa999
+music_phrase_a9a8: equ 0xa9a8
+music_phrase_a9b1: equ 0xa9b1
+music_phrase_a9b8: equ 0xa9b8
+music_phrase_a9cc: equ 0xa9cc
+music_phrase_a9d5: equ 0xa9d5
+music_phrase_aa0a: equ 0xaa0a
+music_phrase_aa1e: equ 0xaa1e
+music_phrase_aa56: equ 0xaa56
+music_phrase_aa90: equ 0xaa90
+music_phrase_aaa4: equ 0xaaa4
+music_phrase_aabd: equ 0xaabd

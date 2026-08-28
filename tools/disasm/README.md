@@ -36,6 +36,23 @@ root. Override with `ROM=path` or `romscan.py --rom path`.
 | `gfxview.py` | ASCII 1bpp / 4bpp pattern viewer |
 | `pngwrite.py` | Stdlib-only RGB PNG writer (used by game-specific sheet dumpers) |
 
+## Sound (generic)
+
+| Script | Role |
+|---|---|
+| `psgplay.py` | Konami packed-PSG bytecode → AY-3-8910 WAV (BGM + sfx) |
+
+Point `--map` (BANK@CPU windows) and the table addresses at the game's
+sound banks. Game-specific catalogue names / default output dirs stay in
+`tools/psgplay.py`.
+
+```
+tools/disasm/psgplay.py Game.rom --map 14@8000,15@a000 \
+    --music-ptr 0x8DC9 --sfx-ptr 0x8D8D \
+    --env-ptr 0xAAD6 --env-alt 0xAAEE --note-tbl 0x8B81 \
+    --music-ids 0x80-0x8E
+```
+
 Runtime tracing (instrumented CocoaMSX, `snapdiff.py`) lives in
 `~/code/cocoamsx-disasm`, not this directory.
 

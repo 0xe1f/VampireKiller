@@ -126,7 +126,7 @@ against the `=` at x=0xB0.
 
 ## Levels / bosses
 
-- Every third stage ends in a **boss battle** (event table `l6376h`: packed
+- Every third stage ends in a **boss battle** (event table `cell_event_tbl`: packed
   `room<<4 | event`). Hitting types **0x11–0x17** subtracts from the shared
   meter `0xC418` (`weapon_hit_damage`); type **0x12** is dual-use (bar in a
   boss room, per-actor HP when `0xCE00==0`).
@@ -1126,7 +1126,7 @@ Shared physics header (`actor_integrate` 0x99C0, velocity helpers in seg3):
 | +06 | physics alive (`actor_integrate` skips if 0; spawn writes 0, init usually sets 1) |
 | +07 / +08 | signed Y velocity |
 | +09 / +0A | signed X velocity |
-| +0B | pose id (`pose_*` in `poses.inc`; stream is `shape_*` in `data/actor_shape.asm` / `actor_shape_ptr`). Unused (no store): **0x0D, 0x2D–0x32, 0x58, 0x76–0x78, 0x8E, 0xA3–0xA4**. Event 6: **0x02 / 0xA5** robe and **0xA6** open / **0xA7** closed head (`actor_dracula_bat`); **0x57 / 0x59** flying SAT head (`actor_dracula_head`); **0x5A** `actor_dracula_chunk`. |
+| +0B | pose id (`pose_*` in `poses.inc`; stream is `shape_*` in `data/actor_shape.asm` / `actor_shape_ptr`). Unused (no store): **0x0A, 0x0D, 0x2D–0x32, 0x76–0x78, 0x8E, 0xA3–0xA4**. **0x58** is intro_0 left (`dracula_intro` stores 0x56+2). Event 6: **0x02 / 0xA5** robe and **0xA6** open / **0xA7** closed head (`actor_dracula_bat`); **0x57 / 0x59** flying SAT head (`actor_dracula_head`); **0x5A** `actor_dracula_chunk`. |
 | +0C | timer |
 | +0D | HP from `actor_hp_tbl` (0x60E9; spawn indexes as 0x60E8+type) |
 | +0E | flags. **bit 0 = hittable** this frame (`rra`/`jr nc` in whip/proj tests; `res 0` on a hit). **bit 2** = rearm hittable (`actors_rearm_hittable`). Spawn writes 7. |
@@ -1251,9 +1251,13 @@ pointers each; stage table is seg1 `stage_bgm_tbl`), 0xFB/0xFD overlays
 streams (`data/psg_sfx.asm` / `data/psg_music.asm`) use the WAV
 catalogue names: `sfx_{id}_{name}` and `music_{id}_{name}_{a,b,c}`
 (hyphens in stems become `_`). Id 0x89 is Simon death; 0x8B is GAME OVER.
-`tools/psgplay.py` (`make music` / `make sfx`) runs the same bytecode through
-an AY model and writes `music/*.wav` (ids `0x80`–`0x8E`; `0x8F` is silence)
-and `sfx/*.wav` (play_sound 1–0x1D; `{id}_{name}` like BGM). SFX ids are
+`tools/psgplay.py` (`make music` / `make sfx`) drives `tools/disasm/psgplay.py`
+with VK table addresses / names and writes `music/*.wav` (ids `0x80`–`0x8E`;
+`0x8F` is silence) and `sfx/*.wav` (play_sound 1–0x1D; `{id}_{name}` like BGM).
+After the last
+channel stream (`music_8f_silence`) sit `music_phrases` (0xA820–0xAAD5): 43
+`sound_cmd_call` (`ED`) / `sound_cmd_return` (`EE`) bodies that `music_ptr`
+tracks jump into; they are not channel starts. SFX ids are
 named from call sites in `sfx_tbl`. The renderer uses AY-3-8910 timing
 (fmaster/8, 16-step hardware envelope); still no speaker filter, and BGM
 loop/fade is heuristic. Channel RAM:
@@ -1630,24 +1634,22 @@ item ids. Vendor scenery attrs stay hex (bits5–2 = offer slot, not `item_*`).
 
 **Skip / return later — constants**
 
-- **RAM `equ`s** (`lives` = `0xC410`, `weapon_id` = `0xC416`, `stage` =
-  `0xD000`, …). Highest readability win in the play banks, but a ~19k-line
-  mechanical rewrite; regen emits hex again, so names have to be re-applied
-  (or a post-pass added). Do it incrementally on the well-known cluster.
 - **Main-state / Simon-action ids** (`main_state_tbl` 0–12, `0xC420` 0–7).
   Tiny sets that collide with every other small literal; only worth it at
   the dispatch sites themselves.
 - **`event.inc`** — CE00 1–6 (giant bat … Dracula). Tiny; add when those
   immediates are replaced.
-- **`dir.inc`** — pending exit `0xC41B` 1–4 / `0xFF` portal. Tiny; add with
+- **`dir.inc`** — pending exit `exit_dir` 1–4 / `0xFF` portal. Tiny; add with
   a `conn_lookup` pass.
 - **Jump tables that are already ROM labels** (`entity_tbl`, `actor_hp_tbl`,
   `collect_bonus_tbl`, `main_state_tbl`, `simon_action_tbl`) stay in
   `msx.sym` and next to their dispatchers. Do not duplicate them as `equ`s
   or peel them into `data/`.
-- **Using the new `.inc`s in `banks_0123`** (`ld (ix+0Bh),pose_*`,
-  `cp equip_knife`, `ld a,sfx_whip`). Data files use them now; the play
-  banks still have hex + comments. Same regen cost as RAM names.
+- **RAM / play-bank immediates** — `segments/ram.inc` covers the confirmed
+  cluster (`lives`, `weapon_id`, `health`, `stage`, `simon_action`, …).
+  Play banks use `sfx_*` / `equip_*` / `pose_*` / `actor_*` / `item_*` at
+  call sites. Regen still emits hex; re-apply after regen-seg. Leftover
+  hex is on purpose (ambiguous small literals, unnamed SAT ids).
 
 **Skip / return later — data left in the bank files**
 

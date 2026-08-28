@@ -41,22 +41,25 @@ instead of reinventing them. Read `docs/progress.md` (End goal + Working notes) 
   `split-rom.sh` emits the leftovers and deletes migrated ones. Regen of a
   migrated bank uses the original ROM (`regen-seg.sh` slices it itself).
   All hand-authored disassembly metadata lives here: `bios.inc` (MSX BIOS entry
-  names), `*.inc` type ids (`actors.inc`, `items.inc`, `weapon.inc`, `sfx.inc`,
-  `poses.inc`, `scenery.inc` — small numeric `equ`s, **not** in `msx.sym` or
-  z80dasm rewrites every `0x01`), `msx.sym` (routine/label names
+  names), `ram.inc` (confirmed work-RAM), `*.inc` type ids (`actors.inc`,
+  `items.inc`, `weapon.inc`, `sfx.inc`, `poses.inc`, `scenery.inc` — small
+  numeric `equ`s, **not** in `msx.sym` or z80dasm rewrites every `0x01`),
+  `msx.sym` (routine/label names
   for z80dasm regen), `seg*.blocks` (code/data split maps). Anything needed to
   reassemble or regenerate belongs here.
 - `docs/` — `progress.md` (checklist + RAM map + working notes), `game-notes.md`
   (detailed findings).
 - `tools/disasm/` — reusable MSX/Konami helpers: `regen-seg.sh`, `split-rom.sh`,
   `strip-listing.py`, `romscan.py`, `seg_sym.py`, Konami RLE (`rledec.py` /
-  `rleenc.py`), `gfxview.py`, `pngwrite.py`. Copy this directory for a new game.
+  `rleenc.py`), `gfxview.py`, `pngwrite.py`, `psgplay.py` (packed-PSG → WAV).
+  Copy this directory for a new game.
 - `tools/` — game-specific executable tooling (VK gfx sheets, room maps, PSG
-  catalogue, handbook art) plus `sjasmplus`.
+  catalogue front-end, handbook art) plus `sjasmplus`.
 - `gfx/` — editable graphics assets (PNG + txt); original compressed bytes stay
   authoritative.
-- `music/` — rendered BGM WAVs from the PSG bytecode (`tools/psgplay.py`).
-  AY-3-8910 timing (fmaster/8); no speaker filter.
+- `music/` — rendered BGM WAVs from the PSG bytecode (`tools/psgplay.py`
+  wrapping `tools/disasm/psgplay.py`). AY-3-8910 timing (fmaster/8); no
+  speaker filter.
 - `sfx/` — rendered SFX WAVs (`make sfx`); same `{id}_{name}.wav` convention
   as `music/`.
 
@@ -93,7 +96,7 @@ of `<Game>.asm`.
   rows for pixel bytes (run/literal counts stay hex). PNG is preview-only
   (hex tile-id labels, not ASCII chars) until the packer is byte-exact. Mixed
   banks (named tables + hex leftover slices). VK bank 15 continues
-  `psg_music` + env tables + 4bpp Dracula portrait.
+  `psg_music` + shared `music_phrases` + env tables + 4bpp Dracula portrait.
   VK banks_ef is scenery
   lists + spawn masks + enemy lists + sound: emit the cracked tables as commented
   `defw`/`defb` once ids are named; packed PSG as labeled hex streams.

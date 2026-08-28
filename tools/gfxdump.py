@@ -111,9 +111,9 @@ def _palette_file_off(cpu):
     return None
 
 def vk_stage_palette(data, stage):
-    """Play-mode palette after `0x5714`: BIOS default, then the 8 HUD-fixed
+    """Play-mode palette after `stage_palette_load` (0x5714): BIOS default, then the 8 HUD-fixed
     colours (`palette_hud_load`), then that row of the 0xBEA7 table. Room entry then
-    overlays 9AB0[stage][room].palette via `0x5787` (see vk_playfield_palette)."""
+    overlays 9AB0[stage][room].palette via `room_gfx_load` (0x5787) (see vk_playfield_palette)."""
     pal = [(msx2_channel(r), msx2_channel(g), msx2_channel(b))
            for r, g, b in MSX2_DEFAULT_RGB]
     fixed = load_palette_table(data, 0x15F88)
@@ -129,7 +129,7 @@ def vk_stage_palette(data, stage):
     return pal
 
 def vk_playfield_palette(data, stage, room):
-    """In-game sprite/BG palette for one room: 0x5714 (HUD + BEA7[stage]) then
+    """In-game sprite/BG palette for one room: `stage_palette_load` (HUD + BEA7[stage]) then
     the per-room table at 9AB0[stage-1][room].palette. Enemy SAT colours 4/5/6/7
     are these overlay slots; 2/12/14 (ghost, bone pillar) are HUD-fixed."""
     pal = vk_stage_palette(data, stage)
@@ -516,9 +516,9 @@ ENEMY_FRAMES = {
     12: (0x87, 0x88, 0x89, 0x8A, 0x8B, 0x8C),
     13: (0x67, 0x68, 0x6A, 0x6B),
     14: (0x80, 0x70),
-    15: (0x6D, 0x6E, 0x8D),
+    15: (0x6D, 0x6E, 0x8D, 0x8E),
     16: (0x5F, 0x60, 0x61, 0x62),
-    17: (0x56, 0x57, 0x5A, 0x5B, 0x5C, 0x5D, 0x5E),
+    17: (0x56, 0x57, 0x58, 0x5A, 0x5B, 0x5C, 0x5D, 0x5E),
     18: (0x4E, 0x4F),
     19: (0x2B, 0x2C),
     20: (0x33, 0x34, 0x35, 0x36, 0x37, 0x38),
@@ -536,7 +536,7 @@ SPAWN_BIT_TYPE = {0: 1, 1: 2, 2: 3, 3: 4, 4: 7, 5: 8, 6: 15}
 # pattern numbers and the sprite looks like scrambled knight parts.
 # Type 9 must stay on stage 13 (script 0x9FB2, pal index 5 = red). The same
 # pattern numbers on stage 14 room 0 are the axe knight (type 16).
-# Boss event rooms (l6376h): s3r5 / s6r5 / s9r7 / s12r6 / s15r9 / s18r9.
+# Boss event rooms (cell_event_tbl): s3r5 / s6r5 / s9r7 / s12r6 / s15r9 / s18r9.
 ENEMY_ROOMS = {
     5: [(1, 2), (1, 3), (1, 7)],
     # Pikeman 0x53-55 is the FC00→FD00 convert. Stage-2 room 0 parks flying

@@ -601,8 +601,8 @@ def write_tile_file(
 
 
 # ix+0B pose -> stream label.  Shared pointer-table slots (6F/70=71, 81-84=85,
-# 95/96=97) pick the first named id on that stream.  Unused holes stay
-# actor_shape_%04x — see the actor_shape.asm header.
+# 95/96=97) pick the first named id on that stream.  Unused ids are still
+# named when the SAT bytes match a known sheet (same as 0x0A).
 SHAPE_ID_NAME = {
     0x00: "shape_pickup_fall",
     0x01: "shape_pickup",
@@ -617,6 +617,7 @@ SHAPE_ID_NAME = {
     0x0A: "shape_merman_open",  # unused; open-mouth in spr_merman load
     0x0B: "shape_merman_green_walk_r0",
     0x0C: "shape_merman_green_walk_r1",
+    0x0D: "shape_merman_red_walk_l0_dup",  # unused; bytes of 0x0F
     0x0E: "shape_merman_splash",
     0x0F: "shape_merman_red_walk_l0",
     0x10: "shape_merman_red_walk_l1",
@@ -648,6 +649,12 @@ SHAPE_ID_NAME = {
     0x2A: "shape_medusa_snake_r1",
     0x2B: "shape_medusa_0",
     0x2C: "shape_medusa_1",
+    0x2D: "shape_hunchback_l1_dup",  # unused; bytes of 0x68, walk pairs swapped
+    0x2E: "shape_hunchback_l0_dup",
+    0x2F: "shape_igor_land_l_dup",
+    0x30: "shape_hunchback_r1_dup",
+    0x31: "shape_hunchback_r0_dup",
+    0x32: "shape_igor_land_r_dup",
     0x33: "shape_mummy_walk_l0",
     0x34: "shape_mummy_walk_l1",
     0x35: "shape_mummy_walk_l2",
@@ -685,6 +692,7 @@ SHAPE_ID_NAME = {
     0x55: "shape_pikeman_walk_r2",
     0x56: "shape_dracula_intro_0",
     0x57: "shape_dracula_intro_1",
+    0x58: "shape_dracula_intro_0_l",  # dracula_intro stores 0x56+2
     0x59: "shape_dracula_intro_1_l",
     0x5A: "shape_dracula_chunk",
     0x5B: "shape_dracula_stand_l",
@@ -712,6 +720,9 @@ SHAPE_ID_NAME = {
     0x73: "shape_ghost_head_r0",
     0x74: "shape_ghost_head_r1",
     0x75: "shape_ghost_head_s15_r1",
+    0x76: "shape_hunchback_l1_b",  # unused; bytes of 0x68, after s15 ghost
+    0x77: "shape_igor_land_l_b",
+    0x78: "shape_hunchback_r0_b",
     0x79: "shape_frankenstein_0",
     0x7A: "shape_frankenstein_1",
     0x7B: "shape_frankenstein_2",
@@ -729,6 +740,7 @@ SHAPE_ID_NAME = {
     0x8B: "shape_raven_fly_r1",
     0x8C: "shape_raven_perch_conv",
     0x8D: "shape_roc_flap_2",
+    0x8E: "shape_roc_flap_3",  # unused; roc_flap_tbl is 0x6D/0x6E/0x8D
     0x8F: "shape_orb_0",
     0x90: "shape_orb_1",
     0x91: "shape_orb_2",
@@ -747,6 +759,8 @@ SHAPE_ID_NAME = {
     0xA0: "shape_blob_fb80_1",
     0xA1: "shape_blob_fd00_0",
     0xA2: "shape_blob_fd00_1",
+    0xA3: "shape_pickup_single",  # unused; 1 cell of pickup pat 0xEC
+    0xA4: "shape_fireball_single",  # unused; 1 cell of fireball pat 0xF0
     0xA5: "shape_dracula_robe_1",
     0xA6: "shape_dracula_head_open",
     0xA7: "shape_dracula_head_closed",
@@ -795,7 +809,7 @@ SHAPE_GROUPS = (
     (0x1A, 0x20, "hanging bat"),
     (0x21, 0x26, "skeleton (red)"),
     (0x27, 0x2C, "medusa"),
-    (0x2D, 0x32, "unused"),
+    (0x2D, 0x32, "hunchback / igor (unused)"),
     (0x33, 0x3A, "mummy"),
     (0x3B, 0x3E, "zombie"),
     (0x3F, 0x46, "dog"),
@@ -808,18 +822,17 @@ SHAPE_GROUPS = (
     (0x67, 0x6C, "hunchback / igor"),
     (0x6D, 0x6E, "roc"),
     (0x6F, 0x75, "ghost head"),
-    (0x76, 0x78, "unused"),
+    (0x76, 0x78, "hunchback / igor (copy)"),
     (0x79, 0x7B, "frankenstein"),
     (0x7C, 0x7C, "grim reaper"),
     (0x7D, 0x80, "sickle"),
     (0x81, 0x86, "flame"),
     (0x87, 0x8C, "raven"),
-    (0x8D, 0x8D, "roc"),
-    (0x8E, 0x8E, "unused"),
+    (0x8D, 0x8E, "roc"),
     (0x8F, 0x91, "orb"),
     (0x92, 0x9A, "intro"),
     (0x9B, 0xA2, "blob"),
-    (0xA3, 0xA4, "unused"),
+    (0xA3, 0xA4, "pickup / fireball (unused)"),
     (0xA5, 0xA5, "dracula robe"),
     (0xA6, 0xA7, "dracula head"),
 )
@@ -874,8 +887,8 @@ def format_actor_shapes(raw: bytes) -> list[str]:
         "; file from there).  shape_* prefix avoids colliding with spr_* RLE.",
         "; Pose ids (ix+0B) are pose_* in segments/poses.inc; do not reuse",
         "; shape_* as equ names (those are the SAT stream labels).",
-        "; Unused (no store): 0x0D 0x2D-0x32 0x58 0x76-0x78 0x8E 0xA3-0xA4.",
-        "; 0x0A is named (open-mouth merman) but unused.  Event 6: 0x02/0xA5",
+        "; Unused (no store): 0x0A 0x0D 0x2D-0x32 0x76-0x78 0x8E 0xA3-0xA4.",
+        "; 0x58 is intro_0 left (dracula_intro stores 0x56+2).  Event 6: 0x02/0xA5",
         "; are robe, 0xA6 open / 0xA7 closed head (actor_dracula_bat); 0x57/0x59",
         "; are the flying SAT head (actor_dracula_head); 0x5A is actor_dracula_chunk.",
         "; Shared slots: 0x6F/0x70 = ghost 0x71; 0x81-0x84 = flame 0x85;",
@@ -1402,7 +1415,8 @@ def emit_psg_music(rom: bytes) -> None:
     lines = [
         "; Packed PSG music (seg14 0x949B through seg15 env tables at 0xABF8).",
         "; music_ptr channel streams; music_85_bgm_s10_18_b crosses 0xA000.",
-        "; Unidentified 0xA820-0xAAD5 is not in music_ptr.  Envelope tables",
+        "; music_phrases (0xA820) are ED-call / EE-return bodies used by those",
+        "; streams (not listed in music_ptr).  Envelope tables",
         "; (sound_env_ptr / sound_env_ptr_alt) and their 0xFF-ended streams follow.",
         "",
     ]
@@ -1416,7 +1430,7 @@ def emit_psg_music(rom: bytes) -> None:
         return bank15[cpu - 0xA000 : cpu - 0xA000 + n]
 
     cpu = 0xA000
-    ends = [start for _, start, _ in MUSIC_SEG15[1:]] + [0xA820]
+    ends = [start for _, start, _ in MUSIC_SEG15[1:]] + [MUSIC_PHRASE_LO]
     for (label, start, comment), end in zip(MUSIC_SEG15, ends):
         assert start == cpu, "music gap at 0x%04X vs 0x%04X" % (start, cpu)
         size = end - start
@@ -1425,14 +1439,23 @@ def emit_psg_music(rom: bytes) -> None:
         lines.append("%s:  ; 0x%04X  packed %d%s" % (label, start, size, extra))
         lines.extend(defb_lines(buf))
         cpu = end
-    assert cpu == 0xA820, hex(cpu)
+    assert cpu == MUSIC_PHRASE_LO, hex(cpu)
 
-    unid = slurp(0xA820, 0xAAD6 - 0xA820)
+    phrases = collect_music_phrases(rom)
+    assert phrases[0] == MUSIC_PHRASE_LO, hex(phrases[0])
+    ends = phrases[1:] + [MUSIC_PHRASE_HI]
     lines.append("")
-    lines.append(
-        "seg15_unid_a820:  ; 0xA820  %d bytes (not in music_ptr)" % len(unid)
-    )
-    lines.extend(defb_lines(unid))
+    lines.append("; ED-call / EE-return phrases.  music_ptr tracks call these;")
+    lines.append("; they are not channel starts.  43 entries, packed 0xA820-0xAAD5.")
+    lines.append("music_phrases:")
+    for start, end in zip(phrases, ends):
+        buf = slurp(start, end - start)
+        lines.append(
+            "music_phrase_%04x:  ; 0x%04X  packed %d"
+            % (start, start, len(buf))
+        )
+        lines.extend(defb_lines(buf))
+    cpu = MUSIC_PHRASE_HI
 
     def words_at(addr: int, n: int) -> list[int]:
         out = []
@@ -2006,6 +2029,10 @@ def emit_seg9_10(rom: bytes) -> None:
 
 
 # Packed music continuation + env tables (seg15 0xA000-0xABF8).  ROM order.
+MUSIC_PTR = 0x8DC9  # 16 records of 3 channel pointers (id 0x80..0x8F)
+MUSIC_PHRASE_LO = 0xA820
+MUSIC_PHRASE_HI = 0xAAD6  # sound_env_ptr
+
 MUSIC_SEG15 = [
     ("music_85_bgm_s10_18_b_cont", 0xA000, "tail of music_85_bgm_s10_18_b (EA 0x9F9C)"),
     ("music_85_bgm_s10_18_c", 0xA051, "85 C; stages 10 and 18"),
@@ -2038,6 +2065,72 @@ MUSIC_SEG15 = [
     ("music_8e_credits_c", 0xA7FE, "8E C"),
     ("music_8f_silence", 0xA81F, "dummy silence (all three channels)"),
 ]
+
+
+def _psg_peek(rom: bytes, cpu: int) -> int:
+    if 0x8000 <= cpu < 0xA000:
+        return rom[14 * 0x2000 + (cpu - 0x8000)]
+    if 0xA000 <= cpu < 0xC000:
+        return rom[15 * 0x2000 + (cpu - 0xA000)]
+    raise ValueError("psg cpu 0x%04X" % cpu)
+
+
+def _psg_peek16(rom: bytes, cpu: int) -> int:
+    return _psg_peek(rom, cpu) | (_psg_peek(rom, cpu + 1) << 8)
+
+
+def collect_music_phrases(rom: bytes) -> list[int]:
+    """ED-call targets in 0xA820-0xAAD5, reached from music_ptr streams."""
+    called: set[int] = set()
+
+    def walk(cpu: int, seen: set[int]) -> None:
+        steps = 0
+        while steps < 8000:
+            steps += 1
+            if cpu in seen:
+                return
+            seen.add(cpu)
+            op = _psg_peek(rom, cpu)
+            cpu = (cpu + 1) & 0xFFFF
+            if op < 0xD0:
+                continue
+            hi, lo = op & 0xF0, op & 0x0F
+            if hi == 0xD0:
+                continue
+            if hi == 0xE0:
+                if lo == 0x0A:
+                    cpu = _psg_peek16(rom, cpu)
+                    continue
+                if lo == 0x0D:
+                    dest = _psg_peek16(rom, cpu)
+                    called.add(dest)
+                    walk(dest, seen)
+                    cpu = (cpu + 2) & 0xFFFF
+                    continue
+                if lo == 0x0E:
+                    return
+                continue
+            if lo == 0x0F:
+                return
+            if lo == 0x0E:
+                dest = _psg_peek16(rom, cpu + 1)
+                walk(dest, seen)
+                cpu = (cpu + 3) & 0xFFFF
+                continue
+            cpu = (cpu + 1) & 0xFFFF
+
+    for i in range(16):
+        rec = MUSIC_PTR + i * 6
+        for ch in range(3):
+            walk(_psg_peek16(rom, rec + ch * 2), set())
+    phrases = sorted(
+        a for a in called if MUSIC_PHRASE_LO <= a < MUSIC_PHRASE_HI
+    )
+    assert phrases[0] == MUSIC_PHRASE_LO
+    assert phrases[-1] < MUSIC_PHRASE_HI
+    # Contiguous: each phrase runs to the next entry (or env tables).
+    return phrases
+
 
 ENV_PTR_MAIN = [
     0xAB06, 0xAB0C, 0xAB1C, 0xAB2F, 0xAB45, 0xAB60,

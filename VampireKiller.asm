@@ -30,8 +30,8 @@
 ;    banks_9a    title gfx 16K @ 0x8000      (banks 9-10)
 ;    banks_bcd   map 24K @ 0x6000            (banks 11-13)
 ;    banks_ef    sound/portrait 16K @ 0x8000 (banks 14-15)
-;  Data lives in `segments/data/`.  Small numeric ids are `segments/*.inc`
-;  (actors, items, weapon, sfx, poses, scenery).
+;  Data lives in `segments/data/`.  Small numeric ids and confirmed RAM
+;  are `segments/*.inc` (actors, items, weapon, sfx, poses, scenery, ram).
 ;  `PHASE` sets each block's runtime address while the output stays contiguous.
 ; ===========================================================================
 
@@ -40,6 +40,8 @@
 
 ; Shared MSX/MSX2 BIOS entry-point names (readability only; not emitted).
     INCLUDE "segments/bios.inc"
+; Confirmed work-RAM (lives, weapon_id, stage, …).  Readability only.
+    INCLUDE "segments/ram.inc"
 ; Actor type ids (spawn_actor C / object-list id).  Readability only.
     INCLUDE "segments/actors.inc"
 ; Pickup ids, C416 equip_*, play_sound, ix+0B pose_*, scenery grammar.

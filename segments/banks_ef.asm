@@ -708,7 +708,8 @@ music_ptr:
 	defw music_8e_credits_a,music_8e_credits_b,music_8e_credits_c  ; 8E credits
 	defw music_8f_silence,music_8f_silence,music_8f_silence  ; 8F dummy silence
 
-; Packed PSG: sfx then music (music_85_bgm_s10_18_b crosses 0xA000).
+; Packed PSG: sfx then music (music_85_bgm_s10_18_b crosses 0xA000;
+; music_phrases at 0xA820 are ED-call bodies, then env tables).
 	INCLUDE "data/psg_sfx.asm"
 	INCLUDE "data/psg_music.asm"
 

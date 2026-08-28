@@ -5,6 +5,8 @@
 ;  Stream labels in data/psg_sfx.asm / psg_music.asm keep the sfx_NN_ / music_NN_ stems.
 ; ===========================================================================
 
+sound_stop:              equ 0x00  ; play_sound 0: halt channels
+
 sfx_boss_heal:           equ 0x01
 sfx_vendor_withdraw:     equ 0x02
 sfx_cross_fly:           equ 0x03
@@ -52,4 +54,8 @@ bgm_dracula_defeated:    equ 0x8d
 bgm_credits:             equ 0x8e
 bgm_silence:             equ 0x8f
 
-sound_fade:              equ 0xff  ; play_sound 0xFF: fade / stop
+sound_fb:                equ 0xfb  ; overlay snd_fb_seq (holy water / hourglass)
+sound_fc:                equ 0xfc  ; restore after FB
+sound_fd:                equ 0xfd  ; overlay snd_fd_seq (pause)
+sound_fe:                equ 0xfe  ; restore after FD (unpause)
+sound_fade:              equ 0xff  ; fade timer C0A5=0x3A

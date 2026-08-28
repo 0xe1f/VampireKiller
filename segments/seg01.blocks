@@ -19,11 +19,10 @@ actor_sat_colors: start 0x6119 end 0x615b type bytedata
 
 ; Konami logo tile-layout stream consumed by sub_6276h (0xFE=newline, 0xFF=end).
 logo_layout: start 0x6296 end 0x62d7 type bytedata
-; Per-row event table for sub_633ah: one byte each (column<<4 | event); 0xFF=none.
-event_tbl_6376: start 0x6376 end 0x6389 type bytedata
-; Per-row screen-position table for sub_6409h: 2 bytes/row (pos&0xFE -> 0xC425,
-; low bit -> 0xC42C flag; 2nd byte -> 0xC427).
-pos_tbl_6426: start 0x6426 end 0x644c type bytedata
+; Per-stage event table for cell_event_set: one byte each (room<<4 | event); 0xFF=none.
+cell_event_tbl: start 0x6376 end 0x6389 type bytedata
+; Per-stage spawn table for simon_spawn_pos: 2 bytes/stage (Y|facing, X).
+simon_spawn_tbl: start 0x6426 end 0x644c type bytedata
 ; Multi-sprite (dx,dy) offset lists selected by the 0x80/0x81/0x82 stream codes
 ; in the actor->sprite builder at 0x644c.
 sprite_ofs_64d4: start 0x64d4 end 0x64ec type bytedata

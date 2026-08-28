@@ -30,5 +30,7 @@ pickup_state_tbl: start 0x8A94 end 0x8AA0 type worddata
 blob_hatch_type: start 0x8AF7 end 0x8AFF type bytedata
 ; SAT colour cycle for actor_reward (red / black / white / black).
 reward_sat_col: start 0x9C60 end 0x9C64 type bytedata
+; Initial CF00 spawn-rate values (7 used; last byte pad before spawn_rate_gate).
+spawn_rate_init_tbl: start 0x9CC2 end 0x9CCA type bytedata
 ; Y subtract per actor type for kill drops; byte 0 (0xC9) is also kill_drop_pos's ret.
 kill_drop_dy: start 0x9B3A end 0x9B67 type bytedata

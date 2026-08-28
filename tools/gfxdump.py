@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """Build PNG graphics sheets in gfx/ from identified asm / ROM tables.
 
-  gfx/sprites/<stem>.png  - packed 1bpp sprite asms (ASM_SPRITE_STEMS)
-  gfx/tilesets/<stem>.png - 4bpp tileset asms
-  gfx/fonts/<stem>.png    - 1bpp font asms (ASM_FONT_STEMS)
-  gfx/<name>.png          - derived sheets (composites, hazards, vendor)
+  gfx/sprites/<stem>.png   - packed 1bpp sprite asms (ASM_SPRITE_STEMS)
+  gfx/tilesets/<stem>.png  - 4bpp tileset asms
+  gfx/palettes/<stem>.png  - palette_apply tables (solid 8x8 swatches)
+  gfx/metatiles/<stem>.png - 4x4 metatile def tables (composed from tilesets)
+  gfx/fonts/<stem>.png     - 1bpp font asms (ASM_FONT_STEMS)
+  gfx/<name>.png           - derived sheets (composites, hazards, vendor)
 
-Tileset cell header is the CPU address. Sprite-asm cell header is the VRAM
-dest. Font cell header is the hex glyph id. One 16x16 plane per sprite
-cell (no CC overlay). Composited SAT poses (enemy_sheet, sheet_enemy_*)
-live in gfx/.
+Tileset / metatile / palette cell header is the CPU address. Sprite-asm
+cell header is the VRAM dest. Font cell header is the hex glyph id. One
+16x16 plane per sprite cell (no CC overlay). Composited SAT poses
+(enemy_sheet, sheet_enemy_*) live in gfx/.
 
 Usage:  tools/gfxdump.py            (run from the repo root)
 """
@@ -23,7 +25,12 @@ ROM = os.path.join(ROOT, "VampireKiller.rom")
 GFX = os.path.join(ROOT, "gfx")
 SPRITE_DIR = os.path.join(GFX, "sprites")
 TILESET_DIR = os.path.join(GFX, "tilesets")
+PALETTE_DIR = os.path.join(GFX, "palettes")
+METATILE_DIR = os.path.join(GFX, "metatiles")
 FONT_DIR = os.path.join(GFX, "fonts")
+# load_stage_tileset blits this many 8x8s from tileset_ptr[stage] (roomperm).
+NTILES = 0xBF
+TILESET_PTR = 0x5749            # seg0 word[stage]; file off = CPU - 0x4000
 # Asm sheets only. Composites / hazards go in GFX.
 ASM_SPRITE_STEMS = frozenset(
     ("enemy_sprite_rle", "simon_rle", "intro_sky", "title_jp_sprites"))
@@ -166,8 +173,9 @@ def render_png(path, cells, palette, cols=8, labels=None, lab_scale=2, size=16,
     """Write a scaled contact sheet.  `labels` (optional) adds a dark band
     above each tile with a 3x5 bitmap id, same treatment as the minimap
     renderer in roomperm.py (`contact_sheet`).  `size` is the tile edge in
-    source pixels (8 for glyphs/tilesets, 16 for HUD/Simon sprites).  `scale`
-    defaults to SCALE (6); 8x8 glyphs use 12 so cells match 16x16 HUD tiles.
+    source pixels (8 for glyphs/tilesets, 16 for HUD/Simon sprites, 32 for
+    4x4 metatiles).  `scale` defaults to SCALE (6); 8x8 glyphs use 12 so
+    cells match 16x16 HUD tiles.
     Returns (W, H, rgb) or None.  `path` None skips the write."""
     if not cells:
         return None
@@ -431,6 +439,8 @@ def main():
     dump_vendor(data)
     dump_asm_sprite_rles(data)
     dump_asm_tilesets(data)
+    dump_asm_palettes()
+    dump_asm_metatiles(data)
 
 # First *recognisable* pose (ix+0B) for entity_tbl types 1-22.
 # Type 9's spawn state uses 0x26 (2-cell wait, legs only); the walk frame is 0x21.
@@ -1384,6 +1394,33 @@ def dump_asm_sprite_rles(data):
         skip_prefix=2, force_pal2_black=True)
 
 
+def _tileset_file(stage, cpu):
+    """ROM file offset of a tileset pointer (page_tileset_banks + late)."""
+    if cpu < 0x8000:
+        bank, base = 4, 0x6000
+    elif cpu < 0xA000:
+        bank, base = (7 if stage >= 13 else 5), 0x8000
+    else:
+        bank, base = (8 if stage >= 13 else 6), 0xA000
+    return bank * 0x2000 + (cpu - base)
+
+
+def _stage_tileset_cells(data, stage):
+    """0xBF uncompressed 8x8s in ROM blit order (nametable id N = tiles[N-1])."""
+    off = TILESET_PTR - 0x4000
+    cpu = data[off + stage * 2] | (data[off + stage * 2 + 1] << 8)
+    fo = _tileset_file(stage, cpu)
+    n = min(NTILES, max(0, (len(data) - fo) // 32))
+    return tile_grids(data[fo:fo + n * 32], "tile8")
+
+
+def _intro_tileset_cells(data):
+    """intro_tiles at seg9 0x8000 (0x80 8x8s).  load_intro_tileset still
+    blits 0xBF, overlapping bonus_hud; intro metatile ids stay in the 0x80."""
+    fo = 9 * 0x2000
+    return tile_grids(data[fo:fo + 0x80 * 32], "tile8")
+
+
 # 8x8 4bpp tileset dumps live in segments/data/*.asm.  make gfx writes one
 # sheet per file to gfx/tilesets/<stem>.png; cell header is the CPU address
 # (4 hex digits, no 0x — roomperm.draw_text treats lowercase x as multiply).
@@ -1648,6 +1685,328 @@ def dump_asm_tilesets(data):
         else:
             desc = "%3d tiles" % len(c8)
         print("%-36s %s  %s%s" % (rel, desc, labels[0], extra))
+
+
+# Metatile def tables.  s00 / s18 are one file each (cross 0x8000 / 0xA000,
+# like tileset_s01).  Cell header = CPU address of the 16-byte def.  Pixels
+# are the 4x4 of nametable tiles (id 0 blank; id N = ROM tile N-1) in the
+# stage / intro tileset.  mtile_streams are room layouts (gfx/stage_sNN.png),
+# not this set.
+_MTILE_DEF_TABLES = (
+    ("mtile_defs_s00", ("mtile_defs_s00.asm",), 0x7EE1, 0),
+    ("mtile_defs_s01", ("mtile_defs_s01.asm",), 0x80B1, 1),
+    ("mtile_defs_s04", ("mtile_defs_s04.asm",), 0x84D1, 4),
+    ("mtile_defs_s07", ("mtile_defs_s07.asm",), 0x8791, 7),
+    ("mtile_defs_s10", ("mtile_defs_s10.asm",), 0x8D21, 10),
+    ("mtile_defs_s13", ("mtile_defs_s13.asm",), 0x9121, 13),
+    ("mtile_defs_s16", ("mtile_defs_s16.asm",), 0x9651, 16),
+    ("mtile_defs_s18", ("mtile_defs_s18.asm",), 0x9AC1, 18),
+    ("mtile_def_intro", ("mtile_def_intro.asm",), 0xA041, "intro"),
+)
+_EMPTY_TILE8 = [[0] * 8 for _ in range(8)]
+
+
+def parse_asm_mtile_defs(paths):
+    """16-byte metatile defs from one or more asms, concatenated.
+
+    Complete 16-byte groups become cells.  A trailing partial is leftover
+    — do not invent a header for it.
+    """
+    raw = bytearray()
+    for path in paths:
+        with open(path) as f:
+            for line in f:
+                if not _RE_DEFB.match(line):
+                    continue
+                payload = line.split(";")[0]
+                row = [int(hx, 16) for hx in _RE_HEXB.findall(payload)]
+                raw.extend(row)
+    leftover = len(raw) % 16
+    defs = [bytes(raw[i:i + 16]) for i in range(0, len(raw) - leftover, 16)]
+    return defs, leftover
+
+
+def _nametable_tile(tiles, tid):
+    """Nametable id -> 8x8.  Id 0 is blank (blit starts at VRAM 0x8004)."""
+    i = tid - 1
+    if i < 0 or i >= len(tiles):
+        return _EMPTY_TILE8
+    return tiles[i]
+
+
+def _compose_metatile(tiles, ids16):
+    """4x4 nametable ids -> 32x32 colour-index grid (ROM-order tiles)."""
+    return _compose_metatile_lookup(
+        lambda tid: _nametable_tile(tiles, tid), ids16)
+
+
+def _compose_metatile_lookup(lookup, ids16):
+    """4x4 nametable ids -> 32x32 grid via lookup(tid) -> 8x8."""
+    grid = []
+    for mr in range(4):
+        cells = [lookup(ids16[mr * 4 + mc]) for mc in range(4)]
+        for y in range(8):
+            row = []
+            for mc in range(4):
+                row.extend(cells[mc][y])
+            grid.append(row)
+    return grid
+
+
+def _paint_rgb(grid, pal):
+    return [[pal[p & 15] for p in row] for row in grid]
+
+
+# tileset_s18 unique prefix (seg8 0xA4C0-0xAC80).  load_stage_tileset's 0xBF
+# blit continues through title_tiles; those high nametable ids are not
+# playfield.  Defs that appear only in room 9 sample the event-6 overlay
+# (frame from nametable id 6 / VRAM 0x8018, face from 0x1E).  Unused defs
+# stay on the castle prefix (out-of-range ids blank).
+_S18_UNIQUE = (0xAC80 - 0xA4C0) // 32
+
+
+def _mtile_room_defs(stage, room):
+    """Metatile ids in mtile_stream_sNN_rNN."""
+    want = "mtile_stream_s%02d_r%02d:" % (stage, room)
+    ids = []
+    on = False
+    with open(os.path.join(DATA_DIR, "mtile_streams.asm")) as f:
+        for line in f:
+            if line.startswith(want):
+                on = True
+                continue
+            if on:
+                if line.startswith("mtile_stream_"):
+                    break
+                if not _RE_DEFB.match(line):
+                    continue
+                payload = line.split(";")[0]
+                ids.extend(int(hx, 16) for hx in _RE_HEXB.findall(payload))
+    return frozenset(ids)
+
+
+def _s18_portrait_atlas(data):
+    """256-slot nametable atlas after dracula_portrait_load (stage 18 room 9)."""
+    import roomperm
+    rom = type("Rom", (), {"rom": data})()
+    return roomperm.playfield_atlas(rom, 18, 9)
+
+
+def _s18_portrait_palette(data):
+    pal = vk_playfield_palette(data, 18, 9)
+    _apply_palette_overlay(pal, load_palette_table(data, 0x15F88))
+    _apply_palette_overlay(pal, load_palette_table(data, 0x15F6F))
+    return pal
+
+
+def dump_asm_metatiles(data):
+    """One sheet per metatile-def table.  Cell header = CPU address."""
+    os.makedirs(METATILE_DIR, exist_ok=True)
+    cache = {}
+
+    def tiles_for(kind):
+        if kind not in cache:
+            if kind == "intro":
+                cache[kind] = _intro_tileset_cells(data)
+            else:
+                cache[kind] = _stage_tileset_cells(data, kind)
+        return cache[kind]
+
+    for stem, fnames, cpu0, kind in _MTILE_DEF_TABLES:
+        paths = [os.path.join(DATA_DIR, fn) for fn in fnames]
+        missing = [p for p in paths if not os.path.isfile(p)]
+        if missing:
+            print("%-28s (missing asm)" % stem)
+            continue
+        defs, leftover = parse_asm_mtile_defs(paths)
+        if not defs:
+            print("%-28s (no complete defs)" % stem)
+            continue
+        if kind == "intro":
+            pal = vk_intro_palette(data)
+        else:
+            pal = vk_stage_palette(data, kind)
+        if kind == 18:
+            castle = tiles_for(18)[:_S18_UNIQUE]
+            portrait = _s18_portrait_atlas(data)
+            ppal = _s18_portrait_palette(data)
+            castle_defs = frozenset()
+            for r in range(9):
+                castle_defs |= _mtile_room_defs(18, r)
+            portrait_defs = _mtile_room_defs(18, 9) - castle_defs
+            cells = []
+            for i, d in enumerate(defs):
+                if i in portrait_defs:
+                    grid = _compose_metatile_lookup(
+                        lambda tid, a=portrait: a[tid] if tid < len(a)
+                        else _EMPTY_TILE8, d)
+                    cells.append(_paint_rgb(grid, ppal))
+                else:
+                    cells.append(_compose_metatile(castle, d))
+        else:
+            cells = [_compose_metatile(tiles_for(kind), d) for d in defs]
+        labels = ["%04X" % (cpu0 + i * 16) for i in range(len(defs))]
+        out = os.path.join(METATILE_DIR, stem + ".png")
+        render_png(out, cells, pal, cols=8, labels=labels, size=32, scale=8)
+        extra = "  +%d leftover bytes" % leftover if leftover else ""
+        rel = os.path.relpath(out, ROOT)
+        print("%-36s %3d metatiles  %s%s" % (rel, len(cells), labels[0], extra))
+
+
+# palette_apply tables.  One sheet per asm (stage_palettes, room_palettes).
+# 16 columns = VDP indices 0-F; one row per table.  Defined slots are a
+# solid 8x8 of that entry's RGB; header is the CPU address of the 3-byte
+# record.  Unused slots are OFF / unlabeled.  pal_9ffe straddles room_gfx
+# into room_palettes (like mtile_defs_s00 / s18 crossing a bank).
+def _solid_tile8(rgb):
+    return [[rgb] * 8 for _ in range(8)]
+
+
+def _decode_palette_buf(buf, cpu):
+    """Walk a palette_apply buffer.  Returns (entries, used, extra).
+
+    entries is [(addr, idx, rgb), ...] for each 3-byte record.  used is
+    bytes consumed through the 0xFF terminator (0 if the buffer is not a
+    table).  extra is trailing leftover after that terminator.
+    """
+    entries = []
+    i = 0
+    addr = cpu
+    while i < len(buf):
+        if buf[i] == 0xFF:
+            i += 1
+            break
+        if buf[i] > 15 or i + 2 >= len(buf):
+            return entries, 0, len(buf)
+        idx, rb, g = buf[i], buf[i + 1], buf[i + 2]
+        rgb = (msx2_channel(rb >> 4), msx2_channel(g), msx2_channel(rb))
+        entries.append((addr, idx, rgb))
+        addr += 3
+        i += 3
+    else:
+        # No terminator: not a complete table.
+        return entries, 0, len(buf)
+    return entries, i, len(buf) - i
+
+
+def _pal_9ffe_prefix():
+    """First 2 bytes of pal_9ffe live in room_gfx.asm (seg9 0x9FFE)."""
+    path = os.path.join(DATA_DIR, "room_gfx.asm")
+    capturing = False
+    buf = bytearray()
+    cpu = None
+    for line in open(path):
+        m = re.match(r"^pal_9ffe:\s*;\s*0x([0-9A-Fa-f]{4})", line)
+        if m:
+            capturing = True
+            cpu = int(m.group(1), 16)
+            continue
+        if not capturing:
+            continue
+        if re.match(r"^[A-Za-z_]", line):
+            break
+        if not _RE_DEFB.match(line):
+            continue
+        payload = line.split(";")[0]
+        for hx in _RE_HEXB.findall(payload):
+            buf.append(int(hx, 16))
+    return ("pal_9ffe", cpu, bytes(buf))
+
+
+def parse_asm_palette_tables(path, prefix=None):
+    """palette_apply tables from an asm: (name, cpu, entries).
+
+    prefix is (name, cpu, bytes) prepended before the file — pal_9ffe's
+    first two bytes in room_gfx.asm.  Empty tables (just 0xFF) are kept.
+    Trailing unlabeled 0xFF pad is leftover, not a table.  Pointer
+    tables (defw, no defb) are skipped.
+    """
+    tables = []
+    leftover = 0
+    current = prefix[0] if prefix else None
+    cpu = prefix[1] if prefix else None
+    buf = bytearray(prefix[2] if prefix else b"")
+
+    def flush():
+        nonlocal current, cpu, buf, leftover
+        if current is None:
+            leftover += len(buf)
+            buf = bytearray()
+            return
+        if not buf:
+            current = None
+            cpu = None
+            return
+        if cpu is None:
+            leftover += len(buf)
+            current = None
+            buf = bytearray()
+            return
+        entries, used, extra = _decode_palette_buf(bytes(buf), cpu)
+        if used:
+            tables.append((current, cpu, entries))
+            leftover += extra
+        else:
+            leftover += len(buf)
+        current = None
+        cpu = None
+        buf = bytearray()
+
+    with open(path) as f:
+        for line in f:
+            m = re.match(r"^([A-Za-z_][\w]*):", line)
+            if m:
+                flush()
+                current = m.group(1)
+                am = _RE_ADDR_INLINE.search(line)
+                cpu = int(am.group(1), 16) if am else None
+                continue
+            if current is None or not _RE_DEFB.match(line):
+                continue
+            payload = line.split(";")[0]
+            for hx in _RE_HEXB.findall(payload):
+                buf.append(int(hx, 16))
+    flush()
+    return tables, leftover
+
+
+def dump_asm_palettes():
+    """One sheet per palette asm. 16 cols = VDP index; cell header = CPU address."""
+    os.makedirs(PALETTE_DIR, exist_ok=True)
+    jobs = (
+        ("stage_palettes", "stage_palettes.asm", None),
+        ("room_palettes", "room_palettes.asm", _pal_9ffe_prefix()),
+    )
+    for stem, fname, prefix in jobs:
+        path = os.path.join(DATA_DIR, fname)
+        if not os.path.isfile(path):
+            print("%-28s (missing asm)" % fname)
+            continue
+        tables, leftover = parse_asm_palette_tables(path, prefix)
+        if not tables:
+            print("%-28s (no palette tables)" % fname)
+            continue
+        cells, labels = [], []
+        n_entries = 0
+        for _name, _cpu, entries in tables:
+            by_idx = {idx: (addr, rgb) for addr, idx, rgb in entries}
+            n_entries += len(entries)
+            for i in range(16):
+                if i in by_idx:
+                    addr, rgb = by_idx[i]
+                    cells.append(_solid_tile8(rgb))
+                    labels.append("%04X" % addr)
+                else:
+                    cells.append(_solid_tile8(OFF))
+                    labels.append("")
+        out = os.path.join(PALETTE_DIR, stem + ".png")
+        render_png(out, cells, [OFF], cols=16, labels=labels, size=8, scale=8)
+        extra = "  +%d leftover bytes" % leftover if leftover else ""
+        rel = os.path.relpath(out, ROOT)
+        first = next((lab for lab in labels if lab), "----")
+        print("%-36s %2d tables %3d entries  %s%s"
+              % (rel, len(tables), n_entries, first, extra))
+
 
 if __name__ == "__main__":
     main()

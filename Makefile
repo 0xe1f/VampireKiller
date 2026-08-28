@@ -3,7 +3,7 @@
 #   make segments   drop leftover .bin files (all banks are source)
 #   make            assemble VampireKiller.asm -> VampireKiller.rom
 #   make verify     assemble, then SHA-1 check against VampireKiller.sha1
-#   make gfx        (re)build PNG sheets in gfx/, gfx/sprites/, gfx/tilesets/, gfx/fonts/
+#   make gfx        (re)build PNG sheets in gfx/, gfx/sprites/, gfx/tilesets/, gfx/palettes/, gfx/metatiles/, gfx/fonts/
 #   make music      render BGM WAVs from the ROM PSG bytecode (music/)
 #   make sfx        render sfx ids 0x01-0x1D into sfx/
 #   make guide      player-handbook portraits, annotated maps, stage pages

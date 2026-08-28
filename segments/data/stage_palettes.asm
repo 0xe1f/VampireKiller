@@ -1,6 +1,8 @@
 ; Stage palette pointer table (seg10 0xBEA7) + palette_apply tables.
 ; Labels sNN_palette match tileset_sNN grouping (stage 2 has its own table).
 ; palette_hud_load loads hud_fixed_palette; title extras at 0xBF6F.
+; Preview: gfx/palettes/stage_palettes.png (`make gfx`); 16 cols = VDP
+; index 0-F, one row per table. Cell header = CPU address of the 3-byte record.
 stage_palette_ptr:
 	defw s00_palette  ; stage 0  courtyard
 	defw s01_palette  ; stage 1

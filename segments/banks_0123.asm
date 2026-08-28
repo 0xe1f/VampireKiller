@@ -365,7 +365,7 @@ l41e4h:
 l41ech:
 	djnz l41fbh
 	ld a,001h
-	ld (0c41ah),a          ; intro: use mtile_stream_c41a
+	ld (0c41ah),a          ; intro: use mtile_stream_intro
 	call intro_scene_build
 	ld a,0a0h
 	jp l41c9h
@@ -2603,7 +2603,7 @@ l4fa3h:
 ;       rooms-in-row = rowbase[row+1]-rowbase[row] (stage 18: use minimap count).
 ;    def base  = mtile_defbase[row]  (seg11 0x7EBB; row 1 -> mtile_defs_s01
 ;       at 0x80B1 in seg12).  def(id) = 16 bytes at defbase + id*16.
-;  (0xC41A!=0 uses mtile_stream_c41a and mtile_def_c41a in seg13.)
+;  (0xC41A!=0 uses mtile_stream_intro and mtile_def_intro in seg13.)
 ;  The 16 def bytes are copied as a 4x4 block (4 tiles, +0x20 to next map row).
 ;  Banks are restored (0x6000/0x8000/0xA000 <- 1/2/3) before returning.
 ;  See tools/roomperm.py for a byte-exact reimplementation of this decoder.
@@ -2625,7 +2625,7 @@ room_map_build:
 	ld (hl),a
 	ei
 	ld a,(0c41ah)
-	ld hl,mtile_stream_c41a
+	ld hl,mtile_stream_intro
 	and a
 	jr nz,l4ff7h
 	ld a,(0c5d8h)
@@ -2656,7 +2656,7 @@ l5000h:
 	push af
 	ld a,(0c41ah)
 	and a
-	ld bc,mtile_def_c41a
+	ld bc,mtile_def_intro
 	jr nz,l501ah
 	ld a,(0c5d8h)
 	add a,a
@@ -5851,7 +5851,7 @@ l63d1h:
 ; --- intro_scene_build (seg1 0x63DA) - intro walk-up: tiles, palette, sprites
 ;  Seeds Simon at (0x80,0x80), loads intro_tiles + intro_palette + intro_simon
 ;  / intro_sky, hides SAT, then the seg0 draw chain.  Called from state_intro
-;  with C41A set (mtile_stream_c41a).  Room-based; no camera.
+;  with C41A set (mtile_stream_intro).  Room-based; no camera.
 intro_scene_build:
 	call 047c0h
 	ld a,080h

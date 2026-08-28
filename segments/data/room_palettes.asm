@@ -1,5 +1,8 @@
 ; Room palettes continued from pal_9ffe (seg9 0x9FFE).
 ; palette_apply tables: (index, rb, g)+ 0xFF.  Ends where gfx RLE starts (0xA066).
+; Preview: gfx/palettes/room_palettes.png (`make gfx`); pal_9ffe stitched
+; from room_gfx.asm. 16 cols = VDP index 0-F, one row per table.
+; Cell header = CPU address of the 3-byte record.
 ; pal_9ffe continued (idx 4 already emitted in seg9)
 	defb 0x01,0x06,0x75,0x06,0xff  ; 0xA000
 pal_a005:  ; 0xA005

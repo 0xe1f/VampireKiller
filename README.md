@@ -30,7 +30,9 @@ docs/               player handbook (Jekyll / GitHub Pages) + RE notes
                     engineering notes (not published)
 gfx/                readable graphics catalogue (PNG sheets committed; `make gfx`)
                     sprites/ packed 1bpp sprite-asm sheets; tilesets/ 4bpp
-                    playfield/title; fonts/ 1bpp glyph sheets; composites at gfx/ root
+                    playfield/title; palettes/ palette_apply swatches;
+                    metatiles/ 4x4 def sheets; fonts/ 1bpp glyph sheets;
+                    composites at gfx/ root
 music/              BGM catalogue (WAV; `make music` from the ROM bytecode;
                     recognizable, not fully hardware-accurate yet)
 sfx/                SFX catalogue (WAV; `make sfx`; `05_whip.wav`, etc.)
@@ -72,6 +74,10 @@ scanline). Sprites stay RLE-packed in source (`tools/disasm/rleenc.py` is not by
 and a full-frame sheet per enemy (`gfx/sheet_enemy_zombie_01.png`, …).
 Packed 1bpp sprite asms dump to `gfx/sprites/<stem>.png`.
 Each 4bpp tileset asm has a sheet at `gfx/tilesets/<stem>.png`.
+Each palette_apply asm has a sheet at `gfx/palettes/<stem>.png`
+(16 columns = VDP index; cell header = CPU address of the 3-byte record).
+Each metatile-def table has a sheet at `gfx/metatiles/<stem>.png`
+(4×4 tiles, cell header = CPU address of the def).
 
 **Player handbook** (controls, items, weapons, bestiary, maps): open
 `docs/index.md`, or after GitHub Pages is enabled,

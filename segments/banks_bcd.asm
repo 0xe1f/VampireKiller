@@ -15,7 +15,7 @@ mtile_rowbase:
 
 ; mtile_roomptr (seg11 0x6013): word[index] -> 48-byte metatile stream.
 ; 156 rooms (stages 0..17 = 146, stage 18 = 10), packed immediately after
-; mtile_stream_c41a.  room_map_build: index = rowbase[D000]+D001.
+; mtile_stream_intro.  room_map_build: index = rowbase[D000]+D001.
 mtile_roomptr:
 	defw 0617bh,061abh,061dbh,0620bh,0623bh,0626bh,0629bh,062cbh
 	defw 062fbh,0632bh,0635bh,0638bh,063bbh,063ebh,0641bh,0644bh
@@ -38,9 +38,9 @@ mtile_roomptr:
 	defw 07c7bh,07cabh,07cdbh,07d0bh,07d3bh,07d6bh,07d9bh,07dcbh
 	defw 07dfbh,07e2bh,07e5bh,07e8bh
 
-; mtile_stream_c41a (seg11 0x614B): 8x6 metatile ids used when 0xC41A != 0
+; mtile_stream_intro (seg11 0x614B): 8x6 metatile ids used when 0xC41A != 0
 ; (room_map_build takes this instead of mtile_roomptr[index]).
-	INCLUDE "data/mtile_stream_c41a.asm"
+	INCLUDE "data/mtile_stream_intro.asm"
 
 ; Packed 8x6 streams for every room, index order, 48 bytes each.
 	INCLUDE "data/mtile_streams.asm"
@@ -54,16 +54,13 @@ mtile_defbase:
 	defw 08791h,08791h,08d21h,08d21h,08d21h,09121h,09121h,09121h
 	defw 09651h,09651h,09ac1h
 
-; Stage 0 metatile defs (29 x 16 bytes), straddling into seg12 at 0x80B1.
-	INCLUDE "data/mtile_defs_s00_a.asm"
+; Stage 0 metatile defs (29 x 16 bytes).  Crosses 0x8000 (seg11 into seg12).
+	INCLUDE "data/mtile_defs_s00.asm"
 
 ; ===========================================================================
-;  SEGMENT 12 - bank 0x0C at 0x8000 (8K into this PHASE).
+;  SEGMENT 12 - bank 0x0C at 0x8000 (8K into this PHASE; s00 already crossed).
 ;  Per-stage 4x4 metatile definition tables.
 ; ===========================================================================
-
-; Tail of stage 0 defs (body starts at mtile_defbase[0] = 0x7EE1 in seg11).
-	INCLUDE "data/mtile_defs_s00_b.asm"
 
 	INCLUDE "data/mtile_defs_s01.asm"
 	INCLUDE "data/mtile_defs_s04.asm"
@@ -71,21 +68,20 @@ mtile_defbase:
 	INCLUDE "data/mtile_defs_s10.asm"
 	INCLUDE "data/mtile_defs_s13.asm"
 	INCLUDE "data/mtile_defs_s16.asm"
-	INCLUDE "data/mtile_defs_s18_a.asm"
+; Stage 18 metatile defs (88 x 16 bytes).  Crosses 0xA000 (seg12 into seg13).
+	INCLUDE "data/mtile_defs_s18.asm"
 
 ; ===========================================================================
-;  SEGMENT 13 - bank 0x0D at 0xA000 (16K into this PHASE).
+;  SEGMENT 13 - bank 0x0D at 0xA000 (16K into this PHASE; s18 already crossed).
 ;  Sprite RLE, conn_lookup, doors.  Regen: tools/disasm/regen-seg.sh 13 0xA000 segments/seg13.blocks
 ; ===========================================================================
 
-; --- 0xA000-0xB962: metatile defs + sprite RLE -----------------------------
-;  0xA000-0xA040 = tail of stage-18 defs (body at mtile_defs_s18 in seg12).
-;  Landmarks: 0xA041 = mtile_def_c41a (room_map_build when 0xC41A != 0); 0xA281 /
+; --- 0xA041-0xB962: intro defs + sprite RLE --------------------------------
+;  Landmarks: 0xA041 = mtile_def_intro (room_map_build when 0xC41A != 0); 0xA281 /
 ;  0xA2D1 = Simon cell pointer tables (below); 0xA319 = packed sprite RLE
 ;  (intro_simon + in-game frames); 0xB5A1-0xB894 figure Dracula 32x32 body;
 ;  0xB895 = intro_sky; 0xBBF6 = title_jp_sprites; 0xBE59 = logo_font.
-	INCLUDE "data/mtile_defs_s18_b.asm"
-	INCLUDE "data/mtile_def_c41a.asm"
+	INCLUDE "data/mtile_def_intro.asm"
 
 ; simon_cell0_ptr (seg13 0xA281): 40 words, indexed by 0xC42E (legs).
 ; Consumed by load_simon_sprites; streams catalogued in gfx/sprites/simon_rle.png.

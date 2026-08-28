@@ -1,6 +1,7 @@
-; Metatile defs used with mtile_stream_c41a (seg13 0xA041).
+; Intro walk-up metatile defs (seg13 0xA041), used with mtile_stream_intro.
 ; 36 x 16-byte 4x4 defs.
-mtile_def_c41a:
+; Preview: gfx/metatiles/mtile_def_intro.png (`make gfx`); cell header = CPU address of the def.
+mtile_def_intro:
 ; def 0x00
 	defb 0x01,0x01,0x01,0x01
 	defb 0x01,0x01,0x01,0x01

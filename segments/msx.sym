@@ -813,7 +813,7 @@ shot_spawn: equ 0x9f74	; spawn shot: A=kind, BC=pos, HL=yvel, DE=xvel
 shot_alloc: equ 0x9f8a	; find a free shot slot and arm it (kind 0xFF -> type 12 flame)
 
 ; ---- Vampire Killer banked routines (segment 13 @ 0xA000) ----------------
-mtile_def_c41a: equ 0xA041	; metatile-def base when 0xC41A != 0
+mtile_def_intro: equ 0xA041	; intro walk-up metatile defs (when 0xC41A != 0)
 simon_cell0_ptr: equ 0xA281	; 40 words, index 0xC42E (legs) -> RLE streams
 simon_cell1_ptr: equ 0xA2D1	; 36 words, index 0xC42F (torso/whip) -> RLE streams
 intro_simon: equ 0xA319		; first intro_simon RLE stream (VRAM 0xF800)
@@ -844,17 +844,17 @@ door_load_paged: equ 0x5A47	; page seg13, door_load, restore
 ; ---- Vampire Killer map-data banks (segment 11 @ 0x6000, 12 @ 0x8000) ----
 mtile_rowbase: equ 0x6000	; byte[stage]=first room index (seg11; stages 0..18)
 mtile_roomptr: equ 0x6013	; word[index]->48-byte 8x6 stream (156 rooms)
-mtile_stream_c41a: equ 0x614B	; alternate 8x6 stream when 0xC41A != 0
+mtile_stream_intro: equ 0x614B	; intro 8x6 stream when 0xC41A != 0
 mtile_streams: equ 0x617B	; 156 packed 8x6 streams (48 bytes each)
 mtile_defbase: equ 0x7EBB	; word[stage]->4x4 metatile-def table (may straddle banks)
-mtile_defs_s00: equ 0x7EE1	; stage 0 defs (seg11; tail in seg12)
+mtile_defs_s00: equ 0x7EE1	; stage 0 defs (crosses 0x8000 into seg12)
 mtile_defs_s01: equ 0x80B1	; stages 1-3 defs (seg12)
 mtile_defs_s04: equ 0x84D1	; stages 4-6
 mtile_defs_s07: equ 0x8791	; stages 7-9
 mtile_defs_s10: equ 0x8D21	; stages 10-12
 mtile_defs_s13: equ 0x9121	; stages 13-15
 mtile_defs_s16: equ 0x9651	; stages 16-17
-mtile_defs_s18: equ 0x9AC1	; stage 18 (tail in seg13 0xA000-0xA040)
+mtile_defs_s18: equ 0x9AC1	; stage 18 defs (crosses 0xA000 into seg13)
 
 ; ---- Vampire Killer gfx-script bank (segment 9 @ 0x8000 / 10 @ 0xA000) --
 room_gfx_ptr: equ 0x9AB0	; word[stage-1] -> 4 bytes/room {script, palette}

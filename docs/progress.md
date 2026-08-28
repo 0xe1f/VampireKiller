@@ -516,7 +516,7 @@ Fully migrated banks (0-15) have no `.bin`.
     * Graduated banks 0x0B/0x0C from `INCBIN` to `INCLUDE segments/seg11.asm` /
       `seg12.asm` (`PHASE` 0x6000 / 0x8000).  Unique labels (window shared with
       seg01/seg02): `mtile_rowbase` 0x6000, `mtile_roomptr` 0x6013 (156 rooms),
-      `mtile_stream_c41a` 0x614B, `mtile_streams` 0x617B, `mtile_defbase` 0x7EBB,
+      `mtile_stream_intro` 0x614B, `mtile_streams` 0x617B, `mtile_defbase` 0x7EBB,
       `mtile_defs_s00`..`s18` (defs still `INCBIN` slices; stage 0/18 straddle
       into the next bank).  `room_map_build` now references those names.
     * Minimap solid-noise errata: brick BODY 09-0b is solid only when 4-adjacent
@@ -1485,8 +1485,8 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   door_load_coords, door_tbl, spot_load_coords, spot_tbl, simon_cell0_ptr,
   simon_cell1_ptr, intro_simon, intro_sky, title_jp_sprites, logo_font, logo_font_ink2,
   logo_font_ink3;
-  seg11/12: mtile_rowbase, mtile_roomptr, mtile_stream_c41a, mtile_streams,
-  mtile_defbase, mtile_defs_s00..s18, mtile_def_c41a.
+  seg11/12: mtile_rowbase, mtile_roomptr, mtile_stream_intro, mtile_streams,
+  mtile_defbase, mtile_defs_s00..s18, mtile_def_intro.
   tilesets: tileset_s00..s18 (in-source; s00/s13 omitted from msx.sym — CPU
   window collides with mtile_rowbase / scenery_list_ptr), hud_weapon_key_tiles,
   title_logo_jp_tiles, title_logo_en_tiles, title_castle_tiles (`title_tiles.asm`), hud_font,

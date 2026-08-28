@@ -614,4 +614,5 @@ gfx_script_9fed:  ; 0x9FED  frontend (ld hl,gfx_script_9fed)
 	defb 0xff
 
 pal_9ffe:  ; 0x9FFE  2 bytes here, rest at 0xA000
+; Preview: gfx/palettes/room_palettes.png (stitched with room_palettes.asm).
 	defb 0x04,0x76

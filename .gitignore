@@ -3,7 +3,7 @@
 segments/*.bin
 
 # ROM-derived scratch — never commit.
-# PNGs (gfx/, gfx/sprites/, gfx/tilesets/, gfx/fonts/, minimaps) ARE tracked so they're viewable without a rebuild.
+# PNGs (gfx/, gfx/sprites/, gfx/tilesets/, gfx/palettes/, gfx/metatiles/, gfx/fonts/, minimaps) ARE tracked so they're viewable without a rebuild.
 gfx/*.bin
 gfx/*.txt
 gfx/index.md

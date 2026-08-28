@@ -440,20 +440,20 @@ def room_stage_local(index: int) -> tuple[int, int]:
 
 def emit_mtile_streams(rom: bytes) -> None:
     b11 = bank(rom, 11)
-    c41a = b11[0x014B : 0x014B + 48]
+    intro = b11[0x014B : 0x014B + 48]
     lines = [
-        "; 8x6 metatile ids used when C41A != 0 (room_map_build).",
-        "; 48 bytes, row-major.  Included at mtile_stream_c41a (seg11 0x614B).",
-        "mtile_stream_c41a:",
+        "; Intro walk-up 8x6 metatile ids (room_map_build when 0xC41A != 0).",
+        "; 48 bytes, row-major.  Included at mtile_stream_intro (seg11 0x614B).",
+        "mtile_stream_intro:",
     ]
     for row in range(6):
-        chunk = c41a[row * 8 : row * 8 + 8]
+        chunk = intro[row * 8 : row * 8 + 8]
         lines.append(
             "\tdefb "
             + ",".join("0x%02x" % b for b in chunk)
             + "  ; row %d" % row
         )
-    write_lines(os.path.join(DATA, "mtile_stream_c41a.asm"), lines)
+    write_lines(os.path.join(DATA, "mtile_stream_intro.asm"), lines)
 
     streams = b11[0x017B : 0x017B + 0x1D40]
     assert len(streams) == NROOMS * 48
@@ -506,71 +506,24 @@ def emit_mtile_defs(rom: bytes) -> None:
     b12 = bank(rom, 12)
     b13 = bank(rom, 13)
 
-    # Stage 0: 0x7EE1, 0x1D0 bytes (29 defs), split 0x11F / 0xB1 at 0x8000.
-    s00a = b11[0x1EE1:0x2000]
-    s00b = b12[0:0x00B1]
-    assert len(s00a) == 0x11F and len(s00b) == 0x00B1
-
-    def dump_defs(path, title, buf, cpu0, first_id, note, label=None):
-        lines = [title, note]
-        if label:
-            lines.append("%s:" % label)
-        lines.append("")
-        # Align comments to 16-byte defs relative to table origin first_id at cpu_table.
-        # We only know first_id at cpu0 if cpu0 is the table start.
-        off = 0
-        while off < len(buf):
-            cpu = cpu0 + off
-            take = min(16, len(buf) - off)
-            chunk = buf[off : off + take]
-            comment = ""
-            rel = cpu - cpu0
-            if take == 16 and rel % 16 == 0:
-                comment = "def 0x%02X" % (first_id + rel // 16)
-            elif take != 16:
-                comment = "0x%04X" % cpu
-            append_mtile_def(lines, chunk, comment)
-            off += take
-        write_lines(path, lines)
-
-    dump_defs(
-        os.path.join(DATA, "mtile_defs_s00_a.asm"),
-        "; Stage 0 metatile defs, body (seg11 0x7EE1).  Tail in mtile_defs_s00_b.",
-        s00a,
-        0x7EE1,
-        0,
-        "; 4x4 tile ids, 16 bytes/def.  Last def straddles 0x8000.",
-        label="mtile_defs_s00",
-    )
-    lines = [
-        "; Stage 0 metatile defs, tail (seg12 0x8000).",
-        "; Completes the def that straddles 0x8000, then defs through 0x1C (29 defs).",
-        "",
-    ]
-    table0 = 0x7EE1
-    off = 0
-    while off < len(s00b):
-        cpu = 0x8000 + off
-        rel = cpu - table0
-        take = min(16 - (rel % 16), len(s00b) - off) if rel % 16 else min(16, len(s00b) - off)
-        chunk = s00b[off : off + take]
-        comment = ""
-        if rel % 16 == 0:
-            comment = "def 0x%02X" % (rel // 16)
-        elif off == 0:
-            comment = "rest of def 0x%02X" % (rel // 16)
-        append_mtile_def(lines, chunk, comment)
-        off += take
-    write_lines(os.path.join(DATA, "mtile_defs_s00_b.asm"), lines)
+    # Stage 0: 0x7EE1, 0x1D0 bytes (29 defs).  Crosses 0x8000 (seg11 into seg12).
+    s00 = b11[0x1EE1:0x2000] + b12[0:0x00B1]
+    assert len(s00) == 0x1D0
+    # Stage 18: 0x9AC1, 0x580 bytes (88 defs).  Crosses 0xA000 (seg12 into seg13).
+    s18 = b12[0x1AC1:0x2000] + b13[0:0x0041]
+    assert len(s18) == 0x580
 
     slices = [
+        ("mtile_defs_s00.asm", "mtile_defs_s00",
+         "stage 0 (0x7EE1).  Crosses 0x8000 (seg11 into seg12)", s00, 0x7EE1),
         ("mtile_defs_s01.asm", "mtile_defs_s01", "stages 1-3 (0x80B1)", b12[0x00B1:0x04D1], 0x80B1),
         ("mtile_defs_s04.asm", "mtile_defs_s04", "stages 4-6 (0x84D1)", b12[0x04D1:0x0791], 0x84D1),
         ("mtile_defs_s07.asm", "mtile_defs_s07", "stages 7-9 (0x8791)", b12[0x0791:0x0D21], 0x8791),
         ("mtile_defs_s10.asm", "mtile_defs_s10", "stages 10-12 (0x8D21)", b12[0x0D21:0x1121], 0x8D21),
         ("mtile_defs_s13.asm", "mtile_defs_s13", "stages 13-15 (0x9121)", b12[0x1121:0x1651], 0x9121),
         ("mtile_defs_s16.asm", "mtile_defs_s16", "stages 16-17 (0x9651)", b12[0x1651:0x1AC1], 0x9651),
-        ("mtile_defs_s18_a.asm", "mtile_defs_s18", "stage 18 body (0x9AC1), tail in seg13", b12[0x1AC1:0x2000], 0x9AC1),
+        ("mtile_defs_s18.asm", "mtile_defs_s18",
+         "stage 18 (0x9AC1).  Crosses 0xA000 (seg12 into seg13)", s18, 0x9AC1),
     ]
     for fname, label, desc, buf, cpu0 in slices:
         n = len(buf) // 16
@@ -579,6 +532,8 @@ def emit_mtile_defs(rom: bytes) -> None:
             "; 4x4 metatile defs, 16 bytes/def.  %s." % desc,
             "; %d complete def(s)%s."
             % (n, ("" if rem == 0 else ", then %d-byte straddle" % rem)),
+            "; Preview: gfx/metatiles/%s.png (`make gfx`); "
+            "cell header = CPU address of the def." % label,
             "%s:" % label,
         ]
         off = 0
@@ -595,37 +550,18 @@ def emit_mtile_defs(rom: bytes) -> None:
             off += take
         write_lines(os.path.join(DATA, fname), lines)
 
-    s18b = b13[0:0x0041]
+    intro_defs = b13[0x0041 : 0x0041 + 0x0240]
+    assert len(intro_defs) == 0x240
     lines = [
-        "; Stage 18 metatile defs, tail (seg13 0xA000).  Completes mtile_defs_s18.",
-        "",
-    ]
-    table0 = 0x9AC1
-    off = 0
-    while off < len(s18b):
-        cpu = 0xA000 + off
-        rel = cpu - table0
-        take = min(16 - (rel % 16), len(s18b) - off) if rel % 16 else min(16, len(s18b) - off)
-        chunk = s18b[off : off + take]
-        comment = ""
-        if rel % 16 == 0:
-            comment = "def 0x%02X" % (rel // 16)
-        elif off == 0:
-            comment = "rest of def 0x%02X" % (rel // 16)
-        append_mtile_def(lines, chunk, comment)
-        off += take
-    write_lines(os.path.join(DATA, "mtile_defs_s18_b.asm"), lines)
-
-    c41a = b13[0x0041 : 0x0041 + 0x0240]
-    assert len(c41a) == 0x240
-    lines = [
-        "; Metatile defs used with mtile_stream_c41a (seg13 0xA041).",
+        "; Intro walk-up metatile defs (seg13 0xA041), used with mtile_stream_intro.",
         "; 36 x 16-byte 4x4 defs.",
-        "mtile_def_c41a:",
+        "; Preview: gfx/metatiles/mtile_def_intro.png (`make gfx`); "
+        "cell header = CPU address of the def.",
+        "mtile_def_intro:",
     ]
     for i in range(36):
-        append_mtile_def(lines, c41a[i * 16 : (i + 1) * 16], "def 0x%02X" % i)
-    write_lines(os.path.join(DATA, "mtile_def_c41a.asm"), lines)
+        append_mtile_def(lines, intro_defs[i * 16 : (i + 1) * 16], "def 0x%02X" % i)
+    write_lines(os.path.join(DATA, "mtile_def_intro.asm"), lines)
 
 
 # --- tileset banks ----------------------------------------------------------
@@ -1700,6 +1636,7 @@ def emit_seg9_10(rom: bytes) -> None:
     assert pal_prefix == bytes([peek(rom, 0x9FFE), peek(rom, 0x9FFF)])
     lines.append("")
     lines.append("pal_9ffe:  ; 0x9FFE  2 bytes here, rest at 0xA000")
+    lines.append("; Preview: gfx/palettes/room_palettes.png (stitched with room_palettes.asm).")
     lines.append("\tdefb " + ",".join("0x%02x" % b for b in pal_prefix))
     write_lines(os.path.join(DATA, "room_gfx.asm"), lines)
 
@@ -1709,6 +1646,9 @@ def emit_seg9_10(rom: bytes) -> None:
     plines = [
         "; Room palettes continued from pal_9ffe (seg9 0x9FFE).",
         "; palette_apply tables: (index, rb, g)+ 0xFF.  Ends where gfx RLE starts (0xA066).",
+        "; Preview: gfx/palettes/room_palettes.png (`make gfx`); pal_9ffe stitched",
+        "; from room_gfx.asm. 16 cols = VDP index 0-F, one row per table.",
+        "; Cell header = CPU address of the 3-byte record.",
         "; pal_9ffe continued (idx 4 already emitted in seg9)",
         "\tdefb "
         + ",".join("0x%02x" % b for b in pal_rest[0:5])
@@ -1850,6 +1790,8 @@ def emit_seg9_10(rom: bytes) -> None:
         "; Stage palette pointer table (seg10 0xBEA7) + palette_apply tables.",
         "; Labels sNN_palette match tileset_sNN grouping (stage 2 has its own table).",
         "; palette_hud_load loads hud_fixed_palette; title extras at 0xBF6F.",
+        "; Preview: gfx/palettes/stage_palettes.png (`make gfx`); 16 cols = VDP",
+        "; index 0-F, one row per table. Cell header = CPU address of the 3-byte record.",
         "stage_palette_ptr:",
     ]
     pal_ptr_note = {0: "courtyard", 18: "Dracula"}

@@ -1,6 +1,13 @@
-; z80dasm block map for segment 14 (bank 0x0E, paged at 0x8000).
-; Shares the CPU window with seg02, so regenerated labels must be renamed
+; z80dasm code/data map for banks 0x0E-0x0F (sound/portrait window @ 0x8000).
+; regen-seg.sh keeps only blocks whose start falls in the 8K being disassembled.
+; Block names avoid colliding with in-source labels (z80dasm emits NAME_start).
+; Shares the CPU window with play bank 2, so regenerated labels must be renamed
 ; (snd_* / credits_font / etc.) before folding — z80dasm lxxxh would collide.
+; Bank 0x0F is PSG tails + Dracula portrait (already labeled data); no code map.
+
+; ===========================================================================
+;  bank 14 (0x0E) @ 0x8000
+; ===========================================================================
 
 ; Packed scenery / spawn-mask / object-list tables (already annotated).
 data_lists: start 0x8000 end 0x8824 type bytedata
@@ -28,5 +35,5 @@ data_sfx: start 0x8D8F end 0x8DC9 type worddata
 ; Music 6-byte records: 3 channel pointers per id 0x80..0x8F.
 data_music: start 0x8DC9 end 0x8E29 type bytedata
 
-; Packed sfx / special / music streams (some music tails live in seg15).
+; Packed sfx / special / music streams (some music tails live in bank 15).
 data_seq: start 0x8E29 end 0xA000 type bytedata

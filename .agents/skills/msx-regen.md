@@ -15,11 +15,13 @@ Paths relative to repo root. Do **not** invent a one-off disassembler.
 ## Regen one bank
 
 ```
-tools/disasm/regen-seg.sh <n> <org> [segments/segNN.blocks]
+tools/disasm/regen-seg.sh <n> <org> [segments/banks_XXXX.blocks]
 ```
 
 `<n>` is the 8 KiB bank index (0-based). `<org>` is that bank's CPU window
-(`PHASE` origin). Optional `.blocks` marks code vs data (rendering only).
+(`PHASE` origin). Optional `.blocks` is a paging-window map (same stem as
+the window `.asm`; VK: `banks_0123.blocks`). Regen keeps only ranges whose
+start is in `[org, org+0x2000)` (rendering only, never bytes).
 
 Writes gitignored scratch:
 

@@ -1,0 +1,205 @@
+; z80dasm code/data map for banks 0-3 (play window @ 0x4000).
+; regen-seg.sh keeps only blocks whose start falls in the 8K being disassembled.
+; Block names avoid colliding with in-source labels (z80dasm emits NAME_start).
+
+; ===========================================================================
+;  bank 0 @ 0x4000
+; ===========================================================================
+; The 16-byte MSX cartridge header is data, not code.
+rom_header: start 0x4000 end 0x4010 type bytedata
+; Game Master relative-format option table (DW-padded CD header).  Between
+; the cart header and int_handler; decoding it as code mis-aligns the IRQ.
+gm_opt_tbl: start 0x4010 end 0x4028 type bytedata
+
+; Main state-machine jump table: DISPATCH_A at 0x415e indexes this by the
+; primary game state (0xC000).  14 word entries -> state handlers.
+main_state_tbl: start 0x4161 end 0x417d type worddata
+; Title-screen tile-layout streams (0xFF=end, 0xFE=next row).
+title_layout: start 0x4c3f end 0x4d0f type bytedata
+; Intro Simon walk-cycle poses (0x98,0x99,0x9A,0x99); decoded as sbc a,b/c/d.
+intro_simon_stride_tbl: start 0x4F86 end 0x4F8A type bytedata
+
+; Door graphic consumed by door_blit_tiles (0x5403): 6 pointers into the three
+; 8x8 4bpp tiles that follow (joint / plain shaft / joint-at-bottom), stacked
+; into an 8x48 vertical bar.  Decoded as code it becomes 13 bogus `jp 0003ch`.
+door_tile_ptr: start 0x5428 end 0x5434 type worddata
+door_tiles: start 0x5434 end 0x5494 type bytedata
+
+; Vendor 32x32 assembly: 4x4 tile pointers + 5 cloak-recolor bytes (IX).
+vendor_tile_ptr: start 0x5575 end 0x5595 type worddata
+vendor_recolor_tbl: start 0x5595 end 0x559A type bytedata
+; Projectile weapon RLE pointers + sub_4745h convert records.
+weapon_sprite_ptr: start 0x55DE end 0x55F3 type bytedata
+
+; Entity-behaviour jump table: DISPATCH_A at 0x5fd0 indexes this by object
+; type (ix+0)-1.  Targets live in the banked 0xA000 ROM, so they can't be
+; local labels.  Runs to the end of the bank.
+entity_tbl: start 0x5fd3 end 0x6000 type worddata
+; F1 pause overlay string (position + vk "PAUSE").
+pause_text: start 0x44B7 end 0x44BF type bytedata
+; New-game C410..C412 seed (lives, STAGE, unread C412).
+run_seed_tbl: start 0x44F0 end 0x44F3 type bytedata
+; Vendor attr bits5-2 -> bonus id (scenery compact into 0xDE00).
+vendor_offer_id: start 0x5B12 end 0x5B22 type bytedata
+; --- Game Master cartridge support -------------------------------------------
+; 6-byte fingerprint of Konami's Game Master cart, compared at CPU 0x7FFA in
+; every slot by game_master_detect.
+game_master_sig: start 0x5CF0 end 0x5CF6 type bytedata
+; Text streams for the hidden Game Master menu (position prefixes, vk glyphs,
+; 0xFE = next field, 0xFF = end).  All three decode as nonsense code.
+gm_menu_text: start 0x5D1D end 0x5D68 type bytedata
+gm_stage_text: start 0x5D79 end 0x5D89 type bytedata
+gm_player_text: start 0x5D9F end 0x5DB0 type bytedata
+; Stage 0-18 -> hub index (0xD002), used when the menu jumps to a stage.
+gm_stage_hub_tbl: start 0x5E71 end 0x5E84 type bytedata
+; Cursor row (Y) for each of the three menu items.
+gm_cursor_y: start 0x5EBC end 0x5EBF type bytedata
+; Extra "F5 -> CONTINUE" line added to GAME OVER when the cart is present.
+gm_continue_text: start 0x4300 end 0x4314 type bytedata
+; Stage 1-18 -> (stage-within-hub)*0x18; scenery_room_ptr then <<4.
+scenery_stage_ofs: start 0x5C0B end 0x5C1D type bytedata
+
+; ===========================================================================
+;  bank 1 @ 0x6000
+; ===========================================================================
+; Entry points are called from bank 0's state machine and from within the
+; bank; the leading region is a set of data tables, not code.
+
+; Spawn-init overflow of entity_tbl (odd-aligned from 0x5FFF; keep as bytes).
+; 48 bytes before the first routine at 0x6030.
+data_6000: start 0x6000 end 0x6030 type bytedata
+
+; 0x6030-0x605e: actor_sat_patterns (0x6030) + actor_sat_assign (0x604F).
+
+; Sprite counts per actor type (spawn indexes as 0x605E+type).
+actor_spr_count: start 0x605f end 0x608d type bytedata
+; Word[type] -> SAT colour/attr init stream (spawn uses 0x608B+type*2).
+actor_sat_pat_ptr: start 0x608d end 0x60e9 type worddata
+; HP per actor type (spawn indexes as 0x60E8+type).
+actor_hp_tbl: start 0x60e9 end 0x6119 type bytedata
+; SAT colour/attr init streams pointed at by actor_sat_pat_ptr.
+actor_sat_colors: start 0x6119 end 0x615b type bytedata
+
+; Konami logo tile-layout stream consumed by sub_6276h (0xFE=newline, 0xFF=end).
+logo_layout: start 0x6296 end 0x62d7 type bytedata
+; Per-stage event table for cell_event_set: one byte each (room<<4 | event); 0xFF=none.
+cell_event_tbl: start 0x6376 end 0x6389 type bytedata
+; Per-stage spawn table for simon_spawn_pos: 2 bytes/stage (Y|facing, X).
+simon_spawn_tbl: start 0x6426 end 0x644c type bytedata
+; Multi-sprite (dx,dy) offset lists selected by the 0x80/0x81/0x82 stream codes
+; in the actor->sprite builder at 0x644c.
+sprite_ofs_64d4: start 0x64d4 end 0x64ec type bytedata
+; Inline DISPATCH_A word table for event_dracula (0x65B7); 11 handler pointers.
+evt_dispatch_65bd: start 0x65bd end 0x65d3 type worddata
+; Inline DISPATCH_A word table for credits_tick (0x66C1); 4 handler pointers.
+evt_dispatch_66c8: start 0x66c8 end 0x66d0 type worddata
+; CE35 visual sub-state DISPATCH_A (dracula_ce35_tick).
+ce35_dispatch: start 0x687B end 0x6883 type worddata
+; 6 x {Yvel, Xvel} words for actor_dracula_chunk (dracula_chunk_init).
+dracula_chunk_vel: start 0x69EB end 0x6A03 type bytedata
+; Event-actor ix+1 DISPATCH_A (0x6AB1).
+evt_actor_tbl: start 0x6AB4 end 0x6ABE type worddata
+; Ending/staff line pointers (indexed by CE31) for credits_keyframe;
+; entries point into seg 8 (0xBFxx) and seg 5 (0x82xx/0x84xx).
+script_ptr_6795: start 0x6795 end 0x67eb type worddata
+; Triangle-ramp animation table (19 bytes, indexed by 0xCE39) used by credits_palette_ramp.
+credits_ramp_tbl: start 0x6804 end 0x6817 type bytedata
+; Simon action-state DISPATCH_A table (0xC420 -> handlers).
+simon_action_tbl: start 0x6b49 end 0x6b59 type worddata
+; Jump sub-state DISPATCH_A table (0xC421 -> aim/up/left/right).
+simon_jump_tbl: start 0x6ccd end 0x6cd5 type worddata
+; Signed dY per jump phase.
+jump_y_delta: start 0x6d9b end 0x6db0 type bytedata
+; Fall dY nibbles.
+fall_y_delta: start 0x6f88 end 0x6f8c type bytedata
+; Hurt sub-state DISPATCH_A table (0xC423).
+simon_hurt_tbl: start 0x6f92 end 0x6f9a type worddata
+; Whip-phase DISPATCH_A table (0xC422-1).
+whip_phase_tbl: start 0x71f9 end 0x7201 type worddata
+; Hurt/holy-water signed dY (22 bytes).  l7090h is also a VRAM dest in HUD blits.
+hurt_y_delta: start 0x7084 end 0x709a type bytedata
+; Projectile type DISPATCH_A (ix+1)-2: knife/axe/cross/holy water.
+proj_type_tbl: start 0x72dd end 0x72e5 type worddata
+; Cross state DISPATCH_A (ix+0)-1.
+cross_state_tbl: start 0x7306 end 0x730e type worddata
+; Axe path's copy of the same 4 state pointers.
+axe_state_tbl: start 0x74a4 end 0x74ac type worddata
+; HP-bar damage vs types 0x11..0x17: leather/knife then chain/axe/cross.
+weapon_dmg_tbl: start 0x7e60 end 0x7e6e type bytedata
+; Per-stage BGM id (play_sound 0x80..) indexed by 0xD000.
+stage_bgm_tbl: start 0x7979 end 0x798c type bytedata
+; door_interact DISPATCH_A by 0xC5AC.
+door_state_tbl: start 0x7725 end 0x7731 type worddata
+; 1 = BGM changes leaving this stage / entering the next.
+stage_bgm_change: start 0x777E end 0x7791 type bytedata
+; Simon SAT layout pointer tables + (count, dy,dx) records.
+simon_sat_cell0: start 0x798C end 0x79DC type worddata
+simon_sat_cell1: start 0x79DC end 0x7A24 type worddata
+simon_sat_recs: start 0x7A24 end 0x7AD6 type bytedata
+; Title SAT (Y,X) template.
+title_sat_tmpl: start 0x7B59 end 0x7B6F type bytedata
+
+; ===========================================================================
+;  bank 2 @ 0x8000
+; ===========================================================================
+; The bank is almost entirely code; these are the authored tables inside it
+; that z80dasm would otherwise decode as instructions.
+
+; HUD bonus-icon X / bonus-id pairs for C701 bits 7..3 (map, hourglass,
+; yellow shield, red shield, holy water).
+hud_bonus_pos: start 0x8F20 end 0x8F2A type bytedata
+; Moving-platform SAT cell table read through IX by platform_sat_cells
+; (0x9119): 4 x {X offset, pattern}.  As code it becomes `ret nc` / `call nc`.
+platform_sat_cell_tbl: start 0x9146 end 0x914e type bytedata
+; Per-stage DE00 base for vendor_de00_slot (stages 1-18: 0x00/0x40/0x80).
+vendor_de00_ofs: start 0x947A end 0x948C type bytedata
+; HUD glyph strings for the vendor offer bubble (0xFF-terminated).
+vendor_offer_str0: start 0x948C end 0x9491 type bytedata
+vendor_offer_str1: start 0x9491 end 0x9498 type bytedata
+; Tile id 0..0x0D -> minimap class (1/2 always drawn; 3/4 hub-gated).
+minimap_class_tbl: start 0x97F3 end 0x9801 type bytedata
+; 4x4 4bpp Simon marker on the F2 map.
+minimap_simon_mark: start 0x9852 end 0x985A type bytedata
+; Two 8x7 4bpp stage icons + 19 x {dest DE, flags} for minimap_palette.
+minimap_icon_a: start 0x987B end 0x9897 type bytedata
+minimap_icon_b: start 0x9897 end 0x98B3 type bytedata
+minimap_stage_gfx: start 0x98B3 end 0x98EC type bytedata
+; Wall-break chip dY; bytes 0-1 (0x2C 0xC9) are also break_chip_move's `inc l; ret`.
+break_chip_dy: start 0x892F end 0x8942 type bytedata
+; C500 pickup +0 state-1 -> handler word.
+pickup_state_tbl: start 0x8A94 end 0x8AA0 type worddata
+; Hub-1 -> blob colour when slime hatches; courtyard (hub 0) despawns.
+blob_hatch_type: start 0x8AF7 end 0x8AFF type bytedata
+; SAT colour cycle for actor_reward (red / black / white / black).
+reward_sat_col: start 0x9C60 end 0x9C64 type bytedata
+; Initial CF00 spawn-rate values (7 used; last byte pad before spawn_rate_gate).
+spawn_rate_init_tbl: start 0x9CC2 end 0x9CCA type bytedata
+; Y subtract per actor type for kill drops; byte 0 (0xC9) is also kill_drop_pos's ret.
+kill_drop_dy: start 0x9B3A end 0x9B67 type bytedata
+
+; ===========================================================================
+;  bank 3 @ 0xA000
+; ===========================================================================
+
+; Hanging-bat flap poses (4 right, 4 left) after hanging_bat_flap's ret.
+hanging_bat_pose_r: start 0xB17E end 0xB186 type bytedata
+; 8x8 atan lut + 64-byte magnitude lut for aim_at_simon.
+aim_octant_tbl: start 0xA1A9 end 0xA1E9 type bytedata
+aim_scale_tbl: start 0xA1E9 end 0xA229 type bytedata
+; Merman walk-period tables.
+merman_period_long: start 0xA4FA end 0xA4FE type bytedata
+merman_period_short: start 0xA4FE end 0xA502 type bytedata
+; Raven flap poses + coast Yvel words.
+raven_flap_r: start 0xA7C0 end 0xA7C4 type bytedata
+raven_coast_dy_up: start 0xA81A end 0xA82A type bytedata
+; Bone-dragon SAT Y wiggle (8 x 4).
+bone_dragon_wiggle_ofs: start 0xAAB4 end 0xAAD4 type bytedata
+; Axe-knight walk poses 0x5F-0x62.
+axe_knight_walk_tbl: start 0xAF2F end 0xAF33 type bytedata
+; Roc flap poses 0x6D/0x6E/0x8D.
+roc_flap_tbl: start 0xB216 end 0xB219 type bytedata
+; Boss-clear orb SAT colours (3 frames x 5 bytes); stage 3 vs everyone else.
+orb_sat_s3: start 0xB801 end 0xB810 type bytedata
+orb_sat_rest: start 0xB810 end 0xB81F type bytedata
+; Orb spin poses 0x8F/90/91/90.
+orb_frames: start 0xB85A end 0xB85E type bytedata

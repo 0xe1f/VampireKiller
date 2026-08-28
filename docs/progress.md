@@ -65,7 +65,7 @@ Fully migrated banks (0-15) have no `.bin`.
   execution with `env: python3\r`).
 - Segment 1 (banked code @ 0x6000) brought into the build as disassembled source
   (byte-exact), shared BIOS names moved to `segments/bios.inc`. Leading data map
-  in `segments/seg01.blocks` (tables at 0x6000-0x602f, 0x605f-0x615a incl. a word
+  in `segments/banks_0123.blocks` (tables at 0x6000-0x602f, 0x605f-0x615a incl. a word
   table at 0x608d). Annotated so far:
   - `konami_logo_draw`/`konami_logo_step` (0x6209/0x6253): logo screen + the
     top-to-bottom wipe (confirmed by the author); `logo_font_load` blits
@@ -108,7 +108,7 @@ Fully migrated banks (0-15) have no `.bin`.
       animated tile/sprite patterns each frame; animation phase in 0xC00F.
       Falls back to the plain shadow blit pattern_shadow_blit (copy 0xD400 -> VRAM 0xF400)
       when idle.
-  - Data tables marked in seg01.blocks this pass: logo layout 0x6296-0x62d6,
+  - Data tables marked in banks_0123.blocks (bank 1) this pass: logo layout 0x6296-0x62d6,
     event table 0x6376-0x6388, per-row pos table 0x6426-0x644b, sprite offset
     lists 0x64d4-0x64eb.
   - Event/cutscene machinery (annotated; event-gated, not seen in normal play):
@@ -128,7 +128,7 @@ Fully migrated banks (0-15) have no `.bin`.
       (entries {tick, action}; 0xFF action = end).  Ramp table
       `credits_ramp_tbl` (triangle, 19 entries) animates via
       `credits_palette_ramp` / `palette_set`.
-  - Data tables marked in seg01.blocks this session: the two event dispatch
+  - Data tables marked in banks_0123.blocks (bank 1) this session: the two event dispatch
     tables (0x65bd, 0x66c8), script_ptr_6795 (0x6795-0x67ea), ramp_tbl_6804.
   - Remaining seg1 play-tick callees named: `event_vscroll` (0x6848),
     `player_tick` (0x6B06), `simon_sat_build` (0x783E), `stage_bgm_play`
@@ -981,7 +981,7 @@ Moving platforms annotated end to end (seg2 0x9034-0x914D plus the Simon side).
 The 7-byte C598 layout, the reverse-at-each-end mover, the 4-cell CC sprite
 build and `platform_tbl`'s `{Y,X,step,span}` records are all in game-notes now;
 `platform_stand_test` (0x852B) was unlabelled because seg1 reaches it by a raw
-cross-bank `call 0852bh`.  New `segments/seg02.blocks` covers the SAT cell table
+cross-bank `call 0852bh`.  New `segments/banks_0123.blocks` (bank 2) covers the SAT cell table
 at 0x9146, which z80dasm had decoded as `ret nc` / `call nc`.  The +5/+6
 counters are never written by `platform_load` because `actor_state_reset`
 already zeroed 0xC470-0xC6FF (which includes C598) on room load.
@@ -1315,8 +1315,12 @@ cleared on whip-contact) and (b) the destroy->drop lifecycle: type 0x1E = FLAME
 effect) -> 0x24 = the small heart (undulates side-to-side as it falls) -> pickup
 (+1 heart), reconfirming 0xC417 as BCD hearts (12->13->14).  (Large hearts differ:
 orb -> quick drop -> large heart; not captured here.)
-Next: rerun WATCH=c470-c4bf to capture the candle-hit writer PC and name the
-routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler PCs.
+Candle-hit writer PCs named from static analysis (no extra WATCH):
+`whip_hit_candles` (0x7FBE) `inc (hl)` on C470+03; `proj_hit_candles`
+(0x80AD) `inc (ix+3)`. Next tick `brazier_tick` -> `brazier_destroyed`.
+Flame→pickup: `flame_tick` (0x9B78) frees the 0x1E slot then
+`spawn_actor` `actor_pickup` (0x24); `actor_pickup_go` / `pickup_tick`
+free the floor slot. RAM: `scenery_slots` 0xC470, `pickup_slots` 0xC500.
 
 ## Working notes
 
@@ -1349,11 +1353,11 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   listing comments. Regen strips them automatically; `tools/disasm/strip-listing.py
   segments/segNN.asm` is still available as a safety net (it drops the byte-listing
   noise but keeps hand-written `; ...` comments and re-aligns them).
-- Data regions go in a `.blocks` file (see `segments/seg00.blocks`, `segments/seg01.blocks`, `segments/seg02.blocks`, `segments/seg03.blocks`);
+- Data regions go in a `.blocks` file (see `segments/banks_0123.blocks`, `segments/banks_bcd.blocks`, `segments/banks_ef.blocks`);
   a `.blocks` file only changes code-vs-data rendering, never the emitted bytes.
   BIOS names live once in `segments/bios.inc`; small numeric ids in
   `segments/*.inc` (`actors.inc`, `items.inc`, `weapon.inc`, `sfx.inc`,
-  `poses.inc`, `scenery.inc`); routine names go in `segments/msx.sym`.
+  `poses.inc`, `scenery.inc`, `event.inc`, `state.inc`); routine names go in `segments/msx.sym`.
 - Identified binary data (standing practice): dump known blobs to labeled
   `defb` (`tools/emit_identified_data.py` -> `segments/data/` and tileset
   banks), Metal Gear style. 4bpp tiles are hex `defb` pixel-rows. Identified
@@ -1367,13 +1371,13 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   hex once a bank is off `.bin`. Do not mass-convert a whole unknown bank to
   opaque `db`.
 - File placement (STANDING PRACTICE): all hand-authored disassembly metadata lives
-  in `segments/` (`bios.inc`, `ram.inc`, `*.inc` type ids, `msx.sym`, `seg*.blocks`) - anything
+  in `segments/` (`bios.inc`, `ram.inc`, `*.inc` type ids, `msx.sym`, `banks_*.blocks`) - anything
   needed to reassemble or to regenerate the disassembly faithfully. `tools/disasm/`
   is the reusable MSX kit; other `tools/` scripts are game-specific. `generated/`
   is gitignored derived scratch (never author
   there). How they're consumed: `bios.inc`, `ram.inc`, and the type-id `.inc`s are `INCLUDE`d
   by the build (symbol equates, not emitted); `msx.sym` is the name catalog,
-  `seg*.blocks` the code/data maps. `regen-seg.sh` runs `tools/disasm/seg_sym.py` so
+  `banks_*.blocks` the code/data maps. `regen-seg.sh` runs `tools/disasm/seg_sym.py` so
   z80dasm `-S` gets a *per-bank* view of `msx.sym` (flat file, banked ROM).
   `bios.inc` and `msx.sym` overlap
   - keep them in sync.  Do **not** put small numeric `equ`s (`actor_zombie: equ
@@ -1522,10 +1526,14 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   Actor type `equ`s: `segments/actors.inc` (`actor_zombie`..`actor_intro_simon`,
   `actor_dracula_bat/_head/_chunk`, `obj_next_room`/`obj_end_stream`, spawn
   bitmask bits); also `items.inc`, `weapon.inc`, `sfx.inc`, `poses.inc`,
-  `scenery.inc`, `ram.inc`. Data files and the play banks (`banks_0123`,
-  `banks_bcd`) use them at confirmed sites. Skip-for-later (`event.inc` /
-  `dir.inc`, `sfx_tbl` left next to the driver, door 8×8 tiles, emit of the
-  new tables): see `docs/game-notes.md` “Deferred constants”.
+  `scenery.inc`, `event.inc` (`evt_*` at `cell_event_tbl` / CE00 tests),
+  `state.inc` (`main_*` / `act_*` at the two jump tables), `ram.inc`
+  (player stats plus CE00–CE16 / CF00 / C470 / C500 / C580 / C598 / C5AC /
+  C800 / D700).
+  Data files and the play banks (`banks_0123`, `banks_bcd`) use them at
+  confirmed sites. Skip-for-later (`dir.inc`, `sfx_tbl` left next to the
+  driver, door 8×8 tiles, emit of the new tables): see
+  `docs/game-notes.md` “Deferred constants”.
 - After any edit, run `make verify` before moving on.
 - Reusable methodology (for disassembling OTHER Konami MSX games later) lives in
   workspace skills at `.agents/skills/` (`konami-msx-disasm`, `msx-regen`,

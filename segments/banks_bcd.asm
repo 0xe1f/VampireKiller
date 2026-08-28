@@ -3,7 +3,7 @@
 ;  Bank 11 at 0x6000 (metatile streams), bank 12 at 0x8000 (defs),
 ;  bank 13 at 0xA000 (sprite RLE, conn_lookup, doors).  Labels are unique
 ;  vs the play window (same CPU addresses, different banks).
-;  Regen bank 13: tools/disasm/regen-seg.sh 13 0xA000 segments/seg13.blocks
+;  Regen bank 13: tools/disasm/regen-seg.sh 13 0xA000 segments/banks_bcd.blocks
 ; ===========================================================================
 
 	INCLUDE "data/mtile_index.asm"
@@ -35,7 +35,7 @@
 
 ; ===========================================================================
 ;  SEGMENT 13 - bank 0x0D at 0xA000 (16K into this PHASE; s18 already crossed).
-;  Sprite RLE, conn_lookup, doors.  Regen: tools/disasm/regen-seg.sh 13 0xA000 segments/seg13.blocks
+;  Sprite RLE, conn_lookup, doors.  Regen: tools/disasm/regen-seg.sh 13 0xA000 segments/banks_bcd.blocks
 ; ===========================================================================
 
 ; --- 0xA041-0xB962: intro defs + sprite RLE --------------------------------
@@ -176,14 +176,14 @@ door_load_coords:
 	inc hl
 	ld h,(hl)              ; X
 	ld l,a
-	ld (0c5adh),hl         ; C5AD=Y, C5AE=X
+	ld (door_y),hl         ; C5AD=Y, C5AE=X
 	ld a,b
 	add a,a                ; bit7 -> carry (vertical)
 	ld a,0ffh
 	jr c,door_arm_c5ac
 	ld a,004h              ; courtyard / open
 door_arm_c5ac:
-	ld (0c5ach),a
+	ld (door_state),a
 	ret
 
 	INCLUDE "data/door_tbl.asm"

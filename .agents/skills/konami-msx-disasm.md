@@ -42,11 +42,11 @@ instead of reinventing them. Read `docs/progress.md` (End goal + Working notes) 
   migrated bank uses the original ROM (`regen-seg.sh` slices it itself).
   All hand-authored disassembly metadata lives here: `bios.inc` (MSX BIOS entry
   names), `ram.inc` (confirmed work-RAM), `*.inc` type ids (`actors.inc`,
-  `items.inc`, `weapon.inc`, `sfx.inc`, `poses.inc`, `scenery.inc` — small
-  numeric `equ`s, **not** in `msx.sym` or z80dasm rewrites every `0x01`),
-  `msx.sym` (routine/label names
-  for z80dasm regen), `seg*.blocks` (code/data split maps). Anything needed to
-  reassemble or regenerate belongs here.
+  `items.inc`, `weapon.inc`, `sfx.inc`, `poses.inc`, `scenery.inc`,
+  `event.inc`, `state.inc` — small numeric `equ`s, **not** in `msx.sym` or z80dasm
+  rewrites every `0x01`), `msx.sym` (routine/label names for z80dasm regen),
+  `banks_*.blocks` (code/data split maps, one per paging window). Anything needed to reassemble or
+  regenerate belongs here.
 - `docs/` — `progress.md` (checklist + RAM map + working notes), `game-notes.md`
   (detailed findings).
 - `tools/disasm/` — reusable MSX/Konami helpers: `regen-seg.sh`, `split-rom.sh`,
@@ -84,8 +84,9 @@ of `<Game>.asm`.
    (VK play bank 3 and map bank 13 both occupy 0xA000) cannot reuse z80dasm
    `lxxxh`/`sub_xxxh` names — give the second unique labels or the assembler
    will error on duplicates.
-3. Separate code vs data with a `segments/segNN.blocks` file (only changes
-   rendering, never bytes). Mark mis-decoded tables and convert them to `db`.
+3. Separate code vs data with a `segments/banks_XXXX.blocks` file matching
+   the paging-window `.asm` (only changes rendering, never bytes). Mark
+   mis-decoded tables and convert them to `db`.
   Keep unreversed graphics as `INCBIN` slices of the bank `.bin`, not a mass
   `defb` dump. Identified blobs (tilesets, metatile tables, named RLE streams)
   graduate to labeled `defb` (Metal Gear style); 4bpp tiles are hex pixel-rows.
@@ -119,7 +120,8 @@ of `<Game>.asm`.
   and macro-like pseudo-instruction helpers (e.g. `DISPATCH_A`); `lower_snake` for
   all game code/data. Small numeric type `equ`s (`actor_zombie: equ 0x01`) live in
   an `INCLUDE`d `.inc`, never `msx.sym` (VK: `actors.inc`, `items.inc`,
-  `weapon.inc`, `sfx.inc`, `poses.inc`, `scenery.inc`).
+  `weapon.inc`, `sfx.inc`, `poses.inc`, `scenery.inc`, `event.inc`,
+  `state.inc`).
 - **A symbol in an immediate operand is usually a lie.** z80dasm substitutes a
   symbol for *any* matching value, so every small constant that collides with a
   low BIOS entry comes back as that name: `ld de,0` reads `ld de,CHKRAM`

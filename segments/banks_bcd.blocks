@@ -1,7 +1,13 @@
-; z80dasm block map for segment 13 (bank 0x0D, paged at 0xA000).
+; z80dasm code/data map for banks 0x0B-0x0D (map window @ 0x6000).
+; regen-seg.sh keeps only blocks whose start falls in the 8K being disassembled.
+; Block names avoid colliding with in-source labels (z80dasm emits NAME_start).
+; Banks 0x0B/0x0C are metatile streams/defs (already labeled data); no code map.
+
+; ===========================================================================
+;  bank 13 (0x0D) @ 0xA000
+; ===========================================================================
 ; Graphics / metatile defs occupy most of the bank; only the room-transition
 ; brain and the white-key door table at the top are code + authored tables.
-; Block names avoid colliding with in-source labels (z80dasm emits NAME_start).
 
 ; Metatile defs (0xA041 used when 0xC41A!=0), Simon sprite pointer tables
 ; (0xA281 / 0xA2D1), and RLE streams (intro_simon 0xA319, intro_sky 0xB895).

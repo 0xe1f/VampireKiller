@@ -50,3 +50,48 @@ simon_torso:             equ 0xC42F
 stage:                   equ 0xD000  ; 0 courtyard, 1-18
 room:                    equ 0xD001
 hub:                     equ 0xD002  ; 0-5, selects seg14 datasets
+
+; Cell event / boss (0xCE00-0xCE16).  Unused CE03-CE06, CE08, CE0A, CE0D
+; have no named meaning yet (CE03/CE08 have xrefs; the rest have none).
+cell_event:              equ 0xCE00  ; evt_* (0 = none)
+event_step:              equ 0xCE01  ; CE01 machine index
+event_timer:             equ 0xCE02
+igor_jump:               equ 0xCE07  ; event 4: Igor's jump trigger
+frank_xvel:              equ 0xCE09  ; event 4: Frankenstein chase vel (word)
+boss_clear:              equ 0xCE0B  ; NZ -> room_event_ce10
+event_fx:                equ 0xCE0C  ; NZ suppresses pattern_phase_upload
+dracula_torso:           equ 0xCE0E  ; 1..5 blit slot (dracula_blit_torso)
+dracula_x:               equ 0xCE0F  ; figure X; chunk scatter origin
+boss_clear_step:         equ 0xCE10  ; DISPATCH_A for room_event_ce10
+orb_got:                 equ 0xCE11  ; boss-clear orb collected
+dracula_chunk_i:         equ 0xCE12  ; chunk velocity-table index
+dracula_fade:            equ 0xCE13  ; palette-fade frame counter
+orb_landed:              equ 0xCE14  ; orb settled (timeout path)
+boss_dead:               equ 0xCE15  ; events 1-5: wait then boss_clear_arm
+dracula_ready:           equ 0xCE16  ; event_dracula_wait gate
+credits_step:            equ 0xCE40  ; 1..4 credits_tick; 0 = off
+
+; Spawn-rate slots (stride 2: +0 counter, +1 phase/side).  spawn_rate_reset
+; fills 7 slots from spawn_slot_zombie; CF04 is unused (mermen share CF02).
+spawn_slot_zombie:       equ 0xCF00  ; bit0
+spawn_slot_merman:       equ 0xCF02  ; green + red (bits 1-2)
+spawn_slot_bat:          equ 0xCF06  ; hanging bat (bit3)
+spawn_slot_skull:        equ 0xCF08  ; flying skull (bit4)
+spawn_slot_ghost:        equ 0xCF0A  ; ghost head (bit5)
+spawn_slot_roc:          equ 0xCF0C  ; roc (bit6)
+spawn_slot_tick:         equ 0xCF10  ; shared gate divider
+
+; Actor / shot pools (stride 0x80).  7 actors, 8 shots.
+actor_slots:             equ 0xC800  ; C800, C880, … CB80
+shot_slots:              equ 0xD700  ; D700 … DA80
+
+; Destructible scenery / floor pickups (stride 0x10, 8 slots).
+scenery_slots:           equ 0xC470  ; candles + 16x16 / 32x32 blocks
+pickup_slots:            equ 0xC500  ; floor items / chests
+
+; Hazards / movers / door (inside the 0xC470-0xC6FF wipe).
+spike_slots:             equ 0xC580  ; 3 x 8 bytes; stage 6 room 1 only
+platform_slots:          equ 0xC598  ; 2 x 7 bytes; stages 5 and 10
+door_state:              equ 0xC5AC  ; 0xFF blit / 1 armed / 3 open / 0x04 court
+door_y:                  equ 0xC5AD  ; pixel Y; word store also writes door_x
+door_x:                  equ 0xC5AE

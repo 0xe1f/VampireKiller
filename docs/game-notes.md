@@ -1619,8 +1619,9 @@ record used by the entity dispatch at 0x5FD0 / `entity_tbl`).
 
 Small numeric `equ`s live in `segments/*.inc`. Packed data already uses
 them: `actors.inc` (types + spawn bits), `items.inc`, `weapon.inc`
-(`equip_*`), `sfx.inc`, `poses.inc`, `scenery.inc`. Id prefixes were
-chosen so they do **not** collide with ROM labels:
+(`equip_*`), `sfx.inc`, `poses.inc`, `scenery.inc`, `event.inc`
+(`evt_*`), `state.inc` (`main_*` / `act_*`). Id prefixes were chosen so they
+do **not** collide with ROM labels:
 
 | Ids | Prefix | Do not reuse |
 |-----|--------|----------------|
@@ -1628,17 +1629,15 @@ chosen so they do **not** collide with ROM labels:
 | C416 equipped | `equip_*` | `weapon_*` thrown-sprite streams in `enemy_sprite_rle.asm` |
 | ix+0B pose | `pose_*` | `shape_*` SAT streams in `data/actor_shape.asm` |
 | `play_sound` | `sfx_*` / `bgm_*` | `sfx_NN_*` bytecode streams |
+| CE00 cell event | `evt_*` | `event_*` CE01 machines (`event_giant_bat`, …) |
+| C000 primary | `main_*` | `state_*` handlers (`state_play`, …) |
+| C420 action | `act_*` | `simon_*` handlers (`simon_dying`, …) |
 
 `collect_bonus_tbl` stays handler addresses (`defw bonus_small_heart`), not
 item ids. Vendor scenery attrs stay hex (bits5–2 = offer slot, not `item_*`).
 
 **Skip / return later — constants**
 
-- **Main-state / Simon-action ids** (`main_state_tbl` 0–12, `0xC420` 0–7).
-  Tiny sets that collide with every other small literal; only worth it at
-  the dispatch sites themselves.
-- **`event.inc`** — CE00 1–6 (giant bat … Dracula). Tiny; add when those
-  immediates are replaced.
 - **`dir.inc`** — pending exit `exit_dir` 1–4 / `0xFF` portal. Tiny; add with
   a `conn_lookup` pass.
 - **Jump tables that are already ROM labels** (`entity_tbl`, `actor_hp_tbl`,
@@ -1646,10 +1645,17 @@ item ids. Vendor scenery attrs stay hex (bits5–2 = offer slot, not `item_*`).
   `msx.sym` and next to their dispatchers. Do not duplicate them as `equ`s
   or peel them into `data/`.
 - **RAM / play-bank immediates** — `segments/ram.inc` covers the confirmed
-  cluster (`lives`, `weapon_id`, `health`, `stage`, `simon_action`, …).
-  Play banks use `sfx_*` / `equip_*` / `pose_*` / `actor_*` / `item_*` at
-  call sites. Regen still emits hex; re-apply after regen-seg. Leftover
-  hex is on purpose (ambiguous small literals, unnamed SAT ids).
+  cluster (`lives`, `weapon_id`, `health`, `stage`, `simon_action`,
+  `cell_event`, `scenery_slots`, `pickup_slots`, `spike_slots`,
+  `platform_slots`, `door_state`, `actor_slots`,
+  `shot_slots`, `spawn_slot_*`, …).
+  Play banks use `sfx_*` / `equip_*` / `pose_*` / `actor_*` / `item_*` /
+  `evt_*` / `main_*` / `act_*` at call sites (`evt_*` at `cell_event_tbl`
+  and CE00 compares; `main_*` / `act_*` at the two jump tables and the
+  id loads that feed them). Regen still emits hex; re-apply after
+  regen-seg. Leftover hex is on purpose (ambiguous small literals,
+  unnamed SAT ids). `0xC000` is not a ram.inc name: VRAM HUD cells use
+  the same numeric address.
 
 **Skip / return later — data left in the bank files**
 

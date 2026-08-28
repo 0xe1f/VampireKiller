@@ -4,10 +4,10 @@
 ;  Banks 1-3 are paged by page_play_banks at 0x6000 / 0x8000 / 0xA000.
 ;  One PHASE from 0x4000; entity_tbl straddles 0x5FFF -> 0x6000.
 ;  Regen one 8K bank at a time:
-;    tools/disasm/regen-seg.sh 0 0x4000 segments/seg00.blocks
-;    tools/disasm/regen-seg.sh 1 0x6000 segments/seg01.blocks
-;    tools/disasm/regen-seg.sh 2 0x8000 segments/seg02.blocks
-;    tools/disasm/regen-seg.sh 3 0xA000
+;    tools/disasm/regen-seg.sh 0 0x4000 segments/banks_0123.blocks
+;    tools/disasm/regen-seg.sh 1 0x6000 segments/banks_0123.blocks
+;    tools/disasm/regen-seg.sh 2 0x8000 segments/banks_0123.blocks
+;    tools/disasm/regen-seg.sh 3 0xA000 segments/banks_0123.blocks
 ;  BIOS names from bios.inc (included by VampireKiller.asm).
 ; ===========================================================================
 
@@ -273,7 +273,7 @@ main_tick:
 	inc (hl)                ; ...++
 	ld bc,(0c000h)          ; C=primary state, B=secondary state
 	ld a,c
-	cp 003h                 ; front-end states 0..2?
+	cp main_intro           ; front-end states 0..2?
 	jr nc,l415eh            ; no -> in-game, skip post-handler
 	ld hl,frontend_input    ; yes -> run front-end post-handler...
 	push hl                 ; ...after the state handler returns
@@ -285,20 +285,20 @@ l415eh:
 ; start walked 1 -> 3 -> 4 -> 5.  State 5 (play) reads the game-event flags to
 ; pick 6..13: death, game-over, room/stage transitions, vendor, game-start.
 main_state_tbl:
-	defw state_logo             ; 0  Konami logo
-	defw state_title            ; 1  title screen
-	defw state_attract          ; 2  attract / demo
-	defw state_intro            ; 3  intro cutscene (timed via 0xC004)
-	defw state_stage_bridge     ; 4  build first/next stage, enter play
-	defw state_play             ; 5  in-stage play + next-state select
-	defw state_death            ; 6  lives left -> respawn (state 4); else game-over
-	defw state_game_over        ; 7  draw GAME OVER (l4d41h)
-	defw state_hub_advance      ; 8  from 0xC409 (boss-clear / credits): hub++ then advance_stage
-	defw state_room_trans       ; 9  pending exit 0xC41B: conn_lookup_paged then back to play
-	defw state_stage_exit       ; 10 from 0xC408: spend white key, advance_stage
-	defw state_pause            ; 11 from 0xC40A: F1 freeze; F1 again resumes play
-	defw state_vendor           ; 12 from 0xC40C: vendor offer / purchase
-	defw state_game_master_menu ; 13 from title start (A=0x0D): Game Master menu
+	defw state_logo             ; 0  main_logo
+	defw state_title            ; 1  main_title
+	defw state_attract          ; 2  main_attract
+	defw state_intro            ; 3  main_intro
+	defw state_stage_bridge     ; 4  main_stage_bridge
+	defw state_play             ; 5  main_play
+	defw state_death            ; 6  main_death
+	defw state_game_over        ; 7  main_game_over
+	defw state_hub_advance      ; 8  main_hub_advance (C409)
+	defw state_room_trans       ; 9  main_room_trans (C41B)
+	defw state_stage_exit       ; 10 main_stage_exit (C408)
+	defw state_pause            ; 11 main_pause (C40A)
+	defw state_vendor           ; 12 main_vendor (C40C)
+	defw state_game_master_menu ; 13 main_game_master
 main_state_tbl_end:
 state_logo:                    ; 0 (0x417D)
 	djnz l418ah
@@ -424,22 +424,22 @@ state_play:                    ; 5 (0x4257)
 	call play_tick
 	ld a,(vendor_hit)
 	or a
-	ld a,00ch
+	ld a,main_vendor
 	jp nz,main_state_set           ; 0xC40C -> vendor
 	ld a,(pause_latch)
 	and a
 	jp nz,pause_enter           ; 0xC40A -> pause
 	ld a,(exit_dir)
 	and a
-	ld a,009h
+	ld a,main_room_trans
 	jp nz,main_state_set           ; pending room exit (1-4 or 0xFF spot) -> room_trans
 	ld a,(door_exit)
 	or a
-	ld a,00ah
+	ld a,main_stage_exit
 	jp nz,main_state_set           ; stage-boundary -> spend key / advance_stage
 	ld a,(hub_advance)
 	and a
-	ld a,008h
+	ld a,main_hub_advance
 	jp nz,main_state_set           ; 0xC409 -> hub_advance
 	ld a,(stay_in_play)
 	or a
@@ -447,7 +447,7 @@ state_play:                    ; 5 (0x4257)
 	jr main_state_inc_20
 pause_enter:
 	call pause_panel_draw
-	ld a,00bh
+	ld a,main_pause
 	jp main_state_set
 state_death:                   ; 6 (0x4294): 0xC410 lives? respawn via state 4 : game-over
 	ld hl,lives
@@ -460,7 +460,7 @@ death_respawn:
 	ld (simon_action),a
 	inc a
 	ld (replay_bgm),a          ; force stage BGM replay on respawn
-	ld a,004h
+	ld a,main_stage_bridge
 	jp main_state_set
 death_game_over:
 	ld a,bgm_game_over
@@ -578,7 +578,7 @@ advance_stage:
 	ld (hl),a              ; room id (0xD001) = 0
 	ld (hub_advance),a          ; clear hub-advance (boss-clear) latch
 	ld (door_exit),a          ; clear stage-boundary (white-key door) latch
-	ld a,004h
+	ld a,main_stage_bridge
 	jp main_state_set
 	ld hl,00000h
 	ld (0c000h),hl
@@ -589,10 +589,10 @@ l4377h:
 	jp main_timer_set
 state_room_trans:              ; 9 (0x437E): 0xC41B pending exit
 	call conn_lookup_paged
-	ld a,006h
+	ld a,main_death
 	jp nc,main_state_set           ; failed transition -> death
 	call play_screen_redraw
-	ld a,005h
+	ld a,main_play
 	jp main_state_set              ; back to play
 state_stage_exit:              ; 10 (0x438E): 0xC408, spend white key, next stage
 	ld hl,0c701h
@@ -627,13 +627,13 @@ frontend_input:
 	ld a,(0e600h)           ; Game Master cartridge present?
 	or a
 	jr nz,frontend_game_start ; yes -> the hidden Game Master menu
-	ld (hl),003h            ; else C000 = 3 (intro)
+	ld (hl),main_intro      ; else C000 = intro
 	inc hl
 	ld (hl),b               ; C001 = 0 (djnz already counted B from 1)
 	ret
 ; state 0 (logo) or 2 (attract) + any press -> return to the title screen.
 frontend_to_title:
-	ld (hl),001h            ; primary state = 1 (title)
+	ld (hl),main_title      ; primary state = title
 	ld a,sound_stop
 	call play_sound          ; request sound/music change
 	jp title_build          ; (re)build the title screen
@@ -647,7 +647,7 @@ frontend_game_start:
 	ld (0e606h),a           ; ...and binary
 	ld a,003h
 	ld (0e607h),a           ; 3 lives
-	ld a,00dh               ; A = 0x0D -> state_game_master_menu
+	ld a,main_game_master
 	jp main_state_set               ; enter via the state setter
 state_pause:                   ; 11 (0x43E1): F1 froze play (0xC40A); wait F1 (0xC00B bit0) to resume
 	ld a,(0c00bh)
@@ -658,7 +658,7 @@ state_pause:                   ; 11 (0x43E1): F1 froze play (0xC40A); wait F1 (0
 	call pause_panel_restore         ; restore the blit rectangle paused over
 	ld a,sound_fe              ; unpause BGM
 	call play_sound
-	ld a,005h
+	ld a,main_play
 	jp main_state_set              ; back to play
 state_vendor:                  ; 12 (0x43F7): 0xC40C whip-hit vendor
 	djnz l4402h
@@ -675,7 +675,7 @@ l4402h:
 	dec (hl)               ; hold the offer for 0xC004 frames...
 	ret nz
 	call 0950eh            ; ...then run the vendor offer-dismiss (seg2)
-	ld a,005h
+	ld a,main_play
 	jp main_state_set
 l4411h:
 	xor a
@@ -707,8 +707,8 @@ state_game_master_menu:
 	or a
 	jp nz,l4439h           ; 1/2 -> a MODIFY prompt
 	call gm_menu_clear     ; 0 = START GAME
-	ld hl,00003h
-	ld (0c000h),hl         ; -> intro (state 3), secondary 0
+	ld hl,main_intro
+	ld (0c000h),hl         ; -> intro, secondary 0
 	ret
 l4439h:
 	dec a
@@ -3221,7 +3221,7 @@ credits_font_blit:
 ; coords is seg13 door_tbl via door_load_coords, not a placed 0x1F object.
 door_blit_tiles:
 	ld (hl),001h           ; 0xC5AC := 1 (door armed / graphic on screen)
-	ld de,(0c5adh)         ; E = door Y (0xC5AD), D = door X (0xC5AE)
+	ld de,(door_y)         ; E = door Y (0xC5AD), D = door X (0xC5AE)
 	ld hl,door_tile_ptr
 	ld b,006h              ; 6 stacked 8x8 tiles
 l540eh:
@@ -3496,7 +3496,7 @@ load_vdoor_sprites:
 	ld hl,0d600h
 	ld bc,00808h
 l5608h:
-	ld de,0c5adh           ; door pixel Y,X (same order as VDP SAT: Y then X)
+	ld de,door_y           ; door pixel Y,X (same order as VDP SAT: Y then X)
 	ld a,b
 	cp 005h
 	ld a,(de)              ; A = door Y (0xC5AD)
@@ -4283,7 +4283,7 @@ vendor_offer_id:
 ; the reveal byte into +09). Block stamps brick tiles over the nametable.
 scenery_room_load:
 	call scenery_room_ptr
-	ld de,0c470h
+	ld de,scenery_slots
 scenery_slots_fill:            ; (0x5B28) caller DE = dest (C470 play / EB00 map)
 	ld b,008h
 l5b2ah:
@@ -4482,7 +4482,7 @@ scenery_pos_xy:
 play_tick:
 	call event_vscroll
 	call frame_vram_refresh
-	ld a,(0ce40h)
+	ld a,(credits_step)
 	and a
 	jp nz,credits_tick      ; CE40: ending credits after event 6
 	call minimap_driver
@@ -4497,8 +4497,8 @@ l5c44h:
 	ld a,(0c00bh)
 	rra
 	jr nc,l5c63h
-	ld a,(0ce00h)
-	cp 006h
+	ld a,(cell_event)
+	cp evt_dracula
 	call z,dracula_blit_torso
 	ld a,001h
 	ld (pause_latch),a          ; F1 pause latch -> state_pause
@@ -4893,9 +4893,9 @@ room_spawner:
 	and a
 	ret nz                 ; yes -> spawn nothing this frame (immediate, current room)
 	ld a,(simon_action)          ; Simon action state
-	cp 006h
-	ret z                  ; state 6 (hurt / dying-respawn) -> no spawns
-	ld a,(0c5ach)
+	cp act_dying
+	ret z                  ; act_dying -> no spawns
+	ld a,(door_state)
 	sub 002h
 	ret z
 	dec a
@@ -4969,7 +4969,7 @@ spawn_actor_ab:                    ; (seg0 0x5F26) keep A/B -> CFFA/CFFB
 	ld a,c
 	ld (0cff0h),a          ; stash requested type id
 	ld (0cff1h),de         ; stash spawn position word
-	ld hl,0c800h           ; scan the actor slot table...
+	ld hl,actor_slots           ; scan the actor slot table...
 	ld b,007h              ; ...7 slots...
 	xor a
 	ld de,00080h           ; ...stride 0x80
@@ -5091,7 +5091,7 @@ entity_tbl_end:
 ;  SEGMENT 1 - banked play code, paged at 0x6000-0x7FFF (page 1b).
 ;  Continues this window at CPU 0x6000 (8K into this PHASE).
 ;  entity_tbl above straddles the bank edge (last byte at 0x5FFF).
-;  Regen: tools/disasm/regen-seg.sh 1 0x6000 segments/seg01.blocks
+;  Regen: tools/disasm/regen-seg.sh 1 0x6000 segments/banks_0123.blocks
 ; ===========================================================================
 
 ; ---- MSX main-ROM BIOS jump table ----------------------------------------
@@ -5731,8 +5731,8 @@ play_screen_redraw:            ; (0x62FC) sprites_hide onward
 	call brazier_tick_all  ; tick braziers/candles (seg2 0x8678)
 	call door_anim_tick
 	call hud_bonus_refresh
-	ld a,(0ce00h)          ; event code for this cell
-	cp 006h
+	ld a,(cell_event)          ; event code for this cell
+	cp evt_dracula
 	call z,dracula_face_rest       ; event 6 -> extra setup (dracula_blit_mouth_closed + dracula_blit_eyes_closed)
 	call vdp_screen_on
 	call spawn_rate_reset
@@ -5751,11 +5751,11 @@ dracula_face_rest:                 ; (seg1 0x6334) event 6: closed mouth + close
 ;  Non-event cells hold 0xFF (high nibble 0xF never matches a real column).
 cell_event_set:
 	xor a
-	ld (0ce40h),a
-	ld (0ce00h),a          ; 0xCE00 = current event code (0 = none)
-	ld (0ce0bh),a
+	ld (credits_step),a
+	ld (cell_event),a          ; 0xCE00 = current event code (0 = none)
+	ld (boss_clear),a
 	ld (0ce08h),a
-	ld (0ce15h),a
+	ld (boss_dead),a
 	ld a,(stage)          ; A = current stage
 	ld hl,cell_event_tbl
 	call ADD_HL_A          ; HL -> cell_event_tbl[stage]
@@ -5774,8 +5774,8 @@ cell_event_set:
 	and 00fh               ; A = low nibble = event code
 	ld l,a
 	ld h,000h
-	ld (0ce00h),hl         ; store event code
-	cp 006h
+	ld (cell_event),hl         ; store event code
+	cp evt_dracula
 	ret nz                 ; only code 6 has an immediate handler
 	call dracula_portrait_palette
 	call dracula_portrait_load
@@ -5786,22 +5786,22 @@ cell_event_tbl:
 	defb 0ffh              ; 0  courtyard
 	defb 0ffh              ; 1
 	defb 0ffh              ; 2
-	defb 051h              ; 3  room 5, event 1 giant bat
+	defb 050h | evt_giant_bat  ; 3  room 5, giant bat
 	defb 0ffh              ; 4
 	defb 0ffh              ; 5
-	defb 052h              ; 6  room 5, event 2 medusa
+	defb 050h | evt_medusa     ; 6  room 5, medusa
 	defb 0ffh              ; 7
 	defb 0ffh              ; 8
-	defb 073h              ; 9  room 7, event 3 mummies
+	defb 070h | evt_mummies    ; 9  room 7, mummies
 	defb 0ffh              ; 10
 	defb 0ffh              ; 11
-	defb 064h              ; 12 room 6, event 4 frankenstein
+	defb 060h | evt_frankenstein  ; 12 room 6, frankenstein
 	defb 0ffh              ; 13
 	defb 0ffh              ; 14
-	defb 095h              ; 15 room 9, event 5 grim reaper
+	defb 090h | evt_grim_reaper   ; 15 room 9, grim reaper
 	defb 0ffh              ; 16
 	defb 0ffh              ; 17
-	defb 096h              ; 18 room 9, event 6 dracula
+	defb 090h | evt_dracula       ; 18 room 9, dracula
 ; --- actor_state_reset - reset the big object/actor state area and its sub-systems ---
 ;  Clears 0xC470..0xC6FF (0x290 bytes) to 0, then calls the per-subsystem reset
 ;  helpers (scenery_room_load into C470, door_load_paged,
@@ -5811,7 +5811,7 @@ cell_event_tbl:
 ;  start empty: spike_bars_seed / platform_load re-fill them after this, and
 ;  platform_load never writes +5/+6 because they are already 0 here.
 actor_state_reset:
-	ld hl,0c470h
+	ld hl,scenery_slots
 	ld de,0c471h           ; dst = src+1
 	ld (hl),000h
 	ld bc,0028fh           ; clear 0xC470..0xC6FF (0x290 bytes)
@@ -5822,11 +5822,11 @@ actor_state_reset:
 	call platform_tick
 	call conn_load_permits_paged
 	call whip_slots_clear
-	ld hl,0c800h           ; zero 7 entries, 0x80 apart, from 0xC800
+	ld hl,actor_slots           ; zero 7 entries, 0x80 apart, from 0xC800
 	ld de,00080h
 	ld b,007h
 	call mem_clear_stride
-	ld hl,0d700h           ; zero 8 entries, 0x80 apart, from 0xD700
+	ld hl,shot_slots           ; zero 8 entries, 0x80 apart, from 0xD700
 	ld b,008h
 ; --- mem_clear_stride - zero B entries starting at HL, stride DE -------------------
 mem_clear_stride:
@@ -6064,11 +6064,11 @@ l64e0h:
 ;    shot_sat_emit: 8 shots at 0xD700    c800_sat_emit: 7 actors at 0xC800
 ;  Each non-empty slot (byte 0 != 0) is turned into sprites by actor_sat_emit.
 shot_sat_emit:
-	ld hl,0d700h           ; 8 shots from 0xD700
+	ld hl,shot_slots           ; 8 shots from 0xD700
 	ld b,008h
 	jr l64f8h
 c800_sat_emit:
-	ld hl,0c800h           ; 7 actors from 0xC800
+	ld hl,actor_slots           ; 7 actors from 0xC800
 	ld b,007h
 l64f8h:
 	push bc
@@ -6158,13 +6158,13 @@ lookup_word_tbl:
 ;  0..0x78 in steps of 0x68 &0x78), then re-uploads the animated pattern tables
 ;  to VRAM.  Otherwise it falls back to the plain shadow blit at pattern_shadow_blit.
 frame_vram_refresh:
-	ld a,(0ce0ch)
+	ld a,(event_fx)
 	or a
 	jp nz,pattern_shadow_blit           ; effect flag set -> plain blit
-	ld a,(0ce00h)
-	cp 005h
+	ld a,(cell_event)
+	cp evt_grim_reaper
 	jr z,pattern_shadow_blit            ; event 5 -> plain blit
-	ld a,(0c5ach)
+	ld a,(door_state)
 	cp 005h
 	jr z,pattern_shadow_blit            ; sub-state 5 -> plain blit
 	ld hl,0c00fh
@@ -6219,7 +6219,7 @@ pattern_shadow_blit:
 ;  turns into credits_tick (ending message + staff).  Other bosses skip this
 ;  and go through room_event_ce10 -> C409.  Each step ends at event_ce01_next.
 event_dracula:
-	ld a,(0ce01h)          ; A = event sub-state index
+	ld a,(event_step)          ; A = event sub-state index
 	call DISPATCH_A
 	defw event_dracula_init    ; 0  seed C0D0 (0x11 entries)
 	defw event_dracula_wait    ; 1  wait CE16, re-run dracula_blit_torso
@@ -6234,31 +6234,31 @@ event_dracula:
 	defw event_dracula_done    ; 10 CE00=0, CE40=1 -> credits_tick
 event_dracula_init:
 	xor a
-	ld (0ce16h),a          ; clear the "active" flag ...
-	ld (0ce0eh),a          ; ... and its companion
+	ld (dracula_ready),a          ; clear the "active" flag ...
+	ld (dracula_torso),a          ; ... and its companion
 	ld de,0c0d0h           ; DE -> 0xC0D0 work block
 	ld c,011h              ; 0x11 entries
 	call 05f24h            ; seg1 block-fill/setup helper
 	jp event_ce01_next              ; -> shared epilogue (page 2b)
 event_dracula_wait:
 	call dracula_blit_torso    ; per-frame 32x32 torso blit (CE0E)
-	ld a,(0ce16h)
+	ld a,(dracula_ready)
 	and a
 	ret z                  ; not ready yet -> stay in this state
 	xor a
-	ld (0ce15h),a
-	ld (0ce0eh),a
+	ld (boss_dead),a
+	ld (dracula_torso),a
 	call dracula_blit_torso
 	jp event_ce01_next
 event_dracula_chunks:
 	xor a
-	ld (0ce12h),a          ; chunk velocity-table index
+	ld (dracula_chunk_i),a          ; chunk velocity-table index
 	call dracula_spawn_chunks
 	ld a,078h
-	ld (0ce02h),a          ; frame timer = 0x78
+	ld (event_timer),a          ; frame timer = 0x78
 	jp event_ce01_next
 event_dracula_quiet:
-	ld hl,0ce02h
+	ld hl,event_timer
 	ld a,(hl)
 	and a
 	jr z,l6611h
@@ -6266,7 +6266,7 @@ event_dracula_quiet:
 l6611h:
 	ld (hl),a
 	ret nz                 ; timer still running -> stay
-	ld a,(0c800h)
+	ld a,(actor_slots)
 	and a
 	ret nz                 ; first actor slot still busy -> stay
 	ld a,sound_stop
@@ -6299,7 +6299,7 @@ event_dracula_rise:
 	ld (0ce37h),a          ; arm counter 0xCE37 = 0xC0
 	jp event_ce01_next
 event_dracula_fork:
-	ld a,(0ce15h)
+	ld a,(boss_dead)
 	and a
 	jr nz,l666eh
 	call credits_palette_ramp         ; 0xCE15 == 0 path
@@ -6321,10 +6321,10 @@ event_dracula_drop:
 	ld a,bgm_dracula_defeated
 	call play_sound            ; trigger action 0x8D
 	ld a,0b4h
-	ld (0ce02h),a          ; frame timer = 0xB4
+	ld (event_timer),a          ; frame timer = 0xB4
 	jp event_ce01_next
 event_dracula_wait2:
-	ld hl,0ce02h
+	ld hl,event_timer
 	dec (hl)
 	ret nz
 	call 06a03h
@@ -6335,16 +6335,16 @@ event_dracula_fade:
 	call video_clear_page
 	call vdp_sprites_off
 	ld a,008h
-	ld (0ce02h),a          ; frame timer = 8
+	ld (event_timer),a          ; frame timer = 8
 	jp event_ce01_next
 event_dracula_done:
-	ld hl,0ce02h
+	ld hl,event_timer
 	dec (hl)
 	ret nz
 	ld hl,00000h            ; reset event pointer
-	ld (0ce00h),hl         ; 0xCE00 = 0 (no event)
+	ld (cell_event),hl         ; 0xCE00 = 0 (no event)
 	ld a,001h
-	ld (0ce40h),a          ; start credits_tick (ending only; other bosses use C409)
+	ld (credits_step),a          ; start credits_tick (ending only; other bosses use C409)
 	ret
 ; --- credits_tick (seg1 0x66C1) - ending credits, dispatched on 0xCE40 ------
 ;  Event 6 (Dracula) finishes the CE01 machine by raising CE40=1.  Play tick
@@ -6354,7 +6354,7 @@ event_dracula_done:
 ;  data/credits_staff.asm.
 ;  On done: C409 -> state_hub_advance (hub wrap / loop).
 credits_tick:
-	ld a,(0ce40h)          ; A = credits step (1..4)
+	ld a,(credits_step)          ; A = credits step (1..4)
 	dec a                  ; -> 0-based index
 	call DISPATCH_A        ; jump via the inline table below
 	defw credits_start     ; 0 (CE40=1) BGM 0x8E, credits_init, advance
@@ -6366,7 +6366,7 @@ credits_start:
 	call play_sound        ; ending theme (music_ptr 0x8E)
 	call credits_init      ; load credits_font, clear CE30-CE34
 credits_next:
-	ld hl,0ce40h
+	ld hl,credits_step
 	inc (hl)               ; advance to the next credits step
 	ret
 credits_pump:
@@ -6379,17 +6379,17 @@ credits_wait:
 	call 05310h
 	ret nz                 ; not ready -> stay
 	ld a,01eh
-	ld (0ce02h),a          ; frame timer = 0x1E
+	ld (event_timer),a          ; frame timer = 0x1E
 	call video_clear_page
 	call vdp_screen_off
 	jr credits_next        ; advance
 credits_finish:
-	ld hl,0ce02h
+	ld hl,event_timer
 	dec (hl)
 	ret nz                 ; timer running -> stay
 	xor a
 	ld (0ce34h),a          ; stop event_vscroll
-	ld (0ce40h),a          ; credits machine off
+	ld (credits_step),a          ; credits machine off
 	inc a
 	ld (hub_advance),a          ; -> state_hub_advance (same latch as boss-clear)
 	ld hl,0d012h
@@ -6588,7 +6588,7 @@ l6858h:
 	and 00fh
 	sub 008h
 	ld d,a
-	ld a,(0ce0fh)
+	ld a,(dracula_x)
 	add a,d
 	ld d,a
 	ld a,r
@@ -6765,7 +6765,7 @@ dracula_chunk_init:
 	ld (ix+00eh),a         ; not hittable
 	ld (ix+006h),001h      ; physics on
 	ld (ix+00bh),pose_dracula_chunk      ; pose_dracula_chunk
-	ld hl,0ce12h
+	ld hl,dracula_chunk_i
 	ld a,(hl)
 	inc (hl)
 	add a,a
@@ -6792,12 +6792,12 @@ dracula_palette_stash:
 	ld bc,00020h
 	call vram_read
 	ld a,080h
-	ld (0ce13h),a
+	ld (dracula_fade),a
 	ret
 ; dracula_palette_fade (seg1 0x6A15): decrement one CE60 entry per 16 frames
 ; of CE13 (starts at 0x80).  Returns Z when CE13 hits 0.
 dracula_palette_fade:
-	ld hl,0ce13h
+	ld hl,dracula_fade
 	dec (hl)
 	ld a,(hl)
 	and 00fh
@@ -6830,7 +6830,7 @@ l6a3bh:
 	ld e,a
 	ld a,c
 	call palette_set
-	ld a,(0ce13h)
+	ld a,(dracula_fade)
 	and a
 	ret
 ; type 0x17 spawn (seg1 0x6A47): no SAT (actor_sat_build skips it), physics
@@ -6925,7 +6925,7 @@ hanging_bat_pose:                  ; (seg1 0x6B00) trampoline: one-rra flap (dra
 ; 0xCE11 (boss-orb collected) freezes input; then door, Simon action, attack
 ; (skipped while the door anims 2/3/5), edge detector, and the timer bank.
 player_tick:
-	ld a,(0ce11h)          ; boss-orb collected: freeze controls
+	ld a,(orb_got)          ; boss-orb collected: freeze controls
 	and a
 	jr z,l6b13h
 	xor a
@@ -6934,7 +6934,7 @@ player_tick:
 l6b13h:
 	call door_interact
 	call simon_action_tick
-	ld a,(0c5ach)
+	ld a,(door_state)
 	cp 002h
 	jr z,l6b2bh
 	cp 003h
@@ -6965,14 +6965,14 @@ simon_action_tick:
 	ld a,(simon_action)          ; Simon action state
 	call DISPATCH_A
 simon_action_tbl:
-	defw simon_grounded
-	defw simon_jump_tick
-	defw simon_crouch
-	defw simon_stairs
-	defw simon_fall
-	defw simon_hurt
-	defw simon_dying
-	defw simon_portal_wait
+	defw simon_grounded        ; 0  act_grounded
+	defw simon_jump_tick       ; 1  act_jump
+	defw simon_crouch          ; 2  act_crouch
+	defw simon_stairs          ; 3  act_stairs
+	defw simon_fall            ; 4  act_fall
+	defw simon_hurt            ; 5  act_hurt
+	defw simon_dying           ; 6  act_dying
+	defw simon_portal_wait     ; 7  act_portal
 simon_grounded:                ; 0 (0x6B59)
 	call simon_floor_test
 	jr c,l6b64h
@@ -6980,7 +6980,7 @@ simon_grounded:                ; 0 (0x6B59)
 	and a
 	jr z,l6bach
 l6b64h:
-	ld a,(0c5ach)
+	ld a,(door_state)
 	cp 004h
 	jr z,l6b6eh
 	cp 002h
@@ -7012,13 +7012,13 @@ l6b8ah:
 	ret z
 	call simon_ceiling_test
 	ret c
-	ld a,001h
+	ld a,act_jump
 	ld (simon_action),a
 	xor a
 	ld (0c421h),a
 	ret
 l6bach:
-	ld a,004h
+	ld a,act_fall
 	ld (simon_action),a
 	xor a
 	ld (0c421h),a
@@ -7033,7 +7033,7 @@ platform_carry_simon:
 	jr nz,l6bbch
 	xor a                  ; slot 1 -> offset 0, slot 2 -> offset 7
 l6bbch:
-	ld hl,0c598h
+	ld hl,platform_slots
 	call ADD_HL_A
 	inc hl
 	inc hl
@@ -7066,7 +7066,7 @@ simon_try_stairs_up:                        ; UP while grounded: try stairs
 	ex af,af'
 	jr l6b8ah
 l6bf5h:
-	ld a,003h
+	ld a,act_stairs
 	ld (simon_action),a
 	ld a,c
 	ld (0c435h),a
@@ -7090,7 +7090,7 @@ simon_try_stairs_down:
 	call stair_probe_down_left
 	ld bc,00102h
 	jr z,l6bf5h
-	ld a,002h
+	ld a,act_crouch
 	ld (simon_action),a
 	ld de,00006h
 	ld (simon_legs),de
@@ -7140,13 +7140,13 @@ l6c7ah:
 	call door_proximity    ; overlapping the white-key door?
 	pop bc
 	ret c
-	ld a,(0c5ach)
+	ld a,(door_state)
 	dec a
 	dec a
 	cp 002h
 	ret c
 	ld a,(simon_action)
-	cp 005h
+	cp act_hurt
 	jr z,simon_add_x
 	dec a
 	call nz,simon_walk_anim
@@ -7319,7 +7319,7 @@ simon_crouch:                  ; 2 (0x6DB0)
 	ld a,(btn_edge)
 	and 020h               ; UP new-press (same bit as jump)
 	jr z,l6dcfh            ; still holding DOWN only
-	ld a,007h
+	ld a,act_portal
 	ld (simon_action),a          ; portal wind-up
 	xor a
 	ld (0c421h),a
@@ -7585,7 +7585,7 @@ l6f9ah:
 	ld a,(health)          ; Simon health
 	and a
 	jr z,l6fc3h            ; health 0 -> death/knockdown branch
-	ld a,003h
+	ld a,act_stairs
 	ld (simon_action),a
 	ld a,002h
 	ld (simon_torso),a
@@ -7652,7 +7652,7 @@ l7024h:
 	ld (0c422h),a
 	ld (0c42ah),a
 	ld (0c428h),a
-	ld a,(0c5ach)
+	ld a,(door_state)
 	cp 002h
 	jr z,l705ah
 	cp 003h
@@ -7678,7 +7678,7 @@ l706ah:
 	ld (0c421h),a
 	inc a
 	ld (0c428h),a
-	ld a,006h
+	ld a,act_dying
 	ld (simon_action),a
 	ld bc,00509h
 	ld (simon_legs),bc
@@ -7892,7 +7892,7 @@ whip_tick:
 	and a
 	ret z
 	ld a,(simon_action)
-	cp 004h
+	cp act_fall
 	ret nc
 	ld a,(0c422h)
 	dec a
@@ -7903,7 +7903,7 @@ whip_tick:
 	defw l7269h
 l7201h:
 	ld a,(simon_action)
-	cp 003h
+	cp act_stairs
 	jr z,simon_torso_from_weapon
 	cp 002h
 	ld a,000h
@@ -7970,7 +7970,7 @@ simon_attack_end:
 	ld (0c422h),a          ; whip phase
 	ld (0c429h),a          ; whip timer
 	ld a,(simon_action)
-	cp 003h
+	cp act_stairs
 	ld a,000h
 	jr nz,l7287h
 	ld a,002h              ; on stairs: keep climb torso
@@ -8047,7 +8047,7 @@ l72ffh:
 	defw boomerang_catch
 boomerang_throw:               ; (0x730E) copy Simon pos; velX ±3 (axe) / ±5 (cross)
 	ld a,(simon_action)
-	cp 002h
+	cp act_crouch
 	ld a,(simon_y)
 	ld b,0f0h
 	jr nz,l731ch
@@ -8137,7 +8137,7 @@ holy_water_tick:
 	dec a
 	jr z,holy_water_flame  ; state 3
 	ld a,(simon_action)
-	cp 002h
+	cp act_crouch
 	ld a,(simon_y)
 	ld b,0f0h
 	jr nz,l73c3h
@@ -8203,7 +8203,7 @@ knife_tick:                    ; (0x743D) C416=2, bonus 0x1B; straight ±5, 1 or
 	dec a
 	ret nz
 	ld a,(simon_action)
-	cp 002h
+	cp act_crouch
 	ld a,(simon_y)
 	ld b,0f0h
 	jr nz,l7450h
@@ -8513,7 +8513,7 @@ l7653h:
 	ret
 l7655h:
 	ld a,(simon_action)
-	cp 003h
+	cp act_stairs
 	ret nz
 	ld hl,simon_legs
 	ld a,(hl)
@@ -8553,13 +8553,13 @@ l767eh:
 ; (3 = on stairs, 6 = mid-transition -> skip).
 room_edge_detect:
 	ld a,(simon_action)
-	cp 006h
+	cp act_dying
 	ret z                  ; already transitioning -> nothing to do
 	ld hl,exit_dir           ; hl -> pending-exit dir
 	ld de,simon_y           ; de -> Simon Y
 	ld bc,simon_x           ; bc -> Simon X
 	ld a,(simon_action)
-	cp 003h                ; on stairs?
+	cp act_stairs                ; on stairs?
 	ld a,(de)              ; A = Y
 	jr nz,l769dh
 	cp 030h
@@ -8596,7 +8596,7 @@ room_edge_down:                        ; past the bottom edge
 	jr nz,room_edge_down_go           ; there IS a room below -> normal down transition
 	xor a                  ; no room below: bottomless pit -> fall to death
 	ld (0c421h),a
-	ld a,006h
+	ld a,act_dying
 	ld (simon_action),a          ; action state 6 (falling/dying)
 	ld a,0fah
 	ld (de),a
@@ -8618,7 +8618,7 @@ room_edge_down_go:                        ; room below exists -> down transition
 	ld a,030h
 	ld (de),a              ; wrap Y to top of the new (lower) room
 	ld a,(simon_action)
-	cp 003h
+	cp act_stairs
 	jr nz,l7706h
 	ld a,(0c42ch)
 	and a
@@ -8658,7 +8658,7 @@ room_edge_right:                        ; right edge
 ; layer (l77d8h): blocked permit -> set_stage_boundary / advance_stage; valid
 ; room -> intra-stage wrap (stages 3,6,9,12,15,18).
 door_interact:
-	ld a,(0c5ach)          ; door sub-state (armed=1, open=3, ...)
+	ld a,(door_state)          ; door sub-state (armed=1, open=3, ...)
 	call DISPATCH_A
 door_state_tbl:
 	defw door_idle         ; 0
@@ -8691,7 +8691,7 @@ l774ah:
 	ld (0c422h),a
 	call actors_kill_all
 	call whip_slots_clear
-	ld hl,0c5ach
+	ld hl,door_state
 	inc (hl)
 	ld a,(stage)
 	ld de,stage_bgm_change
@@ -8724,7 +8724,7 @@ stage_bgm_change:
 ; door_open_walk (seg1 0x7791): C5AC 3/5.  Vertical door loads extra sprites,
 ; then if Simon is grounded auto-walk through the opening.
 door_open_walk:
-	ld a,(0c5ach)
+	ld a,(door_state)
 	cp 005h
 	call z,load_vdoor_sprites
 	ld a,(simon_action)
@@ -8741,7 +8741,7 @@ door_open_walk:
 l77b4h:
 	call simon_add_x
 	call simon_step_walk_frames
-	ld a,(0c5ach)
+	ld a,(door_state)
 	cp 005h
 	jr z,l77cbh
 	ld a,(simon_x)
@@ -8750,7 +8750,7 @@ l77b4h:
 	ret c
 	jr l77d8h
 l77cbh:
-	ld a,(0c5aeh)          ; door X
+	ld a,(door_x)          ; door X
 	add a,008h
 	ld b,a
 	ld a,(simon_x)          ; Simon X
@@ -8804,7 +8804,7 @@ door_idle:
 ; actors_kill_all (seg1 0x780D): C800 via actor_cull (no drops) + D700 via
 ; shot_death_flame. White cross / boss kill.
 actors_kill_all:
-	ld ix,0c800h
+	ld ix,actor_slots
 	ld b,007h
 l7813h:
 	ld a,(ix+000h)
@@ -8817,7 +8817,7 @@ l7813h:
 	ld de,00080h
 	add ix,de
 	djnz l7813h
-	ld ix,0d700h
+	ld ix,shot_slots
 	ld b,008h
 l782dh:
 	ld a,(ix+000h)
@@ -8834,7 +8834,7 @@ l782dh:
 ; simon_sat_colour applies gem/ring flash colours.
 simon_sat_build:
 	call simon_sat_colour
-	ld a,(0c5ach)
+	ld a,(door_state)
 	cp 005h
 	jr z,l785fh
 	ld de,0d610h
@@ -8862,7 +8862,7 @@ l785fh:
 	ld d,(hl)
 	ex de,hl
 	ld c,000h
-	ld a,(0c5ach)
+	ld a,(door_state)
 	cp 005h
 	ld de,0d600h
 	jr nz,l787ch
@@ -8880,7 +8880,7 @@ l787ch:
 	ld d,(hl)
 	ex de,hl
 	ld c,002h
-	ld a,(0c5ach)
+	ld a,(door_state)
 	cp 005h
 	ld de,0d608h
 	jr nz,l789eh
@@ -8983,7 +8983,7 @@ simon_sat_colour:
 	jr c,l791eh
 	ld b,040h
 l791eh:
-	ld a,(0c5ach)
+	ld a,(door_state)
 	cp 005h
 	ld hl,0d400h
 	jr nz,l792bh
@@ -9458,7 +9458,7 @@ l7bc7h:
 	and a
 	jr nz,l7c02h
 	ld a,(simon_action)
-	cp 002h
+	cp act_crouch
 	jr nz,l7c02h
 	xor a
 	ret
@@ -9514,7 +9514,7 @@ l7c23h:
 	and a
 	jr nz,l7c5eh
 	ld a,(simon_action)
-	cp 002h
+	cp act_crouch
 	jr nz,l7c5eh
 	xor a
 	ret
@@ -9532,8 +9532,8 @@ l7c5eh:
 ;  block Simon - the thick wall/brick metatiles (ids 0x2c+) are visual only.
 tile_is_solid:
 	ld c,a
-	ld a,(0ce00h)          ; current cell event code
-	cp 006h
+	ld a,(cell_event)          ; current cell event code
+	cp evt_dracula
 	jr z,l7c7ah            ; event-6 cells use a fixed threshold of 6
 	ld a,(stage)          ; A = world row
 	ld hl,row_solid_thresh
@@ -9555,8 +9555,8 @@ row_solid_thresh:
 ; stair_probe_down_right (seg1 0x7C92): DOWN from ground. Tile 0x04; snap X +8.
 ; Event 6 skips (returns NZ). Z = boarded; C435/C421 get 2 / 0.
 stair_probe_down_right:
-	ld a,(0ce00h)
-	cp 006h
+	ld a,(cell_event)
+	cp evt_dracula
 	jr nz,l7c9bh
 	and a
 	ret
@@ -9584,8 +9584,8 @@ l7c9bh:
 	ret
 ; stair_probe_down_left (seg1 0x7CBA): DOWN from ground. Tile 0x03; snap X -8.
 stair_probe_down_left:
-	ld a,(0ce00h)
-	cp 006h
+	ld a,(cell_event)
+	cp evt_dracula
 	jr nz,l7cc3h
 	and a
 	ret
@@ -9614,8 +9614,8 @@ l7cc3h:
 ; stair_probe_up_right (seg1 0x7CE2): UP from ground. Tile 0x0D; snap X +8.
 ; Event 6 skips. Z = boarded; C435/C421 get 1 / 0.
 stair_probe_up_right:
-	ld a,(0ce00h)
-	cp 006h
+	ld a,(cell_event)
+	cp evt_dracula
 	jr nz,l7cebh
 	and a
 	ret
@@ -9644,8 +9644,8 @@ l7cebh:
 	ret
 ; stair_probe_up_left (seg1 0x7D0C): UP from ground. Tile 0x0C; snap X -8.
 stair_probe_up_left:
-	ld a,(0ce00h)
-	cp 006h
+	ld a,(cell_event)
+	cp evt_dracula
 	jr nz,l7d15h
 	and a
 	ret
@@ -9774,7 +9774,7 @@ whip_hit_actors:
 	ld a,(0c422h)
 	cp 003h
 	ret nz
-	ld ix,0c800h
+	ld ix,actor_slots
 	ld b,007h
 l7dc0h:
 	ld a,(ix+000h)
@@ -9818,7 +9818,7 @@ l7e06h:
 	ld a,(ix+000h)
 	cp 012h
 	jr nz,l7e13h
-	ld a,(0ce00h)
+	ld a,(cell_event)
 	and a
 	jr z,l7dedh
 l7e13h:
@@ -9835,7 +9835,7 @@ boss_killed:
 	call play_sound
 	call award_kill_score
 	ld a,001h
-	ld (0ce15h),a
+	ld (boss_dead),a
 	jp actors_kill_all
 ; weapon_hit_damage (seg1 0x7E33) - Simon DISPENSES damage to the struck enemy in
 ; IX.  Picks a damage byte B from a per-weapon table indexed by (enemy type-0x11),
@@ -9885,10 +9885,10 @@ actors_vs_simon:
 	and a
 	ret nz
 	ld a,(simon_action)
-	cp 005h
+	cp act_hurt
 	ret nc
 l7e84h:
-	ld ix,0c800h
+	ld ix,actor_slots
 	ld b,007h
 l7e8ah:
 	ld a,(ix+000h)
@@ -9910,7 +9910,7 @@ l7e8ah:
 	cp 022h                ; boss-clear orb (sprite 0x8F); not bonus id 22
 	jr nz,l7eb7h
 	ld a,001h
-	ld (0ce11h),a          ; collected: drip-fill HP then advance stage
+	ld (orb_got),a          ; collected: drip-fill HP then advance stage
 	jp actor_kill
 l7eb7h:
 	ld a,(0c434h)
@@ -9921,7 +9921,7 @@ l7eb7h:
 	ld a,sfx_ring_kill
 	jp play_sound
 l7ec8h:
-	ld a,005h
+	ld a,act_hurt
 	ld (simon_action),a
 	xor a
 	ld (0c423h),a
@@ -9950,10 +9950,10 @@ shots_vs_simon:
 	and a
 	ret nz
 	ld a,(simon_action)
-	cp 005h
+	cp act_hurt
 	ret nc
 l7f01h:
-	ld ix,0d700h
+	ld ix,shot_slots
 	ld b,008h
 l7f07h:
 	push bc
@@ -9969,7 +9969,7 @@ l7f07h:
 	ld a,(0c434h)
 	and a
 	jp nz,add_score_100
-	ld a,005h
+	ld a,act_hurt
 	ld (simon_action),a
 	xor a
 	ld (0c423h),a
@@ -9998,7 +9998,7 @@ whip_hit_shots:
 	ld a,(0c422h)
 	cp 003h
 	ret nz
-	ld ix,0d700h
+	ld ix,shot_slots
 	ld b,008h
 l7f5ch:
 	push bc
@@ -10025,7 +10025,7 @@ proj_hit_shots:
 	ld a,(0c460h)
 	or b
 	ret z
-	ld ix,0d700h
+	ld ix,shot_slots
 	ld b,008h
 l7f8fh:
 	ld a,(ix+000h)
@@ -10055,7 +10055,7 @@ whip_hit_candles:
 	ld a,(0c422h)
 	cp 003h
 	ret nz
-	ld hl,0c470h
+	ld hl,scenery_slots
 	ld b,008h
 l7fc9h:
 	ld a,(hl)
@@ -10070,7 +10070,7 @@ l7fc9h:
 	inc l
 	inc l
 	inc l
-	inc (hl)
+	inc (hl)               ; +03 hit -> brazier_destroyed next tick
 	dec l
 	dec l
 	dec l
@@ -10086,7 +10086,7 @@ pickups_vs_simon:
 	ld a,(0c422h)
 	and a
 	ret nz
-	ld hl,0c500h
+	ld hl,pickup_slots
 	ld b,008h
 	push bc
 	push hl
@@ -10134,7 +10134,7 @@ projectile_hit_actors:         ; (0x8025) C450/C460 vs C800 if +0E bit0
 	ld a,(0c460h)
 	or b
 	ret z
-	ld ix,0c800h
+	ld ix,actor_slots
 	ld b,007h
 l8034h:
 	ld a,(ix+000h)
@@ -10188,7 +10188,7 @@ l808fh:
 	ld a,(ix+000h)
 	cp 012h
 	jr nz,l809ch
-	ld a,(0ce00h)
+	ld a,(cell_event)
 	and a
 	jr z,l8061h
 l809ch:
@@ -10202,7 +10202,7 @@ l80a8h:
 	call boss_killed
 	jr l807fh
 proj_hit_candles:              ; (0x80AD) C450/C460 vs C470 candles/blocks
-	ld ix,0c470h
+	ld ix,scenery_slots
 	ld b,008h
 l80b3h:
 	ld a,(ix+000h)
@@ -10269,7 +10269,7 @@ l8119h:
 	ld a,sfx_hit
 	jp play_sound
 hourglass_vs_attack:           ; (0x8122) C500 hourglass/tipped vs whip/proj
-	ld hl,0c500h
+	ld hl,pickup_slots
 	ld b,008h
 l8127h:
 	push bc
@@ -10785,7 +10785,7 @@ l84c6h:
 	cp l
 	ret nc
 	ld a,(simon_action)
-	cp 002h
+	cp act_crouch
 	ld b,012h
 	jr nz,l84d3h
 	ld b,00ah
@@ -10857,13 +10857,13 @@ l8520h:
 ;  with jump phase 0xC428 < 3 the test is skipped entirely.
 platform_stand_test:
 	ld a,(simon_action)
-	cp 004h
+	cp act_fall
 	jr nz,l8538h
 	ld a,(0c428h)
 	cp 003h
 	ret c                  ; still rising -> don't land on anything
 l8538h:
-	ld hl,0c598h
+	ld hl,platform_slots
 	ld de,00000h           ; D = slot 2 result, E = slot 1 result
 	ld b,002h
 l8540h:
@@ -10940,14 +10940,14 @@ l8593h:
 l8597h:
 	dec b
 	dec b
-	ld a,(0c5adh)          ; door Y
+	ld a,(door_y)          ; door Y
 	sub 008h
 	ld d,a
 	ld a,b
 	sub d
 	cp 038h
 	ret nc                 ; Y miss
-	ld a,(0c5aeh)          ; door X
+	ld a,(door_x)          ; door X
 	ld d,a
 	ld a,c
 	sub d
@@ -10963,7 +10963,7 @@ l8597h:
 ; 0xC43A i-frame / freeze timers.
 hurt_simon_spikes:
 	ld a,(simon_action)
-	cp 006h
+	cp act_dying
 	ret z                  ; already dying -> ignore
 	ld a,(0c42dh)
 	and a
@@ -10971,7 +10971,7 @@ hurt_simon_spikes:
 	ld a,(0c43ah)
 	and a
 	ret nz
-	ld hl,0c580h           ; 3 spike-bar slots
+	ld hl,spike_slots           ; 3 spike-bar slots
 	ld b,003h
 l85c2h:
 	ld a,(hl)
@@ -10981,7 +10981,7 @@ l85c2h:
 	call spike_bar_overlap ; overlap test vs Simon
 	pop hl
 	jr nc,l85ddh           ; no hit -> next slot
-	ld a,005h
+	ld a,act_hurt
 	ld (simon_action),a          ; hurt/knockback state
 	ld a,(hl)
 	rra
@@ -11043,7 +11043,7 @@ yellow_shield_tick:
 	ld a,(0c701h)
 	and 020h               ; yellow shield (id 4)
 	ret z
-	ld ix,0d700h
+	ld ix,shot_slots
 	ld b,008h
 l8623h:
 	push bc
@@ -11105,7 +11105,7 @@ l866ah:
 ; ---------------------------------------------------------------------------
 brazier_tick_all:
 	ld bc,00800h            ; B = 8 slots, C = 0 (slot index)
-	ld hl,0c470h            ; HL -> scenery object block
+	ld hl,scenery_slots            ; HL -> scenery object block
 l867eh:
 	push bc
 	push hl
@@ -11224,7 +11224,7 @@ candle_outlines_if:
 	ret nc
 candle_outlines:
 	ld bc,00800h
-	ld hl,0c470h
+	ld hl,scenery_slots
 l8719h:
 	push bc
 	push hl
@@ -11764,7 +11764,7 @@ drop_own_weapon_heart:             ; (seg2 0x8A30) dropping equipped subweapon -
 	ret
 pickup_slot_alloc:                 ; (seg2 0x8A3E) first free C500 slot; Z + HL, else NZ
 	push bc
-	ld hl,0c500h
+	ld hl,pickup_slots
 	ld b,008h
 l8a44h:
 	ld a,(hl)
@@ -11781,7 +11781,7 @@ l8a4fh:
 pickup_tick:                       ; (seg2 0x8A51) 8 x C500 floor items/chests
 	call pickup_popup_tick             ; pickup-popup timer
 	ld bc,00800h
-	ld hl,0c500h
+	ld hl,pickup_slots
 l8a5ah:
 	push hl
 	pop ix
@@ -12617,7 +12617,7 @@ already_have_key:                  ; (seg2 0x8F9B) NZ if C701 has any of B
 ; chain grows and shrinks with the drop, which is why the three bars in the
 ; room have visibly different chain lengths.
 spike_bars_seed_once:              ; (0x8FA1) seed only if slot 0 is free
-	ld a,(0c580h)
+	ld a,(spike_slots)
 	or a
 	ret nz
 spike_bars_seed:                   ; (0x8FA6) seed unconditionally
@@ -12626,7 +12626,7 @@ spike_bars_seed:                   ; (0x8FA6) seed unconditionally
 	rst 20h
 	ret nz                 ; D000/D001 = stage/room: stage 6 room 1 only
 	ld hl,spike_bar_seeds
-	ld de,0c580h
+	ld de,spike_slots
 	ld b,003h
 l8fb6h:
 	push bc
@@ -12646,7 +12646,7 @@ spike_bar_seeds:                   ; 3 x 6-byte C580 seeds (stage 6 room 1)
 hazard_tick:                       ; (seg2 0x8FD6) tick the 3 spike bars
 	call spike_bars_seed_once
 spike_bars_run:                    ; (0x8FD9) walk the 3 slots, stride 8
-	ld hl,0c580h
+	ld hl,spike_slots
 	ld b,003h
 l8fdeh:
 	push hl
@@ -12735,7 +12735,7 @@ spike_bars_restore:
 ;  standing on, and platform_carry_simon (seg1 0x6BB6) then nudges his X by the
 ;  sign of +3 each frame.
 platform_load:                     ; (seg2 0x9034) seed C598 from platform_tbl
-	ld hl,0c598h
+	ld hl,platform_slots
 	ld a,(hl)
 	or a
 	ret nz                 ; already seeded for this room
@@ -12756,7 +12756,7 @@ l903dh:
 	inc hl
 	ld b,(hl)              ; B = platform count for this room
 	inc hl
-	ld de,0c598h
+	ld de,platform_slots
 	ld c,001h              ; slot ids start at 1
 l9056h:
 	push bc
@@ -12799,7 +12799,7 @@ platform_tbl:                      ; (seg2 0x9073) {stage,room,n} + n x {Y,X,ste
 	defb 0a7h,080h,001h,040h    ; Y=0xA7 X=0x80 right, 64
 	defb 0ffh
 platform_tick:                     ; (seg2 0x90A2) 2 x C598 moving platforms
-	ld hl,0c598h
+	ld hl,platform_slots
 	ld b,002h
 l90a7h:
 	push bc
@@ -12949,7 +12949,7 @@ platform_sat_ofs:                  ; 4 x {X offset, pattern}: two 16x16 halves,
 ;  counter that advances each call, blitting opening frames via 0x494D
 ;  until it reaches 0x2C, then latches "open" (state stays 3 at l916fh).
 door_anim_tick:
-	ld hl,0c5ach
+	ld hl,door_state
 	ld a,(hl)
 	inc a
 	jp z,door_blit_tiles   ; 0xFF -> blit door graphic, C5AC:=1
@@ -12972,10 +12972,10 @@ door_anim_tick:
 	jp vdp_hmmm              ; blit the next open frame
 l916fh:
 	ld a,003h
-	ld (0c5ach),a          ; hold "open" state
+	ld (door_state),a          ; hold "open" state
 	ret
 door_begin_open:
-	ld hl,0c5ach
+	ld hl,door_state
 	ld a,(hl)
 	dec a
 	ret nz                 ; only when 0xC5AC == 1 (door armed)
@@ -13610,7 +13610,7 @@ minimap_driver:
 	ld a,(0c002h)          ; input-enable flags...
 	and 040h               ; ...bit6 = input allowed?
 	ret z
-	ld a,(0ce00h)          ; suppress while a transition/cutscene is active
+	ld a,(cell_event)          ; suppress while a transition/cutscene is active
 	and a
 	ret nz
 	ld a,(0cf38h)          ; map-screen state
@@ -13711,7 +13711,7 @@ minimap_room_build:
 	ld hl,0cffdh
 	cp (hl)
 	jr nz,l963bh
-	ld ix,0c470h
+	ld ix,scenery_slots
 l963bh:
 	ld b,008h
 l963dh:
@@ -14166,7 +14166,7 @@ actors_tick:                       ; (seg2 0x98EC) room_spawner + C800 if D010==
 	and a                  ; 0==normal play
 	call z,room_spawner    ; per-frame enemy spawner (seg0 0x5EBF), skipped mid-transition
 c800_tick:                         ; (seg2 0x98F3) tick all 7 C800 actor slots
-	ld ix,0c800h
+	ld ix,actor_slots
 	ld b,007h
 l98f9h:
 	ld a,(ix+000h)
@@ -14186,11 +14186,11 @@ l990fh:
 	djnz l98f9h
 	ret
 shot_sat_build:                    ; (seg2 0x9917) shot shape streams -> actor SAT
-	ld ix,0d700h
+	ld ix,shot_slots
 	ld b,008h
 	jr l9925h
 c800_sat_build:                    ; (seg2 0x991F) C800 shape streams -> actor SAT
-	ld ix,0c800h
+	ld ix,actor_slots
 	ld b,007h
 l9925h:
 	push bc
@@ -14447,7 +14447,7 @@ l9ab0h:
 	scf
 	ret
 l9abah:
-	ld a,(0ce0bh)
+	ld a,(boss_clear)
 	and a
 	ret nz
 	ld (ix+010h),008h
@@ -14455,7 +14455,7 @@ l9abah:
 	ret
 kill_drop_roll:
 	ld b,000h
-	ld a,(0ce00h)
+	ld a,(cell_event)
 	and a
 	ret nz
 	ld a,(0cff0h)
@@ -14687,7 +14687,7 @@ merman_splash_go:
 ; spawn_rate_reset (seg2 0x9CB0) - seed 7 spawn-rate slots at 0xCF00 from
 ;  spawn_rate_init_tbl (value, then a zero byte).  Called from play_screen_redraw.
 spawn_rate_reset:
-	ld hl,0cf00h
+	ld hl,spawn_slot_zombie
 	ld de,spawn_rate_init_tbl
 	ld b,007h
 l9cb8h:
@@ -14703,7 +14703,7 @@ spawn_rate_init_tbl:
 	defb 004h,004h,004h,008h,008h,008h,008h,008h
 spawn_rate_gate:
 	exx
-	ld hl,0cf10h
+	ld hl,spawn_slot_tick
 	dec (hl)
 	ld a,(hl)
 	exx
@@ -14735,7 +14735,7 @@ l9ce9h:
 ;  (hardcoded per stage/room - NOT read from the tile map), then spawns
 ;  actor_zombie.  Typical: X = 0xF0 (right edge) or 0x10 (left), Y = 0xC0.
 zombie_generator:
-	ld hl,0cf00h
+	ld hl,spawn_slot_zombie
 	ld de,spawn_rate_zombie
 	call spawn_rate_gate         ; time to spawn?
 	ret nz
@@ -14771,7 +14771,7 @@ l9d22h:
 	ld e,0a0h
 l9d24h:
 	ld d,0f0h
-	ld a,(0cf01h)
+	ld a,(spawn_slot_zombie+1)
 	bit 1,a
 	ret z
 	ld d,010h
@@ -14799,11 +14799,11 @@ l9d3fh:
 spawn_rate_zombie:                        ; zombie spawn-rate thresholds (8 bytes)
 	defb 00ch,012h,00ch,00ch,00ch,012h,00ch,00ch
 merman_generator:           ; (0x9D52) bit1, actor_merman_green (1 HP)
-	ld hl,0cf02h
+	ld hl,spawn_slot_merman
 	ld c,actor_merman_green
 	jr merman_spawn
 merman_generator_3:         ; (0x9D59) bit2, actor_merman_red (spit, 2 HP)
-	ld hl,0cf02h
+	ld hl,spawn_slot_merman
 	ld c,actor_merman_red
 merman_spawn:
 	ld de,spawn_rate_merman
@@ -14812,7 +14812,7 @@ merman_spawn:
 	pop bc
 	ret nz
 	ld e,0c8h              ; Y = 0xC8
-	ld a,(0cf03h)
+	ld a,(spawn_slot_merman+1)
 	and 007h
 	ld hl,merman_spawn_x           ; X picks
 	call ADD_HL_A
@@ -14836,7 +14836,7 @@ merman_spawn_x:                        ; merman spawn X candidates
 spawn_rate_merman:                        ; merman spawn-rate thresholds
 	defb 001h,018h,018h,018h,018h,018h,018h,018h
 hanging_bat_generator:         ; (0x9D9E) bit3, actor_hanging_bat
-	ld hl,0cf06h
+	ld hl,spawn_slot_bat
 	ld de,spawn_rate_bat
 	ld c,actor_hanging_bat
 flyer_spawn:                   ; bats / ghosts / medusa heads: edge X, Y=SimonY-8
@@ -14859,21 +14859,21 @@ l9db6h:
 spawn_rate_bat:                        ; bat spawn-rate thresholds
 	defb 014h,014h,014h,028h,014h,014h,014h,028h
 flying_skull_generator:        ; (0x9DCA) bit4, actor_flying_skull
-	ld hl,0cf08h
+	ld hl,spawn_slot_skull
 	ld de,spawn_rate_ghost
 	ld c,actor_flying_skull
 	jr flyer_spawn
 spawn_rate_ghost:                        ; ghost spawn-rate thresholds
 	defb 01ch,01ch,01ch,048h,01ch,01ch,01ch,048h
 ghost_head_generator:          ; (0x9DDC) bit5, actor_ghost_head
-	ld hl,0cf0ah
+	ld hl,spawn_slot_ghost
 	ld de,spawn_rate_medusa
 	ld c,actor_ghost_head
 	jr flyer_spawn
 spawn_rate_medusa:                        ; medusa-head spawn-rate thresholds
 	defb 00ch,00ch,00ch,018h,00ch,00ch,00ch,018h
 roc_generator:                 ; (0x9DEE) bit6, actor_roc
-	ld hl,0cf0ch
+	ld hl,spawn_slot_roc
 	ld de,spawn_rate_skull_cannon
 	call spawn_rate_gate
 	ret nz
@@ -14881,11 +14881,11 @@ roc_generator:                 ; (0x9DEE) bit6, actor_roc
 	cp 0c0h
 	jr c,l9e05h
 	ld a,001h
-	ld (0cf0ch),a          ; Simon already on the right -> don't spawn
+	ld (spawn_slot_roc),a          ; Simon already on the right -> don't spawn
 	ret
 l9e05h:
 	ld de,0e030h           ; X=0xE0 Y=0x30
-	ld a,(0cf0dh)
+	ld a,(spawn_slot_roc+1)
 	rra
 	jr c,l9e10h
 	ld e,040h              ; or Y=0x40
@@ -14923,7 +14923,7 @@ l9e35h:
 	ld d,010h
 	ret
 shot_tick:                         ; (seg2 0x9E38) 8 shot slots at 0xD700
-	ld ix,0d700h
+	ld ix,shot_slots
 	ld b,008h
 l9e3eh:
 	ld a,(ix+000h)
@@ -15115,7 +15115,7 @@ shot_alloc:                    ; (seg2 0x9F8A) find a free shot slot and arm it
 l9f9ah:
 	ld a,c
 	ld (0cff0h),a
-	ld hl,0d700h
+	ld hl,shot_slots
 	ld b,008h
 	xor a
 	ld de,00080h
@@ -15752,7 +15752,7 @@ la4e2h:
 play_sound_alive:
 	ld c,a
 	ld a,(simon_action)
-	cp 006h
+	cp act_dying
 	ret z
 	ld a,c
 	jp play_sound
@@ -16624,7 +16624,7 @@ enemy_dracula_go:
 	defw dracula_rise,dracula_teleport,dracula_idle_post,dracula_summon,dracula_done
 dracula_store_x:
 	ld a,(ix+005h)
-	ld (0ce0fh),a
+	ld (dracula_x),a
 	ret
 dracula_intro:
 	ld a,(simon_x)
@@ -16710,7 +16710,7 @@ dracula_rise:
 	ret nz
 	call dracula_sat_hide
 	ld a,005h
-	ld (0ce0eh),a
+	ld (dracula_torso),a
 	ld a,(ix+003h)
 	sub 040h
 	ld (ix+003h),a
@@ -16780,7 +16780,7 @@ dracula_done:
 	dec (ix+00ch)
 	ret nz
 	ld a,001h
-	ld (0ce16h),a          ; event_dracula_wait
+	ld (dracula_ready),a          ; event_dracula_wait
 	call dracula_torso_hide
 	jp actor_free
 ; dracula_head_init (seg3 0xACEF) - actor_dracula_head spawn. Intro SAT
@@ -16808,12 +16808,12 @@ dracula_head_go:               ; (0xAD19) gravity +0x50 / frame
 ; load B; c800_tick left it as remaining C800 count (pushed around the tick).
 shot_pool_clear:
 	push ix
-	ld ix,0d700h
+	ld ix,shot_slots
 	jr shot_pool_free_loop
 ; c800_pool_clear (seg3 0xAD26): free all 7 C800 slots. No caller.
 c800_pool_clear:
 	push ix
-	ld ix,0c800h
+	ld ix,actor_slots
 	ld b,007h
 shot_pool_free_loop:
 	push bc
@@ -16889,7 +16889,7 @@ dracula_save_bg:
 ; (CE0F-16, Y=0x91).  Index 5 (SX=0x80) is the saved background (HMMM);
 ; 0..3 are cloak/chest frames from dracula_body_load (LMMM, colour 0 skip).
 dracula_blit_torso:
-	ld hl,0ce0eh
+	ld hl,dracula_torso
 	ld a,(hl)
 	dec a
 	ret m
@@ -16897,7 +16897,7 @@ dracula_blit_torso:
 	ld de,dracula_torso_src
 	call lookup_word_tbl
 	ex de,hl
-	ld a,(0ce0fh)
+	ld a,(dracula_x)
 	sub 010h
 	ld d,a
 	ld e,091h
@@ -16914,7 +16914,7 @@ dracula_torso_src:
 	defw 00080h,02080h,04080h,06080h,08080h
 dracula_torso_hide:
 	ld a,005h
-	ld (0ce0eh),a
+	ld (dracula_torso),a
 	ret
 dracula_torso_from_shape:
 	bit 0,(ix+00ch)
@@ -16924,7 +16924,7 @@ dracula_torso_select:
 	sub 05ah
 	cp 005h
 	ret nc
-	ld (0ce0eh),a
+	ld (dracula_torso),a
 	ret
 ; enemy_axe_knight_tick (seg3 0xADE5) - type 16. Same SAT layout as type 9,
 ; stage 14+ VRAM is the knight. Throws via shot_throw (0x9F68). 8 HP, 300
@@ -17386,7 +17386,7 @@ lb1b4h:
 	and a
 	ret nz
 	ld a,001h
-	ld (0cf0ch),a
+	ld (spawn_slot_roc),a
 	jp 099fdh
 enemy_roc_go:
 	call roc_flap
@@ -18023,10 +18023,10 @@ lb6aeh:
 ;  the play tick runs credits_tick.  When CE0B is set, tick CE10 instead
 ;  (boss-clear: orb spawn, HP refill, then C409).
 room_event_tick:
-	ld a,(0ce0bh)
+	ld a,(boss_clear)
 	or a
 	jr nz,room_event_ce10
-	ld a,(0ce00h)
+	ld a,(cell_event)
 	dec a
 	ret m
 	call DISPATCH_A
@@ -18037,7 +18037,7 @@ room_event_tick:
 	defw event_grim_reaper  ; 5  s15r9 type 22 + sickles
 	defw event_dracula      ; 6  s18r9 CE01 machine -> CE40 -> credits_tick
 room_event_ce10:
-	ld a,(0ce10h)
+	ld a,(boss_clear_step)
 	call DISPATCH_A
 	defw boss_clear_cull    ; 0  hide actors, timer 0x3C
 	defw boss_clear_wait    ; 1
@@ -18049,41 +18049,41 @@ room_event_ce10:
 boss_clear_cull:
 	call actors_kill_all
 	ld a,03ch
-	ld (0ce02h),a
+	ld (event_timer),a
 	jr boss_clear_next
 boss_clear_wait:
-	ld hl,0ce02h
+	ld hl,event_timer
 	dec (hl)
 	ret nz
 boss_clear_next:
-	ld hl,0ce10h
+	ld hl,boss_clear_step
 	inc (hl)
 	ret
 boss_clear_orb:
 	call 057c7h
 	xor a
-	ld (0ce11h),a
-	ld (0ce14h),a
+	ld (orb_got),a
+	ld (orb_landed),a
 	ld c,actor_orb          ; boss-clear orb (descends; touch -> 0xCE11)
 	ld de,07840h
 	call spawn_actor
 	ld a,0b4h
-	ld (0ce02h),a
+	ld (event_timer),a
 	jr boss_clear_next
 boss_clear_orb_wait:
-	ld a,(0ce11h)
+	ld a,(orb_got)
 	and a
 	jr nz,boss_clear_orb_got
-	ld a,(0ce14h)
+	ld a,(orb_landed)
 	and a
 	ret z
-	ld hl,0ce02h
+	ld hl,event_timer
 	dec (hl)
 	ret nz
 	ld a,006h
-	ld (0ce10h),a
+	ld (boss_clear_step),a
 	ld a,090h
-	ld (0ce02h),a
+	ld (event_timer),a
 	ld a,bgm_boss_defeated
 	jp play_sound
 boss_clear_orb_got:
@@ -18092,7 +18092,7 @@ boss_clear_orb_got:
 	ld a,bgm_boss_defeated
 	call play_sound
 	ld a,096h
-	ld (0ce02h),a
+	ld (event_timer),a
 	jr boss_clear_next
 boss_clear_heal:
 	ld a,(0c003h)
@@ -18106,10 +18106,10 @@ boss_clear_heal:
 	jp heal_simon_1
 lb751h:
 	ld a,03ch
-	ld (0ce02h),a
+	ld (event_timer),a
 	jr boss_clear_next
 boss_clear_done:
-	ld hl,0ce02h
+	ld hl,event_timer
 	dec (hl)
 	ret nz
 	ld a,0e0h
@@ -18121,10 +18121,10 @@ lb767h:
 	inc hl
 	djnz lb767h
 	xor a
-	ld (0ce0bh),a
-	ld (0ce00h),a
-	ld (0ce0ch),a
-	ld (0ce11h),a
+	ld (boss_clear),a
+	ld (cell_event),a
+	ld (event_fx),a
+	ld (orb_got),a
 	inc a
 	ld (hub_advance),a          ; hub-advance -> state_hub_advance
 	ret
@@ -18133,7 +18133,7 @@ actor_orb_tick:
 	ld a,05ah
 	ld (ix+010h),a
 	ld a,001h
-	ld (0ce0ch),a
+	ld (event_fx),a
 	ld (ix+00bh),pose_orb_0
 	ld (ix+006h),000h
 	ld (ix+00eh),000h
@@ -18216,7 +18216,7 @@ orb_settle:
 	call orb_apply_sat
 	ld (ix+00eh),002h
 	ld a,001h
-	ld (0ce14h),a
+	ld (orb_landed),a
 	inc (ix+001h)
 	ret
 orb_spin:
@@ -18233,7 +18233,7 @@ orb_frames:
 	defb 08fh,090h,091h,090h
 ; event_mummies (seg3 0xB85E) - CE00=3, stage 9 room 7. Spawn a pair, wait CE15.
 event_mummies:
-	ld a,(0ce01h)
+	ld a,(event_step)
 	call DISPATCH_A
 	defw event_mummies_spawn, event_mummies_wait
 event_mummies_spawn:
@@ -18245,7 +18245,7 @@ event_mummies_spawn:
 	call spawn_actor
 	jp event_ce01_next
 event_mummies_wait:
-	ld a,(0ce15h)
+	ld a,(boss_dead)
 	and a
 	ret z
 	jp boss_clear_arm
@@ -18428,12 +18428,12 @@ lba2ah:
 	defb 036h,037h,038h
 ; event_frankenstein (seg3 0xBA2D) - CE00=4, stage 12 room 6. Frank + Igor.
 event_frankenstein:
-	ld a,(0ce01h)
+	ld a,(event_step)
 	call DISPATCH_A
 	defw event_frankenstein_spawn, event_frankenstein_wait
 event_frankenstein_spawn:
 	xor a
-	ld (0ce07h),a          ; Igor's jump trigger
+	ld (igor_jump),a          ; Igor's jump trigger
 	ld c,actor_frankenstein
 	ld de,0d0c0h
 	call spawn_actor
@@ -18442,7 +18442,7 @@ event_frankenstein_spawn:
 	call spawn_actor
 	jp event_ce01_next
 event_frankenstein_wait:
-	ld a,(0ce15h)
+	ld a,(boss_dead)
 	and a
 	ret z
 	jp boss_clear_arm
@@ -18476,7 +18476,7 @@ frank_chase:
 lba90h:
 	ld de,00220h
 lba93h:
-	ld (0ce09h),de
+	ld (frank_xvel),de
 	call actor_set_xvel
 	inc (ix+001h)
 	ret
@@ -18515,7 +18515,7 @@ frank_arm_igor:
 	dec (ix+010h)
 	ret nz
 	ld a,001h
-	ld (0ce07h),a
+	ld (igor_jump),a
 	ret
 igor_tick:
 	ld (ix+006h),001h
@@ -18536,7 +18536,7 @@ igor_go:
 igor_wait:
 	call igor_flash
 	ret c
-	ld a,(0ce07h)
+	ld a,(igor_jump)
 	and a
 	jr z,lbb1fh
 	ld (ix+011h),000h
@@ -18546,7 +18546,7 @@ igor_wait:
 	ret
 lbb1fh:
 	ld (ix+00bh),pose_hunchback_l0
-	ld de,(0ce09h)
+	ld de,(frank_xvel)
 	jp actor_set_xvel
 igor_air:
 	call igor_flash
@@ -18651,7 +18651,7 @@ lbbf6h:
 ; event_grim_reaper (seg3 0xBBFA) - CE00=5, stage 15 room 9.
 ; Spawn the reaper plus 4 sickles (shot kind 0x16 -> type 8); keep tossing while waiting.
 event_grim_reaper:
-	ld a,(0ce01h)
+	ld a,(event_step)
 	call DISPATCH_A
 	defw event_grim_reaper_spawn, event_grim_reaper_wait
 event_grim_reaper_spawn:
@@ -18663,13 +18663,13 @@ event_grim_reaper_spawn:
 	call grim_sickle_spawn
 	call grim_sickle_spawn
 	xor a
-	ld (0ce02h),a
+	ld (event_timer),a
 	jp event_ce01_next
 event_grim_reaper_wait:
-	ld a,(0ce15h)
+	ld a,(boss_dead)
 	and a
 	jp nz,boss_clear_arm
-	ld hl,0ce02h
+	ld hl,event_timer
 	dec (hl)
 	ret nz
 	ld (hl),080h
@@ -18758,15 +18758,15 @@ grim_bounce_l:
 	jp actor_set_xvel
 ; event_medusa (seg3 0xBCE2) - CE00=2, stage 6 room 5. Dwell, spawn, wait CE15.
 event_medusa:
-	ld a,(0ce01h)
+	ld a,(event_step)
 	call DISPATCH_A
 	defw event_medusa_arm, event_medusa_dwell, event_medusa_spawn, event_medusa_wait
 event_medusa_arm:
 	ld a,078h
-	ld (0ce02h),a
+	ld (event_timer),a
 	jp event_ce01_next
 event_medusa_dwell:
-	ld hl,0ce02h
+	ld hl,event_timer
 	dec (hl)
 	ret nz
 	jp event_ce01_next
@@ -18781,7 +18781,7 @@ event_medusa_spawn:
 	call vdp_hmmv            ; fill a 32x32 SCREEN 5 rect (entrance hole)
 	jp event_ce01_next
 event_medusa_wait:
-	ld a,(0ce15h)
+	ld a,(boss_dead)
 	and a
 	ret z
 	jp boss_clear_arm
@@ -18918,7 +18918,7 @@ medusa_try_spit:
 ; event_giant_bat (seg3 0xBE32) - CE00=1, stage 3 room 5. Spawn, wait CE15.
 ; Spawn falls into event_ce01_next (the shared CE01++ lives here).
 event_giant_bat:
-	ld a,(0ce01h)
+	ld a,(event_step)
 	call DISPATCH_A
 	defw event_giant_bat_spawn, event_giant_bat_wait
 event_giant_bat_spawn:
@@ -18926,18 +18926,18 @@ event_giant_bat_spawn:
 	ld de,07040h
 	call spawn_actor
 event_ce01_next:               ; (0xBE44) CE01++; also Dracula CE01 epilogue
-	ld hl,0ce01h
+	ld hl,event_step
 	inc (hl)
 	ret
 event_giant_bat_wait:
-	ld a,(0ce15h)
+	ld a,(boss_dead)
 	and a
 	ret z
 boss_clear_arm:                ; (0xBE4E) CE10=0, CE0B=1 -> room_event_ce10
 	xor a
-	ld (0ce10h),a
+	ld (boss_clear_step),a
 	inc a
-	ld (0ce0bh),a
+	ld (boss_clear),a
 	ret
 ; enemy_giant_bat_tick (seg3 0xBE57) - type 18. Event 1 boss; also a normal
 ; enemy on stage 16 when CE00==0 (per-actor HP). 16 HP, 2000 pts. Shape 0x4F.

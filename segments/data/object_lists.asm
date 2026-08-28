@@ -3,10 +3,10 @@
 
 ; object_list_ptr (seg14 0x8668): word[hub 0..5] -> packed object streams.
 ; object_list_lookup indexes by 0xD002. Each hub has 3 streams (0xFF-terminated) =
-; the hub's 3 castle stages (stage 0 shares hub 0 but l61c2h skips it).
+; the hub's 3 castle stages (stage 0 shares hub 0 but object_list_spawn skips it).
 ; 0x00 advances to the next room (obj_next_room). List-id = actor_* type
 ; (segments/actors.inc); bit7 stripped at spawn (dogs only: actor_dog|080h).
-; Attr = Y<<4 | X, cell*16 px (same nibble order as scenery). l61c2h
+; Attr = Y<<4 | X, cell*16 px (same nibble order as scenery). object_list_spawn
 ; loads high->E (Y) and low->D (X) into spawn_actor.
 object_list_ptr:
 	defw object_list_h0,object_list_h1,object_list_h2,object_list_h3,object_list_h4,object_list_h5

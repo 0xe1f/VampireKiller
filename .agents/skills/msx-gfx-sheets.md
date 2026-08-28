@@ -28,11 +28,11 @@ only.
 | Dir | Contents |
 |-----|----------|
 | `gfx/sprites/` | The four packed 1bpp sprite asms only (`ASM_SPRITE_STEMS`): `enemy_sprite_rle`, `simon_rle`, `intro_sky`, `title_jp_sprites`. |
-| `gfx/tilesets/` | 4bpp tileset asms (`tileset_*`, intro/title, bonus HUD, HUD keys, portrait). |
+| `gfx/tilesets/` | 4bpp tileset asms (`tileset_*`, intro/title, bonus HUD, HUD keys, portrait, `spike_bar`, `dracula_body`). |
 | `gfx/palettes/` | palette_apply tables (`stage_palettes`, `room_palettes`). Solid 8×8 swatches, not tiles. |
 | `gfx/metatiles/` | 4x4 metatile-def tables (`mtile_defs_sNN`, `mtile_def_intro`) and 8x6 room streams (`mtile_streams`, `mtile_stream_intro`). Geographic/minimap composites stay `gfx/stage_sNN.png`. |
 | `gfx/fonts/` | The three 1bpp font asms (`ASM_FONT_STEMS`): `font_credits`, `font_hud`, `font_logo`. |
-| `gfx/` | Everything else: SAT composites (`enemy_sheet.png`, `sheet_enemy_*.png`), hazards, stage/minimap sheets. |
+| `gfx/` | Everything else: SAT composites (`enemy_sheet.png`, `sheet_enemy_*.png`), vendor, stage/minimap sheets. |
 
 Do not put composites or fonts in `gfx/sprites/`. Do not put palette
 swatches in `gfx/tilesets/`. A new packed sprite asm
@@ -49,7 +49,9 @@ or animation into one cell (that is `gfx/enemy_sheet.png` /
 | Kind | Atom | Bytes | Output dir | Grid |
 |------|------|-------|------------|------|
 | 4bpp playfield / HUD tile | one 8×8 | 32 | `gfx/tilesets/` | 16 cols, `size=8` |
+| 4bpp 8×4 fragment | one 8×4, padded to 8×8 | 16 | `gfx/tilesets/` | 2 cols (`spike_bar` mount) |
 | 4bpp 16×16 blit | one 16×16 | 128 | `gfx/tilesets/` | 8 cols (5 for bonus HUD, 4 for HUD keys / portrait parts), `size=16` |
+| 4bpp packed 32×32 | one 32×32 | packed | `gfx/tilesets/` | 2 cols (`dracula_body`), `size=32` |
 | palette_apply entry | one 8×8 solid | 3 | `gfx/palettes/` | 16 cols (VDP index 0–F; one row per table), `size=8` |
 | 4×4 metatile def | one 32×32 (4×4 nametable tiles) | 16 | `gfx/metatiles/` | 8 cols, `size=32` |
 | 8×6 room stream | one 256×192 nametable (HUD not cropped) | 48 | `gfx/metatiles/` | one stage per row, `size=(256, 192)`, scale 1 |
@@ -119,6 +121,8 @@ Unused slots in a palette_apply table stay `OFF`.
 - HUD / bonus / title tiles: HUD-fixed (`vk_play_palette`), not a stage
   overlay.
 - Intro tiles: `vk_intro_palette`. Portrait: HUD-fixed then `0xBF6F`.
+- `spike_bar`: `vk_playfield_palette(data, 6, 1)` (the room that draws it).
+- `dracula_body`: `vk_playfield_palette(data, 18, 9)` (figure fight).
 - Fonts: HUD-fixed ink 14 (the `glyph_blit_run` ink).
 - Palette sheets: the table's own `(index, rb, g)` RGB, not a composed
   BIOS+HUD overlay. Column N is VDP index N. Empty tables (`pal_a04a`)
@@ -140,11 +144,13 @@ stand-ins, compositing CC pairs onto this sheet type.
 
 ## Adding a dump
 
-1. Identify the asm (`segments/data/`) and the atom (8×8 tile, 16×16
-   tile, 4×4 metatile def, 8×6 room stream, 16×16 sprite plane, 8×8 glyph,
-   or 3-byte palette_apply record).
+1. Identify the asm (`segments/data/`) and the atom (8×8 tile, 8×4
+   fragment, 16×16 tile, packed 32×32, 4×4 metatile def, 8×6 room stream,
+   16×16 sprite plane, 8×8 glyph, or 3-byte palette_apply record).
 2. Parse that file. Tiles: `parse_asm_tile8` (`; 0xXXXX  … tile …` or
-   `… 16x16 …`; skip `rest of` prefixes). Metatile defs:
+   `… 16x16 …`; `… 8x4 …` is 16 bytes padded to 8×8; skip `rest of`
+   prefixes). Packed 32×32 (`dracula_body`): `_unpack_dracula_body`.
+   Metatile defs:
    `parse_asm_mtile_defs` (16-byte groups; s00/s18 are one file each).
    Room streams: `parse_asm_mtile_streams` (48-byte groups, one stage per
    row) and `parse_asm_mtile_stream_intro`. Sprite RLE:
@@ -167,7 +173,7 @@ stand-ins, compositing CC pairs onto this sheet type.
    streams, `size=(256, 192)`, scale 1). Fonts:
    `FONT_DIR`, scale 12. Packed SAT composites use `render_packed_png`
    into `GFX`. Hook from `main()` / `dump_asm_sprite_rles` /
-   `dump_asm_tilesets` / `dump_asm_palettes` / `dump_asm_metatiles` /
+   `dump_asm_tilesets` / `dump_dracula_body` / `dump_asm_palettes` / `dump_asm_metatiles` /
    `dump_asm_mtile_streams` / `dump_enemy_frames`.
 5. File header comment on the asm: `Preview: gfx/…/<stem>.png`; cell
    header meaning. One line in `docs/game-notes.md` gfx catalogue.
@@ -187,8 +193,11 @@ asm whose sheet is stale.
 
 - **Tiles** — `gfx/tilesets/<stem>.png` ↔ `segments/data/<stem>.asm`
   (`dump_asm_tilesets`: `tileset_*.asm` plus intro/title/bonus HUD/HUD
-  keys/portrait). Trailing `0xFF` bank pads and partial last tiles are
+  keys/portrait/vendor/`spike_bar`; `dump_dracula_body` for the packed
+  32×32 frames). Trailing `0xFF` bank pads and partial last tiles are
   leftover, not missing cells; do not invent a header for them.
+  `spike_bar` mount is 8×4 padded to an 8×8 cell. `dracula_body`
+  H-mirrors are generated at load, not stored.
 - **Palettes** — `gfx/palettes/<stem>.png` ↔ `segments/data/<stem>.asm`
   (`dump_asm_palettes`: `stage_palettes`, `room_palettes`). pal_9ffe's
   first two bytes live in `room_gfx.asm`; the sheet stitches them.

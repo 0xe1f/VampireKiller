@@ -268,12 +268,12 @@ def door_rects(grid, row, conn_room):
 
 def decode_objects(rom, row, col):
     """Per-room placed-object list from seg14 (--compare-doors object overlay).
-    List-id = actor type (l61c2h -> spawn_actor). NOT white-key doors (those
+    List-id = actor type (object_list_spawn -> spawn_actor). NOT white-key doors (those
     are door_tbl). List-id 0x1F is a placed hanging bat, not vendor/reveal
     (display-type 0x1F on a brazier is that path).
     row->dataset/stream: ds=(row-1)//3, stream=(row-1)%3.
     Returns [(sid, bit7, x_tile, y_tile), ...]; object cell is *16px = *2
-    tiles. Attr is Y<<4|X (same packing as scenery_pos_xy). l61c2h puts the
+    tiles. Attr is Y<<4|X (same packing as scenery_pos_xy). object_list_spawn puts the
     high nibble in E and the low nibble in D; spawn_actor stores E at +03 Y
     and D at +05 X. The old decode (X<<4|Y) swapped the axes: dogs/bats
     looked 16px off whenever the nibbles differed by 1. Spawn pixel is the

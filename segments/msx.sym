@@ -124,6 +124,19 @@ NWRVRM: equ 0x0177
 
 ; ---- Vampire Killer resident routines (segment 0) ------------------------
 int_handler: equ 0x4028	; timer-interrupt (H.TIMI) service routine
+int_tick: equ 0x4030	; per-frame body after GM pause check (page 14/15, sound_tick, main_tick)
+int_tick_done: equ 0x405f	; ei;ret — skip the rest of this interrupt
+gm_paused: equ 0x40f1	; STOP-pause: ';' steps one tick, STOP again resumes
+gm_pause_step: equ 0x40fc	; restore PSG and run one int_tick while paused
+gm_pause_hold: equ 0x4102	; keep PSG muted and freeze this interrupt
+main_state_set_0: equ 0x41b5	; C000=0 then main_state_set
+main_state_set: equ 0x41b6	; C000=A, C004=0x20, C001=0
+main_timer_set: equ 0x41c9	; C004=A then main_phase_next
+main_phase_next: equ 0x41cc	; C001++
+main_state_inc_20: equ 0x4249	; C004=0x20 then main_state_inc
+main_state_inc: equ 0x424b	; C004=A, C000++, C001=0
+main_phase_reset: equ 0x4252	; C001=0
+pause_enter: equ 0x428c	; draw pause panel, goto main state 0x0B
 ADD_HL_A: equ 0x4061	; HL += A (unsigned)
 ADD_HL_A_SIGNED: equ 0xa82a	; HL += signed A (seg3; +ve is ADD_HL_A)
 ADD_DE_A: equ 0x4066	; DE += A (unsigned)
@@ -284,6 +297,7 @@ hud_bcd_draw: equ 0x457f	; BCD at HL, B bytes, glyphs at DE (hearts/lives/price)
 draw_stage_hud: equ 0x4542	; draw the HUD STAGE number (0xC411, BCD)
 hud_panel_frames: equ 0x454c	; three vdp_box outlines along the top HUD row
 hud_bars_redraw: equ 0x45b7	; repaint both HUD meters with their frames
+enemy_meter_redraw: equ 0x45ba	; enemy_meter_frame + draw_enemy_meter
 health_bar_redraw: equ 0x45c0	; health frame + draw_health_bar
 enemy_meter_frame: equ 0x45c6	; clear + border the enemy meter panel (66x6)
 health_bar_frame: equ 0x45cf	; clear + border the health bar panel (66x6)
@@ -302,9 +316,13 @@ frontend_to_title: equ 0x43c1	; logo/attract any new-press -> C000=1, title_buil
 frontend_game_start: equ 0x43cb	; Game Master path: seed E604-E607, C000=13 (menu)
 title_build: equ 0x4d4e	; build/redraw the title screen (regional JP vs export logo via 0x002B)
 title_load_tiles: equ 0x5a02	; load title glyphs into VRAM (JP kana vs VAMPIRE KILLER by 0x002B)
+title_load_intl: equ 0x5a2a	; non-Japanese 0x002B: blit VAMPIRE KILLER glyphs
+title_load_finish: equ 0x5a32	; restore play banks
 title_castle: equ 0x4c3f	; title_layout: castle emblem (drawn in both regions)
 title_logo_jp: equ 0x4c5a	; title_layout: Japanese title "Akumajo Dracula"
 title_logo_intl: equ 0x4ca0	; title_layout: export title "VAMPIRE KILLER"
+title_layout_intl: equ 0x4dc3	; non-Japanese 0x002B: VAMPIRE KILLER + castle
+title_layout_finish: equ 0x4dd5	; HUD string + vdp_screen_on
 ; --- Game Master cartridge (Konami's RC-735 cheat cart): detect, pause, menu -
 game_master_detect: equ 0x5c99	; boot slot scan: E600=0xFF if a Game Master cart is present
 gm_scan_expanded: equ 0x5cbf	; expanded slot -> try all 4 subslots
@@ -353,9 +371,22 @@ scenery_room_ptr_a: equ 0x5bd9	; mid: A already = room index
 scenery_stage_ofs: equ 0x5c0b	; stage 1-18: (stage-within-hub)*0x18
 scenery_pos_xy: equ 0x5c1d	; pos byte -> C=Y, B=X pixels
 read_buttons: equ 0x4bc2	; joystick|kbd row 8 -> A; play C007/C006, title C401/C400
+input_edge_play: equ 0x4bb8	; input_edge with HL=0xC007 (play held/edge)
 input_edge: equ 0x4bbb	; A=sample, (HL)=held, (HL-1)=rising-edge bits
 read_fkeys: equ 0x4bfb	; sample kbd row 6 -> bit0=F1,bit1=F2,bit2=F3 (edge-detected into 0xC00B)
+sound_nop: equ 0x50a5	; ret; music start points C016 here so the sfx slot idles
 play_sound: equ 0x50a6	; A=id: 0=stop, 1-7F sfx, 80-8F music, FB-FF special
+play_sound_clear: equ 0x5131	; zero fade/lock, C0A7=7, then play_sound_exit
+play_sound_exit: equ 0x5140	; restore pages 1/2/3 at 0x6000/0x8000/0xA000
+sound_ch_template: equ 0x515d	; 20-byte channel block copied onto C01C/C030/C044/C058/C06C/C080
+play_sound_sfx: equ 0x5171	; 1..0x7F: reject if locked or lower priority than C096
+play_sound_sfx_go: equ 0x5183	; copy template to C058, index sfx_ptr, arm sound_sfx
+play_sound_stop: equ 0x51ab	; id 0: sound_halt then play_sound_exit
+play_sound_special: equ 0x51b1	; FB-FF dispatcher
+play_sound_fd: equ 0x51cb	; 0xFD overlay (C098 bit0, snd_fd_seq)
+play_sound_fe: equ 0x5234	; 0xFE restore from 0xFD
+play_sound_fb: equ 0x527d	; 0xFB overlay (C098 bit1, snd_fb_seq)
+play_sound_fc: equ 0x52d0	; 0xFC restore from 0xFB
 credits_font_load: equ 0x53e5	; page seg14/15 and blit ending credits_font + _az
 credits_font_blit: equ 0x53e8	; blit only (banks already paged)
 hud_font_load: equ 0x53bd	; page seg7/8 and blit hud_font + hud_tile_bf00
@@ -399,6 +430,9 @@ object_list_load: equ 0x615b	; page seg14, unpack 3 streams into DB00/DC00/DD00
 object_list_unpack: equ 0x6188	; expand (id,attr) stream into 4-byte slots
 object_list_lookup: equ 0x61a5	; HL -> this stage's packed object data in seg14
 object_list_clear: equ 0x61b0	; clear the 0xDB00 object list
+object_list_spawn: equ 0x61c2	; spawn actors from the visible room's 0xDB00 slots
+object_list_spawn_loop: equ 0x61e2	; one of 4 slots
+object_list_spawn_next: equ 0x6200	; advance to the next 4-byte slot
 tile_string_draw: equ 0x6276	; tile-id stream at HL to screen pos DE (FF/FE)
 cell_event_set: equ 0x633a	; CE00 from l6376h[stage] if column matches
 intro_scene_build: equ 0x63da	; intro walk-up: intro_tiles + intro_palette + intro_simon/sky
@@ -410,6 +444,11 @@ simon_spawn_pos: equ 0x6409	; Simon Y/X/facing from l6426h[stage]
 pattern_phase_upload: equ 0x6591	; phase-selected pattern rows to VRAM 0xF400
 pattern_shadow_blit: equ 0x65ab	; copy 0xD400 shadow (0x280 bytes) to VRAM 0xF400
 room_edge_detect: equ 0x7682	; set C41B pending exit from Simon vs screen edges
+room_edge_up: equ 0x76ab	; stairs top: wrap Y, pending dir 1
+room_edge_down: equ 0x76c3	; bottom: pit death or room_edge_down_go
+room_edge_down_go: equ 0x76ef	; wrap Y to 0x30, pending dir 2
+room_edge_left: equ 0x7709	; pending dir 3 if C41E permits
+room_edge_right: equ 0x7714	; pending dir 4 if C41F permits
 actor_sat_patterns: equ 0x6030	; copy SAT colour/attr init into slot|0x20 cells
 spawn_nop: equ 0x602f	; unused spawn-init (types 0x1D/0x25/0x2B): ret
 actor_sat_assign: equ 0x604f	; store SAT index D at cell E of slot|0x20
@@ -473,6 +512,8 @@ backdrop_flash_tick: equ 0x760b	; C43E CHGCLR 0x0E/0 (white cross / boss kill)
 simon_action_tick: equ 0x6b40	; Simon per-frame action-state machine (0xC420)
 simon_grounded: equ 0x6b59	; C420=0 walk/idle
 platform_carry_simon: equ 0x6bb6	; ride: Simon X += sign of the C598 slot's step
+simon_try_stairs_up: equ 0x6be1	; grounded + UP: probe stair tiles, else fall through
+simon_try_stairs_down: equ 0x6c17	; DOWN: probe down-right/left stairs or crouch
 simon_walk_left: equ 0x6c36	; face left, try -X
 simon_walk_right: equ 0x6c5a	; face right, try +X
 simon_add_x: equ 0x6c9b	; C426 += BC
@@ -489,6 +530,7 @@ simon_dying: equ 0x709a	; C420=6
 simon_portal_wait: equ 0x7102	; C420=7: wait C42D after crouch+UP on pad, then C41B=0xFF
 inv_reset_life: equ 0x70e3	; new-life/death: keep C701 bit7 (map); clear weapon/keys/sub
 simon_attack_tick: equ 0x7114	; try/start whip + tick + emit SAT
+simon_torso_from_weapon: equ 0x7213	; C42F from C436 (chain 6 / leather 9 / other)
 simon_attack_start: equ 0x711d	; SPACE new-press: whip or throw; jump+dir holy water/hourglass
 whip_tick: equ 0x71e7	; dispatch 0xC422 whip phase
 simon_attack_end: equ 0x7275	; clear C422/C429; torso 0, or 2 on stairs
@@ -676,6 +718,7 @@ break_chip_move: equ 0x88f9	; X ±2, Y += break_chip_dy[age]
 break_chip_dy: equ 0x892f	; dY by chip age; bytes 0-1 are also `inc l; ret`
 break_chip_sat: equ 0x8942	; two chips -> SAT + colour lines
 chip_fill16: equ 0x8979	; fill 16 colour bytes (break-chip SAT)
+vram_hmmm16: equ 0x8984	; HMMM 16x16 from page 1 at (A*16, L)
 scenery_drop: equ 0x8996	; bonus B at DE -> C500; slime skips flame
 scenery_drop_slot: equ 0x8999
 drop_spawn: equ 0x89ea	; flame+C500, or slime directly to scenery_drop_slot
@@ -723,6 +766,8 @@ platform_sat_build: equ 0x90df	; 4 SAT entries + per-line colours for one deck
 platform_fill16: equ 0x9112	; fill 16 colour bytes (one 16x16 sprite's lines)
 platform_sat_cells: equ 0x9119	; write the 4 SAT entries from a C598 slot
 platform_sat_ofs: equ 0x9146	; 4 x {X offset, pattern} deck cells
+vendor_spawn: equ 0x9180	; special object / vendor into C5B5 or C5C5
+vendor_spawn_fill: equ 0x9190	; write the 16-byte slot (HL already chosen)
 vendor_offer_match: equ 0x91a9	; B = offer-table index; A = matching slot (1/2) or 0
 vendor_tick: equ 0x91c5	; 2 x C5B5/C5C5 vendor/special-object slots
 vendor_slot_tick: equ 0x91df	; one slot: reveal / whip-hit / flash
@@ -759,6 +804,9 @@ vendor_purchase_tick: equ 0x94c1	; offer loop: tick timer 0xC706, poll buy/refus
 vendor_read_buttons: equ 0x9526	; edge-detected confirm(SPACE)/refuse(SHIFT)+triggers -> A
 read_kbd_matrix_bit: equ 0x9552	; read one keyboard-matrix bit (row in A) -> 0/1
 minimap_driver: equ 0x9559	; F2 world-map driver: state 0xCF38 (0 play/1 build/2 shown); needs map item 0xC701 bit7 + uses 0xC70F
+map_state_advance: equ 0x95aa	; CF38++
+map_state_build: equ 0x95af	; CF38==1: minimap_build then advance to displayed
+map_state_idle: equ 0x95ba	; CF38==2: F2 closes the map
 minimap_build: equ 0x95d7	; draw whole minimap: loop rooms 0..minimap_room_count[stage]-1
 minimap_room_pos: equ 0x9681	; AUTHORITATIVE room position: stage tbl 0x969c -> per-room code -> coord tbl 0x975e -> 0xCFF2
 minimap_stage_ptr: equ 0x969c	; word[stage] -> per-room minimap position-code array
@@ -798,6 +846,13 @@ actor_integrate: equ 0x99c0	; add velocity (+0x07/08 Y, +0x09/0A X) to position
 actor_cull_offscreen: equ 0x99ec	; free actor if pixel pos left the play area
 actor_free: equ 0x99fd	; clear slot + hide SAT cells at slot|0x20
 spawn_rate_gate: equ 0x9cca	; CF00 counter vs difficulty-scaled threshold
+spawn_rate_zombie: equ 0x9d4a	; 8-byte zombie spawn-rate thresholds
+merman_spawn_x: equ 0x9d8e	; 8 merman spawn X candidates
+spawn_rate_merman: equ 0x9d96	; merman spawn-rate thresholds
+spawn_rate_bat: equ 0x9dc2	; hanging-bat spawn-rate thresholds
+spawn_rate_ghost: equ 0x9dd4	; ghost-head spawn-rate thresholds
+spawn_rate_medusa: equ 0x9de6	; medusa-head spawn-rate thresholds
+spawn_rate_skull_cannon: equ 0x9e15	; skull-cannon spawn-rate thresholds
 spawn_pick_pos: equ 0x9d03	; hardcoded ground-enemy spawn X/Y from stage/room
 spawn_edge_gate: equ 0x9e1d	; C = Simon crowding this spawn edge
 shot_tick: equ 0x9e38	; 8 shot slots at 0xD700

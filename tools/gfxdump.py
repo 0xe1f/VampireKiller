@@ -16,11 +16,11 @@
 """Build PNG graphics sheets in gfx/ from identified asm / ROM tables.
 
   gfx/sprites/<stem>.png   - packed 1bpp sprite asms (ASM_SPRITE_STEMS)
-  gfx/tilesets/<stem>.png  - 4bpp tileset asms
+  gfx/tilesets/<stem>.png  - 4bpp tileset asms (plus spike_bar, dracula_body)
   gfx/palettes/<stem>.png  - palette_apply tables (solid 8x8 swatches)
   gfx/metatiles/<stem>.png - 4x4 metatile def tables and 8x6 room streams
   gfx/fonts/<stem>.png     - 1bpp font asms (ASM_FONT_STEMS)
-  gfx/<name>.png           - derived sheets (composites, hazards, vendor)
+  gfx/<name>.png           - derived sheets (composites, vendor)
 
 Tileset / metatile / palette cell header is the CPU address. Sprite-asm
 cell header is the VRAM dest. Font cell header is the hex glyph id. One
@@ -45,7 +45,7 @@ FONT_DIR = os.path.join(GFX, "fonts")
 # load_stage_tileset blits this many 8x8s from tileset_ptr[stage] (roomperm).
 NTILES = 0xBF
 TILESET_PTR = 0x5749            # seg0 word[stage]; file off = CPU - 0x4000
-# Asm sheets only. Composites / hazards go in GFX.
+# Asm sheets only. Composites go in GFX.
 ASM_SPRITE_STEMS = frozenset(
     ("enemy_sprite_rle", "simon_rle", "intro_sky", "title_jp_sprites"))
 ASM_FONT_STEMS = frozenset(("font_credits", "font_hud", "font_logo"))
@@ -455,7 +455,6 @@ def main():
     dump_logo_font(data)
     dump_enemy_sheet(data)
     dump_enemy_frames(data)
-    dump_hazards(data)
     dump_vendor(data)
     dump_asm_sprite_rles(data)
     dump_asm_tilesets(data)
@@ -1012,46 +1011,6 @@ def _rle_src_file(cpu):
 CREDITS_FONT_FILE = 14 * 0x2000 + 0x0824
 CREDITS_FONT_CHARS = "0123456789.':," + "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-def dump_hazards(data):
-    """Environmental hazards - things that damage Simon but are not actors.
-    The 0xC580 spike bars of stage 6 room 1 are the only one: no C500/C800
-    slot, no HP, and drawn as a 4bpp *background* block rather than sprites,
-    so they are absent from enemy_sheet.png.
-
-    seg0 0x5494 assembles the picture in VRAM page 1 at (0x80, 0x70) out of two
-    seg9 fragments, and spike_bar_slot_tick (seg2 0x8FF1) HMMMs a 32x16 window
-    of it into the playfield.  The top 4 rows are one chain link: the copy is
-    drawn at Y-4 with a 4px step, so descending leaves a link behind each step
-    and the chain is a smear, not stored artwork."""
-    pal = vk_playfield_palette(data, 6, 1)
-
-    def frag(cpu, w, h):
-        fo = _cpu_file(9, cpu, 0x8000)
-        return [[data[fo + y * (w // 2) + x // 2] >> 4 if x % 2 == 0
-                 else data[fo + y * (w // 2) + x // 2] & 0x0F
-                 for x in range(w)] for y in range(h)]
-
-    link = frag(0x9A80, 8, 4)          # spike_bar_mount
-    unit = frag(0x9A90, 8, 8)          # spike (tiled x4 across the 32px bar)
-    bar = [[0] * 32 for _ in range(12)]
-    for y in range(4):                 # link centred over the bar
-        for x in range(8):
-            bar[y][12 + x] = link[y][x]
-    for i in range(4):
-        for y in range(8):
-            for x in range(8):
-                bar[4 + y][i * 8 + x] = unit[y][x]
-
-    def rgb(grid):
-        return [[pal[v] if v else OFF for v in row] for row in grid]
-
-    cells = [rgb(bar), rgb(unit), rgb(link)]
-    labels = ["SPIKE BAR 32x12", "SPIKE 8x8", "CHAIN 8x4"]
-    render_packed_png(os.path.join(GFX, "hazards.png"), cells, labels=labels,
-                      col_units=4)
-    print("hazards.png              spike bar (stage 6 room 1) + its fragments")
-
-
 def dump_vendor(data):
     """Vendor 32x32: 8 x 8x8 tiles at seg10 0xBDA7, assembled by
     vendor_tile_ptr, with nibble 0xF recoloured from vendor_recolor_tbl.
@@ -1553,6 +1512,16 @@ def _tileset_asm_palette(fname, data):
         _apply_palette_overlay(pal, tables["hud_fixed_palette"])
         _apply_palette_overlay(pal, tables["intro_palette"])
         return pal
+    if fname == "spike_bar.asm":
+        if data is not None:
+            pal = list(vk_playfield_palette(data, 6, 1))
+        else:
+            pal = _bios_plus_hud(tables)
+            labels = _stage_palette_labels()
+            if len(labels) > 6:
+                _apply_palette_overlay(pal, tables[labels[6]])
+        pal[0] = OFF
+        return pal
     if fname in ("hud_weapon_key_tiles.asm", "bonus_hud_tiles.asm",
                  "vendor_tiles.asm"):
         if data is not None:
@@ -1584,7 +1553,8 @@ def _asm_tileset_files():
              if fn.startswith("tileset_") and fn.endswith(".asm")]
     for extra in ("intro_tiles.asm", "title_tiles.asm", "bonus_hud_tiles.asm",
                   "hud_weapon_key_tiles.asm", "dracula_portrait.asm",
-                  "dracula_portrait_parts.asm", "vendor_tiles.asm"):
+                  "dracula_portrait_parts.asm", "vendor_tiles.asm",
+                  "spike_bar.asm"):
         if extra not in names and os.path.isfile(os.path.join(DATA_DIR, extra)):
             names.append(extra)
     return sorted(names)
@@ -1594,7 +1564,8 @@ def parse_asm_tile8(path):
     """4bpp tiles in an asm file, driven by `; 0xXXXX  …` headers.
 
     `… tile …` is one 8x8 (32 bytes); `… 16x16 …` is one 16x16 (128 bytes,
-    vram_blit_tile16).  `rest of …` prefixes and trailing incomplete tiles
+    vram_blit_tile16); `… 8x4 …` is a 16-byte fragment padded to 8x8.
+    `rest of …` prefixes and trailing incomplete tiles
     count as leftover so a continuation that starts mid-tile aligns to the
     first complete tile, not the file start.
     """
@@ -1613,17 +1584,24 @@ def parse_asm_tile8(path):
 
     def emit_if_ready():
         nonlocal leftover, pending, kind, cpu
-        need = 32 if kind == 8 else 128
-        if kind is None or len(pending) < need:
+        if kind is None:
+            return
+        need = {4: 16, 8: 32, 16: 128}[kind]
+        if len(pending) < need:
             return
         raw = bytes(pending[:need])
         pending = bytearray(pending[need:])
-        if kind == 8:
+        if kind == 4:
+            raw = raw + bytes(16)
             cells.extend(tile_grids(raw, "tile8"))
+            sizes.append(8)
+        elif kind == 8:
+            cells.extend(tile_grids(raw, "tile8"))
+            sizes.append(8)
         else:
             cells.extend(tile_grids(raw, "tile4"))
+            sizes.append(16)
         labels.append("%04X" % cpu)
-        sizes.append(kind)
         leftover += len(pending)
         pending = bytearray()
         kind = None
@@ -1640,6 +1618,11 @@ def parse_asm_tile8(path):
                 if "16x16" in rest:
                     flush_incomplete()
                     kind = 16
+                    cpu = int(th.group(1), 16)
+                    continue
+                if "8x4" in rest:
+                    flush_incomplete()
+                    kind = 4
                     cpu = int(th.group(1), 16)
                     continue
                 if "tile" in rest:
@@ -1683,7 +1666,9 @@ def dump_asm_tilesets(data):
         c16 = [c for c, s in zip(cells, sizes) if s == 16]
         l16 = [lab for lab, s in zip(labels, sizes) if s == 16]
         if c8 and not c16:
-            cols8 = 8 if fname == "vendor_tiles.asm" else 16
+            cols8 = (
+                2 if fname == "spike_bar.asm" else
+                8 if fname == "vendor_tiles.asm" else 16)
             render_png(out, c8, pal, cols=cols8, labels=l8, size=8, scale=8)
         elif c16 and not c8:
             cols16 = 5 if fname == "bonus_hud_tiles.asm" else (
@@ -1706,6 +1691,34 @@ def dump_asm_tilesets(data):
         else:
             desc = "%3d tiles" % len(c8)
         print("%-36s %s  %s%s" % (rel, desc, labels[0], extra))
+    dump_dracula_body(data)
+
+
+def dump_dracula_body(data):
+    """Packed 32x32 cloak/chest frames.  Cell header = CPU address.
+
+    H-mirrors from dracula_body_load are generated, not stored.  Palette is
+    stage 18 room 9 (figure fight); index 0 is OFF (LMMM skip).
+    """
+    pal = list(vk_playfield_palette(data, 18, 9))
+    pal[0] = OFF
+    cells, labels = [], []
+    for cpu, fo in ((0xB5A1, DRACULA_BODY_FILE),
+                    (0xB719, DRACULA_BODY_OPEN_FILE)):
+        rows, _ = _unpack_dracula_body(data, fo)
+        grid = []
+        for row in rows:
+            pix = []
+            for b in row:
+                pix.append(b >> 4)
+                pix.append(b & 0x0F)
+            grid.append(pix)
+        cells.append(grid)
+        labels.append("%04X" % cpu)
+    out = os.path.join(TILESET_DIR, "dracula_body.png")
+    render_png(out, cells, pal, cols=2, labels=labels, size=32, scale=8)
+    rel = os.path.relpath(out, ROOT)
+    print("%-36s %s  %s" % (rel, "  2 32x32", labels[0]))
 
 
 # Metatile def tables.  s00 / s18 are one file each (cross 0x8000 / 0xA000,

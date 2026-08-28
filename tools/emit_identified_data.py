@@ -1110,7 +1110,7 @@ def emit_tileset_banks(rom: bytes) -> None:
         [
             "data/tileset_s00.asm",
             "data/tileset_s01.asm",
-            "credits_staff.asm",
+            "data/credits_staff.asm",
             "data/tileset_s07.asm",
             "data/tileset_s04.asm",
             "data/tileset_s10.asm",
@@ -1133,7 +1133,7 @@ def emit_tileset_banks(rom: bytes) -> None:
             "data/tileset_s18.asm",
             "data/title_tiles.asm",
             "data/font_hud.asm",
-            "credits_ending.asm",
+            "data/credits_ending.asm",
             "data/tileset_s08_pad.asm",
         ],
     )
@@ -1270,6 +1270,8 @@ def emit_seg13_gaps(rom: bytes) -> None:
         "; zeros + (12-N) payload + 4 trailing zeros = 16 bytes / 32px.",
         "; dracula_body_load HMMCs closed to page-1 (0,0x80) + H-mirror at",
         "; (0x40,0x80), open to (0x20,0x80) + H-mirror at (0x60,0x80).",
+        "; Preview: gfx/tilesets/dracula_body.png (`make gfx`); cell header = CPU address.",
+        "; H-mirrors are generated at load, not stored.",
         "dracula_body_closed:  ; 0xB5A1  cloak (shape 0x5B)",
     ]
     lines.extend(defb_lines(closed))
@@ -1301,10 +1303,10 @@ def emit_seg13_gaps(rom: bytes) -> None:
     emit_logo_font(rom)
 
 
-# Packed PSG (sfx + music that still fits in seg14).  label "" = no label.
-# (label, cpu, size, comment) — ROM order, contiguous 0x8E29-0xA000.
+# Packed PSG.  label "" = no label.  (label, cpu, size, comment)
+# Sfx 0x8E29-0x949B, music 0x949B-0xA000 in seg14 then tails in seg15.
 # Labels match music/ sfx/ WAV stems (hyphen -> _; music channels _a/_b/_c).
-PSG_STREAMS = [
+PSG_SFX = [
     ("", 0x8E29, 0x0002, "unused 1F A8 (= 0xA81F dummy)"),
     ("sfx_01_boss_heal", 0x8E2B, 0x002D, "boss HP drip-fill"),
     ("sfx_02_vendor_withdraw", 0x8E58, 0x0011, "vendor offer withdrawn"),
@@ -1337,6 +1339,8 @@ PSG_STREAMS = [
     ("snd_fd_seq", 0x9463, 0x000D, ""),
     ("sfx_19_vendor_offer", 0x9470, 0x001B, "vendor offer"),
     ("snd_fb_seq", 0x948B, 0x0010, ""),
+]
+PSG_MUSIC_SEG14 = [
     ("music_80_bgm_s00_03_a", 0x949B, 0x0066, "stages 0-3"),
     ("music_80_bgm_s00_03_b", 0x9501, 0x0097, "stages 0-3"),
     ("music_80_bgm_s00_03_c", 0x9598, 0x00D1, "stages 0-3"),
@@ -1357,19 +1361,19 @@ PSG_STREAMS = [
 ]
 
 
-def emit_psg_streams(rom: bytes) -> None:
-    """Labeled packed PSG sequences (sfx_tbl / music_ptr bodies in seg14)."""
-    b14 = 14 * 0x2000
-    lines = [
-        "; Packed PSG streams (seg14 0x8E29-0x9FFF).  sfx_tbl / music_ptr /",
-        "; snd_fb_seq / snd_fd_seq.  music_85_bgm_s10_18_b continues in psg_seg15.asm;",
-        "; ids 85c and 86-8F live there too.",
-        "",
-    ]
-    cpu = 0x8E29
-    for label, start, size, comment in PSG_STREAMS:
+def emit_packed_psg(
+    rom: bytes,
+    bank_n: int,
+    page_org: int,
+    entries: list[tuple],
+    lines: list[str],
+    expect_cpu: int,
+) -> None:
+    b = bank_n * 0x2000
+    cpu = entries[0][1]
+    for label, start, size, comment in entries:
         assert start == cpu, "PSG gap/overlap at 0x%04X vs 0x%04X" % (start, cpu)
-        fo = b14 + (start - 0x8000)
+        fo = b + (start - page_org)
         buf = rom[fo : fo + size]
         assert len(buf) == size
         extra = ("  ; %s" % comment) if comment else ""
@@ -1379,8 +1383,88 @@ def emit_psg_streams(rom: bytes) -> None:
             lines.append("; 0x%04X  packed %d%s" % (start, size, extra))
         lines.extend(defb_lines(buf))
         cpu = start + size
-    assert cpu == 0xA000, hex(cpu)
-    write_lines(os.path.join(DATA, "psg_streams.asm"), lines)
+    assert cpu == expect_cpu, hex(cpu)
+
+
+def emit_psg_sfx(rom: bytes) -> None:
+    """Labeled packed sfx (sfx_tbl / snd_fb_seq / snd_fd_seq in seg14)."""
+    lines = [
+        "; Packed PSG sfx (seg14 0x8E29-0x949B).  sfx_tbl bodies plus snd_fd_seq /",
+        "; snd_fb_seq overlays.  Music follows in psg_music.asm.",
+        "",
+    ]
+    emit_packed_psg(rom, 14, 0x8000, PSG_SFX, lines, 0x949B)
+    write_lines(os.path.join(DATA, "psg_sfx.asm"), lines)
+
+
+def emit_psg_music(rom: bytes) -> None:
+    """Labeled packed music (seg14 0x949B through seg15 env tables)."""
+    lines = [
+        "; Packed PSG music (seg14 0x949B through seg15 env tables at 0xABF8).",
+        "; music_ptr channel streams; music_85_bgm_s10_18_b crosses 0xA000.",
+        "; Unidentified 0xA820-0xAAD5 is not in music_ptr.  Envelope tables",
+        "; (sound_env_ptr / sound_env_ptr_alt) and their 0xFF-ended streams follow.",
+        "",
+    ]
+    emit_packed_psg(rom, 14, 0x8000, PSG_MUSIC_SEG14, lines, 0xA000)
+
+    b15 = 15 * 0x2000
+    bank15 = rom[b15 : b15 + 0x2000]
+    assert len(bank15) == 0x2000
+
+    def slurp(cpu: int, n: int) -> bytes:
+        return bank15[cpu - 0xA000 : cpu - 0xA000 + n]
+
+    cpu = 0xA000
+    ends = [start for _, start, _ in MUSIC_SEG15[1:]] + [0xA820]
+    for (label, start, comment), end in zip(MUSIC_SEG15, ends):
+        assert start == cpu, "music gap at 0x%04X vs 0x%04X" % (start, cpu)
+        size = end - start
+        buf = slurp(start, size)
+        extra = ("  ; %s" % comment) if comment else ""
+        lines.append("%s:  ; 0x%04X  packed %d%s" % (label, start, size, extra))
+        lines.extend(defb_lines(buf))
+        cpu = end
+    assert cpu == 0xA820, hex(cpu)
+
+    unid = slurp(0xA820, 0xAAD6 - 0xA820)
+    lines.append("")
+    lines.append(
+        "seg15_unid_a820:  ; 0xA820  %d bytes (not in music_ptr)" % len(unid)
+    )
+    lines.extend(defb_lines(unid))
+
+    def words_at(addr: int, n: int) -> list[int]:
+        out = []
+        for i in range(n):
+            lo = slurp(addr + i * 2, 2)
+            out.append(lo[0] | (lo[1] << 8))
+        return out
+
+    assert words_at(0xAAD6, 12) == ENV_PTR_MAIN
+    assert words_at(0xAAEE, 12) == ENV_PTR_ALT
+    lines.append("")
+    lines.append("; 12 words; hi nibble of the env note * 2 indexes this.")
+    lines.append("sound_env_ptr:  ; 0xAAD6")
+    lines.extend(emit_defw_names(ENV_PTR_MAIN))
+    lines.append("sound_env_ptr_alt:  ; 0xAAEE")
+    lines.extend(emit_defw_names(ENV_PTR_ALT))
+
+    env_starts = sorted(set(ENV_PTR_MAIN + ENV_PTR_ALT) - {0xABF8})
+    cpu = 0xAB06
+    assert env_starts[0] == cpu
+    for i, start in enumerate(env_starts):
+        assert start == cpu, "env gap at 0x%04X vs 0x%04X" % (start, cpu)
+        end = env_starts[i + 1] if i + 1 < len(env_starts) else 0xABF8
+        buf = slurp(start, end - start)
+        assert buf[-1] == 0xFF
+        lines.append(
+            "%s:  ; 0x%04X  packed %d" % (env_name(start), start, len(buf))
+        )
+        lines.extend(defb_lines(buf))
+        cpu = end
+    assert cpu == 0xABF8, hex(cpu)
+    write_lines(os.path.join(DATA, "psg_music.asm"), lines)
 
 
 # --- banks 9 / 10 (gfx scripts, palettes, enemy/weapon RLE, HUD tiles) ------
@@ -1632,11 +1716,24 @@ def emit_seg9_10(rom: bytes) -> None:
     assert len(tail) == 0x30
     tlines = [
         "; 0x9A80-0x9AAF: stage spike-bar scenery (vdp_hmmc from 0x9A80 / 0x9A90).",
+        "; Uncompressed 4bpp (SCREEN 5).  mount is 8x4 (16 bytes); spike is 8x8",
+        "; (32 bytes).  Each defb is one pixel-row (4 bytes, high nibble = left).",
+        "; Preview: gfx/tilesets/spike_bar.png (`make gfx`); cell header = CPU address.",
+        "; The sheet pads the 8x4 mount to an 8x8 cell.",
         "spike_bar_mount:  ; 0x9A80",
+        "; 0x9A80  mount 8x4",
     ]
-    tlines.extend(defb_lines(tail[:0x10]))
+    mount, unit = tail[:0x10], tail[0x10:]
+    for i in range(0, len(mount), 4):
+        tlines.append(
+            "\tdefb " + ",".join("0x%02x" % b for b in mount[i:i + 4])
+        )
     tlines.append("spike:  ; 0x9A90")
-    tlines.extend(defb_lines(tail[0x10:]))
+    tlines.append("; 0x9A90  spike tile 0x00")
+    for i in range(0, len(unit), 4):
+        tlines.append(
+            "\tdefb " + ",".join("0x%02x" % b for b in unit[i:i + 4])
+        )
     write_lines(os.path.join(DATA, "spike_bar.asm"), tlines)
 
     # --- room_gfx_ptr + records + scripts + pal_9ffe prefix ---
@@ -1908,7 +2005,7 @@ def emit_seg9_10(rom: bytes) -> None:
     )
 
 
-# Packed music tails + env tables (seg15 0xA000-0xABF8).  ROM order.
+# Packed music continuation + env tables (seg15 0xA000-0xABF8).  ROM order.
 MUSIC_SEG15 = [
     ("music_85_bgm_s10_18_b_cont", 0xA000, "tail of music_85_bgm_s10_18_b (EA 0x9F9C)"),
     ("music_85_bgm_s10_18_c", 0xA051, "85 C; stages 10 and 18"),
@@ -1967,7 +2064,7 @@ def emit_defw_names(ptrs: list[int]) -> list[str]:
 
 
 def emit_seg15(rom: bytes) -> None:
-    """Seg15: music tails, env tables, Dracula portrait, leftover tiles."""
+    """Seg15: Dracula portrait (music/env live in psg_music.asm)."""
     b15 = 15 * 0x2000
     bank15 = rom[b15 : b15 + 0x2000]
     assert len(bank15) == 0x2000
@@ -1975,65 +2072,6 @@ def emit_seg15(rom: bytes) -> None:
     def slurp(cpu: int, n: int) -> bytes:
         o = cpu - 0xA000
         return bank15[o : o + n]
-
-    lines = [
-        "; Packed PSG music tails (seg15 0xA000-0xA81F) + unused blob +",
-        "; 12-word env pointer tables (sound_env_ptr / sound_env_ptr_alt)",
-        "; and their 0xFF-ended streams.  music_85_bgm_s10_18_b_cont continues music_85_bgm_s10_18_b",
-        "; from seg14.  Unidentified 0xA820-0xAAD5 is not in music_ptr.",
-        "",
-    ]
-    cpu = 0xA000
-    ends = [start for _, start, _ in MUSIC_SEG15[1:]] + [0xA820]
-    for (label, start, comment), end in zip(MUSIC_SEG15, ends):
-        assert start == cpu, "music gap at 0x%04X vs 0x%04X" % (start, cpu)
-        size = end - start
-        buf = slurp(start, size)
-        extra = ("  ; %s" % comment) if comment else ""
-        lines.append("%s:  ; 0x%04X  packed %d%s" % (label, start, size, extra))
-        lines.extend(defb_lines(buf))
-        cpu = end
-    assert cpu == 0xA820, hex(cpu)
-
-    unid = slurp(0xA820, 0xAAD6 - 0xA820)
-    lines.append("")
-    lines.append(
-        "seg15_unid_a820:  ; 0xA820  %d bytes (not in music_ptr)" % len(unid)
-    )
-    lines.extend(defb_lines(unid))
-    cpu = 0xAAD6
-
-    def words_at(addr: int, n: int) -> list[int]:
-        out = []
-        for i in range(n):
-            lo = slurp(addr + i * 2, 2)
-            out.append(lo[0] | (lo[1] << 8))
-        return out
-
-    assert words_at(0xAAD6, 12) == ENV_PTR_MAIN
-    assert words_at(0xAAEE, 12) == ENV_PTR_ALT
-    lines.append("")
-    lines.append("; 12 words; hi nibble of the env note * 2 indexes this.")
-    lines.append("sound_env_ptr:  ; 0xAAD6")
-    lines.extend(emit_defw_names(ENV_PTR_MAIN))
-    lines.append("sound_env_ptr_alt:  ; 0xAAEE")
-    lines.extend(emit_defw_names(ENV_PTR_ALT))
-
-    env_starts = sorted(set(ENV_PTR_MAIN + ENV_PTR_ALT) - {0xABF8})
-    cpu = 0xAB06
-    assert env_starts[0] == cpu
-    for i, start in enumerate(env_starts):
-        assert start == cpu, "env gap at 0x%04X vs 0x%04X" % (start, cpu)
-        end = env_starts[i + 1] if i + 1 < len(env_starts) else 0xABF8
-        buf = slurp(start, end - start)
-        assert buf[-1] == 0xFF
-        lines.append(
-            "%s:  ; 0x%04X  packed %d" % (env_name(start), start, len(buf))
-        )
-        lines.extend(defb_lines(buf))
-        cpu = end
-    assert cpu == 0xABF8, hex(cpu)
-    write_lines(os.path.join(DATA, "psg_seg15.asm"), lines)
 
     n_face_tiles = 8 + 2 + 2 + 1 + 0x6C  # 121
     n_blank = 6
@@ -2106,7 +2144,8 @@ def main() -> None:
     emit_credits_font(rom)
     emit_simon_rle(rom)
     emit_seg13_gaps(rom)
-    emit_psg_streams(rom)
+    emit_psg_sfx(rom)
+    emit_psg_music(rom)
     emit_seg9_10(rom)
     emit_seg15(rom)
 

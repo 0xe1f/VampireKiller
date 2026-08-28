@@ -63,14 +63,14 @@ gm_opt_tbl:
 ;  the game tick.  0xC005 bit0 skips a frame if the previous tick is still
 ;  running.  0xE600 is the Game Master detection flag, not a re-entrancy flag:
 ;  when set, gm_pause_check gets first look at the keyboard (STOP pause / ';'
-;  frame advance) and then usually falls into l4030h anyway.
+;  frame advance) and then usually falls into int_tick anyway.
 ; ===========================================================================
 int_handler:
 	di
 	ld a,(0e600h)           ; Game Master cartridge present?
 	or a
 	jp nz,gm_pause_check    ; yes -> pause/frame-advance keys get first look
-l4030h:
+int_tick:
 	di
 	ld a,00eh               ; page segment 14...
 	ld (08000h),a           ; ...into 0x8000-0x9FFF
@@ -84,14 +84,14 @@ l4030h:
 	ld (0a000h),a           ; ...(0f0f3 = current seg at 0xA000)
 	ld hl,0c005h            ; soft guard: game-tick-in-progress flag
 	bit 0,(hl)
-	jp nz,l405fh            ; tick still running -> skip this frame
+	jp nz,int_tick_done            ; tick still running -> skip this frame
 	inc (hl)                ; mark tick in progress
 	ei
 	call 04ba4h             ; input / timers update
 	call main_tick          ; MAIN TICK (top-level state machine)
 	xor a
 	ld (0c005h),a           ; clear tick-in-progress flag
-l405fh:
+int_tick_done:
 	ei
 	ret
 ; ADD_HL_A - HL += A (unsigned), carry into H.  Indexes byte tables.
@@ -199,24 +199,24 @@ gm_pause_check:
 	ld hl,0e601h            ; pause state
 	ld a,(hl)
 	or a
-	jr nz,l40f1h            ; already paused
+	jr nz,gm_paused            ; already paused
 	bit 4,c
-	jp z,l4030h             ; running, no STOP -> normal tick
+	jp z,int_tick             ; running, no STOP -> normal tick
 	ld (hl),c               ; STOP -> enter pause...
 	call gm_psg_save_mute   ; ...silence the PSG and skip the tick
 	ei
 	ret
-l40f1h:                         ; paused
+gm_paused:                         ; paused
 	bit 7,c
-	jp nz,l40fch            ; ';' -> single-step one frame, stay paused
+	jp nz,gm_pause_step            ; ';' -> single-step one frame, stay paused
 	bit 4,c
-	jr z,l4102h             ; nothing pressed -> stay frozen
+	jr z,gm_pause_hold             ; nothing pressed -> stay frozen
 	xor a
 	ld (hl),a               ; STOP again -> leave pause
-l40fch:
+gm_pause_step:
 	call gm_psg_restore
-	jp l4030h               ; run one tick
-l4102h:
+	jp int_tick               ; run one tick
+gm_pause_hold:
 	call gm_psg_mute        ; hold the PSG silent while frozen
 	ei
 	ret
@@ -307,7 +307,7 @@ state_logo:                    ; 0 (0x417D)
 	or a
 	ret z
 	xor a
-	jr l41c9h
+	jr main_timer_set
 l418ah:
 	djnz l4198h
 	ld hl,0c004h
@@ -315,37 +315,37 @@ l418ah:
 	ret nz
 	call title_build
 	xor a
-	jp l424bh
+	jp main_state_inc
 l4198h:
 	call video_reset
 	call konami_logo_draw   ; draw Konami logo + start the top-to-bottom wipe (seg1)
-	jr l41cch
+	jr main_phase_next
 state_title:                   ; 1 (0x41A0): idle until C004==0, then attract
 	ld hl,0c004h
 	dec (hl)               ; first entry C004=0 wraps to 0xFF (~4s @ 60Hz)
 	ret nz
 	call title_set_color2
-	jp l4249h              ; C004=0x20, inc C000 -> state 2 attract
+	jp main_state_inc_20              ; C004=0x20, inc C000 -> state 2 attract
 state_attract:                 ; 2 (0x41AB)
 	djnz l41c1h
 	call attract_tick
 	ld a,(0c413h)
 	or a
 	ret nz
-l41b5h:
+main_state_set_0:
 	xor a
-l41b6h:
+main_state_set:
 	ld (0c000h),a
 	ld a,020h
 	ld (0c004h),a
-	jp l4252h
+	jp main_phase_reset
 l41c1h:
 	call video_reset
 	call attract_run_init
 	ld a,020h
-l41c9h:
+main_timer_set:
 	ld (0c004h),a
-l41cch:
+main_phase_next:
 	ld hl,0c001h
 	inc (hl)
 	ret
@@ -353,7 +353,7 @@ state_intro:                   ; 3 (0x41D1)
 	djnz l41e4h
 	ld hl,0c004h
 	dec (hl)
-	jr z,l41cch
+	jr z,main_phase_next
 	bit 2,(hl)
 	ld hl,l4d30h
 	jp z,hud_string_draw
@@ -361,14 +361,14 @@ state_intro:                   ; 3 (0x41D1)
 l41e4h:
 	djnz l41ech
 	call reset_run_state   ; wipe run work RAM (0xC405..0xDFFF) + seed defaults
-	jp l41cch
+	jp main_phase_next
 l41ech:
 	djnz l41fbh
 	ld a,001h
 	ld (0c41ah),a          ; intro: use mtile_stream_intro
 	call intro_scene_build
 	ld a,0a0h
-	jp l41c9h
+	jp main_timer_set
 l41fbh:
 	djnz l4222h
 	call intro_actors_frame
@@ -390,12 +390,12 @@ l4206h:
 	ld (hl),000h
 	call gm_apply_values
 l4220h:
-	jr l4249h
+	jr main_state_inc_20
 l4222h:
 	ld a,08ah
 	call play_sound
 	ld a,050h
-	jp l41c9h
+	jp main_timer_set
 state_stage_bridge:            ; 4 (0x422C)
 	ld hl,0c410h
 	ld a,(hl)
@@ -410,13 +410,13 @@ state_stage_bridge:            ; 4 (0x422C)
 	call stage_bgm_play
 	xor a
 	ld (0c40dh),a          ; clear BGM force-replay (set on death / GM stage jump)
-l4249h:
+main_state_inc_20:
 	ld a,020h
-l424bh:
+main_state_inc:
 	ld (0c004h),a
 	ld hl,0c000h
 	inc (hl)
-l4252h:
+main_phase_reset:
 	xor a
 	ld (0c001h),a
 	ret
@@ -425,30 +425,30 @@ state_play:                    ; 5 (0x4257)
 	ld a,(0c40ch)
 	or a
 	ld a,00ch
-	jp nz,l41b6h           ; 0xC40C -> vendor
+	jp nz,main_state_set           ; 0xC40C -> vendor
 	ld a,(0c40ah)
 	and a
-	jp nz,l428ch           ; 0xC40A -> pause
+	jp nz,pause_enter           ; 0xC40A -> pause
 	ld a,(0c41bh)
 	and a
 	ld a,009h
-	jp nz,l41b6h           ; pending room exit (1-4 or 0xFF spot) -> room_trans
+	jp nz,main_state_set           ; pending room exit (1-4 or 0xFF spot) -> room_trans
 	ld a,(0c408h)
 	or a
 	ld a,00ah
-	jp nz,l41b6h           ; stage-boundary -> spend key / advance_stage
+	jp nz,main_state_set           ; stage-boundary -> spend key / advance_stage
 	ld a,(0c409h)
 	and a
 	ld a,008h
-	jp nz,l41b6h           ; 0xC409 -> hub_advance
+	jp nz,main_state_set           ; 0xC409 -> hub_advance
 	ld a,(0c413h)
 	or a
 	ret nz
-	jr l4249h
-l428ch:
+	jr main_state_inc_20
+pause_enter:
 	call pause_panel_draw
 	ld a,00bh
-	jp l41b6h
+	jp main_state_set
 state_death:                   ; 6 (0x4294): 0xC410 lives? respawn via state 4 : game-over
 	ld hl,0c410h
 	ld a,(hl)
@@ -461,11 +461,11 @@ l429bh:
 	inc a
 	ld (0c40dh),a          ; force stage BGM replay on respawn
 	ld a,004h
-	jp l41b6h
+	jp main_state_set
 l42abh:
 	ld a,08bh
 	call play_sound
-	jr l4249h
+	jr main_state_inc_20
 state_game_over:               ; 7 (0x42B2)
 	djnz l42e3h
 	ld a,(0e600h)          ; Game Master cartridge present?
@@ -484,7 +484,7 @@ l42bfh:
 	ld a,(hl)
 	and 0bfh
 	ld (hl),a
-	jp l41b5h
+	jp main_state_set_0
 l42d3h:
 	ld a,003h
 	ld (0c410h),a
@@ -506,7 +506,7 @@ l42e3h:
 l42f8h:
 	call hud_draw_all
 	ld a,078h
-	jp l41c9h
+	jp main_timer_set
 ; gm_continue_text (0x4300) - extra GAME OVER line, drawn only when a Game
 ; Master cartridge was detected (see game_master_detect).  Renders as
 ; "F5 <arrow> CONTINUE": glyph 0x4F is a right-pointing arrow, not "_".
@@ -553,12 +553,12 @@ state_hub_advance:             ; 8 (0x4324): boss-clear/credits set 0xC409; hub 
 	jr nz,l434bh
 	ld hl,0c002h
 	res 6,(hl)
-	jp l41b5h
+	jp main_state_set_0
 l434bh:
 	call 062dch
 ; advance_stage (0x434E): move to the next stage.  Bumps the two BCD progress
 ; counters 0xC410/0xC411, increments the stage id 0xD000, resets the room id
-; 0xD001 to 0, clears 0xC408/0xC409, then runs transition type 4 (jp l41b6h).
+; 0xD001 to 0, clears 0xC408/0xC409, then runs transition type 4 (jp main_state_set).
 ; (Runtime-confirmed: stage1/room7 -> stage2/room0 on entering a door.)
 advance_stage:
 	ld hl,0c410h
@@ -579,21 +579,21 @@ advance_stage:
 	ld (0c409h),a          ; clear hub-advance (boss-clear) latch
 	ld (0c408h),a          ; clear stage-boundary (white-key door) latch
 	ld a,004h
-	jp l41b6h
+	jp main_state_set
 	ld hl,00000h
 	ld (0c000h),hl
 	ret
 l4377h:
 	call video_reset
 	xor a
-	jp l41c9h
+	jp main_timer_set
 state_room_trans:              ; 9 (0x437E): 0xC41B pending exit
 	call conn_lookup_paged
 	ld a,006h
-	jp nc,l41b6h           ; failed transition -> death
+	jp nc,main_state_set           ; failed transition -> death
 	call 062fch
 	ld a,005h
-	jp l41b6h              ; back to play
+	jp main_state_set              ; back to play
 state_stage_exit:              ; 10 (0x438E): 0xC408, spend white key, next stage
 	ld hl,0c701h
 	ld a,(hl)
@@ -648,7 +648,7 @@ frontend_game_start:
 	ld a,003h
 	ld (0e607h),a           ; 3 lives
 	ld a,00dh               ; A = 0x0D -> state_game_master_menu
-	jp l41b6h               ; enter via the state setter
+	jp main_state_set               ; enter via the state setter
 state_pause:                   ; 11 (0x43E1): F1 froze play (0xC40A); wait F1 (0xC00B bit0) to resume
 	ld a,(0c00bh)
 	rra
@@ -659,13 +659,13 @@ state_pause:                   ; 11 (0x43E1): F1 froze play (0xC40A); wait F1 (0
 	ld a,0feh              ; unpause BGM
 	call play_sound
 	ld a,005h
-	jp l41b6h              ; back to play
+	jp main_state_set              ; back to play
 state_vendor:                  ; 12 (0x43F7): 0xC40C whip-hit vendor
 	djnz l4402h
 	call vendor_purchase_tick  ; poll buy/refuse (seg2)
 	ret nz
 	ld a,00fh
-	jp l41c9h
+	jp main_timer_set
 ; Vendor-interaction states (this resident state machine drives the vendor code
 ; in seg2, which is paged at 0x8000): 0x94C1 = vendor_purchase_tick body, 0x950E
 ; = offer dismiss, vendor_make_offer (0x938E) = arm a sale.
@@ -676,12 +676,12 @@ l4402h:
 	ret nz
 	call 0950eh            ; ...then run the vendor offer-dismiss (seg2)
 	ld a,005h
-	jp l41b6h
+	jp main_state_set
 l4411h:
 	xor a
 	ld (0c40ch),a          ; clear the whip-hit flag
 	call vendor_make_offer ; arm a sale (seg2 0x938E)
-	jp l41cch
+	jp main_phase_next
 ; ===========================================================================
 ;  state_game_master_menu - primary state 13 (0x441B), the hidden Game Master
 ;  menu.  Only reachable when game_master_detect found the cartridge (0xE600),
@@ -723,7 +723,7 @@ l4447h:
 	ld (0e602h),hl
 	call gm_prompt_stage
 l4450h:
-	jp l41cch              ; -> number-entry phase (C001=1)
+	jp main_phase_next              ; -> number-entry phase (C001=1)
 l4453h:
 	djnz l4488h
 	call gm_confirm_key    ; RETURN pressed?
@@ -761,7 +761,7 @@ l4488h:
 	ld bc,0000eh
 	ld (hl),000h
 	ldir
-	jp l41cch
+	jp main_phase_next
 pause_panel_draw:
 	ld hl,06854h
 	ld bc,03010h
@@ -954,7 +954,7 @@ l45b4h:
 ;     Frame is 66x6 at (0x3B,0x0D) / (0x3B,0x16), one pixel around each 64x4 bar.
 hud_bars_redraw:
 	call health_bar_redraw
-l45bah:
+enemy_meter_redraw:
 	call enemy_meter_frame
 	jp draw_enemy_meter
 health_bar_redraw:
@@ -1030,7 +1030,7 @@ l461bh:
 	ld a,080h
 l462eh:
 	ld (hl),a
-	jp l45bah
+	jp enemy_meter_redraw
 ; damage_health (seg0 0x4632) - subtract from HEALTH: 0xC415 -= B, floored at 0.
 damage_health:
 	ld hl,0c415h           ; Simon health
@@ -1062,7 +1062,7 @@ l464bh:
 	ld a,(hl)
 	sub b
 	ld (hl),a
-	jp l45bah
+	jp enemy_meter_redraw
 	ld b,001h
 	jr damage_health
 	ld b,001h
@@ -2119,7 +2119,7 @@ l4b9ch:
 	ld hl,0c00ch
 	call input_edge
 	call read_buttons
-l4bb8h:
+input_edge_play:
 	ld hl,0c007h           ; play: held at C007, rising edge at C006
 input_edge:                    ; (seg0 0x4BBB) A=sample, (HL)=held, (HL-1)=new-press
 	ld c,(hl)
@@ -2306,7 +2306,7 @@ l4d6dh:
 	call title_fill_strips
 	ld a,(0002bh)          ; MSX BIOS ID byte 0x002B...
 	and 00fh               ; ...low nibble = character set (0 = Japanese)
-	jr nz,l4dc3h           ; non-zero -> international title (VAMPIRE KILLER)
+	jr nz,title_layout_intl           ; non-zero -> international title (VAMPIRE KILLER)
 	ld de,0a818h           ; Japanese layout: castle...
 	ld hl,title_castle
 	call tile_layout_draw
@@ -2314,15 +2314,15 @@ l4d6dh:
 	ld hl,title_logo_jp
 	call tile_layout_draw
 	call title_sat_init
-	jr l4dd5h
-l4dc3h:                        ; international/other machine
+	jr title_layout_finish
+title_layout_intl:                        ; international/other machine
 	ld de,03828h           ; "VAMPIRE KILLER" logo...
 	ld hl,title_logo_intl
 	call tile_layout_draw
 	ld de,0b830h           ; ...+ castle
 	ld hl,title_castle
 	call tile_layout_draw
-l4dd5h:
+title_layout_finish:
 	ld hl,l4d0fh
 	call hud_string_draw
 	jp vdp_screen_on
@@ -2375,7 +2375,7 @@ l4e3bh:
 	cp 0ffh
 	jr z,l4e48h
 	ld hl,0c007h
-	jp l4bb8h
+	jp input_edge_play
 l4e48h:
 	xor a
 	ld (0c413h),a
@@ -2749,7 +2749,7 @@ sound_halt:
 	ld (0c012h),hl
 	ld (0c014h),hl
 	ld (0c016h),hl
-l50a5h:
+sound_nop:
 	ret
 ; play_sound (seg0 0x50A6): queue a sound.  A = id.
 ;   0         stop
@@ -2777,19 +2777,19 @@ play_sound:
 	pop af
 	di
 	or a
-	jp z,l51abh
+	jp z,play_sound_stop
 	cp 0fbh
-	jp nc,l51b1h
+	jp nc,play_sound_special
 	or a
-	jp p,l5171h
+	jp p,play_sound_sfx
 	ld de,0c01ch
-	ld hl,l515dh
+	ld hl,sound_ch_template
 	ld bc,00014h
 	ldir
-	ld hl,l515dh
+	ld hl,sound_ch_template
 	ld bc,00014h
 	ldir
-	ld hl,l515dh
+	ld hl,sound_ch_template
 	ld bc,00014h
 	ldir
 	and 07fh
@@ -2825,19 +2825,19 @@ l50f6h:
 	ld (0c014h),hl
 	xor a
 	ld (0c096h),a
-	ld hl,l50a5h
+	ld hl,sound_nop
 	ld (0c016h),hl
 	ld a,(0c098h)
 	and 0fdh
 	ld (0c098h),a
-l5131h:
+play_sound_clear:
 	xor a
 	ld (0c0a5h),a
 	ld (0c0a6h),a
 	ld (0c0a8h),a
 	ld a,007h
 	ld (0c0a7h),a
-l5140h:
+play_sound_exit:
 	di
 	push hl
 	ld hl,0f0f1h
@@ -2858,7 +2858,7 @@ l5140h:
 	pop de
 	pop hl
 	ret
-l515dh:
+sound_ch_template:
 	nop
 	nop
 	ld bc,00000h
@@ -2873,20 +2873,20 @@ l515dh:
 	nop
 	nop
 	nop
-l5171h:
+play_sound_sfx:
 	ld c,a
 	ld a,(0c0a8h)
 	or a
-	jp nz,l5140h
+	jp nz,play_sound_exit
 	ld a,(0c096h)
 	cp c
-	jp z,l5183h
-	jp nc,l5140h
-l5183h:
+	jp z,play_sound_sfx_go
+	jp nc,play_sound_exit
+play_sound_sfx_go:
 	ld a,c
 	ld (0c096h),a
 	ld de,0c058h
-	ld hl,l515dh
+	ld hl,sound_ch_template
 	ld bc,00014h
 	ldir
 	rlca
@@ -2902,22 +2902,22 @@ l519bh:
 	ld (0c064h),de
 	ld hl,sound_sfx
 	ld (0c016h),hl
-	jp l5140h
-l51abh:
+	jp play_sound_exit
+play_sound_stop:
 	call sound_halt
-	jp l5140h
-l51b1h:
-	jp z,l527dh
+	jp play_sound_exit
+play_sound_special:
+	jp z,play_sound_fb
 	cp 0fch
-	jp z,l52d0h
+	jp z,play_sound_fc
 	cp 0fdh
-	jp z,l51cbh
+	jp z,play_sound_fd
 	cp 0feh
-	jp z,l5234h
+	jp z,play_sound_fe
 	ld a,03ah
 	ld (0c0a5h),a
-	jp l5140h
-l51cbh:
+	jp play_sound_exit
+play_sound_fd:
 	ld a,(0c098h)
 	or 001h
 	ld (0c098h),a
@@ -2951,13 +2951,13 @@ l51cbh:
 	ld hl,sound_ch_fd
 	ld (0c01ah),hl
 	ld de,0c080h
-	ld hl,l515dh
+	ld hl,sound_ch_template
 	ld bc,00014h
 	ldir
 	ld hl,snd_fd_seq
 	ld (0c080h),hl
-	jp l5131h
-l5234h:
+	jp play_sound_clear
+play_sound_fe:
 	ld a,(0c098h)
 	and 0feh
 	ld (0c098h),a
@@ -2987,8 +2987,8 @@ l5234h:
 	ld e,a
 	ld a,00ah
 	call WRTPSG
-	jp l5140h
-l527dh:
+	jp play_sound_exit
+play_sound_fb:
 	ld a,(0c098h)
 	or 002h
 	ld (0c098h),a
@@ -3016,13 +3016,13 @@ l529ch:
 	ld hl,sound_ch_fb
 	ld (0c018h),hl
 	ld de,0c06ch
-	ld hl,l515dh
+	ld hl,sound_ch_template
 	ld bc,00014h
 	ldir
 	ld hl,snd_fb_seq
 	ld (0c078h),hl
-	jp l5140h
-l52d0h:
+	jp play_sound_exit
+play_sound_fc:
 	ld a,(0c098h)
 	and 0fdh
 	ld (0c098h),a
@@ -3052,7 +3052,7 @@ l52f0h:
 	ld e,a
 	ld a,008h
 	call WRTPSG
-	jp l5140h
+	jp play_sound_exit
 	ld a,(0c0a6h)
 	cp 0f8h
 	ret
@@ -4086,19 +4086,19 @@ title_load_tiles:
 	call vram_blit_tile_run
 	ld a,(0002bh)          ; MSX character set (0 = Japanese)...
 	and 00fh
-	jr nz,l5a2ah           ; non-zero -> international glyphs
+	jr nz,title_load_intl           ; non-zero -> international glyphs
 	ld hl,0aea0h           ; Japanese: 0x1E "Akumajo Dracula" kana glyphs
 	ld b,01eh
 	call vram_blit_tile_run
 	call page_map_banks
 	ld de,title_jp_sprites
 	call rle_dec_addr
-	jr l5a32h
-l5a2ah:                        ; international/other machine
+	jr title_load_finish
+title_load_intl:                        ; international/other machine
 	ld hl,0b260h           ; 0x59 "VAMPIRE KILLER" glyphs (seg8 0xB260)
 	ld b,059h
 	call vram_blit_tile_run
-l5a32h:
+title_load_finish:
 	jp page_play_banks           ; restore default banks
 ; Paged-call wrappers into seg13 (bank 0x0d @ 0xA000).  page_map_banks pages it in,
 ; page_play_banks restores the banks.  Three sibling entry points:
@@ -4452,7 +4452,7 @@ scenery_stage_ofs:
 	defb 000h,018h,030h    ; hub 4  stages 13-15
 	defb 000h,018h,030h    ; hub 5  stages 16-18
 ; scenery_pos_xy (seg0 0x5C1D) - pos byte (Yhi Xlo nibbles) -> C=Y, B=X pixels.
-; Object-list Attr uses this same packing; l61c2h loads high->E (Y) low->D (X).
+; Object-list Attr uses this same packing; object_list_spawn loads high->E (Y) low->D (X).
 scenery_pos_xy:
 	ld a,(hl)
 	ld b,a
@@ -5468,12 +5468,12 @@ l61b7h:
 	inc hl
 	djnz l61b7h
 	ret
-; --- l61c2h - spawn actors from the visible room's object list ---------------
+; --- object_list_spawn - spawn actors from the visible room's object list ---------------
 ;  Walks 4 slots of the 0xDB00 list at the current room and, for each live
 ;  slot, unpacks Attr (Y<<4|X, same nibble order as scenery_pos_xy) into
 ;  E=Y / D=X pixels and calls spawn_actor_ab (0x5F26) with C = id&0x7F
 ;  (the actor_* type). Stage 0 returns immediately (dec a; ret m).
-l61c2h:
+object_list_spawn:
 	ld a,(0d002h)          ; A = level index
 	ld c,a
 	add a,a
@@ -5494,12 +5494,12 @@ l61c2h:
 	add a,a                ; A = column * 0x10 (slot stride)
 	call ADD_HL_A          ; HL -> first slot to draw
 	ld b,004h              ; up to 4 objects
-l61e2h:
+object_list_spawn_loop:
 	push bc
 	push hl
 	ld a,(hl)              ; slot+0 = id (0 = empty)
 	and a
-	jr z,l6200h
+	jr z,object_list_spawn_next
 	ld b,000h
 	and 07fh               ; low 7 bits = actor type
 	ld c,a
@@ -5518,14 +5518,14 @@ l61e2h:
 	inc hl
 	ld a,(hl)              ; slot+3 = attribute/index
 	call spawn_actor_ab            ; C = type, DE = pixel pos, A = slot+3 -> CFFA
-l6200h:
+object_list_spawn_next:
 	pop hl
 	pop bc
 	inc hl                 ; advance to the next slot (stride 4)
 	inc hl
 	inc hl
 	inc hl
-	djnz l61e2h
+	djnz object_list_spawn_loop
 	ret
 
 ; --- konami_logo_draw (0x6209) - set up the Konami logo screen ---------------
@@ -5699,7 +5699,7 @@ l62eah:
 ;  Full screen/level construction, called from seg0 when entering a cell:
 ;  clears per-screen state, paints tiles (seg2 helpers), sets the cell event,
 ;  unpacks scenery (candles/blocks/chests/vendors), loads the packed object
-;  list and spawns its actors (`l61c2h`).  Many steps are helpers in seg1/seg2
+;  list and spawns its actors (`object_list_spawn`).  Many steps are helpers in seg1/seg2
 ;  not yet mapped; the annotated ones below are the known pieces.
 	call load_stage_tileset
 	call 05714h
@@ -5724,7 +5724,7 @@ l62eah:
 	call 047ceh
 	call 09cb0h
 	call object_list_load         ; load the packed object list into 0xDB00/DC00/DD00
-	jp l61c2h              ; spawn actors from the room object list
+	jp object_list_spawn              ; spawn actors from the room object list
 dracula_face_rest:                 ; (seg1 0x6334) event 6: closed mouth + closed eyes
 	call dracula_blit_mouth_closed
 	jp dracula_blit_eyes_closed
@@ -6342,8 +6342,8 @@ event_dracula_done:
 ;  Event 6 (Dracula) finishes the CE01 machine by raising CE40=1.  Play tick
 ;  (play_tick) then calls here instead of the normal loop.  CE40 (1..4) minus
 ;  1 selects the step; each advances via credits_next.  Story + staff text
-;  live in seg8 (0xBF20) and seg5 (0x82C0); see credits_ending.asm /
-;  credits_staff.asm.
+;  live in seg8 (0xBF20) and seg5 (0x82C0); see data/credits_ending.asm /
+;  data/credits_staff.asm.
 ;  On done: C409 -> state_hub_advance (hub wrap / loop).
 credits_tick:
 	ld a,(0ce40h)          ; A = credits step (1..4)
@@ -6989,10 +6989,10 @@ l6b6eh:
 	call simon_mirror_frames
 	ld a,(0c007h)          ; held: 0=UP 1=DOWN 2=LEFT 3=RIGHT
 	rra
-	jr c,l6be1h            ; UP -> maybe mount stairs
+	jr c,simon_try_stairs_up            ; UP -> maybe mount stairs
 l6b8ah:
 	rra
-	jp c,l6c17h            ; DOWN held -> crouch (or down-stairs)
+	jp c,simon_try_stairs_down            ; DOWN held -> crouch (or down-stairs)
 	rra
 	push af
 	call c,simon_walk_left
@@ -7047,7 +7047,7 @@ l6bd9h:
 	add a,d
 	ld (0c427h),a          ; Simon X += travel direction
 	ret
-l6be1h:                        ; UP while grounded: try stairs
+simon_try_stairs_up:                        ; UP while grounded: try stairs
 	ex af,af'
 	call stair_probe_up_right
 	ld bc,00001h
@@ -7075,7 +7075,7 @@ l6c0ah:
 	ld (0c424h),a
 	ld (0c426h),a
 	ret
-l6c17h:
+simon_try_stairs_down:
 	call stair_probe_down_right
 	ld bc,00002h
 	jr z,l6bf5h
@@ -7896,14 +7896,14 @@ whip_tick:
 l7201h:
 	ld a,(0c420h)
 	cp 003h
-	jr z,l7213h
+	jr z,simon_torso_from_weapon
 	cp 002h
 	ld a,000h
 	jr nz,l7210h
 	ld a,006h
 l7210h:
 	ld (0c42eh),a
-l7213h:                        ; set torso frame 0xC42F from weapon 0xC436
+simon_torso_from_weapon:                        ; set torso frame 0xC42F from weapon 0xC436
 	ld a,(0c436h)
 	cp 002h
 	jr nc,l7231h
@@ -8555,17 +8555,17 @@ room_edge_detect:
 	ld a,(de)              ; A = Y
 	jr nz,l769dh
 	cp 030h
-	jr c,l76abh            ; on stairs & near top -> up exit
+	jr c,room_edge_up            ; on stairs & near top -> up exit
 l769dh:
 	cp 0e1h
-	jr nc,l76c3h           ; past bottom -> down exit
+	jr nc,room_edge_down           ; past bottom -> down exit
 	ld a,(bc)              ; A = X
 	cp 008h
-	jr c,l7709h            ; past left -> left exit (if permitted)
+	jr c,room_edge_left            ; past left -> left exit (if permitted)
 	cp 0f8h
-	jr nc,l7714h           ; past right -> right exit (if permitted)
+	jr nc,room_edge_right           ; past right -> right exit (if permitted)
 	ret
-l76abh:                        ; top edge (climbing off the top of a stairway)
+room_edge_up:                        ; top edge (climbing off the top of a stairway)
 	ld a,(0c420h)
 	dec a
 	ret z
@@ -8582,10 +8582,10 @@ l76bdh:
 	ld (bc),a
 	ld (hl),001h           ; pending dir = 1 (up)
 	ret
-l76c3h:                        ; past the bottom edge
+room_edge_down:                        ; past the bottom edge
 	ld a,(0c41dh)          ; down exit permit
 	inc a
-	jr nz,l76efh           ; there IS a room below -> normal down transition
+	jr nz,room_edge_down_go           ; there IS a room below -> normal down transition
 	xor a                  ; no room below: bottomless pit -> fall to death
 	ld (0c421h),a
 	ld a,006h
@@ -8606,7 +8606,7 @@ l76c3h:                        ; past the bottom edge
 l76eah:
 	ld a,009h
 	jp play_sound
-l76efh:                        ; room below exists -> down transition
+room_edge_down_go:                        ; room below exists -> down transition
 	ld a,030h
 	ld (de),a              ; wrap Y to top of the new (lower) room
 	ld a,(0c420h)
@@ -8624,7 +8624,7 @@ l7703h:
 l7706h:
 	ld (hl),002h           ; pending dir = 2 (down)
 	ret
-l7709h:                        ; left edge
+room_edge_left:                        ; left edge
 	ld a,(0c41eh)          ; left exit permit
 	inc a
 	ret z                  ; 0xFF = blocked -> no horizontal room here
@@ -8632,7 +8632,7 @@ l7709h:                        ; left edge
 	ld (bc),a              ; wrap X to right side of the new room
 	ld (hl),003h           ; pending dir = 3 (left)
 	ret
-l7714h:                        ; right edge
+room_edge_right:                        ; right edge
 	ld a,(0c41fh)          ; right exit permit
 	inc a
 	ret z                  ; 0xFF = blocked -> no horizontal room here
@@ -11380,7 +11380,7 @@ l8815h:
 l8818h:
 	jp break_chip_spawn
 ; --- reveal (bonus 0x1F): +09 is the third scenery byte, +07/+08 -> E000 pos.
-;  bits7-6 == 11 -> vendor at stamp Y (32x32 LMMM, no offset) via l9180h.
+;  bits7-6 == 11 -> vendor at stamp Y (32x32 LMMM, no offset) via vendor_spawn.
 ;  otherwise -> chest at Y+16 (bottom half of the 4x4) via l8a1ah. Same
 ;  Y+16 as a kind-3 whip drop; scenery Y is the top of the stamp.
 l881bh:
@@ -11409,7 +11409,7 @@ l8838h:
 	ld a,c
 	and 003h
 	ld c,a
-	jp l9180h
+	jp vendor_spawn
 l8845h:
 	ld b,a
 	pop de
@@ -11625,7 +11625,7 @@ l897bh:
 l8980h:
 	ld a,005h              ; leather whip: source X = 5*16
 	ld l,070h              ; source Y = 0x70
-l8984h:                        ; HMMM 16x16 from VRAM page 1 at (A*16, L)
+vram_hmmm16:                        ; HMMM 16x16 from VRAM page 1 at (A*16, L)
 	add a,a
 	add a,a
 	add a,a
@@ -12434,7 +12434,7 @@ hud_bonus_tile:                        ; A = bonus id -> blit that HUD tile
 	sub 010h
 	ld l,060h              ; ids 17+ at Y=0x60
 l8eb8h:
-	jp l8984h
+	jp vram_hmmm16
 hud_keys_refresh:
 	call hud_chest_key_icon
 	jp hud_white_key_icon
@@ -12973,22 +12973,22 @@ door_begin_open:
 	ret nz                 ; only when 0xC5AC == 1 (door armed)
 	ld (hl),0ffh           ; -> 0xFF: begin opening
 	jp door_anim_tick
-; --- l9180h - spawn a special object (vendor) into a 0xC5B5/0xC5C5 slot -----
+; --- vendor_spawn - spawn a special object (vendor) into a 0xC5B5/0xC5C5 slot -----
 ;  On entry HL = object map position, B = subtype, C = slot/variant.  vendor_offer_match
 ;  classifies the subtype (via table 0x5B12) and returns the target slot in A
 ;  (1 -> 0xC5B5, else -> 0xC5C5), or NZ to reject.  The 16-byte struct is filled:
 ;    +0 = 1 (active)   +1/+2 = E,D (position)   +4 = B (subtype)   +5 = C (slot)
 ;    +7/+8 = 0xC70D (the position latched on entry).
 ;  This is NOT the white-key door; door coords live at 0xC5AD/0xC5AE from door_tbl.
-l9180h:
+vendor_spawn:
 	ld (0c70dh),hl
 	call vendor_offer_match
 	ret nz
 	ld hl,0c5b5h
 	dec a
-	jr nz,l9190h
+	jr nz,vendor_spawn_fill
 	ld hl,0c5c5h
-l9190h:
+vendor_spawn_fill:
 	ld (hl),001h           ; +0 = active
 	inc l
 	ld (hl),e              ; +1 = pos lo
@@ -13607,9 +13607,9 @@ minimap_driver:
 	ret nz
 	ld a,(0cf38h)          ; map-screen state
 	dec a
-	jr z,l95afh            ; state 1 -> build the map (draw every room cell)
+	jr z,map_state_build            ; state 1 -> build the map (draw every room cell)
 	dec a
-	jr z,l95bah            ; state 2 -> displayed: wait for F2 to close it
+	jr z,map_state_idle            ; state 2 -> displayed: wait for F2 to close it
 	ld a,(0c00bh)          ; state 0 (playing): F-key edges
 	bit 1,a                ; F2 just pressed?
 	ret z
@@ -13639,16 +13639,16 @@ l9589h:
 	call vdp_hmmv
 	ld a,019h
 	call play_sound
-l95aah:
+map_state_advance:
 	ld hl,0cf38h           ; advance map-screen state (0->1->2)
 	inc (hl)
 	ret
-l95afh:                    ; state 1: build the map, then advance to "displayed"
+map_state_build:                    ; state 1: build the map, then advance to "displayed"
 	call minimap_build         ; draw every room's cell (loops over all rooms)
 	call minimap_blit_simon
 	call minimap_palette
-	jr l95aah
-l95bah:                    ; state 2 (displayed): F2 again closes the map
+	jr map_state_advance
+map_state_idle:                    ; state 2 (displayed): F2 again closes the map
 	ld a,(0c00bh)
 	bit 1,a                ; F2 pressed?
 	ret z
@@ -14726,13 +14726,13 @@ l9ce9h:
 	xor a
 	ret
 ; --- zombie_generator (0x9ced) - continuous zombie spawner (room_spawner bit0) -
-;  Rate-gated by spawn_rate_gate (0xCF00 counter, threshold table l9d4ah scaled by the
+;  Rate-gated by spawn_rate_gate (0xCF00 counter, threshold table spawn_rate_zombie scaled by the
 ;  0xD012 difficulty/mood).  When it fires, spawn_pick_pos picks the spawn position
 ;  (hardcoded per stage/room - NOT read from the tile map), then spawns
 ;  actor_zombie.  Typical: X = 0xF0 (right edge) or 0x10 (left), Y = 0xC0.
 zombie_generator:
 	ld hl,0cf00h
-	ld de,l9d4ah
+	ld de,spawn_rate_zombie
 	call spawn_rate_gate         ; time to spawn?
 	ret nz
 	call spawn_pick_pos         ; DE = spawn position (D=X, E=Y)
@@ -14792,7 +14792,7 @@ l9d3fh:
 	jr nc,l9d35h
 	ld de,0f060h
 	ret
-l9d4ah:                        ; zombie spawn-rate thresholds (8 bytes)
+spawn_rate_zombie:                        ; zombie spawn-rate thresholds (8 bytes)
 	defb 00ch,012h,00ch,00ch,00ch,012h,00ch,00ch
 merman_generator:           ; (0x9D52) bit1, actor_merman_green (1 HP)
 	ld hl,0cf02h
@@ -14802,7 +14802,7 @@ merman_generator_3:         ; (0x9D59) bit2, actor_merman_red (spit, 2 HP)
 	ld hl,0cf02h
 	ld c,actor_merman_red
 merman_spawn:
-	ld de,l9d96h
+	ld de,spawn_rate_merman
 	push bc
 	call spawn_rate_gate
 	pop bc
@@ -14810,7 +14810,7 @@ merman_spawn:
 	ld e,0c8h              ; Y = 0xC8
 	ld a,(0cf03h)
 	and 007h
-	ld hl,l9d8eh           ; X picks
+	ld hl,merman_spawn_x           ; X picks
 	call ADD_HL_A
 	ld d,(hl)
 	ld a,(0c427h)          ; skip if Simon X is within 0x18 of spawn X
@@ -14827,13 +14827,13 @@ l9d89h:
 	add a,d
 	ld d,a
 	jp spawn_actor
-l9d8eh:                        ; merman spawn X candidates
+merman_spawn_x:                        ; merman spawn X candidates
 	defb 060h,0d0h,030h,090h,0a0h,040h,060h,0b0h
-l9d96h:                        ; merman spawn-rate thresholds
+spawn_rate_merman:                        ; merman spawn-rate thresholds
 	defb 001h,018h,018h,018h,018h,018h,018h,018h
 hanging_bat_generator:         ; (0x9D9E) bit3, actor_hanging_bat
 	ld hl,0cf06h
-	ld de,l9dc2h
+	ld de,spawn_rate_bat
 	ld c,actor_hanging_bat
 flyer_spawn:                   ; bats / ghosts / medusa heads: edge X, Y=SimonY-8
 	push bc
@@ -14852,25 +14852,25 @@ l9db6h:
 	sub 008h
 	ld e,a                 ; Y = Simon Y - 8
 	jp spawn_actor
-l9dc2h:                        ; bat spawn-rate thresholds
+spawn_rate_bat:                        ; bat spawn-rate thresholds
 	defb 014h,014h,014h,028h,014h,014h,014h,028h
 flying_skull_generator:        ; (0x9DCA) bit4, actor_flying_skull
 	ld hl,0cf08h
-	ld de,l9dd4h
+	ld de,spawn_rate_ghost
 	ld c,actor_flying_skull
 	jr flyer_spawn
-l9dd4h:                        ; ghost spawn-rate thresholds
+spawn_rate_ghost:                        ; ghost spawn-rate thresholds
 	defb 01ch,01ch,01ch,048h,01ch,01ch,01ch,048h
 ghost_head_generator:          ; (0x9DDC) bit5, actor_ghost_head
 	ld hl,0cf0ah
-	ld de,l9de6h
+	ld de,spawn_rate_medusa
 	ld c,actor_ghost_head
 	jr flyer_spawn
-l9de6h:                        ; medusa-head spawn-rate thresholds
+spawn_rate_medusa:                        ; medusa-head spawn-rate thresholds
 	defb 00ch,00ch,00ch,018h,00ch,00ch,00ch,018h
 roc_generator:                 ; (0x9DEE) bit6, actor_roc
 	ld hl,0cf0ch
-	ld de,l9e15h
+	ld de,spawn_rate_skull_cannon
 	call spawn_rate_gate
 	ret nz
 	ld a,(0c427h)
@@ -14888,7 +14888,7 @@ l9e05h:
 l9e10h:
 	ld c,actor_roc
 	jp spawn_actor
-l9e15h:                        ; skull-cannon spawn-rate thresholds
+spawn_rate_skull_cannon:                        ; skull-cannon spawn-rate thresholds
 	defb 018h,018h,018h,018h,018h,018h,018h,018h
 ; spawn_edge_gate (seg2 0x9E1D): carry = don't spawn.  Simon in the middle
 ; (X 0x40..0xBF) always allows.  Near an edge, reject a spawn on that same

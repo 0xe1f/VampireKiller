@@ -9,7 +9,7 @@
 ; starts at X+1.
 ;
 ; Last story line ("LIFE EVER AGAIN::::") and the staff roll live in
-; credits_staff.asm (seg5 @ 0x82C0).
+; data/credits_staff.asm (seg5 @ 0x82C0).
 
 credits_msg_brave:             ; 0xBF20
 	cr 0x08, 0x20, "SO THE BRAVE YOUNG MAN"

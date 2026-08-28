@@ -30,8 +30,7 @@
 ;    banks_9a    title gfx 16K @ 0x8000      (banks 9-10)
 ;    banks_bcd   map 24K @ 0x6000            (banks 11-13)
 ;    banks_ef    sound/portrait 16K @ 0x8000 (banks 14-15)
-;  Data lives in `segments/data/`; ending text is `credits_ending.asm`,
-;  staff is `credits_staff.asm`.  Small numeric ids are `segments/*.inc`
+;  Data lives in `segments/data/`.  Small numeric ids are `segments/*.inc`
 ;  (actors, items, weapon, sfx, poses, scenery).
 ;  `PHASE` sets each block's runtime address while the output stays contiguous.
 ; ===========================================================================

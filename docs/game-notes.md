@@ -227,13 +227,13 @@ then calls `credits_tick` (seg1 0x66C1) instead of the normal loop:
 
 Other bosses never raise CE40; they use `room_event_ce10` → C409 directly.
 
-**Ending paragraph** (seg8, `credits_ending.asm` @ 0xBF20, last line in seg5):
+**Ending paragraph** (seg8, `data/credits_ending.asm` @ 0xBF20, last line in seg5):
 
 > SO THE BRAVE YOUNG MAN PUT DRACULA INTO DEEP SLEEP AGAIN AND THE TOWN
 > RESTORED ITS PEACE: LET;S PRAY THAT THE EVIL MIND OF **HUMANBEINGS** WILL
 > NOT LET DRACULA COME TO LIFE EVER AGAIN::::
 
-**Staff** (seg5, `credits_staff.asm` @ 0x82C0): STAFF; GAME DESIGNER A:NAGATA;
+**Staff** (seg5, `data/credits_staff.asm` @ 0x82C0): STAFF; GAME DESIGNER A:NAGATA;
 PROGRAMMER A:HARIMA / I:AKADA / K:NAGAE; SOUND PROGRAMMER H:SHIKAMA;
 GRAPHIC DESIGNER S:IWAMOTO / N:MATSUI / K:MIZUTANI / A:FUJIMOTO; SOUND
 EFFECT BY K:UEHARA; MUSIC BY K:YAMASHITA / S:TERASHIMA; ART DESIGNER
@@ -290,7 +290,7 @@ The world is a hierarchy: **hub → stage → room**.
   left → isolated room 9; stage 18 room 8 left → room 9 (Dracula). Stage 15 is not
   a unique mechanism — it is the intra-stage case we traced live (`C5AD=0x80`,
   `C5AE=0x0C`).
-- **Display-type `0x1F` is not this door.** `l87f6h` → `l881bh` → `l9180h` is the
+- **Display-type `0x1F` is not this door.** `l87f6h` → `l881bh` → `vendor_spawn` is the
   vendor / brazier-reveal special-object path (`0xC5B5`/`0xC5C5`). An earlier A/B
   scan that "ruled out" placed-object doors was right to reject 0x1F as the
   *white-key door*, but it never found `door_tbl` either. `tools/roomperm.py`
@@ -347,14 +347,14 @@ index is a RAM trio:
 - **0xD000 = stage** (0 = courtyard, 1-18 = the 18 stages).
 - **0xD001 = room** within the stage (increments walking right).
 Each hub's packed stream holds 3 stages × up to 16 room slots × up to 4 objects.
-Per object: **list-id = actor type** (`l61c2h` → `spawn_actor_ab` with
+Per object: **list-id = actor type** (`object_list_spawn` → `spawn_actor_ab` with
 `C = id&0x7F`; names in `segments/actors.inc`). Bit7 is stored then stripped;
 only `actor_dog` ever sets it (3 of 6; role unknown — not facing in the actor
 slot). Attr packs the in-room cell the same way as scenery: **Y<<4|X**, each
-nibble ×16 px. `l61c2h` loads high→E (Y / `spawn_actor` +03) and low→D (X /
+nibble ×16 px. `object_list_spawn` loads high→E (Y / `spawn_actor` +03) and low→D (X /
 +05). A decoder that treated it as X<<4|Y swapped the axes — dogs and bats
 looked one cell off on Y whenever the nibbles differed by 1.
-Stage 0 (courtyard) has no object-list entries — `l61c2h` does `dec a; ret m`.
+Stage 0 (courtyard) has no object-list entries — `object_list_spawn` does `dec a; ret m`.
 `D000`/`D001` are stage/room **indices**,
 not map coordinates — room positions come from `minimap_room_pos` (see below).
 `tools/roomperm.py` is the map (`gfx/minimap_s<NN>.png`); its `decode_objects`
@@ -456,8 +456,8 @@ The graphic is staged once by the HUD/bonus loader at seg0 0x5494, which builds
 the picture in **VRAM page 1 at (0x80, 0x70)** out of two seg9 fragments:
 `spike_bar_mount` (8×4, one chain link) centred at X=140, and `spike` (8×8, a
 bar segment with one downward spike) blitted four times at X = `0x80`/`0x88`/
-`0x90`/`0x98` to span 32px. Dumped by `dump_hazards` to `gfx/hazards.png`
-(assembled bar + both fragments, stage 6 room 1 palette). Note the pixel
+`0x90`/`0x98` to span 32px. Source fragments are `data/spike_bar.asm`
+(`gfx/tilesets/spike_bar.png`; cell header = CPU address). Note the pixel
 indices are 4/6/0xB, all **stage-overlay** slots, so the same bytes are gold
 here but would come out pink or cyan under another stage's palette.
 
@@ -1010,7 +1010,7 @@ in these sheets.
 
   `spawn_actor` takes **D = X** (slot+05), **E = Y** (slot+03). Zombies typically
   enter at X=0xF0 (right edge) or 0x10 (left), Y=0xC0. Mermen spawn at Y=0xC8
-  with X from table `l9d8eh`. Hanging bats / flying skulls / ghost heads share `flyer_spawn`: X at
+  with X from table `merman_spawn_x`. Hanging bats / flying skulls / ghost heads share `flyer_spawn`: X at
   the screen edge, Y = SimonY−8. The roc is fixed at X=0xE0, Y=0x30 or 0x40,
   and skips the spawn if Simon X ≥ 0xC0.
 - Each generator is rate-gated by `spawn_rate_gate` (per-generator 0xCF00+ counter vs a
@@ -1139,7 +1139,7 @@ Shared physics header (`actor_integrate` 0x99C0, velocity helpers in seg3):
 Hardware SAT is **Y then X**. `actor_sat_build` adds `ix+3` to Y and `ix+5` to
 X. Spawn pixel is the feet / hook: walker shapes sit at dy=-16 or -32, 16×16
 hang and fly poses use stream `0x81` (dy=-15, dx=-8). Object-list Attr is
-**Y<<4|X** (same as scenery); `l61c2h` loads high→E (Y) and low→D (X). A
+**Y<<4|X** (same as scenery); `object_list_spawn` loads high→E (Y) and low→D (X). A
 decoder that treated it as X<<4|Y swapped the axes — dogs/bats looked one
 cell off on Y whenever the nibbles differed by 1.
 
@@ -1248,7 +1248,7 @@ Y=0; `tile_string_draw` copies them with no HUD `+0x38`. Logo ids `0x2C`–
 ids: 0 stop, 1-0x1D sfx (`sfx_tbl`), 0x80-0x8F music (`music_ptr`, 3 channel
 pointers each; stage table is seg1 `stage_bgm_tbl`), 0xFB/0xFD overlays
 (hourglass freeze / death-style), 0xFC/0xFE restore, 0xFF fade. Packed
-streams (`data/psg_streams.asm` / `data/psg_seg15.asm`) use the WAV
+streams (`data/psg_sfx.asm` / `data/psg_music.asm`) use the WAV
 catalogue names: `sfx_{id}_{name}` and `music_{id}_{name}_{a,b,c}`
 (hyphens in stems become `_`). Id 0x89 is Simon death; 0x8B is GAME OVER.
 `tools/psgplay.py` (`make music` / `make sfx`) runs the same bytecode through
@@ -1448,7 +1448,7 @@ The committed build stays byte-exact because identified graphics are stored as
 the original bytes (labeled `defb` for uncompressed tilesets / metatiles; packed
 1bpp sprite RLE with `%xxxxxxxx` pixel rows; hex PSG / unidentified slices).
 PNG copies live in `gfx/`, generated by `tools/gfxdump.py` (`make gfx`):
-- `gfx/<name>.png` - derived sheets (composites, hazards)
+- `gfx/<name>.png` - derived sheets (composites)
 - `gfx/fonts/<stem>.png` - 1bpp font asms (`font_credits`, `font_hud`,
   `font_logo`)
 - `gfx/sprites/<stem>.png` - packed 1bpp sprite-asm sheets only
@@ -1512,7 +1512,8 @@ Catalogued so far:
   0x2D** `actor_dracula_head` (intro SAT head `0x57`/`0x59` arcs away after `dracula_summon`), and **type
   0x2C** `actor_dracula_bat` (robe `0x02` / `0xA5`, then head `0xA6` open /
   `0xA7` closed, then hanging-bat fly `0x1B–0x20`). `make gfx` composites
-  the standing cloak into `enemy_sheet.png`.
+  the standing cloak into `enemy_sheet.png`.  The two stored 32×32 frames
+  are also `gfx/tilesets/dracula_body.png`.
   Type **21** is Frankenstein (`0x79`); type 13/24 share the hunchback pose
   `0x67`. Types **0x1A/0x1B/0x1C** are `actor_blob_blue` / `_red` / `_white`
   (`spr_blob` fill / `spr_blob_cc` outline at FE80+; SAT `0F 42` / `08 42` /
@@ -1527,15 +1528,6 @@ Catalogued so far:
   of `89`). Blob `0x9D–0xA2` are dest retargets of `0x9B/0x9C`.
   Igor (`actor_igor`, type `18`) gets his own sheet; he is not on the group
   sheet. Defeat chunk `0x5A` is on the type-17 sheet. Same `make gfx` pass.
-- `hazards.png` - environmental hazards: things that damage Simon but are not
-  actors, so they never appear on `enemy_sheet.png`. The stage 6 room 1 spike
-  bars are the **only** one in the game — every other damage source is an enemy
-  or an enemy shot. Three labelled cells: the assembled `SPIKE BAR 32x12` plus
-  its two seg9 fragments (`SPIKE 8x8`, `CHAIN 8x4`). Same convention as
-  `enemy_sheet.png` (packed mixed sizes, `NAME WxH` labels, `OFF` filling the
-  object's rectangle), but the pixels are 4bpp *background* data read straight
-  from seg9 rather than composited sprite planes. Palette is stage 6 room 1's
-  playfield sequence. Derived (`make gfx`).
 - `vendor.png` - the cloaked sitting vendor as five 32×32 colour variants
   (C70B 0..4: hearts / hit / flash / idle / mood). Assembled from
   `data/vendor_tiles.asm` plus `vendor_tile_ptr` / `vendor_recolor_tbl`.
@@ -1553,12 +1545,16 @@ Catalogued so far:
 - `tilesets/<stem>.png` - one sheet per 4bpp tileset asm
   (`tileset_s00.asm` → `tilesets/tileset_s00.png`, plus `tileset_s08_pad`,
   `intro_tiles`, `bonus_hud_tiles`, `hud_weapon_key_tiles`,
-  `dracula_portrait`, `dracula_portrait_parts`, `vendor_tiles`). Cell header is the CPU
+  `dracula_portrait`, `dracula_portrait_parts`, `vendor_tiles`,
+  `spike_bar`, `dracula_body`). Cell header is the CPU
   address (4 hex digits).
   Playfield files use that stage's palette; intro uses `intro_palette_load`;
   bonus HUD and HUD keys/weapons / vendor 8×8s use HUD-fixed; portrait uses HUD-fixed then
-  `0xBF6F`. 8×8 files are every 32-byte tile; `bonus_hud_tiles`,
+  `0xBF6F`; `spike_bar` uses stage 6 room 1 playfield; `dracula_body` uses
+  stage 18 room 9. 8×8 files are every 32-byte tile; `bonus_hud_tiles`,
   `hud_weapon_key_tiles`, and `dracula_portrait_parts` are 16×16.
+  `spike_bar` is the 8×4 mount (padded to 8×8) plus the 8×8 spike.
+  `dracula_body` is two packed 32×32 frames (cloak / chest-open).
 - `palettes/<stem>.png` - one sheet per palette_apply asm
   (`stage_palettes.asm`, `room_palettes.asm`). 16 columns = VDP indices
   0–F, one row per table. Defined slots are a solid 8×8 of that entry's

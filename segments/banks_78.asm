@@ -14,7 +14,7 @@
 
     INCLUDE "data/font_hud.asm"
 
-    INCLUDE "credits_ending.asm"
+    INCLUDE "data/credits_ending.asm"
 
     INCLUDE "data/tileset_s08_pad.asm"
 

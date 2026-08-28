@@ -802,7 +802,7 @@ def cell_px(cx, cy, scale):
 def object_px(ox, oy, origin, scale):
     """Object-list 8px tiles + SAT bbox origin -> cropped playfield px.
 
-    l61c2h unpacks Attr (Y<<4|X) to pixel DE: E=Y, D=X into spawn_actor
+    object_list_spawn unpacks Attr (Y<<4|X) to pixel DE: E=Y, D=X into spawn_actor
     (same screen space as scenery_pos_xy). actor_sat_build adds shape
     (dx,dy). Composite (0,0) is min(dx,dy): walkers/dogs dy=-16 (feet at
     spawn); hang pose 0x81 is dy=-15 (hook at spawn).

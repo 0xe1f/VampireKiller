@@ -8,7 +8,7 @@
 ; the player `inc a`s it to test the 0xFF end-of-roll marker, so the blit
 ; starts at X+1.  End of roll is {0x20, 0xFF} (X slot = terminator).
 ;
-; Story lines before this live in credits_ending.asm (seg8 @ 0xBF20).
+; Story lines before this live in data/credits_ending.asm (seg8 @ 0xBF20).
 
 credits_msg_life:              ; 0x82C0
 	cr 0x88, 0x20, "LIFE EVER AGAIN::::"

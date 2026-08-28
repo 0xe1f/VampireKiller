@@ -1,7 +1,7 @@
 ; ===========================================================================
 ;  banks e-f - 16K sound/portrait window @ 0x8000-0xBFFF (page_sound_banks).
 ;  Bank 0x0E at 0x8000 (scenery / spawn / objects / credits font / PSG driver);
-;  bank 0x0F at 0xA000 (music tails, env tables, Dracula portrait).
+;  bank 0x0F at 0xA000 (rest of psg_music, env tables, Dracula portrait).
 ;  Origin is set by PHASE 0x8000 in VampireKiller.asm.
 ;
 ;  Shares the CPU window with play bank 2; names here are unique (not z80dasm
@@ -15,7 +15,8 @@
 ;    0x8668  object_list_ptr / packed per-hub enemy streams
 ;    0x8824  credits_font / credits_font_az (data/font_credits.asm)
 ;    0x8964  sound_tick (PSG driver; sfx_tbl 0x8D8F, music_ptr 0x8DC9)
-;    0xA000  psg_seg15 / dracula_portrait / dracula_portrait_parts
+;            then psg_sfx (to 0x949B) / psg_music (crosses 0xA000)
+;    0xABF8  dracula_portrait / dracula_portrait_parts
 ; ===========================================================================
 
 	INCLUDE "data/scenery_lists.asm"
@@ -707,11 +708,9 @@ music_ptr:
 	defw music_8e_credits_a,music_8e_credits_b,music_8e_credits_c  ; 8E credits
 	defw music_8f_silence,music_8f_silence,music_8f_silence  ; 8F dummy silence
 
-; Packed PSG streams (sfx, 0xFB/0xFD specials, music that still fits).
-; Tails 85b_cont / 85c / 86-8F follow in data/psg_seg15.asm (bank 15 @ 0xA000).
-	INCLUDE "data/psg_streams.asm"
-
-	INCLUDE "data/psg_seg15.asm"
+; Packed PSG: sfx then music (music_85_bgm_s10_18_b crosses 0xA000).
+	INCLUDE "data/psg_sfx.asm"
+	INCLUDE "data/psg_music.asm"
 
 	INCLUDE "data/dracula_portrait.asm"
 

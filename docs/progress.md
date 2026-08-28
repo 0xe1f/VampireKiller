@@ -18,8 +18,9 @@ metatile streams/defs are labeled `.asm` (`tileset_s00`..`s18`,
 tables are `data/mtile_index.asm`, `mtile_defbase.asm`, `conn_tbl.asm`,
 `door_tbl.asm`, `spot_tbl.asm` (cell ptrs sit at the front of `simon_rle.asm`).
 Seg14 holds scenery / object lists (`data/scenery_lists.asm`,
-`spawn_masks.asm`, `object_lists.asm`) / `font_credits.asm` / the PSG driver, then bank 15 music tails
-and the Dracula portrait (`psg_seg15.asm`, `dracula_portrait.asm`).
+`spawn_masks.asm`, `object_lists.asm`) / `font_credits.asm` / the PSG
+driver, then packed PSG (`psg_sfx.asm`, `psg_music.asm` crossing into
+bank 15) and the Dracula portrait (`dracula_portrait.asm`).
 Fully migrated banks (0-15) have no `.bin`.
 
 ## Done
@@ -33,7 +34,7 @@ Fully migrated banks (0-15) have no `.bin`.
   `frontend_input` (0x4398), and the entity dispatch/`entity_tbl` at `0x5FD0`.
 - Text: encoding cracked (`ASCII - 0x10` for HUD/title via the `vk` macro). Ending
   credits store letters as ASCII but space as `0x00` (`cr` macro); story + staff
-  live in `segments/credits_ending.asm` / `credits_staff.asm`.
+  live in `data/credits_ending.asm` / `credits_staff.asm`.
 - Reference: Metal Gear disassembly used to confirm the text scheme and the
   Konami actor/OBJ struct ([GuillianSeed/MetalGear](https://github.com/GuillianSeed/MetalGear)).
 - Graphics: identified video mode as **SCREEN 5** (4bpp bitmap) in `video_init`;
@@ -41,7 +42,7 @@ Fully migrated banks (0-15) have no `.bin`.
   `tools/disasm/gfxview.py` (1bpp/4bpp ASCII-art viewer).
 - PSG catalogue: `make music` / `make sfx` (`tools/psgplay.py`) render BGM and
   sfx ids 1–0x1D to `music/` and `sfx/` (`{id}_{name}.wav`). Stream labels in
-  `data/psg_streams.asm` / `psg_seg15.asm` use those stems (`sfx_*`,
+  `data/psg_sfx.asm` / `psg_music.asm` use those stems (`sfx_*`,
   `music_*_{a,b,c}`); 0x89 is Simon death, 0x8B is GAME OVER.
 - Graphics format **cracked**: RLE decompressor `rle_dec`/`rle_dec_addr` (grammar:
   end / set-addr / run / literal) unpacks all bitmaps + sprite patterns to VRAM.
@@ -71,7 +72,7 @@ Fully migrated banks (0-15) have no `.bin`.
   - Object-list loader cluster 0x615b-0x6208: `object_list_load` unpacks the current
     cell's object list from seg 14 into the 4-byte-slot tables at 0xDB00/DC00/DD00
     (`object_list_unpack` unpacker, `object_list_lookup` per-level pointer, `object_list_clear` clear,
-    (`l61c2h` spawns actors via seg0 0x5F26). RAM: 0xD000 = stage (0=court-
+    (`object_list_spawn` spawns actors via seg0 0x5F26). RAM: 0xD000 = stage (0=court-
     yard, 1-18), 0xD001 = room within stage, 0xD002 = hub / seg14 scenery+object
     datasets (6 hubs of 3 stages; row->hub table at seg0 0x5E71). See "Eighth session".
   - `lookup_word_tbl` (0x6549): generic word-table lookup (DE=table, A=index).
@@ -79,7 +80,7 @@ Fully migrated banks (0-15) have no `.bin`.
     - 0x62d7: arms mode bytes 0xC415=0x20/0xC418=0x80, then jp seg0 0x53BD.
     - 0x62ed: full screen builder - clears state, paints tiles (seg2 helpers),
       sets cell event, unpacks scenery (scenery_load), loads object list
-      (object_list_load) + spawns actors (l61c2h).
+      (object_list_load) + spawns actors (object_list_spawn).
     - `intro_scene_build` (0x63DA): Simon at 0x80,0x80, load intro tileset /
       palette / simon+sky sprites, hide SAT, redraw. Used by state_intro.
     - `cell_event_set` (0x633a): set current cell event 0xCE00 from l6376h[row]
@@ -288,7 +289,7 @@ Fully migrated banks (0-15) have no `.bin`.
     * **0xD000 = STAGE** number: 0 = courtyard, 1..18 = the 18 stages (3 per hub).
       Changed once during the walk (0->1) exactly at the courtyard->castle boundary
       (frame 585). Stage 0 (courtyard) carries NO object-list entries: the sprite
-      emitter l61c2h does `dec a; ret m` on stage 0, so it draws nothing (consistent
+      emitter object_list_spawn does `dec a; ret m` on stage 0, so it draws nothing (consistent
       with "no animals in the courtyard").
     * **0xD001 = ROOM** index within the stage (walk right): stepped 0 ->1 (f377) ->2
       (f474) through the three courtyard rooms, then reset to 0 on entering the castle.
@@ -300,7 +301,7 @@ Fully migrated banks (0-15) have no `.bin`.
       0x00 = next room cell (0x10 apart), 0xFF = end. Per object: list-id =
       actor type (`and 0x7F` at spawn); bit7 stripped (dogs only; unknown).
       Attr hi nibble = X cell, lo nibble = Y cell (x/y * 16 px).
-      Reader `l61c2h`: stageStream = (D000-1) - D002*3; room = D001.
+      Reader `object_list_spawn`: stageStream = (D000-1) - D002*3; room = D001.
     * **Room/object map extracted for ALL 18 stages** -> `tools/roommap.py` (decodes
       seg14 + the row table, renders `gfx/map_*.png` + a per-room object breakdown).
       `--datasets all` = whole world (each row = a stage, each cell = a room, dots =
@@ -595,7 +596,7 @@ Fully migrated banks (0-15) have no `.bin`.
       never gates it. Mechanism A (blocked-edge stage exit) therefore structurally
       cannot be stage 15's door.
     * **The type-0x1F special object is a brazier/block REVEAL.** `l87f6h` (checks
-      display-type `0x1F` -> promoter `l881bh` -> spawner `l9180h` -> struct at
+      display-type `0x1F` -> promoter `l881bh` -> spawner `vendor_spawn` -> struct at
       0xC5B5/0xC5C5) lives inside `brazier_destroyed` (seg2 0x87C1). So a whippable
       object whose DEFINITION display-type is `0x1F` becomes an in-room special object
       at its spot; its position feeds 0xC5AD/0xC5AE, which `sub_771fh`/`0x8587`
@@ -705,7 +706,7 @@ Fully migrated banks (0-15) have no `.bin`.
       end: the object renderer (seg2 ~0x87F6) treats display-type **0x1F** as a special
       object. seg2 `l881bh` reads its attribute `ix+009`; if bits7-6 are set (`&0xC0 ==
       0xC0`) it splits the attr into **subtype = bits5-2**, **slot = bits1-0** and calls
-      the spawner **`l9180h`** (0x9180). The spawner writes a 16-byte struct into
+      the spawner **`vendor_spawn`** (0x9180). The spawner writes a 16-byte struct into
       **0xC5B5** (or 0xC5C5): +0=active, +1/+2 = position, +4 = subtype, +5 = slot,
       +7/+8 = latched position. `0xC5AD/0xC5AE` (= 0xC5B5 slot +? / the door coords the
       proximity test reads) come straight from this object's placement.
@@ -720,7 +721,7 @@ Fully migrated banks (0-15) have no `.bin`.
       real game: **doors are mechanism A** (blocked edge + opening), correct for EVERY
       stage except 15. Mechanism B is a dead end for white-key doors: id-0x1f objects
       exist in only **3 rooms game-wide** (stages 3 and 4), none a white-key door. So
-      the type-0x1F code path (seg2 `l881bh`/`l9180h`/`0xC5AC`) is real but it's the
+      the type-0x1F code path (seg2 `l881bh`/`vendor_spawn`/`0xC5AC`) is real but it's the
       **vendor / a rare special object**, NOT the stage door. (Stage-15 room 8's list
       object `0x10 @ (11,10)` is the painting, confirming B doesn't mark the door.)
     * **Shipped: mechanism A is now the default door detector.** `door_rects()` rewritten
@@ -749,7 +750,7 @@ Fully migrated banks (0-15) have no `.bin`.
       9 right→10 (two rooms both claim 9's right), so it can't be a perfect grid - the
       portal edge is simply ignored for placement, which keeps the physical rooms sane.
     * **Source annotated** (seg2, byte-exact): the type-0x1F special-object promoter
-      (0x881B / l8838h), the spawner `l9180h`, and the 0xC5AC door-open state machine
+      (0x881B / l8838h), the spawner `vendor_spawn`, and the 0xC5AC door-open state machine
       (`l914eh`/`sub_9175h`) - now understood to be the vendor/special-object path.
 
 - Twentieth session (STAGE-12 anchor + WHITE-KEY DOOR rendering):
@@ -1077,7 +1078,7 @@ use `room_event_ce10` → C409.
    id N = ROM tile N−1, id 0 blank; HUD rows cropped). Banks 4–8 are labeled
    source (`tileset_s00`..`s18`). Packed Simon/intro RLE is `segments/data/simon_rle.asm`
    / `intro_sky.asm`. Seg9/10 are labeled (`room_gfx.asm`, `enemy_sprite_rle.asm`,
-   palettes). Seg15 is labeled (`psg_seg15.asm`, `dracula_portrait.asm`).
+   palettes). Seg15 is labeled (`psg_music.asm`, `dracula_portrait.asm`).
    `actor_tick_tbl` now uses `enemy_*_go` / `merman_go` / `hanging_bat_go`
    mid-entries (spawn stays `enemy_*_tick`). `vendor_outcome_tbl` converted.
 2. Convert the tile-layout block `0x4C3F-0x4D0E` in seg00 from misdisassembled

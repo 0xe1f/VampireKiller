@@ -2,7 +2,7 @@
 ;  play_sound ids.  Readability only — not emitted.
 ;  1..0x1D index sfx_tbl (seg14 0x8D8F); 0x80..0x8F index music_ptr
 ;  (id & 0x7F)*6.  0xFF is the fade / stop command, not a table row.
-;  Stream labels in data/psg_streams.asm keep the sfx_NN_ / music_NN_ stems.
+;  Stream labels in data/psg_sfx.asm / psg_music.asm keep the sfx_NN_ / music_NN_ stems.
 ; ===========================================================================
 
 sfx_boss_heal:           equ 0x01

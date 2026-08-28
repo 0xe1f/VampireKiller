@@ -8,7 +8,7 @@
 
     INCLUDE "data/tileset_s01.asm"
 
-    INCLUDE "credits_staff.asm"
+    INCLUDE "data/credits_staff.asm"
 
     INCLUDE "data/tileset_s07.asm"
 

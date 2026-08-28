@@ -54,7 +54,7 @@ NOTE_PERIODS = [
     0x12E4, 0x11D4, 0x10D4, 0x0FE4, 0x0F00, 0x0E28,
 ]
 
-# play_sound copies this 20-byte block to each music channel (l515dh).
+# play_sound copies this 20-byte block to each music channel (sound_ch_template).
 TEMPLATE = bytes([
     0x00, 0x00,  # +0 stream ptr (filled in)
     0x01, 0x00, 0x00,  # +2 flags (bit0=tone), +3 scale, +4 base vol

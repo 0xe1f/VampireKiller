@@ -92,8 +92,8 @@ of `<Game>.asm`.
   sheet as hex in a leftover dump. Packed 1bpp sprite RLE uses the same `%`
   rows for pixel bytes (run/literal counts stay hex). PNG is preview-only
   (hex tile-id labels, not ASCII chars) until the packer is byte-exact. Mixed
-  banks (named tables + hex leftover slices). VK seg15 is music tails + env
-  tables + 4bpp Dracula portrait.
+  banks (named tables + hex leftover slices). VK bank 15 continues
+  `psg_music` + env tables + 4bpp Dracula portrait.
   VK banks_ef is scenery
   lists + spawn masks + enemy lists + sound: emit the cracked tables as commented
   `defw`/`defb` once ids are named; packed PSG as labeled hex streams.
@@ -183,7 +183,7 @@ of `<Game>.asm`.
   may be stripped at spawn (not "scenery"). Name ids from that spawn call. The
   same numeric value in another table (display-type, drop-gate) is a different
   field — scan the field the code actually tests. VK's object-list Attr is
-  **Y<<4|X** (same packing as the scenery pos byte); `l61c2h` loads high→E (Y)
+  **Y<<4|X** (same packing as the scenery pos byte); `object_list_spawn` loads high→E (Y)
   and low→D (X). Do not decode it as X<<4|Y — that swap looks like a 16px Y
   error on every record whose nibbles differ by 1.
 - **A second packed list in the same bank often uses a different grammar.** VK's
@@ -313,7 +313,7 @@ game and give per-stage/per-room feedback; fix the classification, re-render.
   against a known axis (here: proximity compares C5AD to Simon Y at 0xC425).
 - **When two mechanisms are plausible, render BOTH and let the human pick.** Don't
   commit to a static-analysis hypothesis before validating it. In VK I traced a
-  slick object path (display-type 0x1F → seg2 `l881bh`/`l9180h`) and was ready to
+  slick object path (display-type 0x1F → seg2 `l881bh`/`vendor_spawn`) and was ready to
   call doors "placed objects." A/B renders (`roomperm.py --compare-doors`) correctly
   **rejected 0x1F** (those 3 rooms are placed hanging bats, list-id 0x1F; the
   vendor/reveal path is display-type 0x1F on a brazier) but the remaining gap was
@@ -323,7 +323,7 @@ game and give per-stage/per-room feedback; fix the classification, re-render.
   settles a wrong theory; WATCH the leftover RAM to find the right one.
 - **A real signal from code can still be the WRONG feature.** The display-type
   0x1F brazier path was genuine engine code — vendor / reveal, not the white-key
-  door. List-id `0x1F` in the same 3 rooms is a placed hanging bat (`l61c2h`
+  door. List-id `0x1F` in the same 3 rooms is a placed hanging bat (`object_list_spawn`
   list-id = actor type). Finding a mechanism that *could* explain something
   isn't proof it *does*; confirm coverage before trusting it.
 - **Engine door placement can be a per-stage record, not room geometry.** VK's

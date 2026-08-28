@@ -9,14 +9,26 @@
 #   make clean      remove build output
 #
 # Prerequisite: tools/sjasmplus (built from source, gitignored)
-# Workbench: tools/workbench (MSXDAW submodule)
+# Workbench (tools/workbench) is required for gfx / music / sfx / segments
+# and for regen — not for assemble or verify.
 
 SRC      := VampireKiller.asm
 OUT      := VampireKiller.rom
 SHA1FILE := VampireKiller.sha1
-include tools/workbench/make/game.mk
+ASM      ?= tools/sjasmplus --longptr
+SHA1SUM  ?= $(shell command -v sha1sum 2>/dev/null || echo "shasum -a 1")
 
-.PHONY: segments gfx music sfx
+.PHONY: all verify clean segments gfx music sfx
+
+all: $(SRC)
+	$(ASM) $(SRC)
+
+verify: all
+	@$(SHA1SUM) -c $(SHA1FILE)
+
+clean:
+	rm -f $(OUT)
+	rm -f banks/*.bin segments/seg*.bin
 
 segments:
 	tools/workbench/msx/split-rom.sh

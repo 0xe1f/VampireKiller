@@ -49,7 +49,9 @@ Tilesets, gfx scripts, RLE, and PSG assemble from labeled `.asm`;
 
 You need **sjasmplus**, built from source
 ([z00m128/sjasmplus](https://github.com/z00m128/sjasmplus)) and placed at
-`tools/sjasmplus`. No original ROM is required to assemble or verify.
+`tools/sjasmplus`. No original ROM and no MSXDAW workbench checkout are
+required to assemble or verify. (`make gfx` / `make music` / `make sfx` and
+bank regen use the `tools/workbench` submodule.)
 
 ```sh
 make verify     # assemble, then SHA-1 check against VampireKiller.sha1

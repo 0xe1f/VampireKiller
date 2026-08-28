@@ -10,15 +10,9 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      # .gitmodules uses SSH; the runner has no deploy key.
-      - name: HTTPS for GitHub SSH URLs
-        run: |
-          git config --global url.https://github.com/.insteadOf git@github.com:
-
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-          submodules: true
 
       - name: Build sjasmplus
         run: |

@@ -1,0 +1,51 @@
+name: verify
+
+on:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # tools/workbench is a local-path submodule; CI only needs game.mk for
+      # `make verify`. Seed the recipes when the submodule is not present.
+      - name: Workbench recipes
+        run: |
+          if [ ! -f tools/workbench/make/game.mk ]; then
+            mkdir -p tools/workbench/make
+            cat > tools/workbench/make/game.mk <<'EOF'
+ASM      ?= tools/sjasmplus --longptr
+SHA1SUM  ?= $(shell command -v sha1sum 2>/dev/null || echo "shasum -a 1")
+
+.PHONY: all verify clean
+
+all: $(SRC)
+	$(ASM) $(SRC)
+
+verify: all
+	@$(SHA1SUM) -c $(SHA1FILE)
+
+clean:
+	rm -f $(OUT)
+EOF
+          fi
+
+      - name: Build sjasmplus
+        run: |
+          git clone --depth 1 --branch v1.24.0 https://github.com/z00m128/sjasmplus.git /tmp/sjasmplus
+          make -C /tmp/sjasmplus
+          cp /tmp/sjasmplus/sjasmplus tools/sjasmplus
+
+      - name: make verify
+        run: make verify
+
+      - name: Discard assembled ROM
+        if: always()
+        run: rm -f VampireKiller.rom

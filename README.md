@@ -1,5 +1,7 @@
 # Vampire Killer (MSX2) — disassembly
 
+[![verify](https://github.com/0xe1f/VampireKiller/actions/workflows/verify.yml/badge.svg)](https://github.com/0xe1f/VampireKiller/actions/workflows/verify.yml)
+
 > This project is a human-guided, largely AI-executed workflow.
 
 A work-in-progress, **byte-exact and reassemblable** disassembly of Konami's

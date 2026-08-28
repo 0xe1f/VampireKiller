@@ -18,15 +18,16 @@ and seg2/3 are both mapped at once.  Paged banks 4..15 default to base 0x8000 -
 pass --base if a bank is mapped at 0xA000.
 
 Examples:
-  tools/romscan.py xref 0x434e                 # who jumps to advance_stage
-  tools/romscan.py xref 0x938e --segs 2,3       # (finds only a data coincidence)
-  tools/romscan.py table 0x92b4 --words 7        # vendor state->handler table
-  tools/romscan.py table 0x8d45 --words 0x19     # collect_bonus handlers (id-1)
+  tools/disasm/romscan.py xref 0x434e                 # who jumps to advance_stage
+  tools/disasm/romscan.py xref 0x938e --segs 2,3       # (finds only a data coincidence)
+  tools/disasm/romscan.py table 0x92b4 --words 7        # vendor state->handler table
+  tools/disasm/romscan.py table 0x8d45 --words 0x19     # collect_bonus handlers (id-1)
+  tools/disasm/romscan.py --rom other.rom xref 0x4000
 """
 import argparse, os, sys
 
 SEG_BASE = {0: 0x4000, 1: 0x6000, 2: 0x8000, 3: 0xA000}
-ROM_CANDIDATES = ["references/VampireKiller.rom", "VampireKiller.rom"]
+ROM_CANDIDATES = ["VampireKiller.rom"]
 
 # absolute control-transfer opcodes -> mnemonic
 ABS_OPS = {0xC3: "jp", 0xCD: "call",
@@ -37,16 +38,24 @@ REL_OPS = {0x18: "jr", 0x20: "jr nz", 0x28: "jr z", 0x30: "jr nc",
 
 
 def repo_root():
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # tools/disasm/<script> -> repo
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-def load_rom():
+def load_rom(path=None):
     root = repo_root()
-    for c in ROM_CANDIDATES:
-        p = os.path.join(root, c)
+    candidates = []
+    if path:
+        candidates.append(path)
+    env = os.environ.get("ROM")
+    if env:
+        candidates.append(env)
+    candidates.extend(ROM_CANDIDATES)
+    for c in candidates:
+        p = c if os.path.isabs(c) else os.path.join(root, c)
         if os.path.isfile(p):
             return open(p, "rb").read()
-    sys.exit("no ROM found (looked for %s)" % ", ".join(ROM_CANDIDATES))
+    sys.exit("no ROM found (looked for %s)" % ", ".join(candidates))
 
 
 def seg_bytes(rom, seg):
@@ -67,7 +76,7 @@ def parse_int(s):
 
 
 def cmd_xref(args):
-    rom = load_rom()
+    rom = load_rom(args.rom)
     target = parse_int(args.addr)
     segs = [int(x) for x in args.segs.split(",")] if args.segs else [0, 1, 2, 3]
     lo, hi = target & 0xFF, target >> 8
@@ -106,7 +115,7 @@ def cmd_xref(args):
 
 
 def cmd_table(args):
-    rom = load_rom()
+    rom = load_rom(args.rom)
     addr = parse_int(args.addr)
     seg = args.seg if args.seg is not None else {0x4000: 0, 0x6000: 1,
                                                   0x8000: 2, 0xA000: 3}.get(addr & 0xE000, 2)
@@ -132,6 +141,7 @@ def cmd_table(args):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--rom", help="ROM image (default: $ROM, then VampireKiller.rom)")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     x = sub.add_parser("xref", help="find references to an address")

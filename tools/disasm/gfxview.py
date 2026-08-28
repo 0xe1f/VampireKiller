@@ -17,12 +17,12 @@ Two pixel formats:
            tall (best for whole loaded images rather than tile arrays).
 
 Usage:
-  tools/gfxview.py <file> <hex-offset> [--count N] [--size 8|16]
+  tools/disasm/gfxview.py <file> <hex-offset> [--count N] [--size 8|16]
                    [--cols C] [--bpp 1|4] [--raw --width W --rows R]
 
 Examples:
-  tools/gfxview.py references/VampireKiller.rom 0x8000 --bpp 4 --size 16 --count 8 --cols 8
-  tools/gfxview.py references/VampireKiller.rom 0x8000 --bpp 4 --raw --width 64 --rows 32
+  tools/disasm/gfxview.py VampireKiller.rom 0x8000 --bpp 4 --size 16 --count 8 --cols 8
+  tools/disasm/gfxview.py VampireKiller.rom 0x8000 --bpp 4 --raw --width 64 --rows 32
 """
 import argparse
 

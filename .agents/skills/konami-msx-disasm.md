@@ -12,14 +12,17 @@ description: >-
 This repo (the Vampire Killer disassembly) is the reference implementation; these
 skills ship inside it. Reuse its layout, tools, and conventions for every new game
 instead of reinventing them. Read `docs/progress.md` (End goal + Working notes) and
-`docs/game-notes.md` before starting a new game; copy `tools/` and the `Makefile`.
-Paths below are relative to this repo root.
+`docs/game-notes.md` before starting a new game; copy `tools/disasm/` and the
+`Makefile`. Game-specific dump/sheet/handbook scripts stay in `tools/` (VK:
+`gfxdump.py`, `roomperm.py`, `psgplay.py`, `emit_identified_data.py`,
+`guide_assets.py`). Paths below are relative to this repo root.
 
 ## Non-negotiables
 
 - **Byte-exact round-trip at every step.** The build must reproduce the original
-  ROM byte-for-byte (`make verify`). Run it after every edit. Never commit a
-  change that breaks it.
+  ROM byte-for-byte (`make verify` checks SHA-1 against a committed
+  `<Game>.sha1`). Run it after every edit. Never commit a change that breaks it.
+  An original ROM dump is not required to assemble or verify.
 - **No binaries in the final repo** (goal). Each 8 KiB segment starts as an
   `INCBIN` placeholder and graduates to annotated `.asm` (code) or extracted data
   assets (graphics/tables) as it's understood. Don't mass-convert bins to opaque
@@ -44,9 +47,11 @@ Paths below are relative to this repo root.
   reassemble or regenerate belongs here.
 - `docs/` — `progress.md` (checklist + RAM map + working notes), `game-notes.md`
   (detailed findings).
-- `tools/` — `regen-seg.sh`, `split-rom.sh`, `strip-listing.py`, `romscan.py`
-  (static xref / table decode), gfx pipeline, and the tracing tools (see
-  `msx-runtime-tracing`). Executable tooling only.
+- `tools/disasm/` — reusable MSX/Konami helpers: `regen-seg.sh`, `split-rom.sh`,
+  `strip-listing.py`, `romscan.py`, `seg_sym.py`, Konami RLE (`rledec.py` /
+  `rleenc.py`), `gfxview.py`, `pngwrite.py`. Copy this directory for a new game.
+- `tools/` — game-specific executable tooling (VK gfx sheets, room maps, PSG
+  catalogue, handbook art) plus `sjasmplus`.
 - `gfx/` — editable graphics assets (PNG + txt); original compressed bytes stay
   authoritative.
 - `music/` — rendered BGM WAVs from the PSG bytecode (`tools/psgplay.py`).
@@ -64,7 +69,7 @@ of `<Game>.asm`.
 
 ## Workflow per segment
 
-1. `tools/regen-seg.sh <n> <org> [blocks]` → writes `generated/segNN.generated.asm`
+1. `tools/disasm/regen-seg.sh <n> <org> [blocks]` → writes `generated/segNN.generated.asm`
    (listing comments already stripped) + `generated/segNN.raw.asm` (raw reference).
 2. Fold the clean disassembly into the paging-window file (`banks_0123.asm`,
    `banks_456.asm`, …) by hand and annotate.
@@ -96,7 +101,7 @@ of `<Game>.asm`.
 ## Conventions (enforced)
 
 - **Never** leave z80dasm's trailing `;addr bytes ascii` listing comments in
-  committed `.asm`. Regen strips them; `tools/strip-listing.py` is the safety net.
+  committed `.asm`. Regen strips them; `tools/disasm/strip-listing.py` is the safety net.
 - **Annotate per-opcode**, not just block headers: comment VDP writes, magic
   constants, RAM addresses, branch conditions, loop counters. Inline comments at
   column 32.
@@ -122,10 +127,10 @@ of `<Game>.asm`.
 - **`msx.sym` is flat, the ROM is banked.** One hand-maintained file covers every
   bank, but z80dasm `-S` can only attach one name to a CPU address. VK has 48 of
   these collisions (21 named-vs-named, including 0x902E `spike_bars_restore` vs
-  `sfx_0e_block_break`). `tools/regen-seg.sh` therefore runs `tools/seg_sym.py N`
+  `sfx_0e_block_break`). `tools/disasm/regen-seg.sh` therefore runs `tools/disasm/seg_sym.py N`
   first: BIOS + out-of-window names from `msx.sym`, in-window names from *this*
   bank's labels. Keep putting new names in `msx.sym` (the catalog); do not split
-  it into per-segment files. `tools/seg_sym.py --audit` reprints the collision
+  it into per-segment files. `tools/disasm/seg_sym.py --audit` reprints the collision
   list. Cross-bank calls to a unique address still name; colliding addresses in
   a *different* bank are left numeric.
 - **Text**: MSX games often store text as `(ASCII - offset)` because the font is
@@ -223,13 +228,13 @@ of `<Game>.asm`.
   glyph before trusting a decoded string, and comment the real shape next to the
   macro rather than "fixing" the spelling.
 - **Subsystem state blocks**: a feature usually parks all its state in one
-  contiguous RAM block (VK vendor = 0xC700..0xC70F). Find the block by F8-diffing
-  while the feature is active (see `msx-runtime-tracing`), then `romscan xref` /
+  contiguous RAM block (VK vendor = 0xC700..0xC70F). Find the block by snapshot-diffing
+  while the feature is active, then `romscan xref` /
   grep the block bytes to reach the handler.
 - State machines driven by a per-frame tick off the 60 Hz timer IRQ (`H.TIMI`).
 - Actor/object slot arrays (fixed count, fixed stride) with a type/active byte at
   offset 0; a per-type behaviour handler table indexed by type. Cross-reference
-  Metal Gear's `references/MetalGear/constants/structures.asm` — Konami reused
+  Metal Gear's `constants/structures.asm` ([GuillianSeed/MetalGear](https://github.com/GuillianSeed/MetalGear)) — Konami reused
   structures across games. VK C800/D700 is a shared 0x80-byte record: pixel **Y at
   +3, X at +5** (hardware SAT is Y then X — a RAM dump that "moves on +03" during
   a horizontal flee is Y, not a per-type layout). SAT sub-block at `slot|0x20`,
@@ -326,7 +331,7 @@ game and give per-stage/per-room feedback; fix the classification, re-render.
 
 ## Rooting out logic (static analysis)
 
-`tools/romscan.py` automates the two look-ups we do constantly:
+`tools/disasm/romscan.py` automates the two look-ups we do constantly:
 
 - `romscan xref 0xADDR [--segs a,b]` — every reference to an address, split into
   **`code`** (real `call`/`jp`/`jr`/`djnz`, absolute + relative) vs **`data?`**
@@ -353,14 +358,14 @@ Gotchas this encodes (learned the hard way):
 
 ## Cost discipline
 
-- Prefer the existing tools over ad-hoc shell. Reuse `regen-seg.sh`, `snapdiff.py`,
+- Prefer the existing tools over ad-hoc shell. Reuse `regen-seg.sh`,
   `romscan.py` (don't re-hand-roll xref/table-decode python each time).
 - Don't read whole 5 KLOC segment files linearly; use Grep/semantic search to the
   region of interest.
 - Batch independent shell/reads in one turn. `make verify` is fast (<1 s) — run it
   freely.
 
-## Companion skill
+## Companion
 
-For identifying variables/routines at runtime (which RAM = HP, which PC writes
-it), use the `msx-runtime-tracing` skill.
+Runtime tracing (instrumented CocoaMSX, snapshot diffs) lives in
+`~/code/cocoamsx-disasm`, not this repo.

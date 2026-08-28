@@ -11,7 +11,9 @@ import os
 import shutil
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_TOOLS = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_TOOLS, "disasm"))
+sys.path.insert(0, _TOOLS)
 import gfxdump
 import gfxview
 import pngwrite
@@ -196,13 +198,10 @@ BLOCK_COURT = bytes([
 
 
 def find_rom():
-    for path in (
-        os.path.join(ROOT, "references", "VampireKiller.rom"),
-        os.path.join(ROOT, "VampireKiller.rom"),
-    ):
-        if os.path.isfile(path):
-            return path
-    sys.exit("need references/VampireKiller.rom (or VampireKiller.rom)")
+    path = os.path.join(ROOT, "VampireKiller.rom")
+    if os.path.isfile(path):
+        return path
+    sys.exit("need VampireKiller.rom (run make)")
 
 
 def ensure_dirs():

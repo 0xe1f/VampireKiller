@@ -13,6 +13,7 @@ ROM exactly, so the game can be understood and modified.
 
 ```
 VampireKiller.asm   master file: stitches paging windows into the ROM image
+VampireKiller.sha1  SHA-1 of the original 128 KiB ROM (`make verify`)
 segments/           one file per paging window (fills through 0xC000)
   banks_0123.asm    banks 0-3: resident + play (32K @ 0x4000)
   banks_456.asm     banks 4-6: tileset window (24K @ 0x6000)
@@ -21,7 +22,8 @@ segments/           one file per paging window (fills through 0xC000)
   banks_bcd.asm     banks b-d: map tables / metatile defs / transitions
   banks_ef.asm      banks e-f: scenery / PSG / Dracula portrait
   data/             metatiles, tilesets, fonts, 1bpp sprite RLE, PSG, gfx scripts
-tools/              helper scripts + symbol/block files (see below)
+tools/              game-specific helpers (gfx sheets, maps, PSG, handbook)
+  disasm/           reusable MSX/Konami disasm helpers
 docs/               player handbook (Jekyll / GitHub Pages) + RE notes
                     index.md is the handbook landing page; subpages and art
                     live under docs/manual/. game-notes.md / progress.md are
@@ -35,44 +37,37 @@ sfx/                SFX catalogue (WAV; `make sfx`; `05_whip.wav`, etc.)
 Makefile            build / verify
 ```
 
-The original ROM is still required for `make verify`. All banks assemble from
-labeled `.asm` (no leftover `.bin`).
+All banks assemble from labeled `.asm` (no leftover `.bin`).
 Tilesets, gfx scripts, RLE, and PSG assemble from labeled `.asm`;
-`tools/emit_identified_data.py` regenerates those dumps from the ROM.
+`tools/emit_identified_data.py` regenerates those dumps from a ROM image.
 
 ## Building
 
-You need two things that are not in the repo:
-
-1. **sjasmplus** — the assembler. Build it from source
-   ([z00m128/sjasmplus](https://github.com/z00m128/sjasmplus)) and place the
-   binary at `tools/sjasmplus`.
-2. **An original `VampireKiller.rom`** (128 KiB) placed at
-   `references/VampireKiller.rom`. It is gitignored and is used to verify
-   the build.
-
-Then:
+You need **sjasmplus**, built from source
+([z00m128/sjasmplus](https://github.com/z00m128/sjasmplus)) and placed at
+`tools/sjasmplus`. No original ROM is required to assemble or verify.
 
 ```sh
-make verify     # assemble and confirm the output is byte-identical to the ROM
+make verify     # assemble, then SHA-1 check against VampireKiller.sha1
 ```
 
-`make` alone produces `VampireKiller.rom` in the repo root (gitignored build
-output; the reference ROM lives in `references/`).
+`make` alone produces `VampireKiller.rom` in the repo root (gitignored).
+`VampireKiller.sha1` is the SHA-1 of the original 128 KiB MSX2 ROM; `make verify`
+rebuilds and confirms the output matches it.
 
 ## How it works
 
 128 KiB = 16 × 8 KiB segments (Konami4 mapping). Segment 0 is always resident at
 `0x4000-0x5FFF`; segments are converted from raw binary into commented
-disassembly one at a time, and after every change the ROM is rebuilt and compared
-against the original so it stays byte-for-byte identical.
+disassembly one at a time, and after every change the ROM is rebuilt and SHA-1
+checked so it stays byte-for-byte identical.
 
 Text is stored as `ASCII - 0x10` (HUD/title) or plain ASCII (credits); the
 `vk` / `cr` macros in `VampireKiller.asm` let strings be written as readable
 ASCII while emitting the exact original bytes (space → 0x00).
 
 Graphics: uncompressed playfield tilesets are hex `defb` (one 4-byte row per
-scanline). Sprites stay RLE-packed in source (`rleenc.py` is not byte-exact).
+scanline). Sprites stay RLE-packed in source (`tools/disasm/rleenc.py` is not byte-exact).
 `make gfx` writes PNG previews from the ROM, including `gfx/enemy_sheet.png`
 and a full-frame sheet per enemy (`gfx/sheet_enemy_zombie_01.png`, …).
 Packed 1bpp sprite asms dump to `gfx/sprites/<stem>.png`.

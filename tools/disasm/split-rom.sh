@@ -2,10 +2,10 @@
 # Drop leftover segment .bin files.  All 16 banks assemble from .asm;
 # nothing is INCBIN'd.  (Kept so `make segments` stays a valid no-op.)
 #
-#   tools/split-rom.sh
+#   tools/disasm/split-rom.sh
 #
 set -euo pipefail
-cd "$(dirname "$0")/.."
+cd "$(cd "$(dirname "$0")/../.." && pwd)"
 
 mkdir -p segments
 for n in {0..15}; do

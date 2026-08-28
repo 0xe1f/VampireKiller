@@ -81,14 +81,16 @@ labelled with its room number in a dark-gray band.  Stage 18 room 9 (Dracula)
 uses the event-6 solidity test (ids 1-6), same as tile_is_solid.
 
 Usage:
-  tools/roomperm.py [--rom references/VampireKiller.rom] [--row 1 | --all]
+  tools/roomperm.py [--rom VampireKiller.rom] [--row 1 | --all]
                     [--scale 6] [--out-dir gfx]
                     [--collision | --visual | --pixels]
                     [--validate generated/disasmsnap.bin] [--ascii]
                     [--no-doors] [--no-spots] [--compare-doors]
 """
 import argparse, os, sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_TOOLS = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_TOOLS, "disasm"))
+sys.path.insert(0, _TOOLS)
 
 COLS, ROWS = 32, 24
 PLAY_TOP = 2                    # rows 0-1 = HUD
@@ -855,7 +857,7 @@ def render_stage(rom, row, scale, mode, tag, out_dir, ascii_dump=False,
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--rom", default="references/VampireKiller.rom")
+    ap.add_argument("--rom", default="VampireKiller.rom")
     ap.add_argument("--row", type=int, default=1, help="world row (stage 1 = 1)")
     ap.add_argument("--all", action="store_true",
                     help="render a sheet for every stage/world row")
@@ -901,7 +903,14 @@ def main():
                          True, door_model="object", show_spots=False)
 
     if a.validate:
-        import snapdiff as sd
+        snapdir = os.path.expanduser("~/code/cocoamsx-disasm/tools/disasm")
+        if snapdir not in sys.path:
+            sys.path.insert(0, snapdir)
+        try:
+            import snapdiff as sd
+        except ImportError:
+            sys.exit("roomperm --validate needs snapdiff.py from "
+                     "~/code/cocoamsx-disasm/tools/disasm")
         snaps = sd.load(a.validate)
         def V(s, addr): return s[2][addr - s[1]]
         # pick the middle of each room's longest dwell (map fully built)

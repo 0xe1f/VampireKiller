@@ -3,7 +3,7 @@
 
 Reimplements sound_tick / sound_fetch / sound_sfx_fetch (seg14) against an
 AY-3-8910 model.  Reads the same bytes the assemble uses
-(references/VampireKiller.rom, or the rebuilt VampireKiller.rom).
+(the rebuilt VampireKiller.rom).
 Writes 16-bit mono WAVs into music/ (BGM) or sfx/ (ids 1-0x1D).
 
 AY timing matches the AY-3-8910 (fmaster/8 generators, 16-step envelope
@@ -119,16 +119,13 @@ FRAME_HZ = 60.0
 
 
 def load_rom() -> bytes:
-    for path in (
-        os.path.join(ROOT, "references", "VampireKiller.rom"),
-        os.path.join(ROOT, "VampireKiller.rom"),
-    ):
-        if os.path.isfile(path):
-            data = open(path, "rb").read()
-            if len(data) != 0x20000:
-                sys.exit("expected 128 KiB ROM at %s (got %d)" % (path, len(data)))
-            return data
-    sys.exit("no ROM: put one at references/VampireKiller.rom")
+    path = os.path.join(ROOT, "VampireKiller.rom")
+    if not os.path.isfile(path):
+        sys.exit("no ROM: run make to produce VampireKiller.rom")
+    data = open(path, "rb").read()
+    if len(data) != 0x20000:
+        sys.exit("expected 128 KiB ROM at %s (got %d)" % (path, len(data)))
+    return data
 
 
 def cpu_off(cpu: int) -> int:

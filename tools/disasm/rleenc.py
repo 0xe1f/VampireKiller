@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Re-pack a flat byte buffer into a Vampire Killer RLE stream (the inverse of
-tools/rledec.py / the game's decompressor rle_dec).
+"""Re-pack a flat byte buffer into a Konami MSX RLE stream (the inverse of
+tools/disasm/rledec.py / the game's decompressor rle_dec).
 
 Grammar emitted:
   0x01..0x7F  N   RUN     : next single byte repeated N times
@@ -17,8 +17,8 @@ smaller stream that decodes to the identical pixels - fine for edited assets,
 since path A keeps the untouched original bytes authoritative in the ROM.
 
 Usage:
-  tools/rleenc.py <flat.bin> [--out packed.rle]
-  tools/rleenc.py <flat.bin> --verify <rom> <src-hex>   # compare to original
+  tools/disasm/rleenc.py <flat.bin> [--out packed.rle]
+  tools/disasm/rleenc.py <flat.bin> --verify <rom> <src-hex>   # compare to original
 """
 import argparse
 

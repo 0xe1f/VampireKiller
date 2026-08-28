@@ -22,7 +22,7 @@ Fully migrated banks (0-15) have no `.bin`.
 ## Done
 
 - Toolchain + build: `VampireKiller.asm` stitches 16 segments; `make verify`
-  confirms the rebuilt ROM is byte-identical to the original.
+  confirms the rebuilt ROM matches `VampireKiller.sha1`.
 - Segment 0 (resident bank) disassembled with MSX/MSX2 BIOS symbol names.
   Annotated: cartridge header, `init`, `int_handler` (H.TIMI), the dispatch
   helpers (`ADD_HL_A`, `ADD_DE_A`, `DISPATCH_A`), the main tick `main_tick`
@@ -32,10 +32,10 @@ Fully migrated banks (0-15) have no `.bin`.
   credits store letters as ASCII but space as `0x00` (`cr` macro); story + staff
   live in `segments/credits_ending.asm` / `credits_staff.asm`.
 - Reference: Metal Gear disassembly used to confirm the text scheme and the
-  Konami actor/OBJ struct (cloned locally to `references/`, not committed).
+  Konami actor/OBJ struct ([GuillianSeed/MetalGear](https://github.com/GuillianSeed/MetalGear)).
 - Graphics: identified video mode as **SCREEN 5** (4bpp bitmap) in `video_init`;
   classified the banks (code = seg 0-3, graphics = seg 4-15). Added
-  `tools/gfxview.py` (1bpp/4bpp ASCII-art viewer).
+  `tools/disasm/gfxview.py` (1bpp/4bpp ASCII-art viewer).
 - PSG catalogue: `make music` / `make sfx` (`tools/psgplay.py`) render BGM and
   sfx ids 1–0x1D to `music/` and `sfx/` (`{id}_{name}.wav`). Stream labels in
   `data/psg_streams.asm` / `psg_seg15.asm` use those stems (`sfx_*`,
@@ -43,12 +43,12 @@ Fully migrated banks (0-15) have no `.bin`.
 - Graphics format **cracked**: RLE decompressor `rle_dec`/`rle_dec_addr` (grammar:
   end / set-addr / run / literal) unpacks all bitmaps + sprite patterns to VRAM.
   Bank switchers `page_map_banks`/`page_title_banks`/`page_play_banks` decoded. Added
-  `tools/rledec.py`; extracted + rendered a 16-frame 16x16 sprite set from
+  `tools/disasm/rledec.py`; extracted + rendered a 16-frame 16x16 sprite set from
   seg 13 (source 0xA319) into the sprite pattern generator table (0xF800).
 
 - Editable graphics workflow ("path A") set up: original compressed bytes stay
   authoritative (ROM byte-exact), readable dumps live in `gfx/`. Added
-  `tools/rleenc.py` (optimal RLE packer), `tools/gfxdump.py` + `gfx/manifest.tsv`
+  `tools/disasm/rleenc.py` (optimal RLE packer), `tools/gfxdump.py` + `gfx/manifest.tsv`
   + `make gfx`. Seeded catalogue with two confirmed sprite sets (seg 13).
 - Simon in-game sprites catalogued: `load_simon_sprites` (seg0 0x56E8) draws Simon
   as two stacked 16x16 cells, each animated independently - cell 0 = legs (seg13
@@ -132,10 +132,11 @@ Fully migrated banks (0-15) have no `.bin`.
     `frame_vram_refresh`.  Event 6 (`event_dracula`) is Dracula's CE01 machine;
     it raises CE40 → `credits_tick` (named; see game-notes Ending / credits).
 
-- Runtime tracer (CocoaMSX) wired up and used for the first time:
+- Runtime tracer (CocoaMSX) wired up and used for the first time
+  (later moved to `~/code/cocoamsx-disasm`):
   - `tools/CocoaMSX` submodule (branch `disasm-tracing`) builds with the opt-in
     `disasmtrace` module (exec/write/bank logging tagged with the paged ROM
-    segment). Build: `tools/build-cocoamsx.sh`; run + capture: `tools/trace-run.sh`
+    segment). Build: `tools/disasm/build-cocoamsx.sh`; run + capture: `tools/disasm/trace-run.sh`
     (env: EXEC / WATCH addr ranges, LOG). Log lands in `generated/` (gitignored).
   - Apple Silicon crash fix: CocoaMSX's immediate-mode GL (`glBegin(GL_QUADS)` in
     `CMMsxDisplayView renderScreen`) segfaults inside Apple's Metal-backed GL shim
@@ -436,7 +437,7 @@ Fully migrated banks (0-15) have no `.bin`.
       Individual whips add 0 (a "did nothing" whip = outcome 5).
     * **Offer** armed by `vendor_make_offer` (0x938E): sets item/price and the
       0xC706 timer (=0x14). Empirically the first offer fired at reveal (idx 2331:
-      0xC706=0x14, 0xC707=0x50, 0xC708=0x1B). [RESOLVED later via tools/romscan.py:
+      0xC706=0x14, 0xC707=0x50, 0xC708=0x1B). [RESOLVED later via tools/disasm/romscan.py:
       the caller is the **resident** vendor state machine at seg0 l4411h
       (`call 0938eh`), which a `segments/*.bin` grep missed because seg0 has no bin.
       seg0 also calls 0x94C1 (vendor_purchase_tick body) and 0x950E (offer dismiss).]
@@ -866,7 +867,7 @@ Fully migrated banks (0-15) have no `.bin`.
       neighbours are consecutive indices) AND the 4-column sheet happens to equal
       stage 1's physical width (T/B alignment is lucky, not guaranteed per stage).
 
-- Tooling: added `tools/romscan.py` (static xref + dispatch-table decoder) to
+- Tooling: added `tools/disasm/romscan.py` (static xref + dispatch-table decoder) to
   automate the two look-ups we do every session. `xref` splits real control
   transfers (`code`) from bare word matches (`data?`); `table` decodes jump/handler
   tables (with `--index-base 1` for `dec a` dispatchers). It reads each bank
@@ -918,7 +919,7 @@ Fully migrated banks (0-15) have no `.bin`.
   All names in `segments/msx.sym`; cross-segment `call 0aXXXh` sites in seg0/1/2 now use
   the labels.  0xB473 is banked: with seg6 paged it is the actor shape-stream
   word table (`actor_sat_build`); with seg3 paged the same CPU address is code.
-  Tooling: fixed CRLF line endings in `tools/split-rom.sh` (it wouldn't run, which is
+  Tooling: fixed CRLF line endings in `tools/disasm/split-rom.sh` (it wouldn't run, which is
   what had left seg02-04.bin missing); it now regenerates seg01-15.bin cleanly.
 
 ## In progress / next
@@ -1018,9 +1019,9 @@ Two follow-ups left open by the spike-bar pass, both closed this pass:
 2. **`msx.sym` collisions audited and filtered at regen.** 48 CPU addresses are
    shared across banks (21 named-vs-named, 27 named-vs-auto). Splitting into
    committed per-segment `.sym` files would duplicate the catalog; instead
-   `tools/seg_sym.py` builds a temp file per regen so 0x902E is
+   `tools/disasm/seg_sym.py` builds a temp file per regen so 0x902E is
    `spike_bars_restore` in seg2 and `sfx_0e_block_break` in seg14. That name is
-   now in `msx.sym` as well. `tools/seg_sym.py --audit` reprints the list.
+   now in `msx.sym` as well. `tools/disasm/seg_sym.py --audit` reprints the list.
 
 Seg14 PSG driver internals renamed: the `snd_8xxx` placeholders (kept unique
 vs seg2's `l8xxxh` in the shared 0x8000 window) are now `sound_*` names that
@@ -1133,7 +1134,16 @@ use `room_event_ce10` → C409.
 
 ## Next tracing session (resume plan)
 
-The setup works: `tools/build-cocoamsx.sh` then `tools/trace-run.sh` (software GL
+The traced CocoaMSX build now lives in `~/code/cocoamsx-disasm` (not this repo).
+Build / run / diff from there:
+
+```
+~/code/cocoamsx-disasm/tools/disasm/build-cocoamsx.sh
+WATCH=... ~/code/cocoamsx-disasm/tools/disasm/trace-run.sh VampireKiller.rom
+~/code/cocoamsx-disasm/tools/disasm/snapdiff.py generated/disasmsnap.bin
+```
+
+The setup works: `build-cocoamsx.sh` then `trace-run.sh` (software GL
 is forced by default; Input Monitoring must be granted to the built .app once -
 see the tracer notes below).  The tracer only logs bank switches unless EXEC
 and/or WATCH ranges are given, and it reads them once at launch (change ranges =
@@ -1146,9 +1156,9 @@ WATCH both empty, so it needs no pre-chosen ranges and no replay-on-change - jus
 play, snap, keep playing.  The intended workflow is "snap before an action, snap
 after", then diff offline:
 
-  tools/snapdiff.py generated/disasmsnap.bin        # diff each consecutive pair
-  tools/snapdiff.py -l generated/disasmsnap.bin     # list captured snapshots
-  tools/snapdiff.py -a 0 -b 1 -r c400-c4ff ...      # pick snaps + restrict range
+  ~/code/cocoamsx-disasm/tools/disasm/snapdiff.py generated/disasmsnap.bin        # diff each consecutive pair
+  ~/code/cocoamsx-disasm/tools/disasm/snapdiff.py -l generated/disasmsnap.bin     # list captured snapshots
+  ~/code/cocoamsx-disasm/tools/disasm/snapdiff.py -a 0 -b 1 -r c400-c4ff ...      # pick snaps + restrict range
 
 Output is "addr: old -> new" per changed byte, which reads directly against the
 live RAM map below.  This is the fastest way to find *where* a counter/flag lives
@@ -1158,7 +1168,7 @@ kept missing.
 
 **Habit: always diff the score on every recording.**  Score is 3-byte BCD at
 **0xC405-0xC407** (main byte 0xC406, value x100).  Track it across the whole take
-with `tools/snapdiff.py -t c405-c407` and note the delta for each pickup / kill /
+with `~/code/cocoamsx-disasm/tools/disasm/snapdiff.py -t c405-c407` and note the delta for each pickup / kill /
 hit - it's a reliable, quantitative fingerprint of what an action was "worth"
 (e.g. chest = +5400, whipping a candle/object = +100, heart pickup = +0).  Points
 are always multiples of 100, so watch 0xC406.
@@ -1312,7 +1322,7 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   opcodes (VDP writes, magic constants, state/RAM addresses, branch conditions,
   loop counters) line by line so the logic can be followed without decoding the
   bytes by hand. Inline comments start at column 32 (see existing seg00/seg01).
-- Regenerate a segment's disassembly: `tools/regen-seg.sh <n> <org> [blocks]`.
+- Regenerate a segment's disassembly: `tools/disasm/regen-seg.sh <n> <org> [blocks]`.
   It writes two scratch files into the gitignored `generated/` dir (which holds
   all temporarily generated files): `generated/segNN.generated.asm` (clean -
   z80dasm's `;<addr> <bytes> <ascii>` listing comments already stripped, fold THIS
@@ -1320,7 +1330,7 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   only as a temporary byte/address reference while reversing). Fold changes into
   `segNN.asm` by hand so the annotated file is never clobbered.
 - Rule: the committed `segNN.asm` must NEVER carry z80dasm's trailing address/opcode
-  listing comments. Regen strips them automatically; `tools/strip-listing.py
+  listing comments. Regen strips them automatically; `tools/disasm/strip-listing.py
   segments/segNN.asm` is still available as a safety net (it drops the byte-listing
   noise but keeps hand-written `; ...` comments and re-aligns them).
 - Data regions go in a `.blocks` file (see `segments/seg00.blocks`, `segments/seg01.blocks`, `segments/seg02.blocks`, `segments/seg03.blocks`);
@@ -1341,11 +1351,12 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   opaque `db`.
 - File placement (STANDING PRACTICE): all hand-authored disassembly metadata lives
   in `segments/` (`bios.inc`, `actors.inc`, `msx.sym`, `seg*.blocks`) - anything
-  needed to reassemble or to regenerate the disassembly faithfully. `tools/` is
-  executable tooling only; `generated/` is gitignored derived scratch (never author
+  needed to reassemble or to regenerate the disassembly faithfully. `tools/disasm/`
+  is the reusable MSX kit; other `tools/` scripts are game-specific. `generated/`
+  is gitignored derived scratch (never author
   there). How they're consumed: `bios.inc` and `actors.inc` are `INCLUDE`d by the
   build (symbol equates, not emitted); `msx.sym` is the name catalog,
-  `seg*.blocks` the code/data maps. `regen-seg.sh` runs `tools/seg_sym.py` so
+  `seg*.blocks` the code/data maps. `regen-seg.sh` runs `tools/disasm/seg_sym.py` so
   z80dasm `-S` gets a *per-bank* view of `msx.sym` (flat file, banked ROM).
   `bios.inc` and `msx.sym` overlap
   - keep them in sync.  Do **not** put small numeric `equ`s (`actor_zombie: equ
@@ -1489,7 +1500,7 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   the packed object list and confirmed `spawn_actor` `ld c` sites.
 - After any edit, run `make verify` before moving on.
 - Reusable methodology (for disassembling OTHER Konami MSX games later) lives in
-  workspace skills at `.agents/skills/` (`konami-msx-disasm`, `msx-runtime-tracing`,
-  `msx-gfx-sheets`).
+  workspace skills at `.agents/skills/` (`konami-msx-disasm`,
+  `msx-gfx-sheets`). Runtime tracing lives in `~/code/cocoamsx-disasm`.
   When we discover a generally-useful pattern/tool/gotcha, fold it into those skills
   (keep them lean - they load every session) and keep VK-specific findings here.

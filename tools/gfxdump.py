@@ -14,7 +14,8 @@ live in gfx/.
 Usage:  tools/gfxdump.py            (run from the repo root)
 """
 import os, re, sys
-sys.path.insert(0, os.path.dirname(__file__))
+_TOOLS = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_TOOLS, "disasm"))
 import rledec, gfxview, pngwrite
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

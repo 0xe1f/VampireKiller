@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Regenerate a segment disassembly from the original ROM.
 #
-#   tools/regen-seg.sh <segment-number> <origin-hex> [blockfile]
+#   tools/disasm/regen-seg.sh <segment-number> <origin-hex> [blockfile]
 #
-# Example:  tools/regen-seg.sh 0 0x4000 segments/seg00.blocks
+# Example:  tools/disasm/regen-seg.sh 0 0x4000 segments/seg00.blocks
 #
 # Produces two scratch files in generated/ (the whole dir is gitignored):
 #   generated/segNN.raw.asm        raw z80dasm listing WITH the address + opcode
@@ -18,21 +18,23 @@
 # listing (handy while reversing) and strip it automatically here; that way the
 # noise can never leak into the working source.
 set -euo pipefail
-cd "$(dirname "$0")/.."
+DISASM="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$DISASM/../.." && pwd)"
+cd "$ROOT"
 
 seg="$1"; org="$2"; blocks="${3:-}"
 segnn=$(printf "%02d" "$seg")
-rom="references/VampireKiller.rom"      # gitignored reference ROM
-[ -f "$rom" ] || rom="VampireKiller.rom"        # fallback: build output in the root
+rom="${ROM:-VampireKiller.rom}"
+[ -f "$rom" ] || { echo "no ROM at $rom (run make, or set ROM=)" >&2; exit 1; }
 
 tmpbin="$(mktemp)"
 dd if="$rom" of="$tmpbin" bs=8192 skip="$seg" count=1 status=none
 
 # Flat msx.sym cannot name two things at the same CPU address in different
-# banks.  tools/seg_sym.py emits a per-segment file: BIOS + out-of-window
+# banks.  seg_sym.py emits a per-segment file: BIOS + out-of-window
 # names from msx.sym, in-window names from this bank's labels.
 mkdir -p generated
-python3 tools/seg_sym.py "$seg"
+python3 "$DISASM/seg_sym.py" "$seg"
 sym="generated/seg${segnn}.z80dasm.sym"
 
 args=(-a -t -l -g "$org" -S "$sym")
@@ -48,5 +50,5 @@ sed -i '' 's/^\torg .*/; (org set by PHASE in VampireKiller.asm)/' "$raw"
 
 # clean working copy: drop the address/opcode listing comments automatically
 cp "$raw" "$gen"
-python3 tools/strip-listing.py "$gen"
+python3 "$DISASM/strip-listing.py" "$gen"
 echo "wrote $gen (clean, fold this)  +  $raw (raw listing, temporary reference)"

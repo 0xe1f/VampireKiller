@@ -1314,7 +1314,7 @@ The 16-colour VDP palette is programmed by `palette_set` / `palette_apply`. Eigh
 (0, 1, 2, 3, 8, 12, 14, 15) are fixed by `palette_hud_load` (seg10 `0xBF88`) and never
 changed by stage palettes — HUD bonus tiles use only those. See *HUD bonus tiles*.
 
-Bank classification (by entropy / zero-fill, `tools/gfxview.py` + a quick scan):
+Bank classification (by entropy / zero-fill, `tools/disasm/gfxview.py` + a quick scan):
 - **seg 0-3**: code (entropy ~7, top byte 0xCD/0xC4/0xDD opcodes).
 - **seg 4-9, 15**: 4bpp bitmap graphics (low entropy 4.3-5.5, zero-heavy, a
   single dominant background colour). These hold the title logo, HUD, stage and
@@ -1425,11 +1425,11 @@ source.
 
 ### Tools for the graphics pipeline
 
-- `tools/rledec.py <rom> <src-off> --dest 0xF800 --out x.bin` replays the RLE
+- `tools/disasm/rledec.py <rom> <src-off> --dest 0xF800 --out x.bin` replays the RLE
   grammar above to extract a decompressed block.
-- `tools/gfxview.py x.bin 0 --bpp 1 --size 16 --count 16 --cols 8` renders 16x16
+- `tools/disasm/gfxview.py x.bin 0 --bpp 1 --size 16 --count 16 --cols 8` renders 16x16
   1bpp sprites as ASCII art (also `--bpp 4` for SCREEN 5 tiles, `--raw` bitmaps).
-- `tools/rleenc.py x.bin --verify <rom> <src-off>` re-packs a flat buffer. It is
+- `tools/disasm/rleenc.py x.bin --verify <rom> <src-off>` re-packs a flat buffer. It is
   an optimal-length packer and always round-trips, but does NOT always reproduce
   Konami's exact bytes (their packer uses a specific tie-break for equal-cost
   run/literal splits; measured ~1-3/10 exact). This is why the catalogue keeps
@@ -1573,7 +1573,7 @@ Pixel room sheets are `gfx/stage_sNN.png` (`roomperm.py --all --pixels`; also
 
 ## Reference: Metal Gear disassembly
 
-Cloned to `references/MetalGear` (GuillianSeed/MetalGear). Same Konami MSX2 engine
+[GuillianSeed/MetalGear](https://github.com/GuillianSeed/MetalGear). Same Konami MSX2 engine
 era; very useful for shared idioms. Notable files:
 - `data/texts.asm`, `gfx/font.asm` - text/charset (confirmed ASCII scheme)
 - `constants/structures.asm` - sprite/object (OBJ) struct layout
@@ -1589,6 +1589,6 @@ record used by the entity dispatch at 0x5FD0 / `entity_tbl`).
   one catalog, but z80dasm `-S` is flat, so 48 CPU addresses are shared by two
   banks (21 of them with a real name on both sides). The known case that started
   the audit is still the type specimen: seg2 `spike_bars_restore` (0x902E) vs.
-  seg14 `sfx_0e_block_break`. `tools/regen-seg.sh` now filters through
-  `tools/seg_sym.py` so each bank keeps its own name. Re-run
-  `tools/seg_sym.py --audit` after a regen or a bulk rename.
+  seg14 `sfx_0e_block_break`. `tools/disasm/regen-seg.sh` now filters through
+  `tools/disasm/seg_sym.py` so each bank keeps its own name. Re-run
+  `tools/disasm/seg_sym.py --audit` after a regen or a bulk rename.

@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """One-shot: dump identified ROM blobs to labeled .asm (Metal Gear-style).
 
-Reads references/VampireKiller.rom.  The generated files are the assemble
-source; the ROM is not needed to *build*, only to regenerate this dump or
-to `make verify`.
+Reads VampireKiller.rom (run `make` first).  The generated files are the assemble
+source; the ROM is not needed to *build*, only to regenerate this dump.
 
   python3 tools/emit_identified_data.py
 """
@@ -13,12 +12,12 @@ import os
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ROM_PATH = os.path.join(ROOT, "references", "VampireKiller.rom")
+ROM_PATH = os.path.join(ROOT, "VampireKiller.rom")
 DATA = os.path.join(ROOT, "segments", "data")
 SEGS = os.path.join(ROOT, "segments")
 
-# rledec.py lives next to this script.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# rledec.py lives in tools/disasm/.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "disasm"))
 from rledec import decompress  # noqa: E402
 
 COLS = 16

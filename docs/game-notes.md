@@ -639,7 +639,7 @@ the dest-room digit in the same colour beside it (`--no-spots` to skip).
 | 0xC420 | handler | meaning |
 | --- | --- | --- |
 | 0 | `simon_grounded` 0x6B59 | grounded (walk / idle). Whipping does **not** change this byte. |
-| 1 | `simon_jump_tick` 0x6CC7 | **jump / airborne** (Y arc via `jump_y_delta`; C421 = up/left/right) |
+| 1 | `simon_jump_tick` 0x6CC7 | **jump / airborne** (Y arc via `jump_y_delta`; `simon_jump_dir` 0 aim / 1 up / 2 left / 3 right — not `dir_*`) |
 | 2 | `simon_crouch` 0x6DB0 | **crouch** (DOWN held; Simon X is locked — cannot move) |
 | 3 | `simon_stairs` 0x6DE4 | **on stairs / climbing** (diagonal travel; can whip while climbing) |
 | 4 | `simon_fall` 0x6F44 | **falling / dropping** off a ledge |
@@ -647,7 +647,8 @@ the dest-room digit in the same colour beside it (`--no-spots` to skip).
 | 6 | `simon_dying` 0x709A | dying / respawn (enemy spawner is suppressed while ==6) |
 | 7 | `simon_portal_wait` 0x7102 | pad crouch+UP wind-up: wait 0xC42D, then C41B=0xFF warp |
 
-`0xC423` tracks the air sub-phase during jumps/falls (e.g. 2→1 rising→falling).
+`0xC423` is the `simon_hurt` DISPATCH_A index (`simon_hurt_step`); jump/fall
+arc phase is `simon_arc` (`0xC428`).
 
 ### Input (RAM 0xC006 / 0xC007)
 
@@ -1620,7 +1621,7 @@ record used by the entity dispatch at 0x5FD0 / `entity_tbl`).
 Small numeric `equ`s live in `segments/*.inc`. Packed data already uses
 them: `actors.inc` (types + spawn bits), `items.inc`, `weapon.inc`
 (`equip_*`), `sfx.inc`, `poses.inc`, `scenery.inc`, `event.inc`
-(`evt_*`), `state.inc` (`main_*` / `act_*`). Id prefixes were chosen so they
+(`evt_*`), `state.inc` (`main_*` / `act_*`), `dir.inc` (`dir_*`). Id prefixes were chosen so they
 do **not** collide with ROM labels:
 
 | Ids | Prefix | Do not reuse |
@@ -1632,29 +1633,33 @@ do **not** collide with ROM labels:
 | CE00 cell event | `evt_*` | `event_*` CE01 machines (`event_giant_bat`, …) |
 | C000 primary | `main_*` | `state_*` handlers (`state_play`, …) |
 | C420 action | `act_*` | `simon_*` handlers (`simon_dying`, …) |
+| C41B pending exit | `dir_*` | `permit_*` RAM; `room_edge_*` labels |
 
 `collect_bonus_tbl` stays handler addresses (`defw bonus_small_heart`), not
 item ids. Vendor scenery attrs stay hex (bits5–2 = offer slot, not `item_*`).
 
 **Skip / return later — constants**
 
-- **`dir.inc`** — pending exit `exit_dir` 1–4 / `0xFF` portal. Tiny; add with
-  a `conn_lookup` pass.
 - **Jump tables that are already ROM labels** (`entity_tbl`, `actor_hp_tbl`,
   `collect_bonus_tbl`, `main_state_tbl`, `simon_action_tbl`) stay in
   `msx.sym` and next to their dispatchers. Do not duplicate them as `equ`s
   or peel them into `data/`.
 - **RAM / play-bank immediates** — `segments/ram.inc` covers the confirmed
   cluster (`lives`, `weapon_id`, `health`, `stage`, `simon_action`,
+  `simon_whip`, `simon_jump_dir`, `simon_hurt_step`, `simon_arc`, `simon_facing`,
+  `simon_invuln`, `simon_on_plat`,
   `cell_event`, `scenery_slots`, `pickup_slots`, `spike_slots`,
   `platform_slots`, `door_state`, `actor_slots`,
   `shot_slots`, `spawn_slot_*`, …).
   Play banks use `sfx_*` / `equip_*` / `pose_*` / `actor_*` / `item_*` /
-  `evt_*` / `main_*` / `act_*` at call sites (`evt_*` at `cell_event_tbl`
+  `evt_*` / `main_*` / `act_*` / `dir_*` at call sites (`evt_*` at `cell_event_tbl`
   and CE00 compares; `main_*` / `act_*` at the two jump tables and the
-  id loads that feed them). Regen still emits hex; re-apply after
+  id loads that feed them; `dir_*` at `room_edge_detect` stores and
+  `dir_portal` at the spot write). Regen still emits hex; re-apply after
   regen-seg. Leftover hex is on purpose (ambiguous small literals,
-  unnamed SAT ids). `0xC000` is not a ram.inc name: VRAM HUD cells use
+  unnamed SAT ids).  CE03 has a `shot_alloc` reader and no ROM writer
+  (always 0 after the run wipe); CE08 is `flame_spawn++` / `cell_event_set`
+  zero with no reader. `0xC000` is not a ram.inc name: VRAM HUD cells use
   the same numeric address.
 
 **Skip / return later — data left in the bank files**

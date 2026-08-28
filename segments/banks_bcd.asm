@@ -52,17 +52,17 @@
 
 ; ---------------------------------------------------------------------------
 ;  conn_lookup (seg13 0xB963) - room-transition BRAIN.
-;  Pending dir 0xC41B is 1=up 2=down 3=left 4=right (from room_edge_detect / l77d8h).
+;  Pending dir 0xC41B is dir_up..dir_right (from room_edge_detect / l77d8h).
 ;  Looks up conn_ptr[stage][room], picks the matching nibble, writes 0xD001.
 ;  0xF = blocked -> return without carry (state_room_trans treats that as death).
-;  0xC41B == 0xFF (simon_portal_wait after crouch+UP on a pad) skips the
+;  0xC41B == dir_portal (simon_portal_wait after crouch+UP on a pad) skips the
 ;  nibble and writes 0xD001 from 0xC5B4 (filled by spot_load_coords).
-;  state_play treats any nonzero C41B as a pending exit (1-4 or 0xFF).
+;  state_play treats any nonzero C41B as a pending exit (dir_* or dir_portal).
 ; ---------------------------------------------------------------------------
 conn_lookup:
 	ld a,(exit_dir)
 	inc a
-	jr z,conn_from_spot    ; was 0xFF -> use 0xC5B4
+	jr z,conn_from_spot    ; dir_portal -> use 0xC5B4
 	call conn_room_record  ; HL -> 2-byte record for D000/D001
 	ld de,exit_dir
 	ld a,(de)
@@ -190,7 +190,7 @@ door_arm_c5ac:
 
 ; spot_load_coords (seg13 0xBB9A): scan spot_tbl for (D000, D001).  On match
 ; arm C5B1=1, store Y,X at C5B2 (same L=Y H=X as the door), and the dest-room
-; nibble at C5B4 (consumed by conn_from_spot when C41B==0xFF).  Current table
+; nibble at C5B4 (consumed by conn_from_spot when C41B==dir_portal).  Current table
 ; is stage 12 only; pairs are two-way (0<->3, 1<->4, 2<->11, 5<->8, 7<->10).
 spot_load_coords:
 	ld de,(stage)         ; E=stage D000, D=room D001

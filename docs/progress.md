@@ -1357,7 +1357,7 @@ free the floor slot. RAM: `scenery_slots` 0xC470, `pickup_slots` 0xC500.
   a `.blocks` file only changes code-vs-data rendering, never the emitted bytes.
   BIOS names live once in `segments/bios.inc`; small numeric ids in
   `segments/*.inc` (`actors.inc`, `items.inc`, `weapon.inc`, `sfx.inc`,
-  `poses.inc`, `scenery.inc`, `event.inc`, `state.inc`); routine names go in `segments/msx.sym`.
+  `poses.inc`, `scenery.inc`, `event.inc`, `state.inc`, `dir.inc`); routine names go in `segments/msx.sym`.
 - Identified binary data (standing practice): dump known blobs to labeled
   `defb` (`tools/emit_identified_data.py` -> `segments/data/` and tileset
   banks), Metal Gear style. 4bpp tiles are hex `defb` pixel-rows. Identified
@@ -1527,11 +1527,12 @@ free the floor slot. RAM: `scenery_slots` 0xC470, `pickup_slots` 0xC500.
   `actor_dracula_bat/_head/_chunk`, `obj_next_room`/`obj_end_stream`, spawn
   bitmask bits); also `items.inc`, `weapon.inc`, `sfx.inc`, `poses.inc`,
   `scenery.inc`, `event.inc` (`evt_*` at `cell_event_tbl` / CE00 tests),
-  `state.inc` (`main_*` / `act_*` at the two jump tables), `ram.inc`
-  (player stats plus CE00–CE16 / CF00 / C470 / C500 / C580 / C598 / C5AC /
-  C800 / D700).
+  `state.inc` (`main_*` / `act_*` at the two jump tables), `dir.inc`
+  (`dir_*` at `room_edge_detect` / portal), `ram.inc`
+  (player stats plus Simon combat / CE00–CE16 / CF00 / C470 / C500 / C580 /
+  C598 / C5AC / C800 / D700; CE03/CE08 stay hex — no writer / no reader).
   Data files and the play banks (`banks_0123`, `banks_bcd`) use them at
-  confirmed sites. Skip-for-later (`dir.inc`, `sfx_tbl` left next to the
+  confirmed sites. Skip-for-later (`sfx_tbl` left next to the
   driver, door 8×8 tiles, emit of the new tables): see
   `docs/game-notes.md` “Deferred constants”.
 - After any edit, run `make verify` before moving on.

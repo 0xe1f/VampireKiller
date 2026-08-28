@@ -31,7 +31,7 @@
 ;    banks_bcd   map 24K @ 0x6000            (banks 11-13)
 ;    banks_ef    sound/portrait 16K @ 0x8000 (banks 14-15)
 ;  Data lives in `segments/data/`.  Small numeric ids and confirmed RAM
-;  are `segments/*.inc` (actors, items, weapon, sfx, poses, scenery, event, state, ram).
+;  are `segments/*.inc` (actors, items, weapon, sfx, poses, scenery, event, state, dir, ram).
 ;  `PHASE` sets each block's runtime address while the output stays contiguous.
 ; ===========================================================================
 
@@ -45,7 +45,7 @@
 ; Actor type ids (spawn_actor C / object-list id).  Readability only.
     INCLUDE "segments/actors.inc"
 ; Pickup ids, C416 equip_*, play_sound, ix+0B pose_*, scenery grammar,
-; CE00 evt_*, C000 main_*, C420 act_*.
+; CE00 evt_*, C000 main_*, C420 act_*, C41B dir_*.
     INCLUDE "segments/items.inc"
     INCLUDE "segments/weapon.inc"
     INCLUDE "segments/sfx.inc"
@@ -53,6 +53,7 @@
     INCLUDE "segments/scenery.inc"
     INCLUDE "segments/event.inc"
     INCLUDE "segments/state.inc"
+    INCLUDE "segments/dir.inc"
 
 ; --- text helpers -----------------------------------------------------------
 ;  HUD/title font (hud_font, seg8 0xBD80) is '0'-'_' at atlas ids 0x20+,

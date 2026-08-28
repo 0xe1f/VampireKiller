@@ -43,7 +43,7 @@ instead of reinventing them. Read `docs/progress.md` (End goal + Working notes) 
   All hand-authored disassembly metadata lives here: `bios.inc` (MSX BIOS entry
   names), `ram.inc` (confirmed work-RAM), `*.inc` type ids (`actors.inc`,
   `items.inc`, `weapon.inc`, `sfx.inc`, `poses.inc`, `scenery.inc`,
-  `event.inc`, `state.inc` — small numeric `equ`s, **not** in `msx.sym` or z80dasm
+  `event.inc`, `state.inc`, `dir.inc` — small numeric `equ`s, **not** in `msx.sym` or z80dasm
   rewrites every `0x01`), `msx.sym` (routine/label names for z80dasm regen),
   `banks_*.blocks` (code/data split maps, one per paging window). Anything needed to reassemble or
   regenerate belongs here.
@@ -121,7 +121,7 @@ of `<Game>.asm`.
   all game code/data. Small numeric type `equ`s (`actor_zombie: equ 0x01`) live in
   an `INCLUDE`d `.inc`, never `msx.sym` (VK: `actors.inc`, `items.inc`,
   `weapon.inc`, `sfx.inc`, `poses.inc`, `scenery.inc`, `event.inc`,
-  `state.inc`).
+  `state.inc`, `dir.inc`).
 - **A symbol in an immediate operand is usually a lie.** z80dasm substitutes a
   symbol for *any* matching value, so every small constant that collides with a
   low BIOS entry comes back as that name: `ld de,0` reads `ld de,CHKRAM`

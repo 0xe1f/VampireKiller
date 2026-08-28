@@ -39,20 +39,32 @@ permit_left:             equ 0xC41E
 permit_right:            equ 0xC41F
 
 ; Simon.  Pixel X is the high byte of the 16-bit value at simon_x16.
-simon_action:            equ 0xC420  ; 0 grounded .. 7 portal wait
+; C424, C42B, C430+ stay unnamed.
+simon_action:            equ 0xC420  ; 0 grounded .. 7 portal wait; logo wipe divider
+simon_jump_dir:          equ 0xC421  ; 0 aim, 1 up, 2 left, 3 right; logo wipe rows
+simon_whip:              equ 0xC422  ; whip phase 0..4; logo wipe-done
+simon_hurt_step:         equ 0xC423  ; simon_hurt DISPATCH_A
 simon_y:                 equ 0xC425
 simon_x16:               equ 0xC426
 simon_x:                 equ 0xC427
+simon_arc:               equ 0xC428  ; jump/fall phase
+simon_whip_timer:        equ 0xC429
+simon_knockback:         equ 0xC42A
+simon_facing:            equ 0xC42C  ; 0 right, 1 left
+simon_invuln:            equ 0xC42D  ; i-frames / portal wind-up
 simon_legs:              equ 0xC42E  ; cell-0 frame; word store also writes torso
 simon_torso:             equ 0xC42F
+simon_on_plat:           equ 0xC439  ; C598 slot id; 0 = none
 
 ; World index (not map coordinates).
 stage:                   equ 0xD000  ; 0 courtyard, 1-18
 room:                    equ 0xD001
 hub:                     equ 0xD002  ; 0-5, selects seg14 datasets
 
-; Cell event / boss (0xCE00-0xCE16).  Unused CE03-CE06, CE08, CE0A, CE0D
-; have no named meaning yet (CE03/CE08 have xrefs; the rest have none).
+; Cell event / boss (0xCE00-0xCE16).  Unused CE04-CE06, CE0A, CE0D have
+; no xrefs.  CE03: shot_alloc SAT scan 8 vs 2; no ROM writer (always 0
+; after the run wipe).  CE08: flame_spawn++; cell_event_set zeros; no
+; reader.  Both stay hex.
 cell_event:              equ 0xCE00  ; evt_* (0 = none)
 event_step:              equ 0xCE01  ; CE01 machine index
 event_timer:             equ 0xCE02

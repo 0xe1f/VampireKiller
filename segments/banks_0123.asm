@@ -303,7 +303,7 @@ main_state_tbl_end:
 state_logo:                    ; 0 (0x417D)
 	djnz l418ah
 	call konami_logo_step   ; wipe the Konami logo in one more row (seg1)
-	ld a,(0c422h)           ; 0xC422 set once the reveal has finished
+	ld a,(simon_whip)           ; 0xC422 set once the reveal has finished
 	or a
 	ret z
 	xor a
@@ -2342,7 +2342,7 @@ vram_clear_page_go:
 	jp vdp_hmmv
 attract_run_init:
 	ld hl,simon_action
-	ld de,0c421h
+	ld de,simon_jump_dir   ; ldir dest = C421 (Simon block after action)
 	ld bc,01bdfh
 	xor a
 	ld (hl),a
@@ -5602,7 +5602,7 @@ konami_logo_step:
 	dec (hl)               ; reveal one more row
 	jr nz,l6265h           ; more rows left -> draw the next band
 	ld a,001h              ; last row done ...
-	ld (0c422h),a          ; ... raise the done flag seg0 polls (0xC422 = 1)
+	ld (simon_whip),a          ; ... raise the done flag seg0 polls (0xC422 = 1)
 	ret
 l6265h:
 	ld a,031h              ; rows revealed so far = 0x31 - rows_remaining
@@ -5754,7 +5754,7 @@ cell_event_set:
 	ld (credits_step),a
 	ld (cell_event),a          ; 0xCE00 = current event code (0 = none)
 	ld (boss_clear),a
-	ld (0ce08h),a
+	ld (0ce08h),a          ; flame_spawn count (no reader)
 	ld (boss_dead),a
 	ld a,(stage)          ; A = current stage
 	ld hl,cell_event_tbl
@@ -5903,7 +5903,7 @@ simon_spawn_pos:
 	ld (simon_x),a          ; byte1 -> Simon X (0xC427)
 	ld a,c
 	and 001h               ; bit0 ...
-	ld (0c42ch),a          ; ... -> facing flag 0xC42C (0=right, 1=left)
+	ld (simon_facing),a          ; ... -> facing flag 0xC42C (0=right, 1=left)
 	ret
 ; simon_spawn_tbl (seg1 0x6426) - 2 bytes per stage 0..18.
 ;  byte0: Y = val&0xFE, facing = val&1 (0=right, 1=left).  byte1: X.
@@ -6976,7 +6976,7 @@ simon_action_tbl:
 simon_grounded:                ; 0 (0x6B59)
 	call simon_floor_test
 	jr c,l6b64h
-	ld a,(0c439h)
+	ld a,(simon_on_plat)
 	and a
 	jr z,l6bach
 l6b64h:
@@ -6986,10 +6986,10 @@ l6b64h:
 	cp 002h
 	ret nc
 l6b6eh:
-	ld a,(0c439h)
+	ld a,(simon_on_plat)
 	and a
 	call nz,platform_carry_simon
-	ld a,(0c422h)
+	ld a,(simon_whip)
 	and a
 	ret nz
 	ld de,00000h
@@ -7015,13 +7015,13 @@ l6b8ah:
 	ld a,act_jump
 	ld (simon_action),a
 	xor a
-	ld (0c421h),a
+	ld (simon_jump_dir),a
 	ret
 l6bach:
 	ld a,act_fall
 	ld (simon_action),a
 	xor a
-	ld (0c421h),a
+	ld (simon_jump_dir),a
 	ret
 ; platform_carry_simon (0x6BB6): A = 0xC439 (slot id).  Slide Simon 1px in the
 ; platform's travel direction, taken from the sign of the slot's step byte.
@@ -7071,7 +7071,7 @@ l6bf5h:
 	ld a,c
 	ld (0c435h),a
 	ld a,b
-	ld (0c421h),a
+	ld (simon_jump_dir),a
 	rra
 	ld a,(simon_x)
 	jr nc,l6c0ah
@@ -7097,7 +7097,7 @@ simon_try_stairs_down:
 	jp simon_mirror_frames
 simon_walk_left:               ; (0x6C36) face left (0xC42C=1), try -X
 	ld a,001h
-	ld (0c42ch),a          ; facing = left
+	ld (simon_facing),a          ; facing = left
 	ld a,(permit_left)          ; left exit permit
 	inc a
 	jr nz,l6c47h
@@ -7116,7 +7116,7 @@ l6c58h:
 	jr l6c7ah
 simon_walk_right:              ; (0x6C5A) face right (0xC42C=0), try +X
 	xor a
-	ld (0c42ch),a          ; facing = right
+	ld (simon_facing),a          ; facing = right
 	ld a,(permit_right)          ; right exit permit
 	inc a
 	jr nz,l6c6ah
@@ -7176,8 +7176,8 @@ l6cbfh:
 	add hl,de
 	ld (simon_legs),hl
 	ret
-simon_jump_tick:               ; 1 (0x6CC7) 0xC421 = 0 aim, 1 up, 2 left, 3 right
-	ld a,(0c421h)
+simon_jump_tick:               ; 1 (0x6CC7) simon_jump_dir: 0 aim, 1 up, 2 left, 3 right
+	ld a,(simon_jump_dir)
 	call DISPATCH_A
 	defw l6cd5h
 	defw simon_jump_arc
@@ -7197,7 +7197,7 @@ l6cd5h:
 	jr c,l6ce9h
 	inc b
 l6ce9h:
-	ld hl,0c421h
+	ld hl,simon_jump_dir
 	ld (hl),b
 	ret
 simon_jump_arc:                ; (0x6CEE) advance 0xC428 through jump_y_delta
@@ -7209,11 +7209,11 @@ simon_jump_arc:                ; (0x6CEE) advance 0xC428 through jump_y_delta
 	ld bc,jump_y_delta
 	ld d,015h
 l6cffh:
-	ld hl,0c428h
+	ld hl,simon_arc
 	push hl
 	call simon_jump_y_step
 	pop hl
-	ld a,(0c422h)
+	ld a,(simon_whip)
 	and a
 	jr nz,l6d1ah
 	ld d,000h
@@ -7238,7 +7238,7 @@ l6d1ah:
 	pop hl
 	call simon_floor_test
 	jr c,l6d37h
-	ld a,(0c439h)
+	ld a,(simon_on_plat)
 	and a
 	ret z
 l6d37h:
@@ -7254,8 +7254,8 @@ l6d42h:
 	ld (hl),a
 	xor a
 	ld (simon_action),a
-	ld (0c421h),a
-	ld (0c428h),a
+	ld (simon_jump_dir),a
+	ld (simon_arc),a
 	ret
 simon_jump_y_step:
 	inc (hl)
@@ -7322,16 +7322,16 @@ simon_crouch:                  ; 2 (0x6DB0)
 	ld a,act_portal
 	ld (simon_action),a          ; portal wind-up
 	xor a
-	ld (0c421h),a
+	ld (simon_jump_dir),a
 	ld a,040h
-	ld (0c42dh),a          ; flash/wait timer
+	ld (simon_invuln),a          ; flash/wait timer
 	ld a,sfx_portal
 	jp play_sound          ; sfx 0x15 (flash)
 l6dcfh:
-	ld a,(0c439h)
+	ld a,(simon_on_plat)
 	and a
 	call nz,platform_carry_simon
-	ld a,(0c422h)
+	ld a,(simon_whip)
 	and a
 	ret nz
 	ld a,(btn_held)
@@ -7340,7 +7340,7 @@ l6dcfh:
 	ret c                  ; DOWN still held -> stay crouched
 	jp l6efch
 simon_stairs:                  ; 3 (0x6DE4)
-	ld a,(0c422h)
+	ld a,(simon_whip)
 	and a
 	ret nz
 	ld a,(0c435h)
@@ -7350,7 +7350,7 @@ simon_stairs:                  ; 3 (0x6DE4)
 l6df2h:
 	ld b,a
 	ld de,00100h
-	ld a,(0c421h)
+	ld a,(simon_jump_dir)
 	and a
 	ld a,b
 	jr nz,l6e0eh
@@ -7381,7 +7381,7 @@ l6e1bh:
 	add hl,de
 	ld (simon_x16),hl
 	xor a
-	ld (0c42ch),a
+	ld (simon_facing),a
 	ld de,00103h
 	ld (simon_legs),de
 	call simon_stair_frames_down
@@ -7410,7 +7410,7 @@ l6e52h:
 	sbc hl,de
 	ld (simon_x16),hl
 	ld a,001h
-	ld (0c42ch),a
+	ld (simon_facing),a
 	ld de,0100dh
 	ld (simon_legs),de
 	call simon_stair_frames_down
@@ -7439,7 +7439,7 @@ l6e8bh:
 	add hl,de
 	ld (simon_x16),hl
 	xor a
-	ld (0c42ch),a
+	ld (simon_facing),a
 	ld de,00103h
 	ld (simon_legs),de
 	call simon_stair_frames_up
@@ -7469,7 +7469,7 @@ l6ec3h:
 	sbc hl,de
 	ld (simon_x16),hl
 	ld a,001h
-	ld (0c42ch),a
+	ld (simon_facing),a
 	ld de,0100dh
 	ld (simon_legs),de
 	call simon_stair_frames_up
@@ -7532,7 +7532,7 @@ simon_stair_frames_up:
 	ld (simon_torso),a
 	ret
 simon_fall:                    ; 4 (0x6F44)
-	ld a,(0c439h)
+	ld a,(simon_on_plat)
 	and a
 	jr nz,l6f71h
 	call simon_floor_test
@@ -7540,7 +7540,7 @@ simon_fall:                    ; 4 (0x6F44)
 	ld de,00000h
 	ld (simon_legs),de
 	call simon_mirror_frames
-	ld hl,0c428h
+	ld hl,simon_arc
 	ld a,(hl)
 	inc (hl)
 	cp 003h
@@ -7558,15 +7558,15 @@ l6f71h:
 	and 0f8h
 	ld (simon_y),a
 	xor a
-	ld (0c428h),a
+	ld (simon_arc),a
 	ld (simon_action),a
-	ld (0c421h),a
+	ld (simon_jump_dir),a
 	ld a,sfx_land
 	jp play_sound
 l6f88h:
 	defb 002h,004h,006h,006h   ; fall dY
 simon_hurt:                    ; 5 (0x6F8C)
-	ld a,(0c423h)
+	ld a,(simon_hurt_step)
 	call DISPATCH_A
 	defw l6f9ah
 	defw l6fdbh
@@ -7578,7 +7578,7 @@ l6f9ah:
 	ld a,013h
 	call nz,play_sound
 	ld a,05ah
-	ld (0c42dh),a          ; arm state timer (0xC42D); in hurt = i-frame/blink
+	ld (simon_invuln),a          ; arm state timer (0xC42D); in hurt = i-frame/blink
 	ld a,(0c42bh)
 	and a
 	jp z,l6fc3h
@@ -7592,11 +7592,11 @@ l6f9ah:
 	jp simon_mirror_frames
 l6fc3h:
 	ld a,(0c43ch)
-	ld (0c42ch),a
+	ld (simon_facing),a
 	inc a
-	ld (0c423h),a
+	ld (simon_hurt_step),a
 	xor a
-	ld (0c42ah),a
+	ld (simon_knockback),a
 	ld de,00307h
 	ld (simon_legs),de
 	jp simon_mirror_frames
@@ -7605,7 +7605,7 @@ l6fdbh:
 l6fdeh:
 	ld bc,l7084h
 	ld d,015h
-	ld hl,0c42ah
+	ld hl,simon_knockback
 	push hl
 	call simon_jump_y_step
 	pop hl
@@ -7614,7 +7614,7 @@ l6fdeh:
 	ret c
 	call simon_floor_test
 	jr c,l6ff9h
-	ld a,(0c439h)
+	ld a,(simon_on_plat)
 	and a
 	ret z
 l6ff9h:
@@ -7622,14 +7622,14 @@ l6ff9h:
 	and 0f8h
 	ld (simon_y),a
 	ld a,003h
-	ld (0c423h),a          ; hurt sub-state = 3
+	ld (simon_hurt_step),a          ; hurt sub-state = 3
 	ld a,(health)          ; health: alive -> short knockback, dead -> long
 	and a
 	ld a,004h
 	jr nz,l7010h
 	ld a,010h
 l7010h:
-	ld (0c42ah),a          ; knockback velocity/timer (0xC42A)
+	ld (simon_knockback),a          ; knockback velocity/timer (0xC42A)
 	ld de,(simon_legs)
 	inc d
 	inc e
@@ -7639,19 +7639,19 @@ l701eh:
 	call simon_walk_right
 	jp l6fdeh
 l7024h:
-	ld a,(0c439h)
+	ld a,(simon_on_plat)
 	and a
 	call nz,platform_carry_simon
-	ld hl,0c42ah           ; knockback counts down; while nonzero Simon slides
+	ld hl,simon_knockback           ; knockback counts down; while nonzero Simon slides
 	dec (hl)
 	ret nz
 	xor a                  ; knockback done: clear the whole hurt state
 	ld (simon_action),a          ; action state -> normal
-	ld (0c421h),a
-	ld (0c423h),a          ; hurt sub-state -> 0
-	ld (0c422h),a
-	ld (0c42ah),a
-	ld (0c428h),a
+	ld (simon_jump_dir),a
+	ld (simon_hurt_step),a          ; hurt sub-state -> 0
+	ld (simon_whip),a
+	ld (simon_knockback),a
+	ld (simon_arc),a
 	ld a,(door_state)
 	cp 002h
 	jr z,l705ah
@@ -7659,9 +7659,9 @@ l7024h:
 	jr z,l705ah
 	cp 005h
 	jr z,l705ah
-	ld a,(0c42ch)
+	ld a,(simon_facing)
 	xor 001h
-	ld (0c42ch),a
+	ld (simon_facing),a
 l705ah:
 	ld a,(health)
 	and a
@@ -7674,10 +7674,10 @@ l705ah:
 	ld (hl),a
 l706ah:
 	xor a
-	ld (0c42dh),a
-	ld (0c421h),a
+	ld (simon_invuln),a
+	ld (simon_jump_dir),a
 	inc a
-	ld (0c428h),a
+	ld (simon_arc),a
 	ld a,act_dying
 	ld (simon_action),a
 	ld bc,00509h
@@ -7691,8 +7691,8 @@ l7084h:
 l7090h:
 	defb 000h,001h,001h,001h,001h,002h,002h,002h,003h,003h
 simon_dying:                   ; 6 (0x709A)
-	ld a,(0c421h)
-	ld hl,0c428h
+	ld a,(simon_jump_dir)
+	ld hl,simon_arc
 l70a0h:
 	and a
 	jr nz,l70b6h
@@ -7700,13 +7700,13 @@ l70a0h:
 	ret nz
 	ld (hl),05ah
 	ld a,001h
-	ld (0c421h),a
+	ld (simon_jump_dir),a
 	ld a,sound_stop
 	call play_sound
 	ld a,bgm_simon_death
 	jp play_sound
 l70b6h:
-	ld hl,0c428h
+	ld hl,simon_arc
 	dec (hl)
 	ret nz
 	ld de,hearts
@@ -7718,8 +7718,8 @@ l70b6h:
 l70c6h:
 	xor a
 	ld (hl),a
-	ld (0c421h),a
-	ld (0c422h),a
+	ld (simon_jump_dir),a
+	ld (simon_whip),a
 	ld (0c434h),a
 	ld (0c43ah),a
 	ld (0c43bh),a
@@ -7743,13 +7743,13 @@ inv_reset_life:
 	ld (0c700h),a
 	ret
 simon_portal_wait:             ; 7 (0x7102) pad crouch+UP: wait, then warp
-	ld a,(0c42dh)
+	ld a,(simon_invuln)
 	and a
 	ret nz
 	xor a
 	ld (simon_action),a          ; back to grounded
 	ld (0c43dh),a
-	ld a,0ffh
+	ld a,dir_portal
 	ld (exit_dir),a          ; conn_from_spot: D001 = C5B4
 	ret
 ; simon_attack_tick (0x7114): SPACE starts whip or C416>=2 throw; then whip
@@ -7764,7 +7764,7 @@ simon_attack_start:
 	ld a,(btn_edge)
 	and 010h               ; SPACE/trig new-press
 	jr z,l713dh
-	ld hl,0c422h
+	ld hl,simon_whip
 	ld a,(hl)
 	and a
 	ret nz
@@ -7888,13 +7888,13 @@ l71dfh:
 ; whip_tick (0x71E7): if 0xC422 (whip phase) is 1..4, dispatch the anim.
 ; Phase 0 = idle (ret).  0xC420>=4 (fall/hurt/dying) suppresses whipping.
 whip_tick:
-	ld a,(0c422h)
+	ld a,(simon_whip)
 	and a
 	ret z
 	ld a,(simon_action)
 	cp act_fall
 	ret nc
-	ld a,(0c422h)
+	ld a,(simon_whip)
 	dec a
 	call DISPATCH_A
 	defw l7201h
@@ -7934,9 +7934,9 @@ l7231h:
 	jr l7242h
 	xor a
 l723fh:
-	ld (0c429h),a
+	ld (simon_whip_timer),a
 l7242h:
-	ld hl,0c422h
+	ld hl,simon_whip
 	inc (hl)
 	ret
 l7247h:
@@ -7960,15 +7960,15 @@ l7269h:
 	ld a,(0c436h)
 	cp 002h
 	jr nc,projectile_arm
-	ld hl,0c429h
+	ld hl,simon_whip_timer
 	dec (hl)
 	ret nz
 ; simon_attack_end (seg1 0x7275): clear whip phase/timer; torso 0, or 2 on
 ; stairs.  Melee whip timeout and projectile_arm both land here.
 simon_attack_end:
 	xor a
-	ld (0c422h),a          ; whip phase
-	ld (0c429h),a          ; whip timer
+	ld (simon_whip),a          ; whip phase
+	ld (simon_whip_timer),a          ; whip timer
 	ld a,(simon_action)
 	cp act_stairs
 	ld a,000h
@@ -7988,7 +7988,7 @@ l7299h:
 	jr nz,l72b1h
 	ld a,018h
 	ld (ix+006h),a
-	ld a,(0c42ch)
+	ld a,(simon_facing)
 	ld (ix+008h),a
 	ld a,(0c436h)
 	ld (ix+001h),a
@@ -8421,7 +8421,7 @@ timers_tick:
 	call dec_nonzero
 	ld hl,0c434h           ; sapphire ring
 	call dec_nonzero
-	ld hl,0c42dh           ; i-frames / portal wind-up (falls into dec_nonzero)
+	ld hl,simon_invuln           ; i-frames / portal wind-up (falls into dec_nonzero)
 dec_nonzero:
 	ld a,(hl)
 	and a
@@ -8474,7 +8474,7 @@ l7619h:
 	ld (0f3ebh),a
 	jp CHGCLR
 l761fh:
-	ld a,(0c422h)
+	ld a,(simon_whip)
 	and a
 	jr nz,l7655h
 	ld a,(0c701h)
@@ -8525,7 +8525,7 @@ l7655h:
 ; simon_mirror_frames (0x7666): if facing left (0xC42C!=0), add 0x0A/0x0F to
 ; the walk/torso frame pair at 0xC42E/0xC42F so the left-facing cells are used.
 simon_mirror_frames:
-	ld a,(0c42ch)
+	ld a,(simon_facing)
 	and a
 	ret z
 	ld hl,(simon_legs)
@@ -8545,8 +8545,8 @@ l767eh:
 	ret
 ; room_edge_detect (seg1 0x7682): per-frame room-EDGE / stair detector.  Compares
 ; Simon's Y (0xC425) and X (0xC427) against the screen bounds and, when he steps
-; past an edge, records the pending-exit direction in 0xC41B (1=up 2=down 3=left
-; 4=right) - which the transition brain (seg13 0xB963, via seg0 conn_lookup_paged) turns
+; past an edge, records the pending-exit direction in 0xC41B (dir_up..dir_right)
+; - which the transition brain (seg13 0xB963, via seg0 conn_lookup_paged) turns
 ; into the new 0xD001.  Horizontal exits also gate on the cached permit bytes
 ; 0xC41E/0xC41F (0xFF = blocked); a blocked horizontal edge is instead handled as
 ; a stage boundary at l77d8h/set_stage_boundary.  0xC420 = Simon's action state
@@ -8579,7 +8579,7 @@ room_edge_up:                        ; top edge (climbing off the top of a stair
 	ret z
 	ld a,0e0h
 	ld (de),a              ; wrap Y to bottom of the new (upper) room
-	ld a,(0c42ch)
+	ld a,(simon_facing)
 	and a
 	ld d,0f0h
 	jr z,l76bdh
@@ -8588,19 +8588,19 @@ l76bdh:
 	ld a,(bc)
 	add a,d                ; nudge X toward the stair landing
 	ld (bc),a
-	ld (hl),001h           ; pending dir = 1 (up)
+	ld (hl),dir_up
 	ret
 room_edge_down:                        ; past the bottom edge
 	ld a,(permit_down)          ; down exit permit
 	inc a
 	jr nz,room_edge_down_go           ; there IS a room below -> normal down transition
 	xor a                  ; no room below: bottomless pit -> fall to death
-	ld (0c421h),a
+	ld (simon_jump_dir),a
 	ld a,act_dying
 	ld (simon_action),a          ; action state 6 (falling/dying)
 	ld a,0fah
 	ld (de),a
-	ld hl,0c428h
+	ld hl,simon_arc
 	ld a,01eh
 	ld (hl),a
 	ld a,(stage)
@@ -8620,7 +8620,7 @@ room_edge_down_go:                        ; room below exists -> down transition
 	ld a,(simon_action)
 	cp act_stairs
 	jr nz,l7706h
-	ld a,(0c42ch)
+	ld a,(simon_facing)
 	and a
 	ld d,0f0h
 	jr z,l7703h
@@ -8630,7 +8630,7 @@ l7703h:
 	add a,d
 	ld (bc),a
 l7706h:
-	ld (hl),002h           ; pending dir = 2 (down)
+	ld (hl),dir_down
 	ret
 room_edge_left:                        ; left edge
 	ld a,(permit_left)          ; left exit permit
@@ -8638,7 +8638,7 @@ room_edge_left:                        ; left edge
 	ret z                  ; 0xFF = blocked -> no horizontal room here
 	ld a,0f6h
 	ld (bc),a              ; wrap X to right side of the new room
-	ld (hl),003h           ; pending dir = 3 (left)
+	ld (hl),dir_left
 	ret
 room_edge_right:                        ; right edge
 	ld a,(permit_right)          ; right exit permit
@@ -8646,7 +8646,7 @@ room_edge_right:                        ; right edge
 	ret z                  ; 0xFF = blocked -> no horizontal room here
 	ld a,00ah
 	ld (bc),a              ; wrap X to left side of the new room
-	ld (hl),004h           ; pending dir = 4 (right)
+	ld (hl),dir_right
 	ret
 ; door_interact (seg1 0x771f): white-key door tick, dispatched by 0xC5AC
 ; through door_state_tbl.  Placement is NOT a 0x1F object:
@@ -8688,7 +8688,7 @@ l774ah:
 	res 0,(hl)             ; spend the white key (clear bit 0)
 	call 08ec1h            ; play door-open effect
 	xor a
-	ld (0c422h),a
+	ld (simon_whip),a
 	call actors_kill_all
 	call whip_slots_clear
 	ld hl,door_state
@@ -8733,7 +8733,7 @@ door_open_walk:
 	ld bc,00000h
 	ld (simon_legs),bc
 	call simon_mirror_frames
-	ld a,(0c42ch)
+	ld a,(simon_facing)
 	and a
 	ld bc,00080h
 	jr z,l77b4h
@@ -8772,17 +8772,17 @@ l77d8h:
 	ld a,(hl)              ; left permit (0xC41E)
 	inc a
 	jr z,set_stage_boundary ; 0xFF = blocked edge -> STAGE EXIT
-	ld bc,003f6h           ; b=3 pending dir "left"; c=0xF6 X-wrap to right side
+	ld bc,003f6h           ; b=dir_left; c=0xF6 X-wrap to right side
 	jr l77f3h
 l77ebh:
 	inc hl                 ; hl -> right exit permit (0xC41F)
 	ld a,(hl)
 	inc a
 	jr z,set_stage_boundary ; 0xFF = blocked edge -> STAGE EXIT
-	ld bc,0040ah           ; b=4 pending dir "right"; c=0x0A X-wrap to left side
+	ld bc,0040ah           ; b=dir_right; c=0x0A X-wrap to left side
 l77f3h:
 	ld a,b
-	ld (exit_dir),a          ; pending-exit dir (1=up 2=down 3=left 4=right)
+	ld (exit_dir),a          ; pending-exit dir (dir_up..dir_right)
 	ld a,c
 	ld (de),a              ; wrap Simon's X to the far side of the new room
 	ld a,(stage)
@@ -8924,7 +8924,7 @@ l78cah:
 	add a,006h
 	ld b,a
 l78d3h:
-	ld a,(0c42dh)
+	ld a,(simon_invuln)
 	and a
 	jr z,l78e2h
 	ld a,(0c003h)
@@ -9771,7 +9771,7 @@ l7dach:
 	djnz l7da9h
 	ret
 whip_hit_actors:
-	ld a,(0c422h)
+	ld a,(simon_whip)
 	cp 003h
 	ret nz
 	ld ix,actor_slots
@@ -9878,7 +9878,7 @@ actors_vs_simon:
 	ld a,(0c434h)
 	and a
 	jr nz,l7e84h
-	ld a,(0c42dh)
+	ld a,(simon_invuln)
 	and a
 	ret nz
 	ld a,(0c43ah)
@@ -9924,8 +9924,8 @@ l7ec8h:
 	ld a,act_hurt
 	ld (simon_action),a
 	xor a
-	ld (0c423h),a
-	ld (0c422h),a
+	ld (simon_hurt_step),a
+	ld (simon_whip),a
 	ld a,(ix+00ah)
 	rla
 	ld a,001h
@@ -9943,7 +9943,7 @@ shots_vs_simon:
 	ld a,(0c434h)
 	and a
 	jr nz,l7f01h
-	ld a,(0c42dh)
+	ld a,(simon_invuln)
 	and a
 	ret nz
 	ld a,(0c43ah)
@@ -9972,8 +9972,8 @@ l7f07h:
 	ld a,act_hurt
 	ld (simon_action),a
 	xor a
-	ld (0c423h),a
-	ld (0c422h),a
+	ld (simon_hurt_step),a
+	ld (simon_whip),a
 	ld a,(ix+00ah)
 	rla
 	ld a,001h
@@ -9995,7 +9995,7 @@ l7f47h:
 	djnz l7f07h
 	ret
 whip_hit_shots:
-	ld a,(0c422h)
+	ld a,(simon_whip)
 	cp 003h
 	ret nz
 	ld ix,shot_slots
@@ -10052,7 +10052,7 @@ l7fb6h:
 	djnz l7f8fh
 	ret
 whip_hit_candles:
-	ld a,(0c422h)
+	ld a,(simon_whip)
 	cp 003h
 	ret nz
 	ld hl,scenery_slots
@@ -10083,7 +10083,7 @@ l7fe2h:
 	djnz l7fc9h
 	ret
 pickups_vs_simon:
-	ld a,(0c422h)
+	ld a,(simon_whip)
 	and a
 	ret nz
 	ld hl,pickup_slots
@@ -10241,7 +10241,7 @@ vendor_vs_attack:              ; (0x80EC) one vendor slot HL vs whip then proj
 	ld a,(weapon_id)
 	cp equip_knife
 	jr nc,l8104h
-	ld a,(0c422h)
+	ld a,(simon_whip)
 	cp equip_axe
 	jr nz,l8104h
 	push hl
@@ -10291,7 +10291,7 @@ l813ch:
 	ld a,(weapon_id)
 	cp equip_knife
 	jr nc,l8151h
-	ld a,(0c422h)
+	ld a,(simon_whip)
 	cp equip_axe
 	jr nz,l8151h
 	push hl
@@ -10345,7 +10345,7 @@ hurt_simon_contact:
 	jr z,l819ah            ; no shield -> full (doubled) damage
 	ld a,(simon_x)
 	sub (ix+005h)
-	ld a,(0c42ch)
+	ld a,(simon_facing)
 	jr nc,l8197h
 	and a
 	jr z,l819fh
@@ -10807,7 +10807,7 @@ whip_reach_x:
 	jr nz,l84eah
 	ld b,018h
 l84eah:
-	ld a,(0c42ch)
+	ld a,(simon_facing)
 	and a
 	ld a,(simon_x)
 	jr z,l84f5h
@@ -10859,7 +10859,7 @@ platform_stand_test:
 	ld a,(simon_action)
 	cp act_fall
 	jr nz,l8538h
-	ld a,(0c428h)
+	ld a,(simon_arc)
 	cp 003h
 	ret c                  ; still rising -> don't land on anything
 l8538h:
@@ -10879,7 +10879,7 @@ l8540h:
 	djnz l8540h
 	ld a,d
 	or e
-	ld (0c439h),a          ; 0 = airborne/ground, else the slot id
+	ld (simon_on_plat),a          ; 0 = airborne/ground, else the slot id
 	ret
 ; platform_overlap (0x8556): HL = slot.  Carry Simon only when he is within 8px
 ; above the platform row and his X (+-7) lands in the 32px deck.  Writes the
@@ -10926,7 +10926,7 @@ l8585h:
 ; 0xC5AE is door X (from door_tbl, NOT a 0x1F object).  Y window is 0x38
 ; after C5AD-8; X window is 8.  Facing (0xC42C) nudges C by +/-8 first.
 door_proximity:
-	ld a,(0c42ch)
+	ld a,(simon_facing)
 	and a
 	jr z,l8593h
 	ld a,c
@@ -10965,7 +10965,7 @@ hurt_simon_spikes:
 	ld a,(simon_action)
 	cp act_dying
 	ret z                  ; already dying -> ignore
-	ld a,(0c42dh)
+	ld a,(simon_invuln)
 	and a
 	ret nz
 	ld a,(0c43ah)
@@ -11073,7 +11073,7 @@ overlap_shield:                ; (0x8652) yellow shield: Simon X ±8 by facing
 	ld a,004h
 	add a,l
 	ld l,a
-	ld a,(0c42ch)
+	ld a,(simon_facing)
 	and a
 	ld a,008h
 	jr z,l8660h
@@ -14400,7 +14400,7 @@ flame_spawn:
 	ld (ix+01fh),b
 	pop ix
 	ld hl,0ce08h
-	inc (hl)
+	inc (hl)               ; flame_spawn count (no reader)
 	ret
 actor_kill_special:
 	ld a,(ix+000h)
@@ -14784,7 +14784,7 @@ l9d33h:
 	ld e,0c0h
 l9d35h:
 	ld d,0f0h
-	ld a,(0c42ch)
+	ld a,(simon_facing)
 	and a
 	ret z
 	ld d,010h
@@ -15136,7 +15136,7 @@ l9faeh:
 	ld de,01100h
 	ld hl,0d67ch
 	ld b,008h
-	ld a,(0ce03h)
+	ld a,(0ce03h)          ; NZ would scan 2 SAT slots; no writer, always 0
 	and a
 	jr z,l9fd1h
 	ld b,002h

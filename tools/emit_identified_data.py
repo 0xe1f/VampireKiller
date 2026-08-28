@@ -753,6 +753,28 @@ SHAPE_ID_NAME = {
 }
 
 
+def emit_poses_inc() -> None:
+    """ix+0B pose ids.  pose_* so they do not collide with SAT streams."""
+    poses = [
+        (i, name.replace("shape_", "pose_", 1))
+        for i, name in sorted(SHAPE_ID_NAME.items())
+    ]
+    width = max(len(n) for _, n in poses) + 1
+    lines = [
+        "; ===========================================================================",
+        ";  Actor SAT pose ids (ix+0B).  Readability only — not emitted.",
+        ";  Named pose_* so they do not collide with SAT streams (shape_*) in",
+        ";  data/actor_shape.asm.  Shared streams use the canonical id (ghost l0",
+        ";  = 0x71, flame 0 = 0x85, intro simon 0 = 0x97).",
+        ";  Do not add these to msx.sym (z80dasm would rewrite every small literal).",
+        "; ===========================================================================",
+        "",
+    ]
+    for i, name in poses:
+        lines.append("%-*s equ 0x%02x" % (width + 1, name + ":", i))
+    write_lines(os.path.join(SEGS, "poses.inc"), lines)
+
+
 def shape_stream_name(cpu: int, ids: list[int] | None = None) -> str:
     if ids:
         for i in ids:
@@ -850,6 +872,8 @@ def format_actor_shapes(raw: bytes) -> list[str]:
         "; this table; nametables do not use those ids.  HUD tiles follow at 0xB9C8.",
         "; Names live in tools/emit_identified_data.py SHAPE_ID_NAME (regen this",
         "; file from there).  shape_* prefix avoids colliding with spr_* RLE.",
+        "; Pose ids (ix+0B) are pose_* in segments/poses.inc; do not reuse",
+        "; shape_* as equ names (those are the SAT stream labels).",
         "; Unused (no store): 0x0D 0x2D-0x32 0x58 0x76-0x78 0x8E 0xA3-0xA4.",
         "; 0x0A is named (open-mouth merman) but unused.  Event 6: 0x02/0xA5",
         "; are robe, 0xA6 open / 0xA7 closed head (actor_dracula_bat); 0x57/0x59",
@@ -1143,9 +1167,7 @@ def _words(rom: bytes, file_off: int, n: int) -> list[int]:
 
 
 def emit_simon_rle(rom: bytes) -> None:
-    """Labeled packed RLE streams at simon_cell0/1_ptr + intro_simon + orphans.
-
-    Covers CPU 0xA319-0xB5A1 exactly.  intro_sky is a separate file (0xB895).
+    """Pointer tables at 0xA281/0xA2D1 then packed RLE 0xA319-0xB5A1.
     0xB5A1-0xB894 is figure Dracula body (dracula_body.asm); title_jp_sprites
     at 0xBBF6; logo_font at 0xBE59.
     """
@@ -1161,17 +1183,45 @@ def emit_simon_rle(rom: bytes) -> None:
             return intro[cpu]
         return "simon_rle_%04x" % cpu
 
+    def emit_ptr_tbl(name, cpu, words, comment):
+        out = [
+            "; %s (seg13 0x%04X): %s" % (name, cpu, comment),
+            "%s:" % name,
+        ]
+        for i in range(0, len(words), 4):
+            chunk = words[i : i + 4]
+            out.append("\tdefw " + ",".join("0x%04x" % w for w in chunk))
+        out.append("")
+        return out
+
     lines = [
         "; Packed 1bpp sprite RLE (rle_dec), CPU 0xA319-0xB5A1.",
         "; Pixel bytes are defb %xxxxxxxx (MSB=left, one 8px row of an 8x8",
         "; cell; VRAM order TL/BL/TR/BR per 16x16).  Run/literal counts stay",
         "; hex so the packed stream is byte-exact.",
-        "; Pointers: simon_cell0_ptr (0xA281), simon_cell1_ptr (0xA2D1),",
-        "; intro load at 0x5682 (intro_simon_0..7).  Six orphan streams are",
-        "; the second 16x16 plane after a listed frame; not in those tables.",
+        "; Pointer tables simon_cell0_ptr (0xA281) / simon_cell1_ptr (0xA2D1)",
+        "; sit at the front of this file (before 0xA319).  intro load at",
+        "; 0x5682 (intro_simon_0..7).  Six orphan streams are the second",
+        "; 16x16 plane after a listed frame; not in those tables.",
         "; PNG preview: gfx/sprites/simon_rle.png (`make gfx`); cell header = VRAM dest.",
         "",
     ]
+    lines.extend(
+        emit_ptr_tbl(
+            "simon_cell0_ptr",
+            0xA281,
+            cell0,
+            "40 words, indexed by 0xC42E (legs).",
+        )
+    )
+    lines.extend(
+        emit_ptr_tbl(
+            "simon_cell1_ptr",
+            0xA2D1,
+            cell1,
+            "36 words, indexed by 0xC42F (torso/whip).",
+        )
+    )
     cpu = 0xA319
     for start in starts:
         assert start == cpu, "gap/overlap at 0x%04X vs 0x%04X" % (start, cpu)
@@ -2049,6 +2099,7 @@ def emit_seg15(rom: bytes) -> None:
 def main() -> None:
     rom = load_rom()
     os.makedirs(DATA, exist_ok=True)
+    emit_poses_inc()
     emit_mtile_streams(rom)
     emit_mtile_defs(rom)
     emit_tileset_banks(rom)

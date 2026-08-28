@@ -7,6 +7,8 @@
 ; this table; nametables do not use those ids.  HUD tiles follow at 0xB9C8.
 ; Names live in tools/emit_identified_data.py SHAPE_ID_NAME (regen this
 ; file from there).  shape_* prefix avoids colliding with spr_* RLE.
+; Pose ids (ix+0B) are pose_* in segments/poses.inc; do not reuse
+; shape_* as equ names (those are the SAT stream labels).
 ; Unused (no store): 0x0D 0x2D-0x32 0x58 0x76-0x78 0x8E 0xA3-0xA4.
 ; 0x0A is named (open-mouth merman) but unused.  Event 6: 0x02/0xA5
 ; are robe, 0xA6 open / 0xA7 closed head (actor_dracula_bat); 0x57/0x59

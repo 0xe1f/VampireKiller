@@ -21,7 +21,9 @@ segments/           one file per paging window (fills through 0xC000)
   banks_9a.asm      banks 9-a: title gfx / palettes / enemy RLE
   banks_bcd.asm     banks b-d: map tables / metatile defs / transitions
   banks_ef.asm      banks e-f: scenery / PSG / Dracula portrait
-  data/             metatiles, tilesets, fonts, 1bpp sprite RLE, PSG, gfx scripts
+  data/             metatiles, tilesets, fonts, 1bpp sprite RLE, PSG, gfx scripts,
+                    scenery/spawn/object lists, conn/door/spot tables
+  actors.inc etc.   small numeric ids (actor/item/weapon/sfx/pose/scenery)
 tools/              game-specific helpers (gfx sheets, maps, PSG, handbook)
   disasm/           reusable MSX/Konami disasm helpers
 docs/               player handbook (Jekyll / GitHub Pages) + RE notes

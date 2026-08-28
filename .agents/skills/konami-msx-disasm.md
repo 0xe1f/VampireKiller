@@ -41,8 +41,9 @@ instead of reinventing them. Read `docs/progress.md` (End goal + Working notes) 
   `split-rom.sh` emits the leftovers and deletes migrated ones. Regen of a
   migrated bank uses the original ROM (`regen-seg.sh` slices it itself).
   All hand-authored disassembly metadata lives here: `bios.inc` (MSX BIOS entry
-  names), `actors.inc` (spawn/object-list type `equ`s — small numeric ids, **not**
-  in `msx.sym` or z80dasm rewrites every `0x01`), `msx.sym` (routine/label names
+  names), `*.inc` type ids (`actors.inc`, `items.inc`, `weapon.inc`, `sfx.inc`,
+  `poses.inc`, `scenery.inc` — small numeric `equ`s, **not** in `msx.sym` or
+  z80dasm rewrites every `0x01`), `msx.sym` (routine/label names
   for z80dasm regen), `seg*.blocks` (code/data split maps). Anything needed to
   reassemble or regenerate belongs here.
 - `docs/` — `progress.md` (checklist + RAM map + working notes), `game-notes.md`
@@ -114,7 +115,8 @@ of `<Game>.asm`.
   `make verify` catches inconsistencies. Casing: `UPPER_SNAKE` only for MSX BIOS
   and macro-like pseudo-instruction helpers (e.g. `DISPATCH_A`); `lower_snake` for
   all game code/data. Small numeric type `equ`s (`actor_zombie: equ 0x01`) live in
-  an `INCLUDE`d `.inc`, never `msx.sym`.
+  an `INCLUDE`d `.inc`, never `msx.sym` (VK: `actors.inc`, `items.inc`,
+  `weapon.inc`, `sfx.inc`, `poses.inc`, `scenery.inc`).
 - **A symbol in an immediate operand is usually a lie.** z80dasm substitutes a
   symbol for *any* matching value, so every small constant that collides with a
   low BIOS entry comes back as that name: `ld de,0` reads `ld de,CHKRAM`

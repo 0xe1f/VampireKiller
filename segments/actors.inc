@@ -9,6 +9,18 @@
 obj_next_room:           equ 0x00
 obj_end_stream:          equ 0xff
 
+; room_spawner bitmask (seg14 spawn_mask_*).  Bits are not actor type ids
+; (red merman is type 0x03 but bit 2 = 0x04).  Bit 7 appears in some masks
+; and is never dispatched.
+spawn_zombie:            equ 0x01
+spawn_merman_green:      equ 0x02
+spawn_merman_red:        equ 0x04
+spawn_hanging_bat:       equ 0x08
+spawn_flying_skull:      equ 0x10
+spawn_ghost_head:        equ 0x20
+spawn_roc:               equ 0x40
+spawn_bit7:              equ 0x80
+
 ; entity_tbl types 1-22
 actor_zombie:            equ 0x01  ; generator bit0
 actor_merman_green:      equ 0x02  ; 1 HP, closed mouth; generator bit1
@@ -46,10 +58,10 @@ actor_orb:               equ 0x22  ; boss-clear orb
 actor_roc_drop:          equ 0x23  ; roc projectile (hunchback tick)
 actor_pickup:            equ 0x24  ; settled / falling heart pickup
 actor_reward:            equ 0x26  ; candle/chest drop: sparkle, fall, then pickup
-actor_intro_sky:         equ 0x27  ; intro SAT; pose shape_intro_sky
-actor_intro_sky_a:       equ 0x28  ; intro SAT; poses 0x92/0x93
+actor_intro_sky:         equ 0x27  ; intro SAT; pose_intro_sky
+actor_intro_sky_a:       equ 0x28  ; intro SAT; pose_intro_sky_a/_b
 actor_intro_sky_b:       equ 0x29  ; same tick as 0x28; second spawn pos
-actor_intro_simon:       equ 0x2A  ; intro SAT Simon; pose shape_intro_simon_1
+actor_intro_simon:       equ 0x2A  ; intro SAT Simon; pose_intro_simon_1
 actor_dracula_bat:       equ 0x2C  ; event 6: drop, then hanging-bat fly
 actor_dracula_head:      equ 0x2D  ; event 6: SAT head arc after dracula_summon
 actor_dracula_chunk:     equ 0x2E  ; event 6: six debris chunks after type 17 dies

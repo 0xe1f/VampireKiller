@@ -1126,7 +1126,7 @@ Shared physics header (`actor_integrate` 0x99C0, velocity helpers in seg3):
 | +06 | physics alive (`actor_integrate` skips if 0; spawn writes 0, init usually sets 1) |
 | +07 / +08 | signed Y velocity |
 | +09 / +0A | signed X velocity |
-| +0B | pose / shape id (`actor_shape_ptr` / seg6 word table while that bank is paged). Named streams are `shape_*` in `data/actor_shape.asm`. Unused (no store): **0x0D, 0x2D–0x32, 0x58, 0x76–0x78, 0x8E, 0xA3–0xA4**. Event 6: **0x02 / 0xA5** robe and **0xA6** open / **0xA7** closed head (`actor_dracula_bat`); **0x57 / 0x59** flying SAT head (`actor_dracula_head`); **0x5A** `actor_dracula_chunk`. |
+| +0B | pose id (`pose_*` in `poses.inc`; stream is `shape_*` in `data/actor_shape.asm` / `actor_shape_ptr`). Unused (no store): **0x0D, 0x2D–0x32, 0x58, 0x76–0x78, 0x8E, 0xA3–0xA4**. Event 6: **0x02 / 0xA5** robe and **0xA6** open / **0xA7** closed head (`actor_dracula_bat`); **0x57 / 0x59** flying SAT head (`actor_dracula_head`); **0x5A** `actor_dracula_chunk`. |
 | +0C | timer |
 | +0D | HP from `actor_hp_tbl` (0x60E9; spawn indexes as 0x60E8+type) |
 | +0E | flags. **bit 0 = hittable** this frame (`rra`/`jr nc` in whip/proj tests; `res 0` on a hit). **bit 2** = rearm hittable (`actors_rearm_hittable`). Spawn writes 7. |
@@ -1614,6 +1614,67 @@ record used by the entity dispatch at 0x5FD0 / `entity_tbl`).
 
 - Per-level / per-boss data tables (which bank they live in). Boss CE01
   machines for events 1–6 are named; leftover is other unnamed tables.
+
+### Deferred constants / naming (do not put in `msx.sym`)
+
+Small numeric `equ`s live in `segments/*.inc`. Packed data already uses
+them: `actors.inc` (types + spawn bits), `items.inc`, `weapon.inc`
+(`equip_*`), `sfx.inc`, `poses.inc`, `scenery.inc`. Id prefixes were
+chosen so they do **not** collide with ROM labels:
+
+| Ids | Prefix | Do not reuse |
+|-----|--------|----------------|
+| pickup / drop | `item_*` | `bonus_*` collect handlers in `banks_0123` |
+| C416 equipped | `equip_*` | `weapon_*` thrown-sprite streams in `enemy_sprite_rle.asm` |
+| ix+0B pose | `pose_*` | `shape_*` SAT streams in `data/actor_shape.asm` |
+| `play_sound` | `sfx_*` / `bgm_*` | `sfx_NN_*` bytecode streams |
+
+`collect_bonus_tbl` stays handler addresses (`defw bonus_small_heart`), not
+item ids. Vendor scenery attrs stay hex (bits5–2 = offer slot, not `item_*`).
+
+**Skip / return later — constants**
+
+- **RAM `equ`s** (`lives` = `0xC410`, `weapon_id` = `0xC416`, `stage` =
+  `0xD000`, …). Highest readability win in the play banks, but a ~19k-line
+  mechanical rewrite; regen emits hex again, so names have to be re-applied
+  (or a post-pass added). Do it incrementally on the well-known cluster.
+- **Main-state / Simon-action ids** (`main_state_tbl` 0–12, `0xC420` 0–7).
+  Tiny sets that collide with every other small literal; only worth it at
+  the dispatch sites themselves.
+- **`event.inc`** — CE00 1–6 (giant bat … Dracula). Tiny; add when those
+  immediates are replaced.
+- **`dir.inc`** — pending exit `0xC41B` 1–4 / `0xFF` portal. Tiny; add with
+  a `conn_lookup` pass.
+- **Jump tables that are already ROM labels** (`entity_tbl`, `actor_hp_tbl`,
+  `collect_bonus_tbl`, `main_state_tbl`, `simon_action_tbl`) stay in
+  `msx.sym` and next to their dispatchers. Do not duplicate them as `equ`s
+  or peel them into `data/`.
+- **Using the new `.inc`s in `banks_0123`** (`ld (ix+0Bh),pose_*`,
+  `cp equip_knife`, `ld a,sfx_whip`). Data files use them now; the play
+  banks still have hex + comments. Same regen cost as RAM names.
+
+**Skip / return later — data left in the bank files**
+
+Code stays in the bank asms (`conn_lookup`, `door_load`, `spot_load_coords`,
+`sound_tick`). Also left in place on purpose:
+
+- **`sfx_tbl` / `sfx_ptr` / `music_ptr`** — pointer tables glued to
+  `sound_tick` (same pattern as `entity_tbl` next to spawn). Peel only if
+  we want `banks_ef` to be driver-only.
+- **Door 8×8 tiles** in `banks_0123` — tiny; they live next to
+  `door_blit_tiles`.
+- **Do not merge** `mtile_stream_intro` and `mtile_streams`. They are
+  contiguous in ROM (`0x614B` / `0x617B`) but different loaders (`0xC41A`
+  vs `mtile_roomptr`).
+- **Emitters** for the hand-extracted tables (`scenery_lists`,
+  `spawn_masks`, `object_lists`, `mtile_index`, `mtile_defbase`,
+  `conn_tbl`, `door_tbl`, `spot_tbl`) are not in
+  `tools/emit_identified_data.py`. A full emit would not regenerate them;
+  add emitters if we want ROM-round-trip dumps.
+- **Named zeros** — empty spawn masks are still `000h` (could be
+  `spawn_none`); bare `scenery_block32` is kind with item 0 (could OR
+  `item_none`). Cosmetic.
+
 - **Symbol collisions across banks — handled at regen.** `segments/msx.sym` stays
   one catalog, but z80dasm `-S` is flat, so 48 CPU addresses are shared by two
   banks (21 of them with a real name on both sides). The known case that started

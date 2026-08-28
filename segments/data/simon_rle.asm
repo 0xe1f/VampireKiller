@@ -2,10 +2,39 @@
 ; Pixel bytes are defb %xxxxxxxx (MSB=left, one 8px row of an 8x8
 ; cell; VRAM order TL/BL/TR/BR per 16x16).  Run/literal counts stay
 ; hex so the packed stream is byte-exact.
-; Pointers: simon_cell0_ptr (0xA281), simon_cell1_ptr (0xA2D1),
-; intro load at 0x5682 (intro_simon_0..7).  Six orphan streams are
-; the second 16x16 plane after a listed frame; not in those tables.
+; Pointer tables simon_cell0_ptr (0xA281) / simon_cell1_ptr (0xA2D1)
+; sit at the front of this file (before 0xA319).  intro load at
+; 0x5682 (intro_simon_0..7).  Six orphan streams are the second
+; 16x16 plane after a listed frame; not in those tables.
 ; PNG preview: gfx/sprites/simon_rle.png (`make gfx`); cell header = VRAM dest.
+
+
+; simon_cell0_ptr (seg13 0xA281): 40 words, indexed by 0xC42E (legs).
+; Consumed by load_simon_sprites; streams catalogued in gfx/sprites/simon_rle.png.
+simon_cell0_ptr:
+	defw 0acd1h,0ad4eh,0adc3h,0afb4h
+	defw 0b026h,0b09bh,0b171h,0b1ffh
+	defw 0b24bh,0b2bch,0a3cah,0a447h
+	defw 0a4bch,0a6adh,0a720h,0a795h
+	defw 0a869h,0a8f4h,0a941h,0a9b1h
+	defw 0aebch,0aefdh,0af36h,0b0ceh
+	defw 0b105h,0b13eh,0b19eh,0b1ffh
+	defw 0b24bh,0b2bch,0a5b5h,0a5f6h
+	defw 0a62fh,0a7c7h,0a7feh,0a837h
+	defw 0a895h,0a8f4h,0a941h,0a9b1h
+
+; simon_cell1_ptr (seg13 0xA2D1): 36 words, indexed by 0xC42F (torso/whip).
+; Consumed by load_simon_sprites; streams catalogued in gfx/sprites/simon_rle.png.
+simon_cell1_ptr:
+	defw 0ac93h,0ad12h,0ad87h,0b1cch
+	defw 0b235h,0b28ah,0b2edh,0b34ah
+	defw 0b392h,0b3fbh,0b46bh,0b4beh
+	defw 0b2edh,0b52dh,0b556h,0a38ch
+	defw 0a40bh,0a480h,0a8c1h,0a92bh
+	defw 0a980h,0a9e2h,0aa3fh,0aa87h
+	defw 0aaeeh,0ab60h,0abb4h,0a9e2h
+	defw 0ac21h,0ac4ch,0ae05h,0ae43h
+	defw 0ae80h,0a4feh,0a53ch,0a579h
 
 intro_simon_0:  ; 0xA319  packed 56; intro_simon + reused by cell ptrs
 	defb 0x07, %00000000

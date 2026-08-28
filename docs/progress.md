@@ -14,8 +14,11 @@ file per paging window (`banks_0123`, `banks_456`, `banks_78`, `banks_9a`,
 `banks_bcd`, `banks_ef`), each filling through CPU 0xC000. Tilesets and
 metatile streams/defs are labeled `.asm` (`tileset_s00`..`s18`,
 `mtile_stream_sNN_rNN`); Simon/intro sprite RLE is labeled packed streams
-(`intro_simon_0`..`7`, `simon_rle_xxxx`, `intro_sky`). Seg14 holds scenery /
-object lists / `font_credits.asm` / the PSG driver, then bank 15 music tails
+(`intro_simon_0`..`7`, `simon_rle_xxxx`, `intro_sky`). Seg11–13 index/conn/door
+tables are `data/mtile_index.asm`, `mtile_defbase.asm`, `conn_tbl.asm`,
+`door_tbl.asm`, `spot_tbl.asm` (cell ptrs sit at the front of `simon_rle.asm`).
+Seg14 holds scenery / object lists (`data/scenery_lists.asm`,
+`spawn_masks.asm`, `object_lists.asm`) / `font_credits.asm` / the PSG driver, then bank 15 music tails
 and the Dracula portrait (`psg_seg15.asm`, `dracula_portrait.asm`).
 Fully migrated banks (0-15) have no `.bin`.
 
@@ -1311,8 +1314,11 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
 
 - Actor SAT streams (`data/actor_shape.asm`, from `SHAPE_ID_NAME` in
   `tools/emit_identified_data.py`) are named `shape_*` where the pose is
-  confirmed. Unused (no store): **0x0D, 0x2D–0x32, 0x58, 0x76–0x78, 0x8E,
-  0xA3–0xA4**. 0x0A is named (`shape_merman_open`) but nothing stores it.
+  confirmed. ix+0B ids are `pose_*` in `segments/poses.inc` (same stems,
+  different prefix — `shape_*` is already the stream label). Unused (no
+  store): **0x0D, 0x2D–0x32, 0x58, 0x76–0x78, 0x8E,
+  0xA3–0xA4**. 0x0A is named (`shape_merman_open` / `pose_merman_open`) but
+  nothing stores it.
   Event 6: **0x02 / 0xA5** robe and **0xA6** open / **0xA7** closed head
   (`actor_dracula_bat`); **0x57 / 0x59** flying SAT head (`actor_dracula_head`);
   **0x5A** = `actor_dracula_chunk`.
@@ -1335,8 +1341,9 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   noise but keeps hand-written `; ...` comments and re-aligns them).
 - Data regions go in a `.blocks` file (see `segments/seg00.blocks`, `segments/seg01.blocks`, `segments/seg02.blocks`, `segments/seg03.blocks`);
   a `.blocks` file only changes code-vs-data rendering, never the emitted bytes.
-  BIOS names live once in `segments/bios.inc`; actor type ids in
-  `segments/actors.inc`; routine names go in `segments/msx.sym`.
+  BIOS names live once in `segments/bios.inc`; small numeric ids in
+  `segments/*.inc` (`actors.inc`, `items.inc`, `weapon.inc`, `sfx.inc`,
+  `poses.inc`, `scenery.inc`); routine names go in `segments/msx.sym`.
 - Identified binary data (standing practice): dump known blobs to labeled
   `defb` (`tools/emit_identified_data.py` -> `segments/data/` and tileset
   banks), Metal Gear style. 4bpp tiles are hex `defb` pixel-rows. Identified
@@ -1350,12 +1357,12 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   hex once a bank is off `.bin`. Do not mass-convert a whole unknown bank to
   opaque `db`.
 - File placement (STANDING PRACTICE): all hand-authored disassembly metadata lives
-  in `segments/` (`bios.inc`, `actors.inc`, `msx.sym`, `seg*.blocks`) - anything
+  in `segments/` (`bios.inc`, `*.inc` type ids, `msx.sym`, `seg*.blocks`) - anything
   needed to reassemble or to regenerate the disassembly faithfully. `tools/disasm/`
   is the reusable MSX kit; other `tools/` scripts are game-specific. `generated/`
   is gitignored derived scratch (never author
-  there). How they're consumed: `bios.inc` and `actors.inc` are `INCLUDE`d by the
-  build (symbol equates, not emitted); `msx.sym` is the name catalog,
+  there). How they're consumed: `bios.inc` and the type-id `.inc`s are `INCLUDE`d
+  by the build (symbol equates, not emitted); `msx.sym` is the name catalog,
   `seg*.blocks` the code/data maps. `regen-seg.sh` runs `tools/disasm/seg_sym.py` so
   z80dasm `-S` gets a *per-bank* view of `msx.sym` (flat file, banked ROM).
   `bios.inc` and `msx.sym` overlap
@@ -1496,8 +1503,12 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   object_list_h0..h5, credits_font, credits_font_az, sound_tick, sound_idle,
   sound_ch_a/b/c, sound_sfx, sound_cmd_*, sound_sfx_*, sfx_ptr, sfx_tbl, music_ptr.
   Actor type `equ`s: `segments/actors.inc` (`actor_zombie`..`actor_intro_simon`,
-  `actor_dracula_bat/_head/_chunk`, `obj_next_room`/`obj_end_stream`); used in
-  the packed object list and confirmed `spawn_actor` `ld c` sites.
+  `actor_dracula_bat/_head/_chunk`, `obj_next_room`/`obj_end_stream`, spawn
+  bitmask bits); also `items.inc`, `weapon.inc`, `sfx.inc`, `poses.inc`,
+  `scenery.inc`. Used in packed scenery / spawn / object lists. Skip-for-later
+  (RAM `equ`s, play-bank immediates, `event.inc`/`dir.inc`, `sfx_tbl` left
+  next to the driver, door 8×8 tiles, emit of the new tables): see
+  `docs/game-notes.md` “Deferred constants”.
 - After any edit, run `make verify` before moving on.
 - Reusable methodology (for disassembling OTHER Konami MSX games later) lives in
   workspace skills at `.agents/skills/` (`konami-msx-disasm`, `msx-regen`,

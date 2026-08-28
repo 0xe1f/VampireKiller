@@ -458,6 +458,8 @@ def emit_mtile_streams(rom: bytes) -> None:
     lines = [
         "; Intro walk-up 8x6 metatile ids (room_map_build when 0xC41A != 0).",
         "; 48 bytes, row-major.  Included at mtile_stream_intro (seg11 0x614B).",
+        "; Preview: gfx/metatiles/mtile_stream_intro.png (`make gfx`); "
+        "cell header = CPU address of the 48-byte stream.",
         "mtile_stream_intro:",
     ]
     for row in range(6):
@@ -474,6 +476,8 @@ def emit_mtile_streams(rom: bytes) -> None:
     lines = [
         "; Packed 8x6 metatile streams, index order (mtile_roomptr).",
         "; 156 rooms x 48 bytes.  Included at mtile_streams (seg11 0x617B).",
+        "; Preview: gfx/metatiles/mtile_streams.png (`make gfx`); "
+        "cell header = CPU address of the stream. One stage per row.",
         "mtile_streams:",
     ]
     for i in range(NROOMS):

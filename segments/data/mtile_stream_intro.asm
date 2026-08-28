@@ -1,5 +1,6 @@
 ; Intro walk-up 8x6 metatile ids (room_map_build when 0xC41A != 0).
 ; 48 bytes, row-major.  Included at mtile_stream_intro (seg11 0x614B).
+; Preview: gfx/metatiles/mtile_stream_intro.png (`make gfx`); cell header = CPU address of the 48-byte stream.
 mtile_stream_intro:
 	defb 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00  ; row 0
 	defb 0x01,0x00,0x00,0x02,0x0a,0x0b,0x0c,0x0d  ; row 1

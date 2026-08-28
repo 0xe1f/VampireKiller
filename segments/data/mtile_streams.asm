@@ -1,5 +1,6 @@
 ; Packed 8x6 metatile streams, index order (mtile_roomptr).
 ; 156 rooms x 48 bytes.  Included at mtile_streams (seg11 0x617B).
+; Preview: gfx/metatiles/mtile_streams.png (`make gfx`); cell header = CPU address of the stream. One stage per row.
 mtile_streams:
 mtile_stream_s00_r00:  ; cpu 0x617B  roomptr[0]
 	defb 0x00,0x01,0x00,0x01,0x00,0x01,0x00,0x01

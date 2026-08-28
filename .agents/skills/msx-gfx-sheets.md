@@ -2,20 +2,21 @@
 name: msx-gfx-sheets
 description: >-
   Build labelled PNG contact sheets for MSX tiles, metatiles, hardware
-  sprites, fonts, and palettes. One tile, 4x4 metatile, 16x16 sprite
-  plane, glyph, or palette entry per cell, header id, in-game palette.
-  gfx/sprites/ is packed 1bpp sprite-asm sheets; gfx/fonts/ is 1bpp font
-  asms; gfx/metatiles/ is composed 4x4 defs; gfx/palettes/ is palette_apply
-  swatches; composites live in gfx/. Use when adding or changing
-  gfx/sprites, gfx/tilesets, gfx/metatiles, gfx/fonts, gfx/palettes,
-  enemy_sheet, sheet_enemy, make gfx, gfxdump.py, or sprite/tile/font/
-  metatile/palette previews.
+  sprites, fonts, and palettes. One tile, 4x4 metatile, 8x6 room stream,
+  16x16 sprite plane, glyph, or palette entry per cell, header id,
+  in-game palette. gfx/sprites/ is packed 1bpp sprite-asm sheets;
+  gfx/fonts/ is 1bpp font asms; gfx/metatiles/ is composed 4x4 defs and
+  8x6 streams; gfx/palettes/ is palette_apply swatches; composites live
+  in gfx/. Use when adding or changing gfx/sprites, gfx/tilesets,
+  gfx/metatiles, gfx/fonts, gfx/palettes, enemy_sheet, sheet_enemy,
+  make gfx, gfxdump.py, or sprite/tile/font/metatile/palette previews.
 ---
 
 # MSX gfx contact sheets
 
 Canonical sheets: `gfx/tilesets/tileset_s01.png`,
-`gfx/metatiles/mtile_defs_s01.png`, `gfx/sprites/enemy_sprite_rle.png`,
+`gfx/metatiles/mtile_defs_s01.png`, `gfx/metatiles/mtile_streams.png`,
+`gfx/sprites/enemy_sprite_rle.png`,
 and `gfx/palettes/stage_palettes.png`.
 New *catalog* dumps must match those, not `simon_rle` / `intro_sky`.
 Implement in `tools/gfxdump.py`; `make gfx` regenerates. Compressed bytes
@@ -29,7 +30,7 @@ only.
 | `gfx/sprites/` | The four packed 1bpp sprite asms only (`ASM_SPRITE_STEMS`): `enemy_sprite_rle`, `simon_rle`, `intro_sky`, `title_jp_sprites`. |
 | `gfx/tilesets/` | 4bpp tileset asms (`tileset_*`, intro/title, bonus HUD, HUD keys, portrait). |
 | `gfx/palettes/` | palette_apply tables (`stage_palettes`, `room_palettes`). Solid 8×8 swatches, not tiles. |
-| `gfx/metatiles/` | 4x4 metatile-def tables (`mtile_defs_sNN`, `mtile_def_intro`). Room streams are `gfx/stage_sNN.png`, not this dir. |
+| `gfx/metatiles/` | 4x4 metatile-def tables (`mtile_defs_sNN`, `mtile_def_intro`) and 8x6 room streams (`mtile_streams`, `mtile_stream_intro`). Geographic/minimap composites stay `gfx/stage_sNN.png`. |
 | `gfx/fonts/` | The three 1bpp font asms (`ASM_FONT_STEMS`): `font_credits`, `font_hud`, `font_logo`. |
 | `gfx/` | Everything else: SAT composites (`enemy_sheet.png`, `sheet_enemy_*.png`), hazards, stage/minimap sheets. |
 
@@ -51,11 +52,13 @@ or animation into one cell (that is `gfx/enemy_sheet.png` /
 | 4bpp 16×16 blit | one 16×16 | 128 | `gfx/tilesets/` | 8 cols (5 for bonus HUD, 4 for HUD keys / portrait parts), `size=16` |
 | palette_apply entry | one 8×8 solid | 3 | `gfx/palettes/` | 16 cols (VDP index 0–F; one row per table), `size=8` |
 | 4×4 metatile def | one 32×32 (4×4 nametable tiles) | 16 | `gfx/metatiles/` | 8 cols, `size=32` |
+| 8×6 room stream | one 256×192 nametable (HUD not cropped) | 48 | `gfx/metatiles/` | one stage per row, `size=(256, 192)`, scale 1 |
 | 1bpp hardware sprite | one 16×16 plane | 32 | `gfx/sprites/` | 8 cols, `size=16` |
 | 1bpp font glyph | one 8×8 | 8 | `gfx/fonts/` | 10 or 16 cols, `size=8`, scale 12 |
 
 Transparent / unused pixels are `OFF` `(0x30, 0x3a, 0x44)` so the cell
-bounds stay visible. Scale **8** (fonts **12**). Gap / canvas from `GAP` /
+bounds stay visible. Scale **8** (fonts **12**; 8×6 streams **1** so a
+room cell is as wide as a scale-8 metatile def). Gap / canvas from `GAP` /
 `BG` in `gfxdump.py`. Do not CC-overlay two SAT planes: the third in-game tone is
 `index_a | index_b` at overlap; compositing would make the dest header lie.
 Composited poses belong on `gfx/sheet_enemy_*`.
@@ -73,6 +76,9 @@ is drawn as ×.
   the VDP index (0–F); unused slots in that table are unlabeled.
 - Metatiles: CPU address of that 16-byte def (`mtile_defs_s01` def 0x00
   at 0x80B1 → `80B1`). Unique per cell.
+- Streams: CPU address of that 48-byte stream (`mtile_stream_s00_r00`
+  at 0x617B → `617B`; intro `614B`). Unique per cell. Empty pads
+  (a stage with fewer rooms than the widest) are unlabeled.
 - Sprite planes: VRAM dest of that 32-byte pattern (`FA00`, `FA20`, …).
   Unique within the load. Pattern *N* is `0xF800 + N*8`.
 - Fonts: 2-digit hex glyph id (`_hex_id`). Credits: ASCII of the character.
@@ -98,6 +104,12 @@ Unused slots in a palette_apply table stay `OFF`.
   0x8004).  Stage 18 Dracula-room defs use the event-6 portrait overlay
   (frame from nametable id 6, face from 0x1E), not the title-tiles tail of
   the 0xBF blit.
+- Room streams `mtile_streams`: `vk_playfield_palette(data, stage, room)`
+  per cell. One stage per row, rooms left to right. Compose the 8×6 from
+  that stage's def table / tileset. Stage 18 room 9 uses the event-6
+  portrait atlas and `_s18_portrait_palette`. `mtile_stream_intro`:
+  `vk_intro_palette` and intro defs. Full nametable (HUD not cropped);
+  `gfx/stage_sNN.png` is the geographic/minimap composite (HUD cropped).
 - Enemy sprite planes: that actor's SAT colour (`col & 0x0F`) in
   `vk_playfield_palette` for a room that actually loads the stream
   (`_sat_plane_map`). HUD-fixed 2/12/14 stay HUD-fixed; 4/5/6/7 come
@@ -129,12 +141,14 @@ stand-ins, compositing CC pairs onto this sheet type.
 ## Adding a dump
 
 1. Identify the asm (`segments/data/`) and the atom (8×8 tile, 16×16
-   tile, 4×4 metatile def, 16×16 sprite plane, 8×8 glyph, or 3-byte
-   palette_apply record).
+   tile, 4×4 metatile def, 8×6 room stream, 16×16 sprite plane, 8×8 glyph,
+   or 3-byte palette_apply record).
 2. Parse that file. Tiles: `parse_asm_tile8` (`; 0xXXXX  … tile …` or
    `… 16x16 …`; skip `rest of` prefixes). Metatile defs:
    `parse_asm_mtile_defs` (16-byte groups; s00/s18 are one file each).
-   Sprite RLE: `_parse_asm_sprite_rle` + `rledec.decompress`; skip
+   Room streams: `parse_asm_mtile_streams` (48-byte groups, one stage per
+   row) and `parse_asm_mtile_stream_intro`. Sprite RLE:
+   `_parse_asm_sprite_rle` + `rledec.decompress`; skip
    `*unid*` (not a valid stream). Split on 32-byte (or 128-byte)
    boundaries; do not emit a cell for a partial leftover. Fonts: 8-byte
    glyphs from the asm / ROM slice (`dump_credits_font` / `dump_hud_font`
@@ -144,15 +158,17 @@ stand-ins, compositing CC pairs onto this sheet type.
 3. Resolve dest (scripts / loaders) and palette as above. Unnamed enemy
    streams: match decompressed dests against SAT maps for a type.
    Metatiles: compose the 4×4 from the matching tileset (`_stage_tileset_cells`
-   / `_intro_tileset_cells`). Palettes: fill an 8×8 with that record's
+   / `_intro_tileset_cells`). Streams: stitch 8×6 of those defs; pad
+   unused columns with `None` cells. Palettes: fill an 8×8 with that record's
    RGB; unused indices in the 16-wide row stay `OFF`.
 4. `render_png(..., labels=..., scale=8)` into `SPRITE_DIR` (packed
    sprite asm), `TILESET_DIR` (4bpp tiles), `PALETTE_DIR` (solid
-   swatches, `size=8`), or `METATILE_DIR` (4×4 defs, `size=32`). Fonts:
+   swatches, `size=8`), or `METATILE_DIR` (4×4 defs, `size=32`; 8×6
+   streams, `size=(256, 192)`, scale 1). Fonts:
    `FONT_DIR`, scale 12. Packed SAT composites use `render_packed_png`
    into `GFX`. Hook from `main()` / `dump_asm_sprite_rles` /
    `dump_asm_tilesets` / `dump_asm_palettes` / `dump_asm_metatiles` /
-   `dump_enemy_frames`.
+   `dump_asm_mtile_streams` / `dump_enemy_frames`.
 5. File header comment on the asm: `Preview: gfx/…/<stem>.png`; cell
    header meaning. One line in `docs/game-notes.md` gfx catalogue.
 6. `make gfx` and check: every cell labelled (palette unused slots are
@@ -179,10 +195,11 @@ asm whose sheet is stale.
   Trailing `0xFF` pad after `intro_palette` is leftover. Pointer table
   `stage_palette_ptr` is not a row.
 - **Metatiles** — `gfx/metatiles/<stem>.png` ↔ the def table
-  (`dump_asm_metatiles`: `mtile_defs_s00`..`s18`, `mtile_def_intro`).
-  Bank-straddle tables (`s00`, `s18`) are one file each, like
-  `tileset_s01` crossing 0x8000. Room streams
-  (`mtile_streams`, `mtile_stream_intro`) are not this set.
+  (`dump_asm_metatiles`: `mtile_defs_s00`..`s18`, `mtile_def_intro`)
+  or the 8×6 stream table (`dump_asm_mtile_streams`: `mtile_streams`,
+  `mtile_stream_intro`). Bank-straddle def tables (`s00`, `s18`) are
+  one file each, like `tileset_s01` crossing 0x8000. `stage_sNN.png` is
+  the geographic/minimap composite (HUD cropped), not this set.
 - **Sprites** — `gfx/sprites/<stem>.png` ↔ `segments/data/<stem>.asm` for
   exactly `ASM_SPRITE_STEMS` (`enemy_sprite_rle`, `simon_rle`,
   `intro_sky`, `title_jp_sprites`). `dump_asm_sprite_rles`. A new packed

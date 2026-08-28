@@ -18,7 +18,7 @@
   gfx/sprites/<stem>.png   - packed 1bpp sprite asms (ASM_SPRITE_STEMS)
   gfx/tilesets/<stem>.png  - 4bpp tileset asms
   gfx/palettes/<stem>.png  - palette_apply tables (solid 8x8 swatches)
-  gfx/metatiles/<stem>.png - 4x4 metatile def tables (composed from tilesets)
+  gfx/metatiles/<stem>.png - 4x4 metatile def tables and 8x6 room streams
   gfx/fonts/<stem>.png     - 1bpp font asms (ASM_FONT_STEMS)
   gfx/<name>.png           - derived sheets (composites, hazards, vendor)
 
@@ -188,28 +188,34 @@ def render_png(path, cells, palette, cols=8, labels=None, lab_scale=2, size=16,
     above each tile with a 3x5 bitmap id, same treatment as the minimap
     renderer in roomperm.py (`contact_sheet`).  `size` is the tile edge in
     source pixels (8 for glyphs/tilesets, 16 for HUD/Simon sprites, 32 for
-    4x4 metatiles).  `scale` defaults to SCALE (6); 8x8 glyphs use 12 so
-    cells match 16x16 HUD tiles.
+    4x4 metatiles), or `(width, height)` for non-square atoms (8x6 streams).
+    `scale` defaults to SCALE (6); 8x8 glyphs use 12 so cells match 16x16
+    HUD tiles.  A `None` cell is a pad (canvas only, no header).
     Returns (W, H, rgb) or None.  `path` None skips the write."""
     if not cells:
         return None
     scale = SCALE if scale is None else scale
+    if isinstance(size, tuple):
+        src_w, src_h = size
+    else:
+        src_w = src_h = size
     lab_h = _label_band(labels, lab_scale)
     rows_of = (len(cells) + cols - 1) // cols
-    tile_s = size * scale
-    cell_w = tile_s
-    cell_h = lab_h + tile_s
+    cell_w = src_w * scale
+    cell_h = lab_h + src_h * scale
     W = cols * cell_w + (cols + 1) * GAP
     H = rows_of * cell_h + (rows_of + 1) * GAP
     buf = bytearray(W * H * 3)
     for i in range(0, W * H):
         buf[i * 3], buf[i * 3 + 1], buf[i * 3 + 2] = BG
     for idx, grid in enumerate(cells):
+        if grid is None:
+            continue
         x0 = GAP + (idx % cols) * (cell_w + GAP)
         y0 = GAP + (idx // cols) * (cell_h + GAP)
+        lab = None if not labels or idx >= len(labels) else labels[idx]
         _blit_cell(buf, W, grid, palette, x0, y0, scale, lab_h,
-                   None if not labels or idx >= len(labels) else labels[idx],
-                   lab_scale, size, size)
+                   lab, lab_scale, src_w, src_h)
     rgb = bytes(buf)
     if path:
         pngwrite.write_rgb(path, W, H, rgb)
@@ -455,6 +461,7 @@ def main():
     dump_asm_tilesets(data)
     dump_asm_palettes()
     dump_asm_metatiles(data)
+    dump_asm_mtile_streams(data)
 
 # First *recognisable* pose (ix+0B) for entity_tbl types 1-22.
 # Type 9's spawn state uses 0x26 (2-cell wait, legs only); the walk frame is 0x21.
@@ -1704,8 +1711,8 @@ def dump_asm_tilesets(data):
 # Metatile def tables.  s00 / s18 are one file each (cross 0x8000 / 0xA000,
 # like tileset_s01).  Cell header = CPU address of the 16-byte def.  Pixels
 # are the 4x4 of nametable tiles (id 0 blank; id N = ROM tile N-1) in the
-# stage / intro tileset.  mtile_streams are room layouts (gfx/stage_sNN.png),
-# not this set.
+# stage / intro tileset.  8x6 room streams are dump_asm_mtile_streams
+# (gfx/metatiles/mtile_streams.png); stage_sNN.png is the minimap layout.
 _MTILE_DEF_TABLES = (
     ("mtile_defs_s00", ("mtile_defs_s00.asm",), 0x7EE1, 0),
     ("mtile_defs_s01", ("mtile_defs_s01.asm",), 0x80B1, 1),
@@ -1718,6 +1725,24 @@ _MTILE_DEF_TABLES = (
     ("mtile_def_intro", ("mtile_def_intro.asm",), 0xA041, "intro"),
 )
 _EMPTY_TILE8 = [[0] * 8 for _ in range(8)]
+_EMPTY_MT32 = [[0] * 32 for _ in range(32)]
+_STREAM_W, _STREAM_H = 256, 192   # 8x6 of 32x32
+_NSTAGES = 19                     # stages 0..18
+_RE_STREAM = re.compile(
+    r"^mtile_stream_s(\d+)_r(\d+):\s*;\s*cpu 0x([0-9A-Fa-f]+)")
+_STREAMS = None
+_STREAMS_LEFT = 0
+
+
+def _mtile_kind_for_stage(stage):
+    """Def-table kind sharing the tileset groups (s01–s03, s04–s06, …)."""
+    if stage == 0:
+        return 0
+    if stage == 18:
+        return 18
+    if stage >= 16:
+        return 16
+    return ((stage - 1) // 3) * 3 + 1
 
 
 def parse_asm_mtile_defs(paths):
@@ -1779,24 +1804,86 @@ def _paint_rgb(grid, pal):
 _S18_UNIQUE = (0xAC80 - 0xA4C0) // 32
 
 
+def parse_asm_mtile_streams(path):
+    """48-byte room streams.  Returns ({(stage, room): (cpu, ids)}, leftover)."""
+    rooms = {}
+    leftover = 0
+    cur = None
+    ids = []
+
+    def flush():
+        nonlocal leftover, ids
+        if cur is None:
+            return
+        if len(ids) >= 48:
+            rooms[cur[0]] = (cur[1], ids[:48])
+            leftover += len(ids) - 48
+        else:
+            leftover += len(ids)
+        ids = []
+
+    with open(path) as f:
+        for line in f:
+            m = _RE_STREAM.match(line)
+            if m:
+                flush()
+                cur = ((int(m.group(1)), int(m.group(2))), int(m.group(3), 16))
+                continue
+            if cur is None:
+                continue
+            if line.startswith("mtile_stream_") and ":" in line:
+                break
+            if not _RE_DEFB.match(line):
+                continue
+            payload = line.split(";")[0]
+            ids.extend(int(hx, 16) for hx in _RE_HEXB.findall(payload))
+    flush()
+    return rooms, leftover
+
+
+def _mtile_streams():
+    global _STREAMS, _STREAMS_LEFT
+    if _STREAMS is None:
+        path = os.path.join(DATA_DIR, "mtile_streams.asm")
+        _STREAMS, _STREAMS_LEFT = parse_asm_mtile_streams(path)
+    return _STREAMS
+
+
+def parse_asm_mtile_stream_intro(path):
+    """One 48-byte stream.  Returns (cpu, ids, leftover)."""
+    raw = bytearray()
+    with open(path) as f:
+        for line in f:
+            if not _RE_DEFB.match(line):
+                continue
+            payload = line.split(";")[0]
+            raw.extend(int(hx, 16) for hx in _RE_HEXB.findall(payload))
+    leftover = max(0, len(raw) - 48)
+    return 0x614B, list(raw[:48]), leftover
+
+
 def _mtile_room_defs(stage, room):
     """Metatile ids in mtile_stream_sNN_rNN."""
-    want = "mtile_stream_s%02d_r%02d:" % (stage, room)
-    ids = []
-    on = False
-    with open(os.path.join(DATA_DIR, "mtile_streams.asm")) as f:
-        for line in f:
-            if line.startswith(want):
-                on = True
-                continue
-            if on:
-                if line.startswith("mtile_stream_"):
-                    break
-                if not _RE_DEFB.match(line):
-                    continue
-                payload = line.split(";")[0]
-                ids.extend(int(hx, 16) for hx in _RE_HEXB.findall(payload))
-    return frozenset(ids)
+    rec = _mtile_streams().get((stage, room))
+    if rec is None:
+        return frozenset()
+    return frozenset(rec[1])
+
+
+def _stitch_metatiles(mts32):
+    """48 cells of 32x32 -> 256x192.  Pads a short list with blank metatiles."""
+    cells = list(mts32[:48])
+    while len(cells) < 48:
+        cells.append(_paint_rgb(_EMPTY_MT32, [OFF] * 16))
+    grid = []
+    for mr in range(6):
+        row_mts = cells[mr * 8:mr * 8 + 8]
+        for y in range(32):
+            row = []
+            for mt in row_mts:
+                row.extend(mt[y])
+            grid.append(row)
+    return grid
 
 
 def _s18_portrait_atlas(data):
@@ -1865,6 +1952,103 @@ def dump_asm_metatiles(data):
         extra = "  +%d leftover bytes" % leftover if leftover else ""
         rel = os.path.relpath(out, ROOT)
         print("%-36s %3d metatiles  %s%s" % (rel, len(cells), labels[0], extra))
+
+
+def dump_asm_mtile_streams(data):
+    """8x6 room streams: one stage per row, cell header = CPU of the stream.
+
+    Atom is the full 256x192 nametable (HUD not cropped).  Scale 1 so a cell
+    is as wide as a scale-8 metatile def.  Empty pads (stages with fewer
+    rooms than the widest) are canvas, unlabeled.  Intro is a 1-cell sheet.
+    """
+    os.makedirs(METATILE_DIR, exist_ok=True)
+    cache = {}
+
+    def tiles_for(kind):
+        if kind not in cache:
+            if kind == "intro":
+                cache[kind] = _intro_tileset_cells(data)
+            else:
+                cache[kind] = _stage_tileset_cells(data, kind)
+        return cache[kind]
+
+    def_tables = {}
+    for stem, fnames, cpu0, kind in _MTILE_DEF_TABLES:
+        paths = [os.path.join(DATA_DIR, fn) for fn in fnames]
+        if any(not os.path.isfile(p) for p in paths):
+            continue
+        defs, _ = parse_asm_mtile_defs(paths)
+        def_tables[kind] = defs
+
+    idx_grids = {}
+    for kind, defs in def_tables.items():
+        tiles = tiles_for(kind)
+        if kind == 18:
+            tiles = tiles[:_S18_UNIQUE]
+        idx_grids[kind] = [_compose_metatile(tiles, d) for d in defs]
+
+    portrait = _s18_portrait_atlas(data)
+    ppal = _s18_portrait_palette(data)
+    portrait_idx = None
+    if 18 in def_tables:
+        lookup = (lambda tid, a=portrait: a[tid] if tid < len(a)
+                  else _EMPTY_TILE8)
+        portrait_idx = [
+            _compose_metatile_lookup(lookup, d) for d in def_tables[18]
+        ]
+
+    def paint_ids(kind, ids, pal, s18_room=None):
+        grids = idx_grids.get(kind, [])
+        if kind == 18 and s18_room == 9 and portrait_idx is not None:
+            grids = portrait_idx
+            pal = ppal
+        mts = []
+        for mid in ids:
+            if mid < len(grids):
+                mts.append(_paint_rgb(grids[mid], pal))
+            else:
+                mts.append(_paint_rgb(_EMPTY_MT32, pal))
+        return _stitch_metatiles(mts)
+
+    streams = _mtile_streams()
+    leftover = _STREAMS_LEFT
+    if streams:
+        ncols = max(rm for (_, rm) in streams) + 1
+        cells = []
+        labels = []
+        nrooms = 0
+        for stage in range(_NSTAGES):
+            pal_kind = _mtile_kind_for_stage(stage)
+            for rm in range(ncols):
+                rec = streams.get((stage, rm))
+                if rec is None:
+                    cells.append(None)
+                    labels.append(None)
+                    continue
+                cpu, ids = rec
+                pal = vk_playfield_palette(data, stage, rm)
+                cells.append(paint_ids(pal_kind, ids, pal, s18_room=rm))
+                labels.append("%04X" % cpu)
+                nrooms += 1
+        out = os.path.join(METATILE_DIR, "mtile_streams.png")
+        render_png(out, cells, [OFF], cols=ncols, labels=labels,
+                   size=(_STREAM_W, _STREAM_H), scale=1)
+        extra = "  +%d leftover bytes" % leftover if leftover else ""
+        rel = os.path.relpath(out, ROOT)
+        first = next(l for l in labels if l)
+        print("%-36s %3d rooms      %s%s" % (rel, nrooms, first, extra))
+
+    intro_path = os.path.join(DATA_DIR, "mtile_stream_intro.asm")
+    if os.path.isfile(intro_path) and "intro" in def_tables:
+        cpu, ids, ileft = parse_asm_mtile_stream_intro(intro_path)
+        pal = vk_intro_palette(data)
+        cell = paint_ids("intro", ids, pal)
+        out = os.path.join(METATILE_DIR, "mtile_stream_intro.png")
+        render_png(out, [cell], [OFF], cols=1, labels=["%04X" % cpu],
+                   size=(_STREAM_W, _STREAM_H), scale=1)
+        extra = "  +%d leftover bytes" % ileft if ileft else ""
+        rel = os.path.relpath(out, ROOT)
+        print("%-36s %3d rooms      %04X%s" % (rel, 1, cpu, extra))
 
 
 # palette_apply tables.  One sheet per asm (stage_palettes, room_palettes).

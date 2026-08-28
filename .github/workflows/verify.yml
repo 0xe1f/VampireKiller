@@ -10,32 +10,14 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
+      # .gitmodules uses SSH; the runner has no deploy key.
+      - name: HTTPS for GitHub SSH URLs
+        run: git config --global url.https://github.com/.insteadOf git@github.com:
+
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-
-      # tools/workbench is a local-path submodule; CI only needs game.mk for
-      # `make verify`. Seed the recipes when the submodule is not present.
-      - name: Workbench recipes
-        run: |
-          if [ ! -f tools/workbench/make/game.mk ]; then
-            mkdir -p tools/workbench/make
-            cat > tools/workbench/make/game.mk <<'EOF'
-ASM      ?= tools/sjasmplus --longptr
-SHA1SUM  ?= $(shell command -v sha1sum 2>/dev/null || echo "shasum -a 1")
-
-.PHONY: all verify clean
-
-all: $(SRC)
-	$(ASM) $(SRC)
-
-verify: all
-	@$(SHA1SUM) -c $(SHA1FILE)
-
-clean:
-	rm -f $(OUT)
-EOF
-          fi
+          submodules: true
 
       - name: Build sjasmplus
         run: |

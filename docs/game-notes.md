@@ -1252,7 +1252,7 @@ pointers each; stage table is seg1 `stage_bgm_tbl`), 0xFB/0xFD overlays
 streams (`data/psg_sfx.asm` / `data/psg_music.asm`) use the WAV
 catalogue names: `sfx_{id}_{name}` and `music_{id}_{name}_{a,b,c}`
 (hyphens in stems become `_`). Id 0x89 is Simon death; 0x8B is GAME OVER.
-`tools/psgplay.py` (`make music` / `make sfx`) drives `tools/disasm/psgplay.py`
+`tools/psgplay.py` (`make music` / `make sfx`) drives `tools/workbench/konami/psgplay.py`
 with VK table addresses / names and writes `music/*.wav` (ids `0x80`–`0x8E`;
 `0x8F` is silence) and `sfx/*.wav` (play_sound 1–0x1D; `{id}_{name}` like BGM).
 After the last
@@ -1323,7 +1323,7 @@ The 16-colour VDP palette is programmed by `palette_set` / `palette_apply`. Eigh
 (0, 1, 2, 3, 8, 12, 14, 15) are fixed by `palette_hud_load` (seg10 `0xBF88`) and never
 changed by stage palettes — HUD bonus tiles use only those. See *HUD bonus tiles*.
 
-Bank classification (by entropy / zero-fill, `tools/disasm/gfxview.py` + a quick scan):
+Bank classification (by entropy / zero-fill, `tools/workbench/msx/gfxview.py` + a quick scan):
 - **seg 0-3**: code (entropy ~7, top byte 0xCD/0xC4/0xDD opcodes).
 - **seg 4-9, 15**: 4bpp bitmap graphics (low entropy 4.3-5.5, zero-heavy, a
   single dominant background colour). These hold the title logo, HUD, stage and
@@ -1437,11 +1437,11 @@ source.
 
 ### Tools for the graphics pipeline
 
-- `tools/disasm/rledec.py <rom> <src-off> --dest 0xF800 --out x.bin` replays the RLE
+- `tools/workbench/konami/rledec.py <rom> <src-off> --dest 0xF800 --out x.bin` replays the RLE
   grammar above to extract a decompressed block.
-- `tools/disasm/gfxview.py x.bin 0 --bpp 1 --size 16 --count 16 --cols 8` renders 16x16
+- `tools/workbench/msx/gfxview.py x.bin 0 --bpp 1 --size 16 --count 16 --cols 8` renders 16x16
   1bpp sprites as ASCII art (also `--bpp 4` for SCREEN 5 tiles, `--raw` bitmaps).
-- `tools/disasm/rleenc.py x.bin --verify <rom> <src-off>` re-packs a flat buffer. It is
+- `tools/workbench/konami/rleenc.py x.bin --verify <rom> <src-off>` re-packs a flat buffer. It is
   an optimal-length packer and always round-trips, but does NOT always reproduce
   Konami's exact bytes (their packer uses a specific tie-break for equal-cost
   run/literal splits; measured ~1-3/10 exact). This is why the catalogue keeps
@@ -1581,7 +1581,8 @@ Catalogued so far:
   stage 18 room 9 uses the event-6 portrait atlas.
   `metatiles/mtile_stream_intro.png` is the 0xC41A walk-up (`614B`).
   Geographic/minimap composites stay on `stage_sNN.png` (HUD cropped).
-- `stage_sNN.png` - per-stage pixel rooms (`roomperm.py --pixels`):
+- `stage_sNN.png` - per-stage playfield (`roomperm.py --composite` via `make gfx`;
+  `--pixels` is the same rooms with no scenery/enemy overlay):
   nametable id N → ROM tile N−1 (id 0 blank — blit starts at VRAM 0x8004),
   per-room playfield palette, HUD rows cropped. `make gfx` emits these
   alongside the tileset sheets. Stage 18 room 9 overlays `dracula_portrait_load`
@@ -1597,8 +1598,8 @@ sprite pattern generator (0xF800 = cell 0, 0xF840 = cell 1).  The two-table desi
 is why legs and upper body can animate on different cadences (e.g. whipping while
 standing still).
 
-Pixel room sheets are `gfx/stage_sNN.png` (`roomperm.py --all --pixels`; also
-`make gfx`). Candle blob is on `enemy_sheet.png` as **1A/1B/1C**. Gfx banks
+Pixel room sheets are `gfx/stage_sNN.png` (`roomperm.py --all --composite`;
+also `make gfx`). `--pixels` is the unannotated playfield. Candle blob is on `enemy_sheet.png` as **1A/1B/1C**. Gfx banks
 4–10 and 15 are labeled dumps.
 
 ## Reference: Metal Gear disassembly
@@ -1656,7 +1657,7 @@ item ids. Vendor scenery attrs stay hex (bits5–2 = offer slot, not `item_*`).
   and CE00 compares; `main_*` / `act_*` at the two jump tables and the
   id loads that feed them; `dir_*` at `room_edge_detect` stores and
   `dir_portal` at the spot write). Regen still emits hex; re-apply after
-  regen-seg. Leftover hex is on purpose (ambiguous small literals,
+  regen-bank. Leftover hex is on purpose (ambiguous small literals,
   unnamed SAT ids).  CE03 has a `shot_alloc` reader and no ROM writer
   (always 0 after the run wipe); CE08 is `flame_spawn++` / `cell_event_set`
   zero with no reader. `0xC000` is not a ram.inc name: VRAM HUD cells use
@@ -1688,6 +1689,6 @@ Code stays in the bank asms (`conn_lookup`, `door_load`, `spot_load_coords`,
   one catalog, but z80dasm `-S` is flat, so 48 CPU addresses are shared by two
   banks (21 of them with a real name on both sides). The known case that started
   the audit is still the type specimen: seg2 `spike_bars_restore` (0x902E) vs.
-  seg14 `sfx_0e_block_break`. `tools/disasm/regen-seg.sh` now filters through
-  `tools/disasm/seg_sym.py` so each bank keeps its own name. Re-run
-  `tools/disasm/seg_sym.py --audit` after a regen or a bulk rename.
+  seg14 `sfx_0e_block_break`. `tools/workbench/msx/regen-bank.sh` now filters through
+  `tools/workbench/msx/bank_sym.py` so each bank keeps its own name. Re-run
+  `tools/workbench/msx/bank_sym.py --audit` after a regen or a bulk rename.

@@ -4,10 +4,10 @@
 ;  Banks 1-3 are paged by page_play_banks at 0x6000 / 0x8000 / 0xA000.
 ;  One PHASE from 0x4000; entity_tbl straddles 0x5FFF -> 0x6000.
 ;  Regen one 8K bank at a time:
-;    tools/disasm/regen-seg.sh 0 0x4000 segments/banks_0123.blocks
-;    tools/disasm/regen-seg.sh 1 0x6000 segments/banks_0123.blocks
-;    tools/disasm/regen-seg.sh 2 0x8000 segments/banks_0123.blocks
-;    tools/disasm/regen-seg.sh 3 0xA000 segments/banks_0123.blocks
+;    tools/workbench/msx/regen-bank.sh 0 0x4000 segments/banks_0123.blocks
+;    tools/workbench/msx/regen-bank.sh 1 0x6000 segments/banks_0123.blocks
+;    tools/workbench/msx/regen-bank.sh 2 0x8000 segments/banks_0123.blocks
+;    tools/workbench/msx/regen-bank.sh 3 0xA000 segments/banks_0123.blocks
 ;  BIOS names from bios.inc (included by VampireKiller.asm).
 ; ===========================================================================
 
@@ -1197,7 +1197,7 @@ vdp_set_read:
 ;       0x80  lo hi    -> set VRAM write pointer = hi<<8 | lo  (jump to rle_dec_addr)
 ;       0x01..0x7F  N  -> RUN     : next single byte repeated N times
 ;       0x81..0xFF  N  -> LITERAL : copy (N & 0x7F) bytes verbatim via OTIR
-;     Tools: tools/disasm/rledec.py replays this exact grammar to extract graphics.
+;     Tools: tools/workbench/konami/rledec.py replays this exact grammar to extract graphics.
 rle_dec_addr:
 	ex de,hl                ; read a fresh 2-byte dest address...
 	ld e,(hl)               ; ...from the source stream (0x80 command)
@@ -5091,7 +5091,7 @@ entity_tbl_end:
 ;  SEGMENT 1 - banked play code, paged at 0x6000-0x7FFF (page 1b).
 ;  Continues this window at CPU 0x6000 (8K into this PHASE).
 ;  entity_tbl above straddles the bank edge (last byte at 0x5FFF).
-;  Regen: tools/disasm/regen-seg.sh 1 0x6000 segments/banks_0123.blocks
+;  Regen: tools/workbench/msx/regen-bank.sh 1 0x6000 segments/banks_0123.blocks
 ; ===========================================================================
 
 ; ---- MSX main-ROM BIOS jump table ----------------------------------------
@@ -10101,7 +10101,7 @@ pickups_vs_simon:
 ; ===========================================================================
 ;  SEGMENT 2 - banked code, paged at 0x8000-0x9FFF (page 2a).
 ;  Continues this window at CPU 0x8000 (16K into this PHASE).
-;  Regen: tools/disasm/regen-seg.sh 2 0x8000
+;  Regen: tools/workbench/msx/regen-bank.sh 2 0x8000
 ; ===========================================================================
 
 	inc l
@@ -15177,7 +15177,7 @@ l9fe7h:
 ; ===========================================================================
 ;  SEGMENT 3 - banked code, paged at 0xA000-0xBFFF (page 2b).
 ;  Continues this window at CPU 0xA000 (24K into this PHASE).
-;  Regen: tools/disasm/regen-seg.sh 3 0xA000
+;  Regen: tools/workbench/msx/regen-bank.sh 3 0xA000
 ; ===========================================================================
 
 	ld (hl),001h

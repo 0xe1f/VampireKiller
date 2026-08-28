@@ -30,8 +30,8 @@ ROM_PATH = os.path.join(ROOT, "VampireKiller.rom")
 DATA = os.path.join(ROOT, "segments", "data")
 SEGS = os.path.join(ROOT, "segments")
 
-# rledec.py lives in tools/disasm/.
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "disasm"))
+# rledec.py lives in tools/workbench/konami/.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "workbench", "konami"))
 from rledec import decompress  # noqa: E402
 
 COLS = 16

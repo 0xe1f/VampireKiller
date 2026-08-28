@@ -1,5 +1,5 @@
 ; z80dasm code/data map for banks 0-3 (play window @ 0x4000).
-; regen-seg.sh keeps only blocks whose start falls in the 8K being disassembled.
+; regen-bank.sh keeps only blocks whose start falls in the 8K being disassembled.
 ; Block names avoid colliding with in-source labels (z80dasm emits NAME_start).
 
 ; ===========================================================================

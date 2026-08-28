@@ -1,5 +1,5 @@
 ; z80dasm code/data map for banks 0x0B-0x0D (map window @ 0x6000).
-; regen-seg.sh keeps only blocks whose start falls in the 8K being disassembled.
+; regen-bank.sh keeps only blocks whose start falls in the 8K being disassembled.
 ; Block names avoid colliding with in-source labels (z80dasm emits NAME_start).
 ; Banks 0x0B/0x0C are metatile streams/defs (already labeled data); no code map.
 

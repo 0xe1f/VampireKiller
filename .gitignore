@@ -15,7 +15,7 @@ gfx/index.md
 tools/sjasmplus
 
 # Temporarily generated files (disassembler scratch, etc.); never committed.
-# Regenerate with tools/disasm/regen-seg.sh; fold the clean .generated.asm into segNN.asm.
+# Regenerate with tools/workbench/msx/regen-bank.sh
 generated/
 
 # Python scratch

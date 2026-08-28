@@ -1342,7 +1342,7 @@ free the floor slot. RAM: `scenery_slots` 0xC470, `pickup_slots` 0xC500.
   opcodes (VDP writes, magic constants, state/RAM addresses, branch conditions,
   loop counters) line by line so the logic can be followed without decoding the
   bytes by hand. Inline comments start at column 32 (see existing seg00/seg01).
-- Regenerate a segment's disassembly: `tools/disasm/regen-seg.sh <n> <org> [blocks]`.
+- Regenerate a segment's disassembly: `tools/workbench/msx/regen-bank.sh <n> <org> [blocks]`.
   It writes two scratch files into the gitignored `generated/` dir (which holds
   all temporarily generated files): `generated/segNN.generated.asm` (clean -
   z80dasm's `;<addr> <bytes> <ascii>` listing comments already stripped, fold THIS
@@ -1350,7 +1350,7 @@ free the floor slot. RAM: `scenery_slots` 0xC470, `pickup_slots` 0xC500.
   only as a temporary byte/address reference while reversing). Fold changes into
   `segNN.asm` by hand so the annotated file is never clobbered.
 - Rule: the committed `segNN.asm` must NEVER carry z80dasm's trailing address/opcode
-  listing comments. Regen strips them automatically; `tools/disasm/strip-listing.py
+  listing comments. Regen strips them automatically; `tools/workbench/msx/strip-listing.py
   segments/segNN.asm` is still available as a safety net (it drops the byte-listing
   noise but keeps hand-written `; ...` comments and re-aligns them).
 - Data regions go in a `.blocks` file (see `segments/banks_0123.blocks`, `segments/banks_bcd.blocks`, `segments/banks_ef.blocks`);
@@ -1372,12 +1372,12 @@ free the floor slot. RAM: `scenery_slots` 0xC470, `pickup_slots` 0xC500.
   opaque `db`.
 - File placement (STANDING PRACTICE): all hand-authored disassembly metadata lives
   in `segments/` (`bios.inc`, `ram.inc`, `*.inc` type ids, `msx.sym`, `banks_*.blocks`) - anything
-  needed to reassemble or to regenerate the disassembly faithfully. `tools/disasm/`
+  needed to reassemble or to regenerate the disassembly faithfully. `tools/workbench/`
   is the reusable MSX kit; other `tools/` scripts are game-specific. `generated/`
   is gitignored derived scratch (never author
   there). How they're consumed: `bios.inc`, `ram.inc`, and the type-id `.inc`s are `INCLUDE`d
   by the build (symbol equates, not emitted); `msx.sym` is the name catalog,
-  `banks_*.blocks` the code/data maps. `regen-seg.sh` runs `tools/disasm/seg_sym.py` so
+  `banks_*.blocks` the code/data maps. `regen-bank.sh` runs `tools/workbench/msx/bank_sym.py` so
   z80dasm `-S` gets a *per-bank* view of `msx.sym` (flat file, banked ROM).
   `bios.inc` and `msx.sym` overlap
   - keep them in sync.  Do **not** put small numeric `equ`s (`actor_zombie: equ

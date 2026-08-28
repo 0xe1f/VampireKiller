@@ -1,21 +1,19 @@
 ---
-name: konami-msx-disasm
+name: vk-disasm
 description: >-
-  Methodology for producing a byte-exact, commented, reassemblable disassembly
-  of a Konami MSX/MSX2 MegaROM (Konami4/SCC and similar mappers). Use when
-  disassembling, reverse-engineering, or annotating an MSX ROM, adding a new
-  game to this workspace, or working in a game repo laid out like vampirekiller/.
+  Vampire Killer–specific disassembly notes: window files banks_0123…,
+  this cart’s RAM/GM/door/object-list bytes, and roomperm.
+  Generic Konami/MSX conventions live in the MSXDAW skill konami-msx-disasm.
 ---
 
-# Konami MSX disassembly
+# Vampire Killer disassembly (this cart)
 
-This repo (the Vampire Killer disassembly) is the reference implementation; these
-skills ship inside it. Reuse its layout, tools, and conventions for every new game
-instead of reinventing them. Read `docs/progress.md` (End goal + Working notes) and
-`docs/game-notes.md` before starting a new game; copy `tools/disasm/` and the
-`Makefile`. Game-specific dump/sheet/handbook scripts stay in `tools/` (VK:
-`gfxdump.py`, `roomperm.py`, `psgplay.py`, `emit_identified_data.py`,
-`guide_assets.py`). Paths below are relative to this repo root.
+Generic rules (byte-exact verify, naming, DISPATCH_A, banks vs windows) are in
+MSXDAW `konami-msx-disasm`. Workbench is `tools/workbench`. This file keeps
+VK layout and gotchas. New games are scaffolded from msxdaw, not by copying
+this repo's `tools/`. Game-specific dump/sheet scripts stay here (`gfxdump.py`,
+`roomperm.py`, `psgplay.py`, `emit_identified_data.py`). Paths below are
+relative to this repo root.
 
 ## Non-negotiables
 
@@ -39,7 +37,7 @@ instead of reinventing them. Read `docs/progress.md` (End goal + Working notes) 
   `.bin` only for banks still `INCBIN`'d (VK: none left).
   Fully migrated banks have no `.bin`;
   `split-rom.sh` emits the leftovers and deletes migrated ones. Regen of a
-  migrated bank uses the original ROM (`regen-seg.sh` slices it itself).
+  migrated bank uses the original ROM (`regen-bank.sh` slices it itself).
   All hand-authored disassembly metadata lives here: `bios.inc` (MSX BIOS entry
   names), `ram.inc` (confirmed work-RAM), `*.inc` type ids (`actors.inc`,
   `items.inc`, `weapon.inc`, `sfx.inc`, `poses.inc`, `scenery.inc`,
@@ -49,16 +47,15 @@ instead of reinventing them. Read `docs/progress.md` (End goal + Working notes) 
   regenerate belongs here.
 - `docs/` — `progress.md` (checklist + RAM map + working notes), `game-notes.md`
   (detailed findings).
-- `tools/disasm/` — reusable MSX/Konami helpers: `regen-seg.sh`, `split-rom.sh`,
-  `strip-listing.py`, `romscan.py`, `seg_sym.py`, Konami RLE (`rledec.py` /
-  `rleenc.py`), `gfxview.py`, `pngwrite.py`, `psgplay.py` (packed-PSG → WAV).
-  Copy this directory for a new game.
+- `tools/workbench/` — reusable MSX/Konami helpers (`msx/regen-bank.sh`,
+  `split-rom.sh`, `strip-listing.py`, `romscan.py`, `bank_sym.py`, `gfxview.py`;
+  `konami/` RLE and packed-PSG). Do not copy this tree; it is the submodule.
 - `tools/` — game-specific executable tooling (VK gfx sheets, room maps, PSG
-  catalogue front-end, handbook art) plus `sjasmplus`.
+  catalogue front-end) plus `sjasmplus`.
 - `gfx/` — editable graphics assets (PNG + txt); original compressed bytes stay
   authoritative.
 - `music/` — rendered BGM WAVs from the PSG bytecode (`tools/psgplay.py`
-  wrapping `tools/disasm/psgplay.py`). AY-3-8910 timing (fmaster/8); no
+  wrapping `tools/workbench/konami/psgplay.py`). AY-3-8910 timing (fmaster/8); no
   speaker filter.
 - `sfx/` — rendered SFX WAVs (`make sfx`); same `{id}_{name}.wav` convention
   as `music/`.
@@ -73,7 +70,7 @@ of `<Game>.asm`.
 
 ## Workflow per segment
 
-1. `tools/disasm/regen-seg.sh <n> <org> [blocks]` → writes `generated/segNN.generated.asm`
+1. `tools/workbench/msx/regen-bank.sh <n> <org> [blocks]` → writes `generated/segNN.generated.asm`
    (listing comments already stripped) + `generated/segNN.raw.asm` (raw reference).
 2. Fold the clean disassembly into the paging-window file (`banks_0123.asm`,
    `banks_456.asm`, …) by hand and annotate.
@@ -106,7 +103,7 @@ of `<Game>.asm`.
 ## Conventions (enforced)
 
 - **Never** leave z80dasm's trailing `;addr bytes ascii` listing comments in
-  committed `.asm`. Regen strips them; `tools/disasm/strip-listing.py` is the safety net.
+  committed `.asm`. Regen strips them; `tools/workbench/msx/strip-listing.py` is the safety net.
 - **Annotate per-opcode**, not just block headers: comment VDP writes, magic
   constants, RAM addresses, branch conditions, loop counters. Inline comments at
   column 32.
@@ -134,10 +131,10 @@ of `<Game>.asm`.
 - **`msx.sym` is flat, the ROM is banked.** One hand-maintained file covers every
   bank, but z80dasm `-S` can only attach one name to a CPU address. VK has 48 of
   these collisions (21 named-vs-named, including 0x902E `spike_bars_restore` vs
-  `sfx_0e_block_break`). `tools/disasm/regen-seg.sh` therefore runs `tools/disasm/seg_sym.py N`
+  `sfx_0e_block_break`). `tools/workbench/msx/regen-bank.sh` therefore runs `tools/workbench/msx/bank_sym.py N`
   first: BIOS + out-of-window names from `msx.sym`, in-window names from *this*
   bank's labels. Keep putting new names in `msx.sym` (the catalog); do not split
-  it into per-segment files. `tools/disasm/seg_sym.py --audit` reprints the collision
+  it into per-segment files. `tools/workbench/msx/bank_sym.py --audit` reprints the collision
   list. Cross-bank calls to a unique address still name; colliding addresses in
   a *different* bank are left numeric.
 - **Text**: MSX games often store text as `(ASCII - offset)` because the font is
@@ -338,7 +335,7 @@ game and give per-stage/per-room feedback; fix the classification, re-render.
 
 ## Rooting out logic (static analysis)
 
-Use the `msx-romscan` skill (`tools/disasm/romscan.py`). Do not grep leftover
+Use the `msx-romscan` skill (`tools/workbench/msx/romscan.py`). Do not grep leftover
 `.bin` files or write ad-hoc xref python.
 
 Gotchas:
@@ -354,7 +351,7 @@ Gotchas:
 
 ## Cost discipline
 
-- Prefer the existing tools over ad-hoc shell. Reuse `regen-seg.sh` (`msx-regen`)
+- Prefer the existing tools over ad-hoc shell. Reuse `regen-bank.sh` (`msx-regen`)
   and `romscan.py` (`msx-romscan`); don't re-hand-roll xref/table-decode python.
 - Don't read whole 5 KLOC segment files linearly; use Grep/semantic search to the
   region of interest.
@@ -363,7 +360,7 @@ Gotchas:
 
 ## Companion skills
 
-- `msx-regen` — `regen-seg.sh`, `seg_sym.py`, `strip-listing.py`, `split-rom.sh`
+- `msx-regen` — `regen-bank.sh`, `bank_sym.py`, `strip-listing.py`, `split-rom.sh`
 - `msx-romscan` — xref / jump-table decode
 - `msx-konami-gfx` — RLE + ASCII `gfxview.py` (not labelled PNG sheets)
 - `msx-gfx-sheets` — `gfxdump.py` contact sheets

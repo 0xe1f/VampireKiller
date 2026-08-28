@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Render Vampire Killer BGM and SFX via tools/disasm/psgplay.py.
+"""Render Vampire Killer BGM and SFX via tools/workbench/konami/psgplay.py.
 
 Reads the rebuilt VampireKiller.rom (segs 14/15 paged at 0x8000/0xA000)
 and writes 16-bit mono WAVs into music/ (BGM) or sfx/ (ids 1-0x1D).
@@ -31,7 +31,8 @@ import os
 import sys
 
 _TOOLS = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(_TOOLS, "disasm"))
+_WB = os.path.join(_TOOLS, "workbench")
+sys.path.insert(0, os.path.join(_WB, "konami"))
 import psgplay  # noqa: E402
 
 ROOT = os.path.dirname(_TOOLS)

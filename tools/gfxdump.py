@@ -31,7 +31,9 @@ Usage:  tools/gfxdump.py            (run from the repo root)
 """
 import os, re, sys
 _TOOLS = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(_TOOLS, "disasm"))
+_WB = os.path.join(_TOOLS, "workbench")
+sys.path.insert(0, os.path.join(_WB, "msx"))
+sys.path.insert(0, os.path.join(_WB, "konami"))
 import rledec, gfxview, pngwrite
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1725,7 +1727,8 @@ def dump_dracula_body(data):
 # like tileset_s01).  Cell header = CPU address of the 16-byte def.  Pixels
 # are the 4x4 of nametable tiles (id 0 blank; id N = ROM tile N-1) in the
 # stage / intro tileset.  8x6 room streams are dump_asm_mtile_streams
-# (gfx/metatiles/mtile_streams.png); stage_sNN.png is the minimap layout.
+# (gfx/metatiles/mtile_streams.png); gfx/stage_sNN.png is the annotated
+# playfield composite (`tools/roomperm.py --composite`).
 _MTILE_DEF_TABLES = (
     ("mtile_defs_s00", ("mtile_defs_s00.asm",), 0x7EE1, 0),
     ("mtile_defs_s01", ("mtile_defs_s01.asm",), 0x80B1, 1),

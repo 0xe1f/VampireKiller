@@ -1,15 +1,9 @@
 ---
-name: msx-gfx-sheets
+name: vk-gfx-sheets
 description: >-
-  Build labelled PNG contact sheets for MSX tiles, metatiles, hardware
-  sprites, fonts, and palettes. One tile, 4x4 metatile, 8x6 room stream,
-  16x16 sprite plane, glyph, or palette entry per cell, header id,
-  in-game palette. gfx/sprites/ is packed 1bpp sprite-asm sheets;
-  gfx/fonts/ is 1bpp font asms; gfx/metatiles/ is composed 4x4 defs and
-  8x6 streams; gfx/palettes/ is palette_apply swatches; composites live
-  in gfx/. Use when adding or changing gfx/sprites, gfx/tilesets,
-  gfx/metatiles, gfx/fonts, gfx/palettes, enemy_sheet, sheet_enemy,
-  make gfx, gfxdump.py, or sprite/tile/font/metatile/palette previews.
+  Vampire Killer catalogue sheets: stem tables, SAT composites, stage palettes,
+  simon_rle/intro_sky anti-patterns, gfxdump.py hooks. Generic cell/header rules
+  are the MSXDAW skill msx-gfx-sheets.
 ---
 
 # MSX gfx contact sheets

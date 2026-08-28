@@ -3,7 +3,7 @@
 ;  Bank 11 at 0x6000 (metatile streams), bank 12 at 0x8000 (defs),
 ;  bank 13 at 0xA000 (sprite RLE, conn_lookup, doors).  Labels are unique
 ;  vs the play window (same CPU addresses, different banks).
-;  Regen bank 13: tools/disasm/regen-seg.sh 13 0xA000 segments/banks_bcd.blocks
+;  Regen bank 13: tools/workbench/msx/regen-bank.sh 13 0xA000 segments/banks_bcd.blocks
 ; ===========================================================================
 
 	INCLUDE "data/mtile_index.asm"
@@ -35,7 +35,7 @@
 
 ; ===========================================================================
 ;  SEGMENT 13 - bank 0x0D at 0xA000 (16K into this PHASE; s18 already crossed).
-;  Sprite RLE, conn_lookup, doors.  Regen: tools/disasm/regen-seg.sh 13 0xA000 segments/banks_bcd.blocks
+;  Sprite RLE, conn_lookup, doors.  Regen: tools/workbench/msx/regen-bank.sh 13 0xA000 segments/banks_bcd.blocks
 ; ===========================================================================
 
 ; --- 0xA041-0xB962: intro defs + sprite RLE --------------------------------

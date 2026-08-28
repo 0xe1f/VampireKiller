@@ -1,5 +1,5 @@
 ; MSX / MSX2 BIOS entry points + named Vampire Killer routines for z80dasm.
-; Used by tools/disasm/regen-seg.sh when regenerating a segment disassembly so BIOS
+; Used by tools/workbench/msx/regen-bank.sh when regenerating a bank so BIOS
 ; calls read as names (e.g. `call ENASLT`) instead of raw addresses.
 
 ; ---- MSX main-ROM BIOS jump table ----------------------------------------

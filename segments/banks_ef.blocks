@@ -1,5 +1,5 @@
 ; z80dasm code/data map for banks 0x0E-0x0F (sound/portrait window @ 0x8000).
-; regen-seg.sh keeps only blocks whose start falls in the 8K being disassembled.
+; regen-bank.sh keeps only blocks whose start falls in the 8K being disassembled.
 ; Block names avoid colliding with in-source labels (z80dasm emits NAME_start).
 ; Shares the CPU window with play bank 2, so regenerated labels must be renamed
 ; (snd_* / credits_font / etc.) before folding — z80dasm lxxxh would collide.

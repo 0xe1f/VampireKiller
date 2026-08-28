@@ -52,7 +52,7 @@ the engine's stair-step code tests; other stages draw 1-tile-wide stairs
 (hence its "fat" 2-wide stairs).
 Colours: walls/floors white, empty black, climbable stairs amber.
 
-Three other views:
+Four other views:
   --collision : the engine's OWN feet/head test (seg1 tile_is_solid): solid iff
                 (id-1) < row_solid_thresh[0xD000] (stage 1 -> 4).  Event 6
                 (stage 18 room 9) forces threshold 6.  This is exactly
@@ -67,6 +67,9 @@ Three other views:
                 overlays dracula_portrait_load (seg15 face + mirrors) then
                 the 16x16 eye/mouth HMMMs (closed, same as dracula_face_rest). No
                 door/spot/object overlay. Default --scale is 2.
+  --composite : --pixels plus scenery, enemies, vendors, doors, spots,
+                spike bars, and moving pads. Default --scale is 2.
+                `make gfx` writes this to gfx/stage_sNN.png.
 
 White-key doors (drawn as a red bar; --no-doors to skip): EVERY stage 0-18 has
 exactly one, from seg13 door_tbl at 0xBB61 (3 bytes/stage: room|vert<<7, Y, X).
@@ -85,7 +88,8 @@ on the walkable surface (empty tiles immediately above).  Decoder is generic.
 
 Output: one sheet per stage. Permeability (default) and --collision/--visual
 are schematic maps at gfx/minimap_s<NN>.png (optional _coll/_vis suffix).
---pixels is the assembled playfield (not a minimap) at gfx/stage_s<NN>.png.
+--pixels / --composite write the assembled playfield (not a minimap) at
+gfx/stage_s<NN>.png (--composite is the annotated `make gfx` sheet).
 For all 19 stages 0..18.  Rooms are
 placed SPATIALLY using the GAME'S OWN hand-authored F2-minimap position table
 (layout(), seg2 minimap_room_pos) - the authoritative in-ROM geography.  (The room
@@ -97,14 +101,18 @@ uses the event-6 solidity test (ids 1-6), same as tile_is_solid.
 Usage:
   tools/roomperm.py [--rom VampireKiller.rom] [--row 1 | --all]
                     [--scale 6] [--out-dir gfx]
-                    [--collision | --visual | --pixels]
+                    [--collision | --visual | --pixels | --composite]
                     [--validate generated/disasmsnap.bin] [--ascii]
                     [--no-doors] [--no-spots] [--compare-doors]
 """
 import argparse, os, sys
 _TOOLS = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(_TOOLS, "disasm"))
+_WB = os.path.join(_TOOLS, "workbench")
+sys.path.insert(0, os.path.join(_WB, "msx"))
+sys.path.insert(0, os.path.join(_WB, "konami"))
 sys.path.insert(0, _TOOLS)
+ROOT = os.path.dirname(_TOOLS)
+DATA = os.path.join(ROOT, "segments", "data")
 
 COLS, ROWS = 32, 24
 PLAY_TOP = 2                    # rows 0-1 = HUD
@@ -818,6 +826,719 @@ def contact_sheet(images, pos, gw, gh, gap, bg=(40, 44, 56), lab_scale=2):
             buf[dst:dst + w * 3] = data[src:src + w * 3]
     return W, H, bytes(buf)
 
+# --composite: annotated playfield (scenery, enemies, vendors, doors, spots).
+COMP_BG = (12, 14, 20)
+COMP_GOLD = (212, 180, 90)
+COMP_BLOCK_RGB = (255, 255, 255)
+COMP_DOOR_RGB = (220, 40, 40)
+COMP_SPOT_RGB = (64, 186, 176)
+COMP_PAD_PATH_RGB = (255, 255, 255)
+COMP_SHEET_BG = (24, 26, 34)
+# playfield_draw dest Y: nametable row 2. SAT / table Y is screen space.
+PLAYFIELD_Y0 = 0x20
+
+VENDOR_OFFER = {
+    0: 0x0E, 1: 0x12, 2: 0x03, 3: 0x04, 4: 0x0A,
+    5: 0x16, 6: 0x1E, 7: 0x1D, 8: 0x1B,
+}
+VENDOR_PRICE = {
+    0x0E: (20, 15, 60), 0x12: (30, 20, 60), 0x03: (20, 10, 60),
+    0x04: (20, 10, 80), 0x0A: (40, 20, 80), 0x16: (40, 15, 80),
+    0x1E: (30, 10, 50), 0x1D: (20, 10, 80), 0x1B: (50, 30, 90),
+}
+OBJECT_SLUG = {
+    0x05: "dog", 0x06: "pikeman", 0x09: "red-skeleton", 0x0A: "skull-pile",
+    0x0B: "white-skeleton", 0x0C: "raven", 0x0D: "hunchback",
+    0x0E: "bone-dragon", 0x10: "axe-knight", 0x12: "giant-bat",
+    0x1F: "hanging-bat", 0x21: "merman-red", 0x18: "igor",
+}
+# spawn_actor DE (D=X, E=Y) from the event_*_spawn machines in banks_0123.asm.
+BOSS_SPAWNS = {
+    3:  [(5, "giant-bat", 0x70, 0x40)],
+    6:  [(5, "medusa", 0x90, 0x90)],
+    9:  [(7, "mummy", 0x30, 0xC5), (7, "mummy", 0xD0, 0xC5)],
+    12: [(6, "frankenstein", 0xD0, 0xC0), (6, "igor", 0xD0, 0xA0)],
+    15: [(9, "grim-reaper", 0xA0, 0x90)],
+    18: [(9, "dracula", 0x80, 0xC1)],
+}
+IGOR_SHAPE = 0x67
+
+# block_tiles_*: leading 2x2 (kind 2) then 4x4 (kind 3). See block_stamp.
+BLOCK_CASTLE_2 = bytes([0x01, 0x02, 0x0A, 0x0B])
+BLOCK_CASTLE = bytes([
+    0x01, 0x02, 0x01, 0x02,
+    0x0A, 0x0B, 0x0A, 0x0B,
+    0x01, 0x02, 0x01, 0x02,
+    0x0A, 0x0B, 0x0A, 0x0B,
+])
+BLOCK_COURT_2 = bytes([0x01, 0x02, 0x09, 0x0B])
+BLOCK_COURT = bytes([
+    0x01, 0x02, 0x01, 0x02,
+    0x09, 0x0B, 0x0A, 0x09,
+    0x01, 0x02, 0x01, 0x02,
+    0x09, 0x0B, 0x0A, 0x09,
+])
+
+
+def _comp_is_ink(px):
+    import gfxdump
+    if isinstance(px, tuple):
+        return px != gfxdump.OFF and px != (0, 0, 0) and px != COMP_BG
+    return px not in (0, None)
+
+
+def _comp_crop(grid, pad=1):
+    h, w = len(grid), len(grid[0]) if grid else 0
+    ys = [y for y in range(h) if any(_comp_is_ink(grid[y][x]) for x in range(w))]
+    xs = [x for x in range(w) if any(_comp_is_ink(grid[y][x]) for y in range(h))]
+    if not xs or not ys:
+        return grid
+    x0, x1 = max(0, xs[0] - pad), min(w, xs[-1] + 1 + pad)
+    y0, y1 = max(0, ys[0] - pad), min(h, ys[-1] + 1 + pad)
+    return [row[x0:x1] for row in grid[y0:y1]]
+
+
+def _comp_to_rgb(grid, pal):
+    out = []
+    for row in grid:
+        out.append([
+            px if isinstance(px, tuple) else (pal[px] if px else COMP_BG)
+            for px in row
+        ])
+    return out
+
+
+def _comp_icon_rgb(grid, pal):
+    return _comp_to_rgb(_comp_crop(grid, pad=0), pal)
+
+
+def _tiles16_by_label(asm_name):
+    import gfxdump
+    path = os.path.join(DATA, asm_name)
+    cells, labels, leftover, sizes = gfxdump.parse_asm_tile8(path)
+    out = {}
+    ci = 0
+    for lab, kind in zip(labels, sizes):
+        if kind != 16:
+            if kind == 8:
+                ci += 1
+            continue
+        out[lab] = cells[ci]
+        ci += 1
+    named = {}
+    with open(path) as f:
+        cpu = None
+        stem = None
+        for line in f:
+            if line.startswith("bonus_hud_") or line.startswith("hud_") or line.startswith("candle_"):
+                stem = line.split(":")[0].strip()
+            th = gfxdump._RE_TILE_HDR.match(line)
+            if th and "16x16" in th.group(2).lower():
+                cpu = "%04X" % int(th.group(1), 16)
+                if stem and cpu in out:
+                    named[stem] = out[cpu]
+                stem = None
+    return named
+
+
+def _bonus_by_id(named):
+    table = {
+        1: "bonus_hud_small_heart", 2: "bonus_hud_large_heart",
+        3: "bonus_hud_red_shield", 4: "bonus_hud_yellow_shield",
+        5: "bonus_hud_white_cross", 6: "bonus_hud_rosary",
+        7: "bonus_hud_small_orb", 8: "bonus_hud_blue_gem",
+        9: "bonus_hud_sapphire_ring", 10: "bonus_hud_hourglass",
+        11: "bonus_hud_tipped_hourglass", 12: "bonus_hud_boots",
+        13: "bonus_hud_wings", 14: "bonus_hud_candle",
+        15: "bonus_hud_map", 16: "bonus_hud_black_bible",
+        17: "bonus_hud_white_bible", 18: "bonus_hud_lockpick",
+        19: "bonus_hud_white_bag", 20: "bonus_hud_blue_bag",
+        22: "bonus_hud_potion",
+        23: "hud_yellow_key", 24: "hud_white_key", 25: "hud_chest",
+        0x1A: "hud_chain_whip", 0x1B: "hud_knife", 0x1C: "hud_axe",
+        0x1D: "hud_cross", 0x1E: "hud_holy_water",
+    }
+    return {bid: named[stem] for bid, stem in table.items() if stem in named}
+
+
+def _sat_origin(data, typ):
+    """Top-left of the SAT composite relative to spawn (ix+5 X, ix+3 Y)."""
+    import gfxdump
+    ncells = data[gfxdump._cpu_file(1, 0x605E, 0x6000) + typ]
+    if typ == 14:
+        parts, _ = gfxdump._type14_parts()
+        sid = None
+    else:
+        sid = gfxdump.ENEMY_SHAPE_ID.get(typ)
+        if typ == 0x18:
+            sid = IGOR_SHAPE
+        if sid is None or not ncells:
+            return (0, 0)
+        parts = gfxdump._parse_shape(data, sid, ncells)
+        if not parts:
+            return (0, 0)
+    x0, y0, _, _ = gfxdump._sat_bbox(typ, parts, sid)
+    return (x0, y0)
+
+
+def _dump_enemies(data):
+    import gfxdump
+    types = list(range(1, 23)) + [0x18, 0x1A, 0x1B, 0x1C]
+    cache = {}
+    slug_of = {
+        1: "zombie", 2: "merman-green", 3: "merman-red", 4: "hanging-bat",
+        5: "dog", 6: "pikeman", 7: "flying-skull", 8: "ghost-head",
+        9: "red-skeleton", 10: "skull-pile", 11: "white-skeleton", 12: "raven",
+        13: "hunchback", 14: "bone-dragon", 15: "roc", 16: "axe-knight",
+        17: "dracula", 18: "giant-bat", 19: "medusa", 20: "mummy",
+        21: "frankenstein", 22: "grim-reaper", 0x18: "igor",
+        0x1A: "blob-blue", 0x1B: "blob-red", 0x1C: "blob-white",
+    }
+    portraits, origins = {}, {}
+    for typ in types:
+        sid = IGOR_SHAPE if typ == 0x18 else None
+        grid = gfxdump._composite_enemy(data, typ, cache, shape_id=sid)
+        slug = slug_of[typ]
+        portraits[slug] = grid
+        origins[slug] = _sat_origin(data, typ)
+    return portraits, origins
+
+
+def _dump_vendor(data):
+    import gfxdump
+    fo = gfxdump._cpu_file(10, 0xBDA7, 0xA000)
+    src = data[fo:fo + 256]
+    ptrs = [gfxdump._word(data, 0x1575 + i * 2) for i in range(16)]
+    fills = list(data[0x1595:0x159A])
+
+    def tile(addr):
+        if addr == 0xE900:
+            return bytes(32)
+        return src[addr - 0xE800:addr - 0xE800 + 32]
+
+    def assemble(fill):
+        img = [[0] * 32 for _ in range(32)]
+        for ty in range(4):
+            for tx in range(4):
+                t = tile(ptrs[ty * 4 + tx])
+                for r in range(8):
+                    row = t[r * 4:(r + 1) * 4]
+                    for c, b in enumerate(row):
+                        hi, lo = b >> 4, b & 0x0F
+                        if hi == 0x0F:
+                            hi = fill
+                        if lo == 0x0F:
+                            lo = fill
+                        img[ty * 8 + r][tx * 8 + c * 2] = hi
+                        img[ty * 8 + r][tx * 8 + c * 2 + 1] = lo
+        return img
+
+    return assemble(fills[3])
+
+
+def _dump_hazards(data):
+    import gfxdump
+
+    def frag(cpu, w, h):
+        fo = gfxdump._cpu_file(9, cpu, 0x8000)
+        return [[data[fo + y * (w // 2) + x // 2] >> 4 if x % 2 == 0
+                 else data[fo + y * (w // 2) + x // 2] & 0x0F
+                 for x in range(w)] for y in range(h)]
+
+    link = frag(0x9A80, 8, 4)
+    unit = frag(0x9A90, 8, 8)
+    bar = [[0] * 32 for _ in range(12)]
+    for y in range(4):
+        for x in range(8):
+            bar[y][12 + x] = link[y][x]
+    for i in range(4):
+        for y in range(8):
+            for x in range(8):
+                bar[4 + y][i * 8 + x] = unit[y][x]
+    return bar
+
+
+def _parse_platform_tbl(data):
+    """platform_tbl @ 0x9073: {stage, room, n} + n x {Y, X, step, span}; 0xFF."""
+    import gfxdump
+    fo = gfxdump._cpu_file(2, 0x9073, 0x8000)
+    out = {}
+    i = fo
+    while data[i] != 0xFF:
+        stage, room, n = data[i], data[i + 1], data[i + 2]
+        i += 3
+        recs = []
+        for _ in range(n):
+            y, x, step, span = data[i:i + 4]
+            recs.append((y, x, gfxdump._s8(step), span))
+            i += 4
+        out[(stage, room)] = recs
+    return out
+
+
+def _composite_pad(vram, pat0, pal, c0, c1):
+    """32x16 deck: two CC 16x16 halves, both using pat0 / pat0+4."""
+    import gfxdump, gfxview
+    pats = (pat0, pat0 + 4)
+    cols = (c0, c1 | 0x40)
+    grid = [[gfxdump.OFF] * 32 for _ in range(16)]
+    index = [[0] * 32 for _ in range(16)]
+    for xoff in (0, 16):
+        for pat, col in zip(pats, cols):
+            src = 0xF800 + pat * 8
+            raw = bytes(vram[src + k] for k in range(32))
+            spr = gfxview.sprite16_1bpp(raw)
+            idx = col & 0x0F
+            cc = bool(col & 0x40)
+            for y in range(16):
+                for x in range(16):
+                    if spr[y][x] != "#":
+                        continue
+                    xx = xoff + x
+                    if cc and index[y][xx]:
+                        index[y][xx] |= idx
+                    elif not cc or index[y][xx] == 0:
+                        index[y][xx] = idx
+    for y in range(16):
+        for x in range(32):
+            if index[y][x]:
+                grid[y][x] = pal[index[y][x]]
+    return grid
+
+
+def _dump_platforms(data):
+    import gfxdump
+    art = {}
+    specs = (
+        (5, 1, 0xD0, 2, 4),
+        (10, 0, 0xD8, 9, 0xC),
+    )
+    for stage, room, pat0, c0, c1 in specs:
+        script = gfxdump._script_key(data, stage, room)
+        vram = gfxdump._load_script_vram(data, script)
+        pal = gfxdump.vk_playfield_palette(data, stage, room)
+        art[stage] = _composite_pad(vram, pat0, pal, c0, c1)
+    return art, _parse_platform_tbl(data)
+
+
+def composite_art(rom):
+    """HUD icons, enemy SAT poses, vendor, hazards. Cached on the Rom."""
+    import gfxdump
+    cached = getattr(rom, "_composite_art", None)
+    if cached is not None:
+        return cached
+    data = rom.rom
+    named = {}
+    named.update(_tiles16_by_label("bonus_hud_tiles.asm"))
+    named.update(_tiles16_by_label("hud_weapon_key_tiles.asm"))
+    by_id = _bonus_by_id(named)
+    enemy_grids, enemy_origin = _dump_enemies(data)
+    blob = enemy_grids.get("blob-blue")
+    if blob is not None:
+        by_id[21] = blob
+    pad_art, platform_tbl = _dump_platforms(data)
+    art = {
+        "by_id": by_id,
+        "pal": gfxdump.vk_play_palette(data),
+        "candle": named.get("candle_0"),
+        "brazier": named.get("candle_2"),
+        "enemy_grids": enemy_grids,
+        "enemy_origin": enemy_origin,
+        "vendor": _dump_vendor(data),
+        "spike_grid": _dump_hazards(data),
+        "pad_art": pad_art,
+        "platform_tbl": platform_tbl,
+    }
+    rom._composite_art = art
+    return art
+
+
+def _sat_crop(x, y, scale):
+    return x * scale, (y - PLAYFIELD_Y0) * scale
+
+
+def _parse_scenery_stream(seg14, ptr):
+    """Packed scenery: 0xFE next room, 0xFF next stage, 0x00 end hub."""
+    off = ptr - 0x8000
+    stages, room = [[]], []
+    while 0 <= off < len(seg14):
+        b = seg14[off]
+        off += 1
+        if b == 0x00:
+            if room:
+                stages[-1].append(room)
+            break
+        if b == 0xFF:
+            if room:
+                stages[-1].append(room)
+                room = []
+            stages.append([])
+            continue
+        if b == 0xFE:
+            stages[-1].append(room)
+            room = []
+            continue
+        attr = seg14[off]
+        off += 1
+        extra = None
+        if attr == 0x7F:
+            extra = seg14[off]
+            off += 1
+        room.append(((b & 0x0F), (b >> 4), attr, extra))
+    return stages
+
+
+def _classify_attr(a):
+    hi6 = a >> 6
+    if hi6 == 3:
+        return "vendor", VENDOR_OFFER.get((a >> 2) & 0xF, 0)
+    if hi6 == 2:
+        return "chest", a & 0x1F
+    kind = (a >> 5) & 7
+    bonus = a & 0x1F
+    if kind == 0:
+        return "floor", bonus
+    if kind == 1:
+        return "candle", bonus
+    if kind == 2:
+        return "block16", bonus
+    if kind == 3:
+        return "block", bonus
+    return "other", bonus
+
+
+def _classify(attr, extra):
+    if extra is not None:
+        reveal, bonus = _classify_attr(extra)
+        return "block", bonus, True, reveal
+    kind, bonus = _classify_attr(attr)
+    return kind, bonus, False, None
+
+
+def scenery_for_stage(rom, stage):
+    cache = getattr(rom, "_scenery_cache", None)
+    if cache is None:
+        rom._scenery_cache = cache = {}
+    if stage in cache:
+        return cache[stage]
+    seg14 = rom.rom[0x1C000:0x1E000]
+    if stage == 0:
+        stages = _parse_scenery_stream(seg14, 0x800C)
+        cache[stage] = stages[0] if stages else []
+        return cache[stage]
+    hub = (stage - 1) // 3
+    idx = (stage - 1) % 3
+    ptr = seg14[2 * hub] | (seg14[2 * hub + 1] << 8)
+    stages = _parse_scenery_stream(seg14, ptr)
+    cache[stage] = stages[idx] if idx < len(stages) else []
+    return cache[stage]
+
+
+def _blit_rgb(buf, W, H, x0, y0, rgb_grid, scale, skip=None):
+    import gfxdump
+    skip = skip or {gfxdump.OFF, COMP_BG, (0, 0, 0)}
+    for y, row in enumerate(rgb_grid):
+        for x, col in enumerate(row):
+            if col in skip:
+                continue
+            for yy in range(scale):
+                py = y0 + y * scale + yy
+                if not 0 <= py < H:
+                    continue
+                for xx in range(scale):
+                    px = x0 + x * scale + xx
+                    if not 0 <= px < W:
+                        continue
+                    o = (py * W + px) * 3
+                    buf[o:o + 3] = bytes(col)
+
+
+def _fill_rect(buf, W, H, x0, y0, w, h, rgb):
+    for y in range(y0, y0 + h):
+        if not 0 <= y < H:
+            continue
+        for x in range(x0, x0 + w):
+            if 0 <= x < W:
+                o = (y * W + x) * 3
+                buf[o:o + 3] = bytes(rgb)
+
+
+def _outline_rect(buf, W, H, x0, y0, w, h, rgb, t=2):
+    for i in range(t):
+        for x in range(x0, x0 + w):
+            for py in (y0 + i, y0 + h - 1 - i):
+                if 0 <= py < H and 0 <= x < W:
+                    o = (py * W + x) * 3
+                    buf[o:o + 3] = bytes(rgb)
+        for y in range(y0, y0 + h):
+            for px in (x0 + i, x0 + w - 1 - i):
+                if 0 <= y < H and 0 <= px < W:
+                    o = (y * W + px) * 3
+                    buf[o:o + 3] = bytes(rgb)
+
+
+def _blit_vendor_offer(buf, W, H, x0, y0, vendor_grid, item_grid, heart_grid,
+                       price, pal, scale):
+    head = 8
+    if vendor_grid is not None:
+        for y, row in enumerate(vendor_grid):
+            if any(_comp_is_ink(p) for p in row):
+                head = y
+                break
+    bw, bh = 32 * scale, 18 * scale
+    bx, by = x0, y0 + head * scale - bh
+    if by < 0:
+        by = y0
+        bx = x0 + 32 * scale
+        if bx + bw > W:
+            bx = max(0, x0 - bw)
+    _fill_rect(buf, W, H, bx, by, bw, bh, (0, 0, 0))
+    _outline_rect(buf, W, H, bx, by, bw, bh, (255, 255, 255), t=max(2, scale))
+
+    inset = scale
+    ix, iy = bx + inset, by + inset
+    iw, ih = bw - 2 * inset, bh - 2 * inset
+    item_w = 16 * scale
+    left_w = max(0, iw - item_w)
+
+    heart_rgb = _comp_icon_rgb(heart_grid, pal) if heart_grid is not None else None
+    hs = scale
+    hh = len(heart_rgb) * hs if heart_rgb else 0
+    hw = len(heart_rgb[0]) * hs if heart_rgb else 0
+    label = str(price) if price is not None else ""
+    tw = len(label) * 4 * scale
+    th = 5 * scale if label else 0
+    gap = scale if (heart_rgb and label) else 0
+    stack_h = hh + gap + th
+    sy = iy + max(0, (ih - stack_h) // 2)
+    if heart_rgb:
+        _blit_rgb(buf, W, H, ix + max(0, (left_w - hw) // 2), sy, heart_rgb, hs)
+        sy += hh + gap
+    if label:
+        draw_text(buf, W, ix + max(0, (left_w - tw) // 2), sy,
+                  label, scale, (255, 255, 255))
+    if item_grid is not None:
+        item = _comp_icon_rgb(item_grid, pal)
+        if item and item[0]:
+            ihg, iwg = len(item), len(item[0])
+            twi, thi = iwg * scale, ihg * scale
+            _blit_rgb(buf, W, H,
+                      ix + left_w + max(0, (item_w - twi) // 2),
+                      iy + max(0, (ih - thi) // 2),
+                      item, scale)
+
+
+def _blit_badge(buf, W, H, x0, y0, rgb_grid, scale):
+    import gfxdump
+    d = 16 * scale
+    fill, rim = (10, 12, 18), COMP_GOLD
+    r = (d - 1) * 0.5
+    r2, rim2 = r * r, (r - max(1.5, scale * 0.85)) ** 2
+    for yy in range(d):
+        dy = yy - r
+        for xx in range(d):
+            dist = (xx - r) * (xx - r) + dy * dy
+            if dist > r2:
+                continue
+            px, py = x0 + xx, y0 + yy
+            if not (0 <= px < W and 0 <= py < H):
+                continue
+            o = (py * W + px) * 3
+            buf[o:o + 3] = bytes(rim if dist > rim2 else fill)
+    if not rgb_grid or not rgb_grid[0]:
+        return
+    ih, iw = len(rgb_grid), len(rgb_grid[0])
+    tw, th = iw * scale, ih * scale
+    ix = x0 + (d - tw) // 2
+    iy = y0 + (d - th) // 2
+    skip = {gfxdump.OFF, COMP_BG, (0, 0, 0)}
+    for y, row in enumerate(rgb_grid):
+        for x, col in enumerate(row):
+            if col in skip:
+                continue
+            dx = ix + x * scale + (scale - 1) * 0.5 - (x0 + r)
+            dy = iy + y * scale + (scale - 1) * 0.5 - (y0 + r)
+            if dx * dx + dy * dy > r2:
+                continue
+            for yy in range(scale):
+                py = iy + y * scale + yy
+                if not 0 <= py < H:
+                    continue
+                for xx in range(scale):
+                    px = ix + x * scale + xx
+                    if 0 <= px < W:
+                        o = (py * W + px) * 3
+                        buf[o:o + 3] = bytes(col)
+
+
+def _cell_px(cx, cy, scale):
+    nt_row = cy * 2 - 2
+    return cx * 16 * scale, (nt_row - PLAY_TOP) * 8 * scale
+
+
+def _object_px(ox, oy, origin, scale):
+    bx, by = origin
+    nt_row = oy - 2
+    return (ox * 8 + bx) * scale, ((nt_row - PLAY_TOP) * 8 + by) * scale
+
+
+def _stamp_block(rom, buf, W, H, stage, room, cx, cy, scale, span=32):
+    import gfxdump
+    tiles = playfield_atlas(rom, stage, room)
+    pal = gfxdump.vk_playfield_palette(rom.rom, stage, room)
+    if span == 16:
+        ids = BLOCK_COURT_2 if stage == 0 else BLOCK_CASTLE_2
+        cols = 2
+    else:
+        ids = BLOCK_COURT if stage == 0 else BLOCK_CASTLE
+        cols = 4
+    tw = 8 * scale
+    x0, y0 = _cell_px(cx, cy, scale)
+    for i, tid in enumerate(ids):
+        tr, tc = divmod(i, cols)
+        cell = nametable_cell(tiles, tid)
+        px, py = x0 + tc * tw, y0 + tr * tw
+        for y in range(8):
+            for x in range(8):
+                col = pal[cell[y][x] & 15]
+                for yy in range(scale):
+                    for xx in range(scale):
+                        qx, qy = px + x * scale + xx, py + y * scale + yy
+                        if 0 <= qx < W and 0 <= qy < H:
+                            o = (qy * W + qx) * 3
+                            buf[o:o + 3] = bytes(col)
+    _outline_rect(buf, W, H, x0, y0, span * scale, span * scale, COMP_BLOCK_RGB,
+                  t=max(2, scale) + scale)
+
+
+def render_composite(rom, grid, stage, col, scale, art):
+    """Pixel room plus scenery / enemies / vendors / doors / spots."""
+    import gfxdump
+    W, H, raw = render_pixels(rom, grid, stage, col, scale)
+    buf = bytearray(raw)
+    by_id = art["by_id"]
+    pal = art["pal"]
+    vendor = art["vendor"]
+    origins = art["enemy_origin"]
+    enemy_grids = art["enemy_grids"]
+    scenery = scenery_for_stage(rom, stage)
+    recs = scenery[col] if col < len(scenery) else []
+    stand = art["brazier"] if stage == 0 else art["candle"]
+    for cx, cy, attr, extra in recs:
+        kind, bonus, hidden, reveal = _classify(attr, extra)
+        x0, y0 = _cell_px(cx, cy, scale)
+        g = by_id.get(bonus)
+        if kind in ("block", "block16"):
+            _stamp_block(rom, buf, W, H, stage, col, cx, cy, scale,
+                         16 if kind == "block16" else 32)
+        draw = reveal if hidden else kind
+        if draw in ("block", "block16"):
+            if g is not None:
+                inset = 0 if kind == "block16" else 8
+                _blit_badge(buf, W, H,
+                            x0 + inset * scale, y0 + inset * scale,
+                            _comp_icon_rgb(g, pal), scale)
+        elif draw == "candle":
+            if stand is not None:
+                _blit_rgb(buf, W, H, x0, y0, _comp_icon_rgb(stand, pal), scale)
+            if g is not None and bonus:
+                bx = x0 + 16 * scale
+                if bx + 16 * scale > W:
+                    bx = x0 - 16 * scale
+                _blit_badge(buf, W, H, bx, y0, _comp_icon_rgb(g, pal), scale)
+        elif draw == "chest":
+            cy0 = y0 + (16 * scale if hidden else 0)
+            if 25 in by_id:
+                _blit_rgb(buf, W, H, x0, cy0, _comp_icon_rgb(by_id[25], pal), scale)
+            if g is not None:
+                bx = x0 + 16 * scale
+                if bx + 16 * scale > W:
+                    bx = x0 - 16 * scale
+                _blit_badge(buf, W, H, bx, cy0, _comp_icon_rgb(g, pal), scale)
+        elif draw == "floor":
+            if g is not None:
+                _blit_badge(buf, W, H, x0, y0, _comp_icon_rgb(g, pal), scale)
+        elif draw == "vendor":
+            prices = VENDOR_PRICE.get(bonus)
+            _blit_vendor_offer(
+                buf, W, H, x0, y0, vendor, g, by_id.get(1),
+                prices[0] if prices else None, pal, scale)
+            if vendor is not None:
+                _blit_rgb(buf, W, H, x0, y0, _comp_to_rgb(vendor, pal), scale)
+            elif g is None:
+                _outline_rect(buf, W, H, x0, y0, 32 * scale, 32 * scale,
+                              (200, 200, 240), t=2)
+    for sid, bit7, ox, oy in decode_objects(rom, stage, col):
+        slug = OBJECT_SLUG.get(sid)
+        eg = enemy_grids.get(slug) if slug else None
+        x0, y0 = _object_px(ox, oy, origins.get(slug, (0, 0)), scale)
+        if eg:
+            _blit_rgb(buf, W, H, x0, y0, _comp_to_rgb(eg, None), scale)
+        else:
+            _outline_rect(buf, W, H, x0, y0, 16 * scale, 16 * scale,
+                          (70, 120, 210), t=2)
+    entry = door_table_entry(rom, stage)
+    for rect in door_table_rects(entry, col):
+        dx, dy, dw, dh = rect[:4]
+        _outline_rect(buf, W, H,
+                      dx * 8 * scale,
+                      (dy - PLAY_TOP) * 8 * scale,
+                      dw * 8 * scale, dh * 8 * scale, COMP_DOOR_RGB, t=2)
+    spots = [s for s in parse_spots(rom) if s["stage"] == stage]
+    for tx, dy, dw, dh, dest in spot_table_rects(spots, stage, col, grid):
+        sx = tx * 8 * scale
+        sy = (dy - PLAY_TOP) * 8 * scale
+        _outline_rect(buf, W, H, sx, sy,
+                      dw * 8 * scale, dh * 8 * scale, COMP_SPOT_RGB, t=2)
+        tw = len(str(dest)) * 4 * scale
+        th = 5 * scale
+        pad = scale
+        tx_text = sx + dw * 8 * scale + 3 * scale
+        if tx_text + tw + pad > W:
+            tx_text = max(pad, sx - tw - 3 * scale)
+        ty_text = sy + max(0, (dh * 8 * scale - th) // 2)
+        bx0, by0 = tx_text - pad, ty_text - pad
+        bw, bh = tw + 2 * pad, th + 2 * pad
+        for yy in range(bh):
+            py = by0 + yy
+            if not 0 <= py < H:
+                continue
+            for xx in range(bw):
+                px = bx0 + xx
+                if 0 <= px < W:
+                    o = (py * W + px) * 3
+                    buf[o:o + 3] = bytes((10, 12, 18))
+        draw_text(buf, W, tx_text, ty_text, str(dest), scale, COMP_SPOT_RGB)
+    if stage == 6 and col == 1 and art["spike_grid"] is not None:
+        pal6 = gfxdump.vk_playfield_palette(rom.rom, 6, 1)
+        rgb = _comp_icon_rgb(art["spike_grid"], pal6)
+        y0 = (0x60 - PLAY_TOP * 8) * scale
+        for x in (0x3C, 0x7C, 0xBC):
+            _blit_rgb(buf, W, H, x * scale, y0, rgb, scale)
+    pad = art["pad_art"].get(stage)
+    for py, px, step, span in art["platform_tbl"].get((stage, col), ()):
+        x_end = px + step * (span - 1)
+        x0 = min(px, x_end)
+        w = abs(x_end - px) + 32
+        if pad is not None:
+            bx, by = _sat_crop(px, py, scale)
+            _blit_rgb(buf, W, H, bx, by, _comp_to_rgb(pad, None), scale)
+        sx, sy = _sat_crop(x0, py, scale)
+        _outline_rect(buf, W, H, sx, sy + scale,
+                      w * scale, (16 - 1) * scale,
+                      COMP_PAD_PATH_RGB, t=max(2, scale))
+    for room, slug, px, py in BOSS_SPAWNS.get(stage, ()):
+        if room != col:
+            continue
+        eg = enemy_grids.get(slug)
+        if not eg:
+            continue
+        bx, by = origins.get(slug, (0, 0))
+        x0, y0 = _sat_crop(px + bx, py + by, scale)
+        _blit_rgb(buf, W, H, x0, y0, _comp_to_rgb(eg, None), scale)
+    return W, H, bytes(buf)
+
+
 def ascii_grid(grid, row, mode, top=PLAY_TOP, room=None):
     def ch(r, c):
         if grid[r][c] in STAIRS and not ((row, room) == (18, 9) and mode in ("perm", "collision")):
@@ -834,10 +1555,13 @@ def render_stage(rom, row, scale, mode, tag, out_dir, ascii_dump=False,
     entry = door_table_entry(rom, row)
     spots = parse_spots(rom) if show_spots else []
     images = []
-    pixels = mode == "pixels"
+    playfield = mode in ("pixels", "composite")
+    art = composite_art(rom) if mode == "composite" else None
     for col in range(n):
         grid = decode_room(rom, row, col)
-        if pixels:
+        if mode == "composite":
+            images.append(render_composite(rom, grid, row, col, scale, art))
+        elif mode == "pixels":
             images.append(render_pixels(rom, grid, row, col, scale))
         else:
             doors, objects = None, None
@@ -853,14 +1577,15 @@ def render_stage(rom, row, scale, mode, tag, out_dir, ascii_dump=False,
             images.append(render(grid, row, scale, mode, doors=doors, objects=objects,
                                  room=col, spots=pad))
         if ascii_dump:
-            ascii_mode = "perm" if pixels else mode
+            ascii_mode = "perm" if playfield else mode
             print(f"row {row} room {col}:")
             print(ascii_grid(grid, row, ascii_mode, room=col)); print()
     if not images:
         return
     pos, gw, gh = layout(rom, row, len(images))
-    W, H, buf = contact_sheet(images, pos, gw, gh, gap=8)
-    if pixels:
+    bg = COMP_SHEET_BG if mode == "composite" else (40, 44, 56)
+    W, H, buf = contact_sheet(images, pos, gw, gh, gap=8, bg=bg)
+    if playfield:
         sheet = f"{out_dir}/stage_s{row:02d}.png"
     else:
         suffix = "" if tag == "perm" else f"_{tag}"
@@ -877,7 +1602,7 @@ def main():
                     help="render a sheet for every stage/world row")
     ap.add_argument("--scale", type=int, default=None,
                     help="pixels per source pixel (perm/coll/vis default 6; "
-                         "--pixels default 2)")
+                         "--pixels / --composite default 2)")
     ap.add_argument("--out-dir", default="gfx")
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--collision", action="store_true",
@@ -887,6 +1612,8 @@ def main():
     g.add_argument("--pixels", action="store_true",
                    help="paint rooms from the stage tileset (8x8 4bpp, "
                         "playfield palette)")
+    g.add_argument("--composite", action="store_true",
+                   help="--pixels plus scenery, enemies, vendors, doors, spots")
     ap.add_argument("--ascii", action="store_true")
     ap.add_argument("--no-doors", action="store_true",
                     help="skip the white-key door overlay")
@@ -898,33 +1625,35 @@ def main():
     ap.add_argument("--validate", metavar="SNAPFILE",
                     help="byte-check ROM decode against RAM snapshots")
     a = ap.parse_args()
-    mode = ("pixels" if a.pixels else
+    mode = ("composite" if a.composite else
+            "pixels" if a.pixels else
             "collision" if a.collision else
             "visual" if a.visual else "perm")
-    scale = a.scale if a.scale is not None else (2 if mode == "pixels" else 6)
+    scale = a.scale if a.scale is not None else (
+        2 if mode in ("pixels", "composite") else 6)
     rom = Rom(a.rom)
     os.makedirs(a.out_dir, exist_ok=True)
     tag = {"collision": "coll", "visual": "vis", "perm": "perm",
-           "pixels": "pix"}[mode]
+           "pixels": "pix", "composite": "comp"}[mode]
     rows = minimap_stages(rom) if a.all else [a.row]
     for row in rows:
         render_stage(rom, row, scale, mode, tag, a.out_dir, a.ascii,
                      not a.no_doors, show_spots=not a.no_spots)
-        if a.compare_doors and mode != "pixels":
+        if a.compare_doors and mode not in ("pixels", "composite"):
             render_stage(rom, row, scale, mode, tag, a.out_dir, False,
                          True, door_model="edge", show_spots=False)
             render_stage(rom, row, scale, mode, tag, a.out_dir, False,
                          True, door_model="object", show_spots=False)
 
     if a.validate:
-        snapdir = os.path.expanduser("~/code/cocoamsx-disasm/tools/disasm")
+        snapdir = os.path.join(_WB, "cocoamsx", "tools", "disasm")
         if snapdir not in sys.path:
             sys.path.insert(0, snapdir)
         try:
             import snapdiff as sd
         except ImportError:
             sys.exit("roomperm --validate needs snapdiff.py from "
-                     "~/code/cocoamsx-disasm/tools/disasm")
+                     "tools/workbench/cocoamsx/tools/disasm")
         snaps = sd.load(a.validate)
         def V(s, addr): return s[2][addr - s[1]]
         # pick the middle of each room's longest dwell (map fully built)

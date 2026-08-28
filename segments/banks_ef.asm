@@ -5,9 +5,9 @@
 ;  Origin is set by PHASE 0x8000 in VampireKiller.asm.
 ;
 ;  Shares the CPU window with play bank 2; names here are unique (not z80dasm
-;  lxxxh).  regen-seg.sh filters msx.sym per bank, so a collision at the
+;  lxxxh).  regen-bank.sh filters msx.sym per bank, so a collision at the
 ;  same CPU address in bank 2 is fine.
-;  Regen bank 14: tools/disasm/regen-seg.sh 14 0x8000 segments/banks_ef.blocks
+;  Regen bank 14: tools/workbench/msx/regen-bank.sh 14 0x8000 segments/banks_ef.blocks
 ;
 ;  Layout:
 ;    0x8000  scenery_list_ptr / packed per-hub candle, block, chest, vendor

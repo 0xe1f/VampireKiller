@@ -1,7 +1,7 @@
 ; ===========================================================================
 ;  Confirmed work-RAM addresses.  Readability only — not emitted, not in
 ;  msx.sym (z80dasm would rewrite every matching immediate).  Regen of a
-;  play bank emits hex again; re-apply after regen-seg.
+;  play bank emits hex again; re-apply after regen-bank.
 ; ===========================================================================
 
 ; Play input (input_edge).  Bits: 0=UP 1=DOWN 2=LEFT 3=RIGHT

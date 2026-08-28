@@ -31,15 +31,17 @@ sprite_ofs_64d4: start 0x64d4 end 0x64ec type bytedata
 evt_dispatch_65bd: start 0x65bd end 0x65d3 type worddata
 ; Inline DISPATCH_A word table for credits_tick (0x66C1); 4 handler pointers.
 evt_dispatch_66c8: start 0x66c8 end 0x66d0 type worddata
-; CE35 visual sub-state DISPATCH_A (sub_6875h).
+; CE35 visual sub-state DISPATCH_A (dracula_ce35_tick).
 ce35_dispatch: start 0x687B end 0x6883 type worddata
+; 6 x {Yvel, Xvel} words for actor_dracula_chunk (dracula_chunk_init).
+dracula_chunk_vel: start 0x69EB end 0x6A03 type bytedata
 ; Event-actor ix+1 DISPATCH_A (0x6AB1).
 evt_actor_tbl: start 0x6AB4 end 0x6ABE type worddata
 ; Ending/staff line pointers (indexed by CE31) for credits_keyframe;
 ; entries point into seg 8 (0xBFxx) and seg 5 (0x82xx/0x84xx).
 script_ptr_6795: start 0x6795 end 0x67eb type worddata
-; Triangle-ramp animation table (19 bytes, indexed by 0xCE39) used by sub_67ebh.
-ramp_tbl_6804: start 0x6804 end 0x6817 type bytedata
+; Triangle-ramp animation table (19 bytes, indexed by 0xCE39) used by credits_palette_ramp.
+credits_ramp_tbl: start 0x6804 end 0x6817 type bytedata
 ; Simon action-state DISPATCH_A table (0xC420 -> handlers).
 simon_action_tbl: start 0x6b49 end 0x6b59 type worddata
 ; Jump sub-state DISPATCH_A table (0xC421 -> aim/up/left/right).

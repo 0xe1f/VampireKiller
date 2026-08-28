@@ -290,9 +290,9 @@ gfx_script_9db5:  ; 0x9DB5  3 rooms, first s4r1
 	defb 0x00
 	defw spr_blob_cc, 0xfe40
 	defb 0x00
-	defw gfx_rle_a0a8, 0xfe80
+	defw gfx_rle_a0a8, 0xfe80   ; pad art (s10 uses the FEC0 copy)
 	defb 0x00
-	defw gfx_rle_a0a8, 0xfec0
+	defw gfx_rle_a0a8, 0xfec0   ; moving pad SAT D8/DC
 	defb 0x01
 	defw 0xfa40
 	defb 0x06
@@ -311,7 +311,7 @@ gfx_script_9de0:  ; 0x9DE0  18 rooms, first s4r0
 	defb 0x00
 	defw spr_skull_pile, 0xfe00
 	defb 0x00
-	defw gfx_rle_a066, 0xfe80
+	defw gfx_rle_a066, 0xfe80   ; moving pad SAT D0/D4 (stage 5)
 	defb 0x00
 	defw spr_blob, 0xfb80
 	defb 0x00
@@ -434,7 +434,7 @@ gfx_script_9eba:  ; 0x9EBA  5 rooms, first s10r1
 	defb 0x00
 	defw gfx_rle_a23b, 0xfe80
 	defb 0x00
-	defw gfx_rle_a0a8, 0xfec0
+	defw gfx_rle_a0a8, 0xfec0   ; moving pad SAT D8/DC (stage 10)
 	defb 0x01
 	defw 0xfa40
 	defb 0x06

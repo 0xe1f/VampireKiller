@@ -127,7 +127,7 @@ Fully migrated banks (0-15) have no `.bin`.
     Play-loop tail in `play_tick` also named: `room_event_tick` (0xB6B2,
     CE00; event 6 = event_dracula), `actors_tick` (0x98EC), `shot_tick`
     (0x9E38), `vendor_tick` (0x91C5), `pickup_tick` (0x8A51),
-    `break_spark_tick` (0x88DF), `hazard_tick` (0x8FD6), `platform_tick`
+    `break_chip_tick` (0x88DF), `hazard_tick` (0x8FD6), `platform_tick`
     (0x90A2), `c800_sat_build`/`shot_sat_build`, `c800_sat_emit`/`shot_sat_emit`,
     `frame_vram_refresh`.  Event 6 (`event_dracula`) is Dracula's CE01 machine;
     it raises CE40 → `credits_tick` (named; see game-notes Ending / credits).
@@ -259,7 +259,7 @@ Fully migrated banks (0-15) have no `.bin`.
       A-1). Confirmed entries: **value 1 = small heart (+1)**, **value 2 = large
       heart (+5)** (both `call add_hearts` with B=1/5), health refills via
       restore_health (7 small life orb +8 / 22 potion bottle +32; vendor 0x16, not the boss-clear orb), keys/sub-weapons OR a bit into 0xC701/0xC702.
-      Reached from BOTH pickup paths: the mid-air 0x24 heart (seg2 sub_9a72h ->
+      Reached from BOTH pickup paths: the mid-air 0x24 heart (seg2 actor_kill_special ->
       collect_bonus(1)) and the settled 0xC500 list (collision -> collect).
     * **add_hearts (seg0 0x459B)** / **spend_hearts (0x45A7)** now labelled: BCD add
       (clamp 99) / subtract (floor 0) on 0xC417; heart counter confirmed BCD again
@@ -999,6 +999,15 @@ shapes, so `@` is a horizontal rule, `_` is a right-pointing arrow (the menu
 cursor) and `?` is an **equals sign** - `vk "STAGE NUMBER?"` actually renders
 `STAGE NUMBER=`.
 
+**Game Master ROM dump (follow-up).** A 16 KB RC-735 dump matches
+`game_master_sig` at CPU 0x7FFA (`00 30 31 13 35 AA`); `35 AA` is the
+standard 16K Konami RC stamp. The old unlabeled 0x4010 block is a
+DW-padded CD option table (`gm_opt_tbl`) naming C411 / D000 / C410 /
+C405 — the same RAM the in-game menu writes — but Game Master 1 looks
+for word 0x4443 at 0x4010 and never sees 0x0043, and VK's 0x5000
+checksum is not in GM's known-game list. The cart is a dongle; it does
+not poke this ROM.
+
 Two follow-ups left open by the spike-bar pass, both closed this pass:
 
 1. **`hurt_simon_projectile` renamed to `hurt_simon_spikes`.** Confirmed: the
@@ -1040,7 +1049,7 @@ Event 6 extras: `actor_dracula_bat` 0x2C, `actor_dracula_head` 0x2D
 (intro SAT 0x57/0x59, arc away after summon), `actor_dracula_chunk` 0x2E.
 s18r9 collision uses event-6 threshold 6 (`tile_is_solid` l7c7ah). Leftover
 fake `DISPATCH_A`
-in-lines converted to `defw` (seg1 `sub_6875h` / 0x6AB4). Seg2 hit-class
+in-lines converted to `defw` (seg1 `dracula_ce35_tick` / 0x6AB4). Seg2 hit-class
 named: `hit_class_c800` / `_shot` tables, `actor_vs_*` / `shot_vs_*`,
 `overlap_simon` / `_whip` / `_projectile` / `_shield`. Shot ticks named
 (`fireball`, `medusa_snake`, `mummy_bandage`, `shot_sickle`, `shot_axe`, `shot_bone`);
@@ -1079,7 +1088,7 @@ use `room_event_ce10` → C409.
    `simon_walk_left/right`, `simon_add_x`, `simon_jump_*`, `simon_mirror_frames`,
    `whip_tick` / `simon_attack_tick`, action-state handlers 0-6 named.
    Play-loop tail in `play_tick` named: `room_event_tick`, `actors_tick`,
-   `shot_tick`, `vendor_tick`, `pickup_tick`, `break_spark_tick`,
+   `shot_tick`, `vendor_tick`, `pickup_tick`, `break_chip_tick`,
    `hazard_tick`, `platform_tick`, SAT build/emit, `frame_vram_refresh`.
 5. Continue disassembling segments 1-15.
 6. Room-map renderer (`tools/roomperm.py`) per-stage tile-semantics cleanup.
@@ -1226,11 +1235,13 @@ Known live RAM map (runtime-confirmed this session):
     knockback throws Simon back (0xC427 X down) and up (0xC425 Y down, restored
       to 0xC0 ground on recovery).
   0xC450-C46F whip sprite buffer
-  0xC470 block: destructible scenery (candles **and** 32×32 wall blocks),
-         stride 0x10, 8 slots.  +00 state (1 first frame / 2 present / 0 gone);
-         +01 Y +02 X; +03 hit; +04 kind (0 castle candle, 1 courtyard, 3 4x4
-         block); +05 bonus id; +07/+08 E000 pos ptr.  First tick saves D100
-         under the slot (E480/E4A0) and stamps brick tiles for kind 3.
+  0xC470 block: destructible scenery (candles **and** 16×16 / 32×32 wall
+         blocks), stride 0x10, 8 slots.  +00 state (1 first frame / 2 present
+         / 0 gone); +01 Y +02 X; +03 hit; +04 kind (0 castle candle, 1
+         courtyard, 2 2x2, 3 4x4); +05 bonus id (0x1F = covering wall);
+         +07/+08 E000 pos ptr; +09 reveal byte when +05 is 0x1F.  First tick
+         saves D100 under the slot (E480/E4A0) and stamps brick tiles for
+         kind 2/3.
   0xC500 floor pickups/chests: 8 slots, stride 0x10 (`pickup_tick`).
   0xC580 spike bars: 3 x 8 bytes (`hazard_tick`; `hurt_simon_spikes`
          overlap, 32x8 box). Stage 6 room 1 only - the pool holds nothing else.
@@ -1244,7 +1255,7 @@ Known live RAM map (runtime-confirmed this session):
          (colours 2/4 on stage 5, 9/0xC on stage 10).  +5/+6 are skipped by
          platform_load because actor_state_reset already zeroed 0xC470-0xC6FF.
          See game-notes "Moving platforms".
-  0xC5A6 whip-break sparks: 2 x 3 bytes (`break_spark_tick`).
+  0xC5A6 wall-break chips: 2 x 3 bytes (`break_chip_tick`).
   0xC800 actor slots: 7 slots, stride 0x80 (0xC800, 0xC880, … 0xCB80). Same
          0x80-byte layout as the 8 D700 shot slots. Allocated by `spawn_actor`
          (seg0 0x5F24); SAT helpers `actor_sat_patterns` / `actor_sat_assign`.
@@ -1312,7 +1323,7 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   listing comments. Regen strips them automatically; `tools/strip-listing.py
   segments/segNN.asm` is still available as a safety net (it drops the byte-listing
   noise but keeps hand-written `; ...` comments and re-aligns them).
-- Data regions go in a `.blocks` file (see `segments/seg00.blocks`, `segments/seg01.blocks`);
+- Data regions go in a `.blocks` file (see `segments/seg00.blocks`, `segments/seg01.blocks`, `segments/seg02.blocks`, `segments/seg03.blocks`);
   a `.blocks` file only changes code-vs-data rendering, never the emitted bytes.
   BIOS names live once in `segments/bios.inc`; actor type ids in
   `segments/actors.inc`; routine names go in `segments/msx.sym`.
@@ -1369,7 +1380,7 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   merman_generator_3, hanging_bat_generator, flying_skull_generator, ghost_head_generator,
   roc_generator, door_blit_tiles, read_buttons, input_edge, play_sound,
   frontend_input, frontend_to_title, frontend_game_start,
-  the Game Master cluster (game_master_detect/_sig, gm_scan_expanded, gm_sig_cmp,
+  the Game Master cluster (game_master_detect/_sig, gm_opt_tbl, gm_scan_expanded, gm_sig_cmp,
   gm_pause_check, gm_psg_save_mute/_mute/_restore, gm_continue_text/_key,
   gm_menu_draw/_clear/_text/_move, gm_box_clear, gm_prompt_stage/_player/_draw/_clear,
   gm_stage_text, gm_player_text, gm_digit_entry, gm_digit_read, gm_bit_to_digit,
@@ -1388,29 +1399,35 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   glyph_expand_4bpp, tile_atlas_pos, blit_advance_x, hud_draw_all,
   draw_stage_hud, hud_panel_frames, hud_bars_redraw, health_bar_redraw,
   health_bar_frame, enemy_meter_frame, intro_actors_frame,
-  intro_spawn_sky, intro_spawn_sky_ab, intro_spawn_simon;
+  intro_spawn_sky, intro_spawn_sky_ab, intro_spawn_simon, intro_simon_stride,
+  spawn_actor_ab;
   seg1: simon_action_tick, simon_walk_left/right, simon_jump_tick, simon_mirror_frames,
-  simon_crouch, simon_stairs, simon_fall, simon_hurt, simon_dying,
-  simon_portal_wait, simon_attack_tick, simon_attack_start, whip_tick, projectile_tick,
+  simon_crouch, simon_stairs, simon_stair_frames_up/down, simon_fall, simon_hurt, simon_dying,
+  simon_portal_wait, simon_attack_tick, simon_attack_start, simon_attack_end, whip_tick, projectile_tick,
   knife_tick, cross_tick, axe_tick, tile_layout_draw, holy_water_use,
   holy_water_tick, map_cell_at, tile_is_solid, row_solid_thresh,
   set_stage_boundary, door_interact, door_try_open, door_open_walk,
   hourglass_use, stage_bgm_tbl, stage_bgm_play, stage_bgm_change,
   event_vscroll, credits_tick, credits_init, credits_frame, credits_clock,
-  credits_keyframe, credits_script_ptr, credits_wipe, player_tick, simon_sat_build, simon_sat_cell0/1, combat_tick,
+  credits_keyframe, credits_script_ptr, credits_wipe, player_tick, simon_sat_build, simon_sat_emit, simon_sat_colour, simon_sat_cell0/1, combat_tick,
   title_fill_strips, title_set_color2, title_sat_init, actor_sat_build,
   actor_sat_emit, c800_sat_build/emit, shot_sat_build/emit, frame_vram_refresh,
   object_list_load/unpack/lookup/clear, tile_string_draw, cell_event_set,
   actor_state_reset, mem_clear_stride, simon_block_clear, sprites_hide,
   simon_spawn_pos, pattern_phase_upload, pattern_shadow_blit, room_edge_detect,
   inv_reset_life, simon_wall_right/left, stair_probe_up_right/left,
-  stair_probe_down_right/left;
+  stair_probe_down_right/left, simon_land_sfx_arm, dracula_face_rest, hanging_bat_pose;
   seg2: door_proximity, door_anim_tick, door_begin_open, spot_proximity,
   collect_bonus_tbl, bonus_holy_water, yellow_shield_tick, projectile_hit_actors,
   actor_vs_whip/simon/proj, shot_vs_simon/proj/shield/whip, overlap_simon/whip/projectile/shield,
   lose_weapon, shot_throw, shot_spawn, shot_alloc, shot_bone, shot_tick,
   shot_type_tick, fireball, medusa_snake, mummy_bandage, shot_axe, shot_sickle,
-  actors_tick, c800_tick, pickup_tick, vendor_tick, break_spark_tick,
+  actors_tick, c800_tick, pickup_tick, vendor_tick, break_chip_tick,
+  break_chip_spawn/move/sat/dy, chip_fill16, drop_fx_spawn, pickup_slot_write,
+  drop_own_weapon_heart, pickup_slot_alloc, pickup_state_tick, pickup_state_tbl,
+  pickup_appear/fall/stamp/idle/hop, pickup_try_collect, chest_spill,
+  pickup_sat_draw, bonus_icon_blit, pickup_save_under, pickup_restore_under,
+  pickup_collect, already_have_key, sat_fill, hittable_rearm_scan, actor_floor_test,
   hazard_tick, hurt_simon_spikes, spike_bar_overlap,
   spike_bars_seed_once, spike_bars_seed, spike_bar_seeds,
   spike_bars_run, spike_bar_slot_tick, spike_bars_restore,
@@ -1420,8 +1437,9 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   actor_type_tick, actor_tick_tbl, vendor_outcome_tbl, vendor_hit_latch,
   vendor_leave, award_kill_score, collect_bonus_apply, inv_or_c701/c702,
   hud_weapon_icon, hud_bonus_refresh, spawn_rate_gate, spawn_pick_pos,
+  spawn_edge_gate,
   minimap_build, minimap_room_pos, minimap_stage_ptr, minimap_room_count,
-  actor_pickup_init, actor_reward_init/go, merman_splash_init;
+  actor_pickup_init, actor_reward_init/go, reward_sat_col, merman_splash_init;
   seg3: room_event_tick, shot_kind_type, mummy_bandage_init, shot_sickle_init, shot_axe_init,
   enemy_zombie_tick, enemy_dog_tick, enemy_merman_tick,
   enemy_hanging_bat_tick, enemy_flying_skull_tick, enemy_ghost_head_tick,
@@ -1436,14 +1454,22 @@ routine; a WATCH on the pickup slot's +0x00 to get the 0x1E->0x24->free handler 
   hunchback_wait, hunchback_drop, hunchback_crouch, hunchback_jump,
   hunchback_hide, blob_hatch, blob_fall, blob_pause, blob_hop, merman_fall,
   merman_walk, merman_spit, hanging_bat_hang, hanging_bat_swoop,
-  hanging_bat_bob, enemy_skull_pile_go, skull_pile_idle, skull_pile_windup,
+  hanging_bat_bob, hanging_bat_flap, hanging_bat_flap_slow, hanging_bat_pose_r/l,
+  enemy_skull_pile_go, skull_pile_idle, skull_pile_windup,
   skull_pile_recover, enemy_axe_knight_tick, enemy_dracula_tick,
   enemy_giant_bat_tick, enemy_medusa_tick, enemy_mummy_tick,
   enemy_frankenstein_tick, enemy_grim_reaper_tick, enemy_placed_merman_init,
   enemy_placed_bat_init, event_giant_bat, event_medusa, event_mummies,
   event_frankenstein, event_grim_reaper, event_dracula, event_ce01_next,
-  boss_clear_arm, aim_at_simon, room_event_ce10, boss_clear_cull, boss_clear_wait,
-  boss_clear_orb, boss_clear_orb_wait, boss_clear_heal, boss_clear_done;
+  boss_clear_arm, aim_at_simon, aim_octant, aim_scale, MUL_H_E, room_event_ce10, boss_clear_cull, boss_clear_wait,
+  boss_clear_orb, boss_clear_orb_wait, boss_clear_heal, boss_clear_done,
+  actor_flip_xvel, ADD_HL_A_SIGNED, actor_halt_if_rightward/leftward, simon_dx_abs,
+  actor_snap_y8, actor_wall_ahead, play_sound_alive, map_solid_at, actor_wall_right/left,
+  skull_pile_face, skull_pile_sat_pat, merman_walk_period, raven_flap, raven_pick_vel,
+  raven_bounds, dog_run_pose, bone_dragon_sat_nudge, bone_dragon_wiggle,
+  axe_knight_walk_pose, red_skel_face, flying_skull_pose, roc_flap,
+  blob_fall_step, blob_hatch_wait, blob_at_edge, blob_wall_ahead, blob_can_rise,
+  blob_floor, blob_chase_x;
   seg13: conn_lookup, conn_load_permits, conn_room_record, conn_ptr, door_load,
   door_load_coords, door_tbl, spot_load_coords, spot_tbl, simon_cell0_ptr,
   simon_cell1_ptr, intro_simon, intro_sky, title_jp_sprites, logo_font, logo_font_ink2,

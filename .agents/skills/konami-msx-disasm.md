@@ -175,12 +175,20 @@ of `<Game>.asm`.
   placed copy of the same enemy is a different id. A high bit on the stored byte
   may be stripped at spawn (not "scenery"). Name ids from that spawn call. The
   same numeric value in another table (display-type, drop-gate) is a different
-  field — scan the field the code actually tests.
+  field — scan the field the code actually tests. VK's object-list Attr is
+  **Y<<4|X** (same packing as the scenery pos byte); `l61c2h` loads high→E (Y)
+  and low→D (X). Do not decode it as X<<4|Y — that swap looks like a 16px Y
+  error on every record whose nibbles differ by 1.
 - **A second packed list in the same bank often uses a different grammar.** VK's
   enemy `object_list` is `0x00` next-room / `0xFF` end-stage; the candle/scenery
-  list is `0xFE` / `0xFF` / `0x00`-end-hub plus a 3-byte `0x7F` reveal record.
-  Don't reuse the first decoder. Stage 0 may bypass the hub pointer table and
+  list is `0xFE` / `0xFF` / `0x00`-end-hub plus a 3-byte `0x7F` covering wall
+  (still bits7-5=011 / 32x32; extra is the chest/vendor reveal — bit7 is clear
+  so load stamps bricks, it does not spawn the reveal). Don't reuse the first
+  decoder. Stage 0 may bypass the hub pointer table and
   point at a stream that sits *between* the words and hub 0.
+- **MSX SAT Y is the line above the sprite.** Writers often store the visual
+  row and `dec a` into SAT. VK's moving pads do this (`platform_tbl` Y vs SAT
+  Y-1); the stand test compares Simon against the visual row, not the SAT byte.
 - **RNG via `ld a,r`** (the refresh register) — a cheap pseudo-random source. If a
   mechanic behaves differently run-to-run for the same input, grep for `ld a,r`
   near its state machine; the branch after it is the coin-flip.
@@ -191,15 +199,22 @@ of `<Game>.asm`.
   re-entrancy flag.** A routine that walks `EXPTBL` (0xFCC1), recurses into
   expanded subslots, and `RDSLT`s a handful of bytes at a fixed address in each
   is fingerprinting *another cartridge*. Konami's **Game Master** cheat cart
-  (RC-735) is the common one: VK compares 6 bytes at CPU 0x7FFA — the tail of a
-  16 KB page mapped at 0x4000, so an arbitrary end-of-ROM fingerprint rather than
-  a readable ID — and parks the result in a single flag (0xE600) that gates a
-  pause / frame-advance key pair in the interrupt handler, a hidden
-  stage-and-lives select menu reached from the title, and a CONTINUE option on
-  game over. If you find one flag set at boot and read
-  from unrelated places, look for the RDSLT compare before inventing a meaning
-  for it — and expect its features to sit in ROM regions z80dasm mangled, since
-  nothing in the normal flow reaches them.
+  (RC-735) is the common one: VK compares 6 bytes at CPU 0x7FFA — the last six
+  of a 16 KB page at 0x4000, which on RC-735 are `00 30 31 13 35 AA`. The last
+  two are Konami's standard 16K stamp (BCD last-two-digits of the RC-code +
+  0xAA); the rest is the uniqueness window. The result parks in a single flag
+  (0xE600) that gates a pause / frame-advance key pair in the interrupt
+  handler, a hidden stage-and-lives select menu reached from the title, and a
+  CONTINUE option on game over. The reverse direction also exists: later
+  Konami titles advertise a `"CD"` / `"AB"` option table at 0x4010 for Game
+  Master to parse (stage/lives/score addresses + max values). Writing those
+  four header bytes as words (extra 0x00) makes the word at 0x4010 `0x0043`
+  instead of `0x4443`, so Game Master 1 never sees it — VK's `gm_opt_tbl` is
+  that failed handshake; the features that actually work are the ones the
+  *game* implements after fingerprinting the cart. If you find one flag set
+  at boot and read from unrelated places, look for the RDSLT compare before
+  inventing a meaning for it — and expect its features to sit in ROM regions
+  z80dasm mangled, since nothing in the normal flow reaches them.
 - **In-house fonts reuse ASCII slots for symbols.** VK's HUD font spans ASCII
   `'0'`-`'_'`, but the `@`, `_` and `?` slots actually draw a horizontal rule, a
   right-pointing cursor arrow and an equals sign. A text macro that reproduces

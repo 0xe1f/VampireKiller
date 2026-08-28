@@ -2,7 +2,7 @@
 ; HUD/title strings are vk (ASCII-0x10); space is 0x00 (copies the
 ; ink-0 blit of hud_font_solid at VRAM (0,0)).  hud_font_load
 ; (seg0 0x53BD) expands these via glyph_blit_run to page 1 at Y=0x40,
-; ink 0x0E.  Drawing is HMMM from that atlas (sub_4aeeh, Y += 0x38).
+; ink 0x0E.  Drawing is HMMM from that atlas (hud_glyph_blit, Y += 0x38).
 ; Each defb is one row, MSB = left pixel.  Not the credits font.
 ; Preview: gfx/fonts/font_hud.png.  Source: data/font_hud.asm.
 hud_font:

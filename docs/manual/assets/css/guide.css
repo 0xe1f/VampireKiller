@@ -115,8 +115,9 @@ html, body {
 }
 
 .entry img {
-  width: 96px;
+  width: auto;
   height: auto;
+  max-width: 100%;
   flex: 0 0 auto;
 }
 
@@ -153,5 +154,4 @@ th, td {
 
 @media (max-width: 640px) {
   html, body { font-size: 16px; }
-  .entry img { width: 72px; }
 }

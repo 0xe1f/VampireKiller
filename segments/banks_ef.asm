@@ -24,12 +24,14 @@
 ; 0xFE next room, 0xFF next stage, 0x00 end hub. Instantiator 0x5B22 fills
 ; 8 C470 candle/block slots, C500 floor items/chests, C5B5/C5C5 vendors.
 ; Record: pos (hi nibble Y, lo nibble X, cell*16 px), attr; attr 0x7F adds a
-; third byte (reveal). attr bits7-5: 000 floor pickup, 001 candle/brazier,
-; 011 32x32 breakable block (stamped over the nametable); bits7-6 10 chest,
-; 11 vendor. bits4-0 = bonus id (vendor uses bits5-2 as vendor_offer_id
-; index). Instantiator scenery_room_load fills 8 C470 candle/block slots,
-; C500 floor items/chests, C5B5/C5C5 vendors. Stage 18 room 9 (Dracula)
-; is omitted and stays empty.
+; third byte (reveal). 0x7F is still a 32x32 covering wall: bits7-5 = 011,
+; bonus 0x1F, bit7 clear, so scenery_room_load stamps C470 bricks and parks
+; the extra byte in +09. Do not treat extra as the surface (that is a chest
+; or vendor only after the wall is whipped). attr bits7-5: 000 floor pickup,
+; 001 candle/brazier, 010 16x16 block (block_stamp kind 2; unused in the
+; packed stream), 011 32x32 block; bits7-6 10 chest, 11 vendor. bits4-0 =
+; bonus id (vendor uses bits5-2 as vendor_offer_id index). Stage 18 room 9
+; (Dracula) is omitted and stays empty.
 
 scenery_list_ptr:
 	defw scenery_list_h0     ; hub 0 = stages 1-3
@@ -1097,7 +1099,8 @@ spawn_mask_s18:
 ; the hub's 3 castle stages (stage 0 shares hub 0 but l61c2h skips it).
 ; 0x00 advances to the next room (obj_next_room). List-id = actor_* type
 ; (segments/actors.inc); bit7 stripped at spawn (dogs only: actor_dog|080h).
-; Attr = X<<4 | Y, cell*16 px.
+; Attr = Y<<4 | X, cell*16 px (same nibble order as scenery). l61c2h
+; loads high->E (Y) and low->D (X) into spawn_actor.
 object_list_ptr:
 	defw object_list_h0,object_list_h1,object_list_h2,object_list_h3,object_list_h4,object_list_h5
 
@@ -1108,83 +1111,83 @@ object_list_h0:
 	defb obj_next_room
 	defb actor_dog,088h                 ; r2 (8,8)
 	defb obj_next_room
-	defb actor_dog|080h,046h            ; r3 (4,6)
+	defb actor_dog|080h,046h            ; r3 (6,4)
 	defb obj_next_room
 	defb obj_next_room
 	defb obj_next_room
 	defb obj_next_room
-	defb actor_dog|080h,06ch            ; r7 (6,12)
+	defb actor_dog|080h,06ch            ; r7 (12,6)
 	defb obj_end_stream
 	; stage 2
 	defb obj_end_stream
 	; stage 3
-	defb actor_dog,087h                 ; r0 (8,7)
+	defb actor_dog,087h                 ; r0 (7,8)
 	defb obj_next_room
 	defb actor_dog,088h                 ; r1 (8,8)
-	defb actor_dog|080h,0abh            ; r1 (10,11)
+	defb actor_dog|080h,0abh            ; r1 (11,10)
 	defb obj_next_room
-	defb actor_placed_bat,067h          ; r2 (6,7)
+	defb actor_placed_bat,067h          ; r2 (7,6)
 	defb obj_end_stream
 
 ; hub 1 = stages 4-6 (0x868E)
 object_list_h1:
 	; stage 4
-	defb actor_pikeman,0ceh             ; r0 (12,14)
-	defb actor_pikeman,069h             ; r0 (6,9)
+	defb actor_pikeman,0ceh             ; r0 (14,12)
+	defb actor_pikeman,069h             ; r0 (9,6)
 	defb obj_next_room
-	defb actor_pikeman,0c8h             ; r1 (12,8)
-	defb actor_pikeman,064h             ; r1 (6,4)
-	defb actor_placed_bat,034h          ; r1 (3,4)
+	defb actor_pikeman,0c8h             ; r1 (8,12)
+	defb actor_pikeman,064h             ; r1 (4,6)
+	defb actor_placed_bat,034h          ; r1 (4,3)
 	defb obj_next_room
-	defb actor_pikeman,0cbh             ; r2 (12,11)
-	defb actor_pikeman,064h             ; r2 (6,4)
+	defb actor_pikeman,0cbh             ; r2 (11,12)
+	defb actor_pikeman,064h             ; r2 (4,6)
 	defb obj_next_room
 	defb actor_placed_bat,033h          ; r3 (3,3)
 	defb obj_next_room
-	defb actor_pikeman,0cah             ; r4 (12,10)
-	defb actor_pikeman,0a6h             ; r4 (10,6)
+	defb actor_pikeman,0cah             ; r4 (10,12)
+	defb actor_pikeman,0a6h             ; r4 (6,10)
 	defb obj_end_stream
 	; stage 5
 	defb obj_next_room
 	defb obj_next_room
-	defb actor_pikeman,065h             ; r2 (6,5)
+	defb actor_pikeman,065h             ; r2 (5,6)
 	defb obj_next_room
-	defb actor_pikeman,06ah             ; r3 (6,10)
+	defb actor_pikeman,06ah             ; r3 (10,6)
 	defb actor_pikeman,0aah             ; r3 (10,10)
 	defb obj_end_stream
 	; stage 6
 	defb obj_next_room
 	defb obj_next_room
-	defb actor_skull_pile,05ch          ; r2 (5,12)
+	defb actor_skull_pile,05ch          ; r2 (12,5)
 	defb obj_end_stream
 
 ; hub 2 = stages 7-9 (0x86B6)
 object_list_h2:
 	; stage 7
 	defb obj_next_room
-	defb actor_hunchback,095h           ; r1 (9,5)
-	defb actor_hunchback,09ah           ; r1 (9,10)
+	defb actor_hunchback,095h           ; r1 (5,9)
+	defb actor_hunchback,09ah           ; r1 (10,9)
 	defb obj_next_room
-	defb actor_white_skeleton,0b9h      ; r2 (11,9)
+	defb actor_white_skeleton,0b9h      ; r2 (9,11)
 	defb obj_next_room
-	defb actor_white_skeleton,0cbh      ; r3 (12,11)
+	defb actor_white_skeleton,0cbh      ; r3 (11,12)
 	defb obj_next_room
-	defb actor_white_skeleton,0cdh      ; r4 (12,13)
-	defb actor_hunchback,08bh           ; r4 (8,11)
+	defb actor_white_skeleton,0cdh      ; r4 (13,12)
+	defb actor_hunchback,08bh           ; r4 (11,8)
 	defb actor_hunchback,055h           ; r4 (5,5)
 	defb obj_next_room
-	defb actor_white_skeleton,093h      ; r5 (9,3)
+	defb actor_white_skeleton,093h      ; r5 (3,9)
 	defb obj_next_room
-	defb actor_white_skeleton,0b9h      ; r6 (11,9)
+	defb actor_white_skeleton,0b9h      ; r6 (9,11)
 	defb obj_next_room
-	defb actor_raven,057h               ; r7 (5,7)
+	defb actor_raven,057h               ; r7 (7,5)
 	defb obj_next_room
-	defb actor_raven,057h               ; r8 (5,7)
+	defb actor_raven,057h               ; r8 (7,5)
 	defb obj_end_stream
 	; stage 8
 	defb obj_next_room
 	defb obj_next_room
-	defb actor_white_skeleton,05dh      ; r2 (5,13)
+	defb actor_white_skeleton,05dh      ; r2 (13,5)
 	defb obj_next_room
 	defb actor_white_skeleton,099h      ; r3 (9,9)
 	defb obj_next_room
@@ -1192,29 +1195,29 @@ object_list_h2:
 	defb actor_raven,055h               ; r5 (5,5)
 	defb obj_next_room
 	defb actor_skull_pile,099h          ; r6 (9,9)
-	defb actor_raven,0c5h               ; r6 (12,5)
+	defb actor_raven,0c5h               ; r6 (5,12)
 	defb obj_next_room
-	defb actor_white_skeleton,0c8h      ; r7 (12,8)
+	defb actor_white_skeleton,0c8h      ; r7 (8,12)
 	defb obj_end_stream
 	; stage 9
 	defb obj_next_room
-	defb actor_skull_pile,07ch          ; r1 (7,12)
+	defb actor_skull_pile,07ch          ; r1 (12,7)
 	defb obj_next_room
-	defb actor_skull_pile,075h          ; r2 (7,5)
-	defb actor_skull_pile,07bh          ; r2 (7,11)
-	defb obj_next_room
-	defb obj_next_room
-	defb actor_skull_pile,075h          ; r4 (7,5)
-	defb actor_white_skeleton,07bh      ; r4 (7,11)
-	defb obj_next_room
-	defb actor_hunchback,075h           ; r5 (7,5)
-	defb actor_hunchback,057h           ; r5 (5,7)
-	defb obj_next_room
-	defb actor_white_skeleton,054h      ; r6 (5,4)
+	defb actor_skull_pile,075h          ; r2 (5,7)
+	defb actor_skull_pile,07bh          ; r2 (11,7)
 	defb obj_next_room
 	defb obj_next_room
-	defb actor_white_skeleton,0b3h      ; r8 (11,3)
-	defb actor_hunchback,057h           ; r8 (5,7)
+	defb actor_skull_pile,075h          ; r4 (5,7)
+	defb actor_white_skeleton,07bh      ; r4 (11,7)
+	defb obj_next_room
+	defb actor_hunchback,075h           ; r5 (5,7)
+	defb actor_hunchback,057h           ; r5 (7,5)
+	defb obj_next_room
+	defb actor_white_skeleton,054h      ; r6 (4,5)
+	defb obj_next_room
+	defb obj_next_room
+	defb actor_white_skeleton,0b3h      ; r8 (3,11)
+	defb actor_hunchback,057h           ; r8 (7,5)
 	defb obj_end_stream
 
 ; hub 3 = stages 10-12 (0x8706)
@@ -1226,198 +1229,198 @@ object_list_h3:
 	defb obj_next_room
 	defb obj_next_room
 	defb obj_next_room
-	defb actor_placed_merman,0b3h       ; r6 (11,3)
-	defb actor_placed_merman,0bch       ; r6 (11,12)
+	defb actor_placed_merman,0b3h       ; r6 (3,11)
+	defb actor_placed_merman,0bch       ; r6 (12,11)
 	defb obj_next_room
-	defb actor_placed_merman,0b8h       ; r7 (11,8)
+	defb actor_placed_merman,0b8h       ; r7 (8,11)
 	defb obj_next_room
-	defb actor_placed_merman,0b3h       ; r8 (11,3)
-	defb actor_placed_merman,0bdh       ; r8 (11,13)
+	defb actor_placed_merman,0b3h       ; r8 (3,11)
+	defb actor_placed_merman,0bdh       ; r8 (13,11)
 	defb obj_end_stream
 	; stage 11
 	defb obj_next_room
-	defb actor_hunchback,059h           ; r1 (5,9)
+	defb actor_hunchback,059h           ; r1 (9,5)
 	defb obj_next_room
 	defb actor_hunchback,077h           ; r2 (7,7)
 	defb obj_next_room
 	defb obj_next_room
 	defb obj_next_room
-	defb actor_bone_dragon,07dh         ; r5 (7,13)
+	defb actor_bone_dragon,07dh         ; r5 (13,7)
 	defb obj_end_stream
 	; stage 12
-	defb actor_bone_dragon,09ch         ; r0 (9,12)
+	defb actor_bone_dragon,09ch         ; r0 (12,9)
 	defb obj_next_room
 	defb obj_next_room
 	defb obj_next_room
 	defb obj_next_room
-	defb actor_bone_dragon,065h         ; r4 (6,5)
+	defb actor_bone_dragon,065h         ; r4 (5,6)
 	defb obj_next_room
-	defb actor_bone_dragon,07dh         ; r5 (7,13)
+	defb actor_bone_dragon,07dh         ; r5 (13,7)
 	defb obj_next_room
 	defb obj_next_room
-	defb actor_bone_dragon,096h         ; r7 (9,6)
+	defb actor_bone_dragon,096h         ; r7 (6,9)
 	defb obj_next_room
 	defb actor_bone_dragon,099h         ; r8 (9,9)
 	defb obj_next_room
 	defb obj_next_room
-	defb actor_bone_dragon,09ah         ; r10 (9,10)
+	defb actor_bone_dragon,09ah         ; r10 (10,9)
 	defb obj_next_room
-	defb actor_bone_dragon,09eh         ; r11 (9,14)
+	defb actor_bone_dragon,09eh         ; r11 (14,9)
 	defb obj_end_stream
 
 ; hub 4 = stages 13-15 (0x873F)
 object_list_h4:
 	; stage 13
-	defb actor_white_skeleton,0bch      ; r0 (11,12)
-	defb actor_red_skeleton,05ch        ; r0 (5,12)
+	defb actor_white_skeleton,0bch      ; r0 (12,11)
+	defb actor_red_skeleton,05ch        ; r0 (12,5)
 	defb obj_next_room
-	defb actor_white_skeleton,054h      ; r1 (5,4)
-	defb actor_hunchback,07bh           ; r1 (7,11)
+	defb actor_white_skeleton,054h      ; r1 (4,5)
+	defb actor_hunchback,07bh           ; r1 (11,7)
 	defb obj_next_room
 	defb actor_hunchback,055h           ; r2 (5,5)
-	defb actor_hunchback,05ah           ; r2 (5,10)
-	defb actor_hunchback,097h           ; r2 (9,7)
-	defb actor_hunchback,0beh           ; r2 (11,14)
+	defb actor_hunchback,05ah           ; r2 (10,5)
+	defb actor_hunchback,097h           ; r2 (7,9)
+	defb actor_hunchback,0beh           ; r2 (14,11)
 	defb obj_next_room
-	defb actor_white_skeleton,056h      ; r3 (5,6)
-	defb actor_white_skeleton,05ch      ; r3 (5,12)
-	defb actor_hunchback,09dh           ; r3 (9,13)
+	defb actor_white_skeleton,056h      ; r3 (6,5)
+	defb actor_white_skeleton,05ch      ; r3 (12,5)
+	defb actor_hunchback,09dh           ; r3 (13,9)
 	defb obj_next_room
-	defb actor_white_skeleton,09ch      ; r4 (9,12)
-	defb actor_red_skeleton,0b2h        ; r4 (11,2)
+	defb actor_white_skeleton,09ch      ; r4 (12,9)
+	defb actor_red_skeleton,0b2h        ; r4 (2,11)
 	defb obj_next_room
-	defb actor_white_skeleton,05ch      ; r5 (5,12)
+	defb actor_white_skeleton,05ch      ; r5 (12,5)
 	defb actor_white_skeleton,077h      ; r5 (7,7)
-	defb actor_hunchback,0b6h           ; r5 (11,6)
-	defb actor_hunchback,0bch           ; r5 (11,12)
+	defb actor_hunchback,0b6h           ; r5 (6,11)
+	defb actor_hunchback,0bch           ; r5 (12,11)
 	defb obj_next_room
-	defb actor_hunchback,057h           ; r6 (5,7)
+	defb actor_hunchback,057h           ; r6 (7,5)
 	defb obj_next_room
-	defb actor_white_skeleton,056h      ; r7 (5,6)
-	defb actor_white_skeleton,0b4h      ; r7 (11,4)
+	defb actor_white_skeleton,056h      ; r7 (6,5)
+	defb actor_white_skeleton,0b4h      ; r7 (4,11)
 	defb obj_next_room
-	defb actor_red_skeleton,05bh        ; r8 (5,11)
-	defb actor_red_skeleton,074h        ; r8 (7,4)
-	defb actor_red_skeleton,0bah        ; r8 (11,10)
+	defb actor_red_skeleton,05bh        ; r8 (11,5)
+	defb actor_red_skeleton,074h        ; r8 (4,7)
+	defb actor_red_skeleton,0bah        ; r8 (10,11)
 	defb obj_next_room
 	defb actor_red_skeleton,055h        ; r9 (5,5)
-	defb actor_red_skeleton,07ch        ; r9 (7,12)
-	defb actor_red_skeleton,0b4h        ; r9 (11,4)
-	defb actor_red_skeleton,0b7h        ; r9 (11,7)
+	defb actor_red_skeleton,07ch        ; r9 (12,7)
+	defb actor_red_skeleton,0b4h        ; r9 (4,11)
+	defb actor_red_skeleton,0b7h        ; r9 (7,11)
 	defb obj_next_room
-	defb actor_white_skeleton,079h      ; r10 (7,9)
-	defb actor_white_skeleton,0b4h      ; r10 (11,4)
+	defb actor_white_skeleton,079h      ; r10 (9,7)
+	defb actor_white_skeleton,0b4h      ; r10 (4,11)
 	defb obj_next_room
-	defb actor_hunchback,05ah           ; r11 (5,10)
-	defb actor_hunchback,075h           ; r11 (7,5)
-	defb actor_hunchback,0b6h           ; r11 (11,6)
+	defb actor_hunchback,05ah           ; r11 (10,5)
+	defb actor_hunchback,075h           ; r11 (5,7)
+	defb actor_hunchback,0b6h           ; r11 (6,11)
 	defb obj_end_stream
 	; stage 14
-	defb actor_axe_knight,07ch          ; r0 (7,12)
+	defb actor_axe_knight,07ch          ; r0 (12,7)
 	defb obj_next_room
-	defb actor_axe_knight,072h          ; r1 (7,2)
-	defb actor_axe_knight,0bah          ; r1 (11,10)
+	defb actor_axe_knight,072h          ; r1 (2,7)
+	defb actor_axe_knight,0bah          ; r1 (10,11)
 	defb obj_next_room
-	defb actor_axe_knight,0b9h          ; r2 (11,9)
+	defb actor_axe_knight,0b9h          ; r2 (9,11)
 	defb obj_next_room
-	defb actor_red_skeleton,056h        ; r3 (5,6)
-	defb actor_red_skeleton,05ch        ; r3 (5,12)
-	defb actor_red_skeleton,0b2h        ; r3 (11,2)
-	defb actor_red_skeleton,0bah        ; r3 (11,10)
+	defb actor_red_skeleton,056h        ; r3 (6,5)
+	defb actor_red_skeleton,05ch        ; r3 (12,5)
+	defb actor_red_skeleton,0b2h        ; r3 (2,11)
+	defb actor_red_skeleton,0bah        ; r3 (10,11)
 	defb obj_next_room
-	defb actor_axe_knight,059h          ; r4 (5,9)
-	defb actor_axe_knight,0b4h          ; r4 (11,4)
+	defb actor_axe_knight,059h          ; r4 (9,5)
+	defb actor_axe_knight,0b4h          ; r4 (4,11)
 	defb obj_next_room
-	defb actor_axe_knight,0bah          ; r5 (11,10)
+	defb actor_axe_knight,0bah          ; r5 (10,11)
 	defb obj_next_room
-	defb actor_axe_knight,074h          ; r6 (7,4)
-	defb actor_axe_knight,0bch          ; r6 (11,12)
+	defb actor_axe_knight,074h          ; r6 (4,7)
+	defb actor_axe_knight,0bch          ; r6 (12,11)
 	defb obj_next_room
-	defb actor_axe_knight,058h          ; r7 (5,8)
-	defb actor_axe_knight,0bdh          ; r7 (11,13)
+	defb actor_axe_knight,058h          ; r7 (8,5)
+	defb actor_axe_knight,0bdh          ; r7 (13,11)
 	defb obj_end_stream
 	; stage 15
 	defb obj_next_room
-	defb actor_axe_knight,058h          ; r1 (5,8)
-	defb actor_axe_knight,0b5h          ; r1 (11,5)
+	defb actor_axe_knight,058h          ; r1 (8,5)
+	defb actor_axe_knight,0b5h          ; r1 (5,11)
 	defb obj_next_room
 	defb actor_axe_knight,055h          ; r2 (5,5)
-	defb actor_axe_knight,0b5h          ; r2 (11,5)
+	defb actor_axe_knight,0b5h          ; r2 (5,11)
 	defb obj_next_room
-	defb actor_axe_knight,0bch          ; r3 (11,12)
+	defb actor_axe_knight,0bch          ; r3 (12,11)
 	defb obj_next_room
-	defb actor_axe_knight,079h          ; r4 (7,9)
-	defb actor_axe_knight,0b6h          ; r4 (11,6)
+	defb actor_axe_knight,079h          ; r4 (9,7)
+	defb actor_axe_knight,0b6h          ; r4 (6,11)
 	defb obj_next_room
 	defb obj_next_room
-	defb actor_axe_knight,0bah          ; r6 (11,10)
+	defb actor_axe_knight,0bah          ; r6 (10,11)
 	defb obj_next_room
-	defb actor_axe_knight,0bah          ; r7 (11,10)
+	defb actor_axe_knight,0bah          ; r7 (10,11)
 	defb obj_next_room
-	defb actor_axe_knight,0bah          ; r8 (11,10)
+	defb actor_axe_knight,0bah          ; r8 (10,11)
 	defb obj_end_stream
 
 ; hub 5 = stages 16-18 (0x87CE)
 object_list_h5:
 	; stage 16
 	defb obj_next_room
-	defb actor_giant_bat,0b8h           ; r1 (11,8)
+	defb actor_giant_bat,0b8h           ; r1 (8,11)
 	defb obj_next_room
-	defb actor_giant_bat,097h           ; r2 (9,7)
+	defb actor_giant_bat,097h           ; r2 (7,9)
 	defb obj_next_room
-	defb actor_giant_bat,098h           ; r3 (9,8)
+	defb actor_giant_bat,098h           ; r3 (8,9)
 	defb obj_next_room
-	defb actor_giant_bat,0bah           ; r4 (11,10)
+	defb actor_giant_bat,0bah           ; r4 (10,11)
 	defb obj_next_room
 	defb obj_next_room
 	defb obj_next_room
-	defb actor_giant_bat,056h           ; r7 (5,6)
+	defb actor_giant_bat,056h           ; r7 (6,5)
 	defb obj_next_room
-	defb actor_giant_bat,058h           ; r8 (5,8)
+	defb actor_giant_bat,058h           ; r8 (8,5)
 	defb obj_end_stream
 	; stage 17
 	defb obj_next_room
-	defb actor_white_skeleton,0b6h      ; r1 (11,6)
+	defb actor_white_skeleton,0b6h      ; r1 (6,11)
 	defb obj_next_room
-	defb actor_hunchback,07eh           ; r2 (7,14)
+	defb actor_hunchback,07eh           ; r2 (14,7)
 	defb obj_next_room
-	defb actor_axe_knight,076h          ; r3 (7,6)
+	defb actor_axe_knight,076h          ; r3 (6,7)
 	defb obj_next_room
-	defb actor_axe_knight,05bh          ; r4 (5,11)
-	defb actor_axe_knight,0bah          ; r4 (11,10)
+	defb actor_axe_knight,05bh          ; r4 (11,5)
+	defb actor_axe_knight,0bah          ; r4 (10,11)
 	defb obj_next_room
-	defb actor_axe_knight,053h          ; r5 (5,3)
+	defb actor_axe_knight,053h          ; r5 (3,5)
 	defb obj_next_room
-	defb actor_hunchback,079h           ; r6 (7,9)
-	defb actor_hunchback,0b9h           ; r6 (11,9)
+	defb actor_hunchback,079h           ; r6 (9,7)
+	defb actor_hunchback,0b9h           ; r6 (9,11)
 	defb obj_next_room
 	defb obj_next_room
-	defb actor_hunchback,053h           ; r8 (5,3)
+	defb actor_hunchback,053h           ; r8 (3,5)
 	defb obj_next_room
 	defb actor_hunchback,055h           ; r9 (5,5)
 	defb obj_end_stream
 	; stage 18
 	defb obj_next_room
-	defb actor_axe_knight,056h          ; r1 (5,6)
+	defb actor_axe_knight,056h          ; r1 (6,5)
 	defb obj_next_room
-	defb actor_axe_knight,095h          ; r2 (9,5)
+	defb actor_axe_knight,095h          ; r2 (5,9)
 	defb obj_next_room
-	defb actor_hunchback,07dh           ; r3 (7,13)
+	defb actor_hunchback,07dh           ; r3 (13,7)
 	defb actor_hunchback,077h           ; r3 (7,7)
 	defb obj_next_room
 	defb actor_hunchback,077h           ; r4 (7,7)
-	defb actor_hunchback,053h           ; r4 (5,3)
+	defb actor_hunchback,053h           ; r4 (3,5)
 	defb obj_next_room
-	defb actor_hunchback,05ah           ; r5 (5,10)
-	defb actor_hunchback,054h           ; r5 (5,4)
+	defb actor_hunchback,05ah           ; r5 (10,5)
+	defb actor_hunchback,054h           ; r5 (4,5)
 	defb obj_next_room
-	defb actor_hunchback,07bh           ; r6 (7,11)
-	defb actor_hunchback,0b4h           ; r6 (11,4)
+	defb actor_hunchback,07bh           ; r6 (11,7)
+	defb actor_hunchback,0b4h           ; r6 (4,11)
 	defb obj_next_room
-	defb actor_hunchback,079h           ; r7 (7,9)
+	defb actor_hunchback,079h           ; r7 (9,7)
 	defb actor_hunchback,055h           ; r7 (5,5)
 	defb obj_next_room
-	defb actor_axe_knight,0b6h          ; r8 (11,6)
+	defb actor_axe_knight,0b6h          ; r8 (6,11)
 	defb obj_end_stream
 
     INCLUDE "data/font_credits.asm"

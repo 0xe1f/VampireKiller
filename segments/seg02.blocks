@@ -3,6 +3,32 @@
 ; that z80dasm would otherwise decode as instructions.
 ; Block names avoid colliding with in-source labels (z80dasm emits NAME_start).
 
+; HUD bonus-icon X / bonus-id pairs for C701 bits 7..3 (map, hourglass,
+; yellow shield, red shield, holy water).
+hud_bonus_pos: start 0x8F20 end 0x8F2A type bytedata
 ; Moving-platform SAT cell table read through IX by platform_sat_cells
 ; (0x9119): 4 x {X offset, pattern}.  As code it becomes `ret nc` / `call nc`.
 platform_sat_cell_tbl: start 0x9146 end 0x914e type bytedata
+; Per-stage DE00 base for vendor_de00_slot (stages 1-18: 0x00/0x40/0x80).
+vendor_de00_ofs: start 0x947A end 0x948C type bytedata
+; HUD glyph strings for the vendor offer bubble (0xFF-terminated).
+vendor_offer_str0: start 0x948C end 0x9491 type bytedata
+vendor_offer_str1: start 0x9491 end 0x9498 type bytedata
+; Tile id 0..0x0D -> minimap class (1/2 always drawn; 3/4 hub-gated).
+minimap_class_tbl: start 0x97F3 end 0x9801 type bytedata
+; 4x4 4bpp Simon marker on the F2 map.
+minimap_simon_mark: start 0x9852 end 0x985A type bytedata
+; Two 8x7 4bpp stage icons + 19 x {dest DE, flags} for minimap_palette.
+minimap_icon_a: start 0x987B end 0x9897 type bytedata
+minimap_icon_b: start 0x9897 end 0x98B3 type bytedata
+minimap_stage_gfx: start 0x98B3 end 0x98EC type bytedata
+; Wall-break chip dY; bytes 0-1 (0x2C 0xC9) are also break_chip_move's `inc l; ret`.
+break_chip_dy: start 0x892F end 0x8942 type bytedata
+; C500 pickup +0 state-1 -> handler word.
+pickup_state_tbl: start 0x8A94 end 0x8AA0 type worddata
+; Hub-1 -> blob colour when slime hatches; courtyard (hub 0) despawns.
+blob_hatch_type: start 0x8AF7 end 0x8AFF type bytedata
+; SAT colour cycle for actor_reward (red / black / white / black).
+reward_sat_col: start 0x9C60 end 0x9C64 type bytedata
+; Y subtract per actor type for kill drops; byte 0 (0xC9) is also kill_drop_pos's ret.
+kill_drop_dy: start 0x9B3A end 0x9B67 type bytedata

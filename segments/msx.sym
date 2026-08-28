@@ -125,6 +125,7 @@ NWRVRM: equ 0x0177
 ; ---- Vampire Killer resident routines (segment 0) ------------------------
 int_handler: equ 0x4028	; timer-interrupt (H.TIMI) service routine
 ADD_HL_A: equ 0x4061	; HL += A (unsigned)
+ADD_HL_A_SIGNED: equ 0xa82a	; HL += signed A (seg3; +ve is ADD_HL_A)
 ADD_DE_A: equ 0x4066	; DE += A (unsigned)
 DISPATCH_A: equ 0x406b	; jump via inline word table indexed by A
 init: equ 0x4075	; cartridge entry point
@@ -189,14 +190,40 @@ dracula_body_load: equ 0x57e6	; event-6: unpack figure 32x32 cloak/chest to page
 dracula_body_vram: equ 0x5816	; 32x32 from 0xE800 to VRAM DE
 dracula_body_unpack: equ 0x5834	; packed 4bpp rows (N zeros + 12-N + 4 zeros) -> 0xE800
 dracula_body_hflip: equ 0x5858	; H-mirror the 32x32 at 0xE800
+nibble_hflip: equ 0x5873	; swap 4bpp nibbles between (hl) and (de), B bytes, de--
+dracula_portrait_blit: equ 0x589c	; frame + 108 face 8x8s into page-1 atlas
+dracula_portrait_hflip: equ 0x58d3	; H-mirror face/frame into dest atlas ids
+dracula_hflip_run: equ 0x58f1	; B tiles: tile8_hflip then atlas_advance_x4
+dracula_tile8_hflip_blit: equ 0x5904	; copy 8x8 to E800, hflip, blit
+tile8_hflip: equ 0x5919	; H-flip 8x8 4bpp at 0xE800 (nibble_hflip)
+dracula_portrait_vflip: equ 0x5931	; V-mirror frame tiles (top -> bottom)
+dracula_vflip_run: equ 0x594f	; B tiles: tile8_vflip_blit then atlas_advance_x4
+atlas_advance_x4: equ 0x5962	; DE += 4 in the 8x8 atlas, wrap row
+tile8_vflip_blit: equ 0x5970	; V-flip 8x8 from VRAM HL into dest DE
+tile16_hflip_blit: equ 0x59c3	; copy 16x16 to E800, hflip, blit
+tile16_hflip: equ 0x59d8	; H-flip 16x16 4bpp at 0xE800
 main_tick: equ 0x414d	; top-level per-frame state machine (from int_handler)
 vram_write: equ 0x467c	; CPU RAM -> VRAM via OTIR (HL dest, DE src after ex)
+vram_read: equ 0x4661	; VRAM HL -> CPU DE via INIR (pages via vram_otir_count)
+vram_otir_count: equ 0x4674	; A = pages, B = remainder from BC after ex de,hl
+vram_fill: equ 0x468f	; fill VRAM HL with A, BC bytes (B pages, C rem)
+vram_poke: equ 0x46a7	; write A to VRAM HL (one byte)
 vdp_set_write: equ 0x46b6	; set VDP VRAM write pointer from HL (R14 + bit6)
 vdp_set_read: equ 0x46d5	; set VDP VRAM read pointer from HL (R14, no bit6)
 rle_dec_addr: equ 0x46f2	; RLE unpack; dest word taken from the stream
 rle_dec: equ 0x46f8	; RLE unpack DE -> VRAM HL (0 / 80-addr / run / literal)
 gfx_script_run: equ 0x471b	; gfx-script walk: 0=RLE, 1=gfx_script_convert, 2+=copy, FF=end
 gfx_script_convert: equ 0x4745	; cmd 1: 1bpp sprite convert via 0xE800 then vram_write
+gfx_1bpp_expand: equ 0x4786	; expand A planes from 0xE800 -> 0xEC10 (gfx_script_convert)
+gfx_1bpp_row: equ 0x47a4	; 16 source bytes -> 16 dest (highest-set-bit encode)
+video_clear_page: equ 0x47b8	; sat hide, screen off, HMMV 256x256 page 0, screen on
+video_reset: equ 0x47c0	; sat hide, screen off, HMMV 256x212 page 0, screen on
+vdp_screen_off: equ 0x47db	; R1 display off, then vdp_sprites_off
+vdp_fill_origin: equ 0x47e8	; HMMV from (0,0) page 0 size BC, R23=0
+sat_vram_hide: equ 0x47f7	; fill VRAM SAT 0xF600 with Y=0xE0, then sprites_hide
+vdp_screen_on: equ 0x47ce	; R1 display on, then vdp_sprites_on
+vdp_sprites_off: equ 0x4805	; VDP R8 SPD set (sprites disabled)
+vdp_sprites_on: equ 0x4810	; VDP R8 SPD clear
 gfx_script_rle: equ 0x4735	; cmd 0: src word, VRAM dest word -> rle_dec
 gfx_script_copy: equ 0x4772	; cmd 2+: 6-byte VRAM blit (vram_write)
 palette_set: equ 0x481b	; write one MSX2 palette entry A=index, D=0rrr0bbb, E=g
@@ -224,13 +251,36 @@ vdp_hmmv: equ 0x4911	; HMMV fill: H=X L=Y D=page B=w C=h A=byte (0 = 256)
 vdp_hmmc: equ 0x4991	; HMMC: CPU bytes at HL -> rect D,E size B,C page A
 glyph_blit_run: equ 0x4a2e	; blit B 8x8 1bpp glyphs at D,E in ink C
 glyph_blit: equ 0x4a37	; one glyph: expand to 0xC110 then blit to the bitmap
+hud_string_draw: equ 0x4ad2	; HUD/title string at HL (C=0xFF); 0xFE new pos, 0xFF end
+hud_string_masked: equ 0x4ad6	; same stream, C=0 (blank glyphs)
+hud_string_glyphs: equ 0x4adc	; glyph loop of hud_string_draw
+hud_glyph_blit: equ 0x4aee	; HMMM 8x8 HUD glyph A at DE (atlas Y+0x38; 0 = space)
+hud_glyph_run: equ 0x4b07	; B glyphs via hud_glyph_blit + blit_advance_x
+tile_blit: equ 0x4b12	; HMMM 8x8 tile A from page-1 atlas to DE page 0
+tile_blit_skip0: equ 0x4b24	; LMMM 8x8 tile A (colour-0 skip); title layout
+tile_blit_page1: equ 0x4b36	; HMMM 8x8 tile A onto page 1; Konami logo
+vram_clear_page1: equ 0x4de0	; HMMV fill page 1 (256x256)
+vram_clear_page: equ 0x4de2	; HMMV fill page D (D=0 here) 256x256
+attract_run_init: equ 0x4dee	; wipe play RAM, seed stage 1, build screen, HUD
+attract_tick: equ 0x4e27	; play_tick + room transition during attract
+room_map_load: equ 0x4f8a	; D100 := current room (D000/D001) via room_map_build
+playfield_draw: equ 0x4f98	; HMMM 32x22 tiles from D140 onto page 0
+psg_init: equ 0x507d	; mixer shadow + fade clear, then sound_halt
+sound_halt: equ 0x508c	; point music/sfx tick ptrs at sound_idle
+sat_color_fill: equ 0x5642	; 16 bytes at HL and HL+0x40 := C
 vram_blit_tile8: equ 0x4a58	; one 8x8 4bpp tile, HL src -> DE VRAM (0x80 stride)
 vram_blit_tile_run: equ 0x4a6d	; B consecutive 8x8 tiles, wrapping each 0x80 line
 vram_blit_tile16: equ 0x4a82	; one 16x16 4bpp tile (16 rows of 8)
+vram_blit_tile16_run: equ 0x4a97	; B consecutive 16x16 tiles, wrapping each 0x80 line
 glyph_expand_4bpp: equ 0x4aac	; 8x8 1bpp at HL -> 4bpp scratch 0xC110, ink C
 tile_atlas_pos: equ 0x4b48	; tile id A -> H=SX=(A&1F)*8, L=SY=(A&E0)>>2
 blit_advance_x: equ 0x4b56	; step D,E one 8x8 cell right, wrap to the next row
 hud_draw_all: equ 0x451a	; repaint the whole HUD (labels, counters, meters, icons)
+pause_panel_draw: equ 0x449c	; HMMM pause rectangle + PAUSE string (state 11 enter)
+pause_panel_restore: equ 0x44bf	; HMMM the pause rectangle back over the playfield
+pause_text: equ 0x44b7	; HUD string: PAUSE
+panel_frame: equ 0x5d15	; gm_box_clear + vdp_box colour 14 at HL size BC
+hud_bcd_draw: equ 0x457f	; BCD at HL, B bytes, glyphs at DE (hearts/lives/price)
 draw_stage_hud: equ 0x4542	; draw the HUD STAGE number (0xC411, BCD)
 hud_panel_frames: equ 0x454c	; three vdp_box outlines along the top HUD row
 hud_bars_redraw: equ 0x45b7	; repaint both HUD meters with their frames
@@ -259,7 +309,8 @@ title_logo_intl: equ 0x4ca0	; title_layout: export title "VAMPIRE KILLER"
 game_master_detect: equ 0x5c99	; boot slot scan: E600=0xFF if a Game Master cart is present
 gm_scan_expanded: equ 0x5cbf	; expanded slot -> try all 4 subslots
 gm_sig_cmp: equ 0x5cd3	; RDSLT 6 bytes at 0x7FFA in slot C vs game_master_sig (carry = match)
-game_master_sig: equ 0x5cf0	; 6-byte Game Master fingerprint compared at CPU 0x7FFA
+game_master_sig: equ 0x5cf0	; RC-735 ROM tail at CPU 0x7FFA: 00 30 31 13 35 AA
+gm_opt_tbl: equ 0x4010	; DW-padded CD option table (GM1 does not parse it)
 gm_pause_check: equ 0x40c5	; int_handler pre-pass: STOP pauses, ';' single-steps a frame
 gm_psg_save_mute: equ 0x4107	; stash PSG volumes 8-10 in E611-E613, then silence
 gm_psg_mute: equ 0x411f	; zero PSG volume registers 8-10
@@ -292,8 +343,13 @@ scenery_load: equ 0x5a50	; unpack scenery_list into 0xE000, vendor index into 0x
 scenery_unpack: equ 0x5a63	; expand scenery stream (0xFE/0xFF/0x00) into 0xE000
 scenery_list_lookup: equ 0x5a9f	; HL -> scenery stream for stage 0 or hub 0xD002
 vendor_offer_id: equ 0x5b12	; vendor attr bits5-2 -> bonus id (DE00 compact)
+scenery_vendor_index: equ 0x5ab6	; compact vendors from E000 into DE00 (48 rooms x 4)
+scenery_vendors_compact: equ 0x5ade	; one room: attr 11xxxxxx + 0x7F walls -> DE00 via vendor_offer_id
 scenery_room_load: equ 0x5b22	; current E000 room -> C470/C500/C5B5
+scenery_slots_fill: equ 0x5b28	; mid: B=8 slots into caller DE
+scenery_item_xy: equ 0x5b9d	; floor item: pos -> DE, bonus id bits4-0 -> B
 scenery_room_ptr: equ 0x5bd6	; HL -> this room's 24-byte slot in 0xE000
+scenery_room_ptr_a: equ 0x5bd9	; mid: A already = room index
 scenery_stage_ofs: equ 0x5c0b	; stage 1-18: (stage-within-hub)*0x18
 scenery_pos_xy: equ 0x5c1d	; pos byte -> C=Y, B=X pixels
 read_buttons: equ 0x4bc2	; joystick|kbd row 8 -> A; play C007/C006, title C401/C400
@@ -320,6 +376,7 @@ flying_skull_generator: equ 0x9dca	; room_spawner bit4: flying skull type 07
 ghost_head_generator: equ 0x9ddc	; room_spawner bit5: ghost head type 08
 roc_generator: equ 0x9dee	; room_spawner bit6: roc type 0x0F (drops 0x23)
 spawn_actor: equ 0x5f24	; alloc a free actor slot (7 @ 0xC800, stride 0x80) + init
+spawn_actor_ab: equ 0x5f26	; mid: keep A/B -> CFFA/CFFB (spawn_actor zeros both)
 spawn_actor_init: equ 0x5f7e	; init tail of spawn_actor
 intro_actors_frame: equ 0x4e9a	; intro: C800 tick + SAT + pattern_shadow_blit
 intro_spawn_sky: equ 0x4ea6	; actor_intro_sky at (0xE0, 0x48)
@@ -330,7 +387,10 @@ intro_sky_ab_init: equ 0x4ed7	; types 0x28/0x29 spawn: pose 0x92
 intro_sky_ab_go: equ 0x4f00	; types 0x28/0x29 tick: toggle pose 0x92/0x93
 intro_spawn_simon: equ 0x4f1e	; actor_intro_simon at (0xF0, 0xC0)
 intro_simon_init: equ 0x4f26	; type 0x2A spawn: pose 0x98
-intro_simon_go: equ 0x4f3c	; type 0x2A tick
+intro_simon_go: equ 0x4f3c	; type 0x2A tick: walk left, then idle
+intro_simon_idle: equ 0x4f5e	; X < 0x80: stop, pose 0x97
+intro_simon_stride: equ 0x4f67	; walk-cycle pose from ix+13/14
+intro_simon_stride_tbl: equ 0x4f86	; shapes 0x98,0x99,0x9A,0x99
 
 ; ---- Vampire Killer banked routines (segment 1 @ 0x6000) -----------------
 konami_logo_draw: equ 0x6209	; draw Konami logo + seed the top-to-bottom wipe
@@ -376,6 +436,22 @@ credits_keyframe: equ 0x674a	; blit credits_script_ptr[CE31] when tick matches
 credits_script_done: equ 0x6788	; CE32=1, play_sound 0xFF
 credits_script_ptr: equ 0x6795	; 43 words -> seg8 ending + seg5 staff keyframes
 credits_wipe: equ 0x6831	; FILVRM 0x80 at (CE33-2)<<7 (clear scrolled-off line)
+credits_palette_ramp: equ 0x67eb	; cycle CE39 through credits_ramp_tbl onto pal 6
+credits_ramp_tbl: equ 0x6804	; 19-byte triangle for palette index 6
+credits_palette_clear: equ 0x6817	; palette index 6 := 0
+dracula_eyes_blink: equ 0x681f	; CE38&0x1F: 0x1C closed eyes, 0x1F open
+dracula_ce35_tick: equ 0x6875	; DISPATCH_A on CE35: wait / close / open face
+dracula_face_close: equ 0x68af	; CE37 anim -> closed mouth (then half composite)
+dracula_face_open: equ 0x68cb	; CE37 anim -> half composite then open mouth
+dracula_blit_mouth_half: equ 0x68e3	; no mid tile: open mouth 2 on top, closed mouth 1 below
+dracula_blit_mouth_closed: equ 0x691b	; mouths 0+1 closed (0xBDD8/0xBE58)
+dracula_blit_mouth_open: equ 0x6953	; mouths 2+3 open (0xBED8/0xBF58)
+dracula_blit_eyes_open: equ 0x698b	; eyes 0+1 open (0xBBD8/0xBC58) -> (0x68,0x58)/(0x88,0x58)
+dracula_blit_eyes_closed: equ 0x69a7	; eyes 2+3 closed (0xBCD8/0xBD58), same dest
+dracula_face_rest: equ 0x6334	; event 6: closed mouth + closed eyes
+dracula_chunk_vel: equ 0x69eb	; 6 x {Yvel, Xvel} words for actor_dracula_chunk
+dracula_palette_stash: equ 0x6a03	; VRAM 0xF680 -> CE60, CE13=0x80
+dracula_palette_fade: equ 0x6a15	; fade CE60; Z when CE13 hits 0
 event_dracula: equ 0x65b7	; CE00=6: 11-step CE01 machine -> CE40 credits
 event_dracula_init: equ 0x65d3
 event_dracula_chunks: equ 0x65fa	; CE01=2: six defeat chunks, then wait 0x78
@@ -386,7 +462,14 @@ dracula_chunk_init: equ 0x69c3	; type 0x2E spawn: shape 0x5A + l69ebh velocity
 event_dracula_spawn_bat: equ 0x6a50	; CE36==2: one actor_dracula_bat at (0x80,0x98)
 dracula_bat_init: equ 0x6a64	; type 0x2C spawn: robe 0x02, fall, home on Simon
 dracula_bat_go: equ 0x6aa3	; type 0x2C tick: robe 0x02/0xA5, head open/closed, then bat fly
+hanging_bat_pose: equ 0x6b00	; trampoline to hanging_bat_flap_slow (one rra)
 player_tick: equ 0x6b06	; door + simon_action + attack + edge detector + timers
+timers_tick: equ 0x75c7	; dec C440 (rosary), C434 (ring), C42D (i-frames)
+dec_nonzero: equ 0x75d6	; dec (hl) unless already 0
+boss_flash_delay_tick: equ 0x75db	; C445 -> arm C43E=0x18 backdrop flash
+gem_timer_tick: equ 0x75e9	; C43A invis; sfx 0x17 at 16 frames left
+hourglass_timer_tick: equ 0x75f9	; C43B; on 0: res D010.0, play_sound 0xFC
+backdrop_flash_tick: equ 0x760b	; C43E CHGCLR 0x0E/0 (white cross / boss kill)
 simon_action_tick: equ 0x6b40	; Simon per-frame action-state machine (0xC420)
 simon_grounded: equ 0x6b59	; C420=0 walk/idle
 platform_carry_simon: equ 0x6bb6	; ride: Simon X += sign of the C598 slot's step
@@ -395,8 +478,11 @@ simon_walk_right: equ 0x6c5a	; face right, try +X
 simon_add_x: equ 0x6c9b	; C426 += BC
 simon_jump_tick: equ 0x6cc7	; C420=1 jump; C421 picks direction
 simon_jump_arc: equ 0x6cee	; step C428 through jump_y_delta
+simon_land_sfx_arm: equ 0x6d74	; late jump: CFF0 so landing plays sfx 7
 simon_crouch: equ 0x6db0	; C420=2; on-pad + UP new-press -> portal wind-up
 simon_stairs: equ 0x6de4	; C420=3
+simon_stair_frames_down: equ 0x6f10	; descending: C42E/C42F from C42B bit2
+simon_stair_frames_up: equ 0x6f2b	; ascending: same C, legs step 1 or 2
 simon_fall: equ 0x6f44	; C420=4
 simon_hurt: equ 0x6f8c	; C420=5
 simon_dying: equ 0x709a	; C420=6
@@ -405,6 +491,7 @@ inv_reset_life: equ 0x70e3	; new-life/death: keep C701 bit7 (map); clear weapon/
 simon_attack_tick: equ 0x7114	; try/start whip + tick + emit SAT
 simon_attack_start: equ 0x711d	; SPACE new-press: whip or throw; jump+dir holy water/hourglass
 whip_tick: equ 0x71e7	; dispatch 0xC422 whip phase
+simon_attack_end: equ 0x7275	; clear C422/C429; torso 0, or 2 on stairs
 whip_slots_clear: equ 0x751a	; zero 0xC450 whip slots + hide SAT
 simon_mirror_frames: equ 0x7666	; facing-left: C42E/C42F += 0x0A/0x0F
 tile_layout_draw: equ 0x7b39	; blit title_layout stream (FF=end, FE=next row)
@@ -429,16 +516,23 @@ projectile_integrate: equ 0x74C2
 projectile_clip: equ 0x74D5	; offscreen; cross/axe X-wrap -> lose_weapon
 projectile_clear: equ 0x74F0
 projectile_clear_hl: equ 0x74F3
+sat_fill: equ 0x7597	; fill B bytes at HL with A (SAT colour run)
 l7e60h: equ 0x7E60		; HP-bar dmg leather/knife (types 0x11..0x17)
 l7e67h: equ 0x7E67		; HP-bar dmg chain/axe/cross
 tile_is_solid: equ 0x7c65	; carry=solid iff (tile-1) < row_solid_thresh[0xD000]
 row_solid_thresh: equ 0x7c7f	; per-world-row solidity threshold byte table
 map_cell_at: equ 0x7d36	; A = room tile id under pixel (D=X,E=Y) from the 0xD100 map
+simon_land_test: equ 0x7b6f	; carry if tile at (SimonX, SimonY+7) is solid
+simon_ceiling_test: equ 0x7b7f	; carry if tile at (SimonX, SimonY-0x2C) is solid
+simon_floor_test: equ 0x7b8f	; carry if floor under Simon (map_solid_pair); Y>=0xD0 = pit
 map_solid_pair: equ 0x7b9f	; carry if (D,E) or (D-10,E) is solid (enemy floor)
-probe_wall_right: equ 0x7bc5	; A=1 wall probe +X; BC from caller (often 0x0808)
+map_solid_at: equ 0x7baa	; carry if tile at (D,E) is solid
 simon_wall_right: equ 0x7bb0	; probe +X from Simon Y/X (BC=0x0802, A=0)
-probe_wall_left: equ 0x7c21	; A=1 wall probe -X; BC from caller (often 0x0808)
+actor_wall_right: equ 0x7bbe	; enemy-sized +X (BC=0x1004, A=2)
+probe_wall_right: equ 0x7bc5	; A=1 wall probe +X; BC from caller (often 0x0808)
 simon_wall_left: equ 0x7c0c	; probe -X from Simon Y/X (BC=0x0802, A=0)
+actor_wall_left: equ 0x7c1a	; enemy-sized -X (BC=0x1004, A=2)
+probe_wall_left: equ 0x7c21	; A=1 wall probe -X; BC from caller (often 0x0808)
 stair_probe_down_right: equ 0x7c92	; DOWN stairs: tile 0x04, snap X +8
 stair_probe_down_left: equ 0x7cba	; DOWN stairs: tile 0x03, snap X -8
 stair_probe_up_right: equ 0x7ce2	; UP stairs: tile 0x0D, snap X +8
@@ -451,6 +545,8 @@ stage_bgm_change: equ 0x777e	; byte[stage 0..18]: 1 = BGM changes leaving this s
 set_stage_boundary: equ 0x7807	; blocked horizontal edge walk-off -> set 0xC408 (advance_stage)
 door_idle: equ 0x780c	; ret; door_state_tbl 0/2
 simon_sat_build: equ 0x783e	; emit Simon SAT from C42E/C42F via simon_sat_cell0/1
+simon_sat_emit: equ 0x78a0	; one SAT record -> D600; crouch Y, i-frame blink
+simon_sat_colour: equ 0x7913	; D400/D480 CC; gem white / ring red flash
 stage_bgm_play: equ 0x7956	; play_sound stage_bgm_tbl[D000] unless same track as previous
 stage_bgm_tbl: equ 0x7979	; byte[stage 0..18] = play_sound music id
 simon_sat_cell0: equ 0x798c	; word[C42E] -> legs SAT record
@@ -459,9 +555,23 @@ title_fill_strips: equ 0x7ad6	; HMMV-fill 16 colour-2 strips; HL = dest
 title_set_color2: equ 0x7aee	; palette index 2 = (0x11, 0x01); leaving title
 title_sat_init: equ 0x7af6	; seed SAT shadow from title_sat_tmpl
 title_sat_tmpl: equ 0x7b59	; 11 (Y,X) pairs
+actors_kill_all: equ 0x780d	; cull C800 (no drops) + D700 death flames
 combat_tick: equ 0x7d6f	; per-frame whip/projectile hits + yellow_shield_tick
+combat_busy_wait: equ 0x7da7	; pad subweapon combat_tick (~17k T); no RAM side effects
+whip_hit_actors: equ 0x7db4	; whip phase 3 vs C800 (+0E bit0)
+boss_killed: equ 0x7e1e	; bar empty: C445 flash, sfx 0x1C, CE15, actors_kill_all
+actors_vs_simon: equ 0x7e6e	; C800 vs Simon (i-frame/gem/hurt; ring instant-kill)
+shots_vs_simon: equ 0x7eeb	; D700 vs Simon
+whip_hit_shots: equ 0x7f50	; whip phase 3 vs D700
+proj_hit_shots: equ 0x7f80	; C450/C460 vs D700
+whip_hit_candles: equ 0x7fbe	; whip phase 3 vs C470; inc hit byte
+pickups_vs_simon: equ 0x7fe9	; C500 vs Simon while not whipping
 
 ; ---- Vampire Killer banked routines (segment 2 @ 0x8000) -----------------
+proj_hit_candles: equ 0x80ad	; C450/C460 vs C470 candles/blocks
+vendors_vs_attack: equ 0x80e3	; both vendor slots vs whip/proj
+vendor_vs_attack: equ 0x80ec	; one C5B5/C5C5 slot vs whip then proj; inc hit
+hourglass_vs_attack: equ 0x8122	; C500 ids 0x0A/0x0B vs whip/proj
 award_kill_score: equ 0x81b2	; add_score from l81d5h[type] (C:D:E BCD)
 door_proximity: equ 0x8587	; carry if Simon (B=Y,C=X) overlaps door at C5AD=Y / C5AE=X
 door_anim_tick: equ 0x914e	; 0xC5AC door state: 0xFF -> door_blit_tiles; 3 = opening frames
@@ -501,6 +611,16 @@ inv_or_c701: equ 0x8e74	; OR B into inventory bitfield 0xC701
 inv_or_c702: equ 0x8e79	; OR B into bible/candle flags 0xC702
 hud_weapon_icon: equ 0x8ea1	; draw equipped-weapon HUD icon from C416
 hud_bonus_refresh: equ 0x8eed	; redraw C701 bonus icons (map/hourglass/shields/holy)
+hud_bonus_tile: equ 0x8ead	; blit bonus id A as 16x16 HUD tile at DE
+hud_keys_refresh: equ 0x8ebb	; yellow-key/lockpick lamp then white-key lamp
+hud_white_key_icon: equ 0x8ec1	; C701 bit0 -> bonus 0x18 at (0xA4,0x0C)
+hud_chest_key_icon: equ 0x8ed0	; C701 bit1/2 + C700 -> yellow key or lockpick lamp
+hud_bonus_icon: equ 0x8f0c	; one C701 bit7..3 icon from hud_bonus_pos
+hud_bonus_pos: equ 0x8f20	; 5 x {X, bonus id} for map/hourglass/shields/holy
+pickup_popup_show: equ 0x8f2a	; C5E5=FF, C5E6=0x20, blit C419 at (0xD0,0x0C)
+hud_bonus_clear: equ 0x8f51	; HMMV blank 64x16 at (0xB8,0x0C) page 0
+pickup_popup_tick: equ 0x8f5c	; C5E5 popup countdown; 0 -> hud_bonus_refresh
+chest_try_open: equ 0x8f6f	; if chest (id 0x19) spend C700; CY/A=1 if locked
 projectile_hit_actors: equ 0x8025	; C450/C460 vs C800
 add_score_100: equ 0x8231	; +100 for destroying a shot
 pickup_vs_simon: equ 0x8237	; C500 slot vs Simon
@@ -518,33 +638,76 @@ hit_class_shot: equ 0x8302	; shot type -> class 0..2, B=X C=Y
 hit_class_shot_tbl: equ 0x8314	; shot type-1 -> class 0..2
 overlap_simon: equ 0x8481	; DE/HL box vs Simon
 overlap_whip: equ 0x84ae	; DE/HL box vs whip
+whip_reach_x: equ 0x84e0	; whip X from Simon facing + C42C
 overlap_projectile: equ 0x84f7	; DE/HL box vs C450 then C460
+proj_slot_overlap: equ 0x8507	; one IY projectile slot vs DE/HL box
 platform_stand_test: equ 0x852b	; recompute 0xC439 = C598 slot Simon stands on
 platform_overlap: equ 0x8556	; one slot: 32x8 box vs Simon, -> D/E by slot id
 candle_vs_whip: equ 0x8457	; C470 slot vs whip
+candle_vs_proj: equ 0x8467	; C470 slot vs C450/C460 (16x8 or 32x16)
 overlap_shield: equ 0x8652	; yellow shield box vs shot
 actors_rearm_hittable: equ 0x99A6	; +0E bit2 -> set bit0 on C800/shot
+hittable_rearm_scan: equ 0x99B6	; one pool: bit2 -> bit0, B slots, stride DE
 yellow_shield_tick: equ 0x8617	; absorb enemy shots while C701 bit5
 hourglass_use: equ 0x7166	; jump+DOWN + 5 hearts -> C43B / D010 freeze
 brazier_tick_all: equ 0x8678	; per-frame update of the 8 C470 candle/block slots
 brazier_tick: equ 0x8693	; one C470 slot: first frame stamps, hit -> destroyed
 block_stamp: equ 0x86d1	; overlay 2x2/4x4 brick tiles on VRAM + D100
+vdp_box_white: equ 0x8709	; vdp_box colour 14 (candle-bonus outlines)
+candle_outlines_if: equ 0x870e	; if C702 bit0, draw C470 outlines
+candle_outlines: equ 0x8713	; white boxes on live C470 candles/blocks
 block_save_under: equ 0x8741	; copy nametable under slot to E480/E4A0
 tiles_blit_vram: equ 0x8783	; B rows x C tile-ids from (HL) at pixel DE
 block_tiles_court: equ 0x8799	; 2x2 then 4x4 tile ids (courtyard)
 block_tiles_castle: equ 0x87ad	; 2x2 then 4x4 tile ids (castle)
 brazier_destroyed: equ 0x87c1	; candle/block hit: restore tiles + drop
 block_restore_vram_2x2: equ 0x8851
+tiles_blit_2x2: equ 0x8854	; mid: 2x2 from caller HL at pixel DE
 block_restore_vram_4x4: equ 0x8865
+tiles_blit_4x4: equ 0x8868	; mid: 4x4 from caller HL (vendor uses E580)
 scenery_clear_rec: equ 0x887b	; zero E000 pos byte for this C470 slot
 block_restore_map_2x2: equ 0x8884
 block_restore_map_4x4: equ 0x88a0
+tiles_to_map_4x4: equ 0x88a3	; mid: 4x4 tile ids from caller HL into D100
 tiles_to_map: equ 0x88be	; copy BxC tile ids into D100 at HL, stride 0x20
-break_spark_tick: equ 0x88df	; 2 x C5A6 whip-break sparks
+break_chip_spawn: equ 0x88ce	; two chips at DE: right then left
+break_chip_tick: equ 0x88df	; 2 x C5A6 wall-break chips
+break_chip_move: equ 0x88f9	; X ±2, Y += break_chip_dy[age]
+break_chip_dy: equ 0x892f	; dY by chip age; bytes 0-1 are also `inc l; ret`
+break_chip_sat: equ 0x8942	; two chips -> SAT + colour lines
+chip_fill16: equ 0x8979	; fill 16 colour bytes (break-chip SAT)
 scenery_drop: equ 0x8996	; bonus B at DE -> C500; slime skips flame
 scenery_drop_slot: equ 0x8999
 drop_spawn: equ 0x89ea	; flame+C500, or slime directly to scenery_drop_slot
+drop_fx_spawn: equ 0x89c6	; flame (heart) or actor_reward at DE
+pickup_slot_write: equ 0x89f7	; C500: live 0x83, XY, bonus B, +5=FF
+drop_own_weapon_heart: equ 0x8a30	; dropping equipped subweapon -> small heart
+pickup_slot_alloc: equ 0x8a3e	; first free C500 slot; Z+HL, else NZ
+shot_death_flame: equ 0x9a21	; actor_free + shot_spawn kind 0xFF (type 12 flame)
+actor_cull: equ 0x9a41	; CFFF=1 then actor_kill_go (white cross / actors_kill_all)
+actor_kill: equ 0x9a45	; CFFF=0 then actor_kill_go (whip/touch; may drop)
+actor_kill_go: equ 0x9a51	; specials, else free + drop roll + flame
+flame_spawn: equ 0x9a5f	; actor_flame at this slot; B -> +1F drop gate, CE08++
+actor_kill_special: equ 0x9a72	; orb free; 0x24/0x26 collect; Dracula/Igor state; red skel
+kill_drop_roll: equ 0x9ac5	; skip if CE00; type 0x0E four flames; else bag/heart/flame
+kill_drop_pos: equ 0x9b29	; DE = (X, Y - kill_drop_dy[type])
+kill_drop_dy: equ 0x9b3a	; Y subtract per type; byte 0 is also the routine's ret
 pickup_tick: equ 0x8a51	; 8 x C500 floor items/chests
+pickup_state_tick: equ 0x8a74	; C500 +0 dispatch; +3==1 -> pickup_try_collect
+pickup_state_tbl: equ 0x8a94	; (state-1) -> appear/fall/stamp/idle/hop
+pickup_appear: equ 0x8aa0	; 16-frame settle; slime hatches blob
+pickup_fall: equ 0x8aff	; +0x0810 gravity; bounce or land
+pickup_stamp: equ 0x8b77	; snap to 8px, save under, blit icon
+pickup_idle: equ 0x8ba9	; floor wait; +3==2 whip; countdown despawn
+pickup_hop: equ 0x8bd3	; chest-spill: every 32 frames -> fall
+pickup_try_collect: equ 0x8be6	; Simon/key touch: collect or chest_spill
+chest_spill: equ 0x8c36	; hop opened chest contents as state 5
+pickup_sat_draw: equ 0x8c67	; SAT/colour for live C500; skip chests
+bonus_icon_blit: equ 0x8cc8	; 16x16 LMMM from page-0 atlas (Y 0x50/0x60)
+pickup_save_under: equ 0x8cdf	; nametable 2x2 under pickup -> E520
+pickup_restore_under: equ 0x8ced	; put the saved 2x2 back, then redraw overlays
+pickup_collect: equ 0x8d30	; A = slot+4, then collect_bonus
+already_have_key: equ 0x8f9b	; NZ if C701 has any of B (dup yellow/white key)
 spike_bars_seed_once: equ 0x8fa1	; seed the C580 bars only if slot 0 is free
 spike_bars_seed: equ 0x8fa6	; seed 3 x C580 from spike_bar_seeds (stage 6 room 1)
 spike_bar_seeds: equ 0x8fc4	; 3 x 6-byte spike-bar seeds
@@ -560,7 +723,11 @@ platform_sat_build: equ 0x90df	; 4 SAT entries + per-line colours for one deck
 platform_fill16: equ 0x9112	; fill 16 colour bytes (one 16x16 sprite's lines)
 platform_sat_cells: equ 0x9119	; write the 4 SAT entries from a C598 slot
 platform_sat_ofs: equ 0x9146	; 4 x {X offset, pattern} deck cells
+vendor_offer_match: equ 0x91a9	; B = offer-table index; A = matching slot (1/2) or 0
 vendor_tick: equ 0x91c5	; 2 x C5B5/C5C5 vendor/special-object slots
+vendor_slot_tick: equ 0x91df	; one slot: reveal / whip-hit / flash
+vendor_slot_ptr: equ 0x9228	; HL -> DE00 offer byte for this slot
+vendor_force_hit: equ 0x9294	; occupied C5B5/C5C5 with bit7: hit byte = 0xFF
 vendor_draw_idle: equ 0x9263	; LMMM white (slot 3) vendor 32x32 at DE
 vendor_draw: equ 0x9265	; A=C70B 0..4 -> 32x32 LMMM from page-1 Y=0xA0 onto DE
 vendor_redraw_all: equ 0x9273	; idle-blit every occupied C5B5/C5C5 slot
@@ -572,12 +739,22 @@ vendor_transition_tbl: equ 0x9307	; 4 x 8-byte rows -> next 0xC70C state (>=7 = 
 vendor_state_action_tbl: equ 0x9327	; state 0..6 -> C70B recolor slot (red/blue/magenta/white)
 vendor_hit_latch: equ 0x932e	; outcome 0: C40C=FF, latch vendor id
 vendor_leave: equ 0x935f	; outcome 6: vanish, +5000
+vendor_restore_tiles: equ 0x937f	; 4x4 from E580 at vendor pixel pos
 vendor_make_offer: equ 0x938e	; arm a sale: item 0xC708, price 0xC707, timer 0xC706
 vendor_set_offer_item: equ 0x9406	; pick sale item -> 0xC708 and look up price row
 vendor_select_price: equ 0x941f	; 0xC702 bible flags pick normal/half/double price -> 0xC707
 vendor_price_tbl: equ 0x942f	; 9 x {item id, normal, half(white bible), double(black bible)}
+vendor_de00_this: equ 0x9453	; HL -> DE00 row for C703 (this vendor)
+vendor_de00_slot: equ 0x9456	; HL -> DE00 row for slot A (0/1); D000==0 skips ofs
+vendor_de00_ofs: equ 0x947a	; byte[stage-1] = DE00 base for that stage's rooms
+vendor_offer_str0: equ 0x948c	; HUD glyphs for the offer bubble
+vendor_offer_str1: equ 0x9491
+vendor_price_draw: equ 0x9498	; BCD price 0xC707 at bubble + (0x18,0x10)
+vendor_glyphs: equ 0x94a6	; 0xFF-terminated HUD string at HL, pos via vendor_bubble_xy
+vendor_bubble_xy: equ 0x94b6	; DE = C704 + (B,C)
 vendor_offer_withdraw: equ 0x9503	; offer declined/expired/unaffordable: sfx 0x02, ret 0
 vendor_offer_pending: equ 0x950a	; no button this frame: ret 0xFF (keep offer open)
+vendor_offer_wipe: equ 0x9514	; HMMM 80x32 from (0xB0,0x80) onto C704 (erase bubble)
 vendor_purchase_tick: equ 0x94c1	; offer loop: tick timer 0xC706, poll buy/refuse, buy item
 vendor_read_buttons: equ 0x9526	; edge-detected confirm(SPACE)/refuse(SHIFT)+triggers -> A
 read_kbd_matrix_bit: equ 0x9552	; read one keyboard-matrix bit (row in A) -> 0/1
@@ -587,12 +764,28 @@ minimap_room_pos: equ 0x9681	; AUTHORITATIVE room position: stage tbl 0x969c -> 
 minimap_stage_ptr: equ 0x969c	; word[stage] -> per-room minimap position-code array
 minimap_coord_tbl: equ 0x975e	; word[code] -> packed minimap coord (hi=X 0x20+0x20*col, lo=Y 0x38+0x15*row)
 minimap_room_count: equ 0x95fd	; byte[stage] = room count (incl. stage 18/Dracula = 10)
+minimap_room_build: equ 0x9610	; expand room into E800, scenery EB00, stamp kind-3 blocks
+minimap_stamp_block: equ 0x9653	; 4x4 of 1s at a 32x32 block's pixel pos in E800
+minimap_pack: equ 0x979a	; E840 tiles x 0x2C0 -> packed EB00 via class table
+minimap_tile_class: equ 0x97b5	; tile id -> F2 paint: 1/2 always white, 3/4 hub-gated
+minimap_class_tbl: equ 0x97f3	; id 0..0x0D: 0 skip, 1/2 always, 3=09 hub0+5, 4=05-08 hub5
+minimap_plot_nibble: equ 0x9801	; store or OR a nibble into packed dest
+minimap_blit_room: equ 0x980e	; HMMC 32x22 from EB00 at CFF2
+minimap_blit_simon: equ 0x981c	; 4x4 Simon marker at play pos inside the room cell
+minimap_simon_y_adj: equ 0x984b	; if Simon Y<0x40, dest Y -= 0x20
+minimap_simon_mark: equ 0x9852	; 4x4 4bpp pixels for the Simon marker
+minimap_palette: equ 0x985a	; HMMC 8x7 stage icon; table picks dest + A/B bitmap
+minimap_icon_a: equ 0x987b	; 8x7 4bpp
+minimap_icon_b: equ 0x9897	; 8x7 4bpp (bit0 of stage-gfx flags)
+minimap_stage_gfx: equ 0x98b3	; 19 x {dest DE, flags}
 flame_init: equ 0x9b67	; seed a destruction-flame effect (frame 0x85, timer 0x10)
 flame_tick: equ 0x9b78	; flame flicker 0x85/0x86; on expiry spawn 0x24 pickup
 actor_pickup_init: equ 0x9ba2	; type 0x24 spawn: fall + sway, pose 0x00
 actor_reward_init: equ 0x9bcb	; type 0x26 spawn: physics off, pose 0x01, timer 0x14
 actor_pickup_go: equ 0x9be0	; type 0x24 tick: undulate, land -> drop_spawn
-actor_reward_go: equ 0x9c25	; type 0x26 tick: sparkle, fall, drop_spawn with +0x1F
+actor_reward_go: equ 0x9c25	; type 0x26 tick: cycle SAT colour, fall, drop_spawn with +0x1F
+reward_sat_col: equ 0x9c60	; 4 SAT colours for actor_reward (08 01 0E 01)
+actor_floor_test: equ 0x9c64	; map_solid_pair at actor (Y,X)
 merman_splash_init: equ 0x9c6d	; type 0x20 spawn: pose 0x0E (0x15 on stage 10)
 actors_tick: equ 0x98ec	; if D010==0: room_spawner then c800_tick
 c800_tick: equ 0x98f3	; tick all 7 C800 actor slots
@@ -606,6 +799,7 @@ actor_cull_offscreen: equ 0x99ec	; free actor if pixel pos left the play area
 actor_free: equ 0x99fd	; clear slot + hide SAT cells at slot|0x20
 spawn_rate_gate: equ 0x9cca	; CF00 counter vs difficulty-scaled threshold
 spawn_pick_pos: equ 0x9d03	; hardcoded ground-enemy spawn X/Y from stage/room
+spawn_edge_gate: equ 0x9e1d	; C = Simon crowding this spawn edge
 shot_tick: equ 0x9e38	; 8 shot slots at 0xD700
 shot_type_tick: equ 0x9e5f	; DISPATCH_A on shot type-1
 fireball: equ 0x9e7e	; types 1-3,5,10: shared fireball (pose 3, SAT pat 0xF0)
@@ -685,7 +879,7 @@ vdoor_rle: equ 0xA0EA	; vertical-door patterns (load_vdoor_sprites)
 ; ---- Vampire Killer banked routines (segment 3 @ 0xA000) -----------------
 room_event_tick: equ 0xb6b2	; CE00 room-event dispatcher; events 1-6
 room_event_ce10: equ 0xb6cc	; CE0B set: DISPATCH_A on CE10 (boss-clear)
-boss_clear_cull: equ 0xb6e0	; CE10=0: sub_780dh + timer
+boss_clear_cull: equ 0xb6e0	; CE10=0: actors_kill_all + timer
 boss_clear_wait: equ 0xb6ea	; CE10=1/4: wait CE02
 boss_clear_orb: equ 0xb6f4	; CE10=2: spawn actor_orb
 boss_clear_orb_wait: equ 0xb70d	; CE10=3: wait CE11/CE14, music 0x8C
@@ -700,7 +894,13 @@ event_giant_bat: equ 0xbe32	; CE00=1: spawn giant bat, wait CE15
 event_ce01_next: equ 0xbe44	; CE01++; Dracula + events 1-5 share this
 boss_clear_arm: equ 0xbe4e	; CE10=0, CE0B=1 -> room_event_ce10
 aim_at_simon: equ 0xa0ec	; vel toward Simon from actor Y/X; speed 0x80+8*D012
+aim_at_simon_xy: equ 0xa0ee	; same; A = speed, load E/D from actor
 aim_at_simon_spd: equ 0xa0f4	; same; A = speed base, E=Y D=X
+aim_octant: equ 0xa13b	; CFF8/9 from actor (E,D) vs Simon
+aim_scale: equ 0xa18b	; DE = CFF0 * E / 32
+MUL_H_E: equ 0xa19d	; HL = H * E (8x8 -> 16)
+aim_octant_tbl: equ 0xa1a9	; 8x8 atan lut
+aim_scale_tbl: equ 0xa1e9	; 64-byte magnitude lut
 shot_kind_type: equ 0xa095	; kind -> shot type (byte 0 is axe-init RET)
 shot_sat_ptr: equ 0xa0c4	; word[shot type] SAT record
 shot_init_nop: equ 0xa053	; shot spawn-init ret (types 1-6, 10-11)
@@ -709,13 +909,23 @@ shot_sickle_init: equ 0xa071	; type 8: visible, timer 0x3C
 shot_axe_init: equ 0xa082	; type 9: facing + thrower CFFC
 neg_de: equ 0xa183	; DE = -DE
 enemy_skull_pile_tick: equ 0xa229	; entity type 10 (skull pile, shoots)
+skull_pile_sat_pat: equ 0xa291	; both SAT cells pattern A, colour 2
+skull_pile_face: equ 0xa2af	; pose from Simon X
 enemy_placed_merman_init: equ 0xa2ce	; object-list id 0x21 (placed red merman)
 enemy_merman_tick: equ 0xa2e7	; actor_merman_green / actor_merman_red
 merman_pick_frame: equ 0xa4ba	; merman stand pose from facing + type bit0
+merman_walk_period: equ 0xa4d6	; ix+15 from period tbl
+play_sound_alive: equ 0xa4ef	; play_sound unless C420==6
+merman_period_long: equ 0xa4fa
+merman_period_short: equ 0xa4fe
 enemy_ghost_head_tick: equ 0xa502	; entity type 8 (ghost head)
 enemy_pikeman_tick: equ 0xa57a	; entity type 6 (pikeman)
 actor_set_pose: equ 0xa636	; ix+0B = (HL)[C]
 simon_y_overlap: equ 0xa63e	; NZ if Simon Y is within ±8 of actor Y
+actor_flip_xvel: equ 0xa649	; negate X velocity
+actor_halt_if_rightward: equ 0xaf33	; if Xvel >= 0, +6 = 0 (right-edge stop)
+actor_halt_if_leftward: equ 0xaf3d	; if Xvel < 0, +6 = 0 (left-edge stop)
+simon_dx_abs: equ 0xaf47	; A = |Simon X - actor X|
 enemy_raven_tick: equ 0xa677	; entity type 12 (raven hover-flight)
 enemy_zombie_tick: equ 0xa93b	; entity type 1 (walking zombie)
 enemy_dog_tick: equ 0xa863	; entity type 5 (sitting dog)
@@ -727,6 +937,8 @@ dracula_head_go: equ 0xad19	; type 0x2D tick: gravity +0x50/frame
 shot_pool_clear: equ 0xad1f	; free B slots from D700 (B from c800_tick remaining)
 c800_pool_clear: equ 0xad26	; free 7 C800 slots (no caller)
 actor_set_pose_facing: equ 0xad3e	; ix+0B = (HL)[C] or [C+2] if Simon is to the right
+axe_knight_walk_pose: equ 0xaf1f	; poses 0x5F-0x62
+axe_knight_walk_tbl: equ 0xaf2f
 dracula_sat_color: equ 0xad4c	; 8 SAT colours from dracula_sat_cols
 dracula_sat_hide: equ 0xad62	; colour 0 on all 8 SAT cells
 dracula_sat_hide_body: equ 0xad68	; colour 0 on cells 4-7 (lower cape)
@@ -737,9 +949,12 @@ dracula_blit_torso: equ 0xad9a	; LMMM/HMMM 32x32 from page-1 Y=0x80 onto (X-16,0
 enemy_axe_knight_tick: equ 0xade5	; entity type 16 (axe knight)
 enemy_red_skeleton_tick: equ 0xaf51	; entity type 9 (red skeleton, no throw)
 enemy_flying_skull_tick: equ 0xb068	; entity type 7 (flying skull)
+flying_skull_pose: equ 0xb0bc	; poses 0x16-0x19
 enemy_hanging_bat_tick: equ 0xb0d1	; entity type 4 (hanging bat; generator fly-in)
 enemy_placed_bat_init: equ 0xb0d5	; object-list id 0x1F (placed hanging bat)
 enemy_roc_tick: equ 0xb19a	; entity type 15 (roc; drops type 0x23)
+roc_flap: equ 0xb1ee	; poses 0x6D/0x6E/0x8D
+roc_flap_tbl: equ 0xb216
 enemy_hunchback_tick: equ 0xb219	; entity type 13 (hunchback; roc shares init)
 enemy_white_skeleton_tick: equ 0xb34b	; entity type 11 (white skeleton: kite, ledge hop, bone)
 enemy_blob_tick: equ 0xb4d9	; types 0x19-0x1C (actor_blob_blue/_red/_white hatched)
@@ -748,6 +963,13 @@ blob_hatch: equ 0xb502		; wait ix+10, then fall
 blob_fall: equ 0xb514		; gravity until floor
 blob_pause: equ 0xb51a		; grounded wait, then hop
 blob_hop: equ 0xb52d		; hop; land -> pause
+blob_fall_step: equ 0xb570	; wall, floor, gravity; C = landed
+blob_hatch_wait: equ 0xb590
+blob_at_edge: equ 0xb5a5
+blob_wall_ahead: equ 0xb5b5
+blob_can_rise: equ 0xb5c8	; NC if Simon >16px above and gap ahead
+blob_floor: equ 0xb5e7
+blob_chase_x: equ 0xb607	; Xvel toward Simon
 blob_set_pose: equ 0xb618	; ix+0B from per-stage nibble table + 0x9B/9D/9F/A1
 white_skel_set_pose: equ 0xb36b	; walk poses 0x47-0x4A from Simon X + anim counter
 white_skel_go: equ 0xb385	; per-frame: set_pose then DISPATCH walk/air/throw
@@ -758,12 +980,17 @@ merman_spit: equ 0xa461	; state 2: hide, fire shot kind 2
 hanging_bat_go: equ 0xb0ff	; types 4/0x1F per-frame (past fly-in)
 hanging_bat_hang: equ 0xb109	; state 0: pose 0x1A until Simon close
 hanging_bat_swoop: equ 0xb145	; state 1: fly at Simon
+hanging_bat_flap: equ 0xb15f	; wing pose; three rras (placed bat)
+hanging_bat_flap_slow: equ 0xb164	; one rra (dracula_bat / hanging_bat_pose)
+hanging_bat_pose_r: equ 0xb17e	; 4 right-facing flap poses
+hanging_bat_pose_l: equ 0xb182	; 4 left-facing flap poses
 hanging_bat_bob: equ 0xb186	; state 2: flap + Y around lock
 hunchback_go: equ 0xb24f	; types 13/0x23 per-frame
 hunchback_wait: equ 0xb25f	; until |Simon X| < 0x3C
 hunchback_drop: equ 0xb26f	; gravity, then crouch
 hunchback_crouch: equ 0xb28c	; 2-frame squat, then jump
 hunchback_jump: equ 0xb2ce	; air; land -> crouch
+actor_wall_ahead: equ 0xb307	; probe wall in Xvel direction
 hunchback_hide: equ 0xb321	; type-13 spawn: hidden until Simon close
 enemy_raven_go: equ 0xa684	; ix+1: wait/coast/hover/pick/strafe/recover/hold
 raven_wait: equ 0xa69d
@@ -774,18 +1001,32 @@ raven_strafe_init: equ 0xa705
 raven_strafe: equ 0xa72f
 raven_recover: equ 0xa76b
 raven_hold: equ 0xa79a
+raven_flap: equ 0xa79e	; pose 0x8A/8B or 0x87/88
+raven_flap_r: equ 0xa7c0
+raven_flap_l: equ 0xa7c2
+raven_pick_vel: equ 0xa7c4	; Xvel toward Simon; Yvel from coast_dy
+raven_coast_dy_up: equ 0xa81a
+raven_coast_dy_down: equ 0xa822
+raven_bounds: equ 0xa834	; C = hit screen edge; force hover
 enemy_dog_go: equ 0xa884	; ix+1: idle/run/air
 dog_idle: equ 0xa898
 dog_run: equ 0xa8b3
 dog_air: equ 0xa8d9
+dog_run_pose: equ 0xa910	; 3-frame run from facing
 enemy_zombie_go: equ 0xa96b	; walk + gravity (no ix+1 table)
+actor_snap_y8: equ 0xa9a9	; Y &= 0xF8
 enemy_bone_dragon_go: equ 0xa9be	; ix+1: form/idle/spit
 bone_dragon_follow: equ 0xa9ce	; actor Y/X from SAT head
 bone_dragon_form: equ 0xa9df
 bone_dragon_idle: equ 0xaa12
 bone_dragon_spit: equ 0xaa3e
+bone_dragon_sat_nudge: equ 0xaa6e	; 8 SAT bytes ±1 toward DE
+bone_dragon_wiggle_arm: equ 0xaa84
+bone_dragon_wiggle: equ 0xaa91
+bone_dragon_wiggle_ofs: equ 0xaab4
 enemy_red_skeleton_go: equ 0xaf66	; ix+1: wake/walk/pause
 red_skel_wake: equ 0xaf72
+red_skel_face: equ 0xafa2	; pose/Xvel toward Simon
 red_skel_walk: equ 0xafc5
 red_skel_pause: equ 0xb03c
 enemy_skull_pile_go: equ 0xa235	; ix+1: idle/windup/recover

@@ -50,7 +50,8 @@ Three other views:
                 tileset_ptr) in the per-room playfield palette. Nametable id 0
                 is blank (blit starts at VRAM 0x8004; id N = ROM tile N-1).
                 HUD rows 0-1 cropped like the other views. Stage 18 room 9
-                overlays dracula_portrait_load (seg15 face + mirrors). No
+                overlays dracula_portrait_load (seg15 face + mirrors) then
+                the 16x16 eye/mouth HMMMs (closed, same as dracula_face_rest). No
                 door/spot/object overlay. Default --scale is 2.
 
 White-key doors (drawn as a red bar; --no-doors to skip): EVERY stage 0-18 has
@@ -255,8 +256,13 @@ def decode_objects(rom, row, col):
     are door_tbl). List-id 0x1F is a placed hanging bat, not vendor/reveal
     (display-type 0x1F on a brazier is that path).
     row->dataset/stream: ds=(row-1)//3, stream=(row-1)%3.
-    Returns [(sid, bit7, x_tile, y_tile), ...]; object cell (X,Y) is *16px = *2
-    tiles. bit7 is stored then stripped at spawn (dogs only; role unknown)."""
+    Returns [(sid, bit7, x_tile, y_tile), ...]; object cell is *16px = *2
+    tiles. Attr is Y<<4|X (same packing as scenery_pos_xy). l61c2h puts the
+    high nibble in E and the low nibble in D; spawn_actor stores E at +03 Y
+    and D at +05 X. The old decode (X<<4|Y) swapped the axes: dogs/bats
+    looked 16px off whenever the nibbles differed by 1. Spawn pixel is the
+    feet / hang hook; actor_sat_build adds shape dy/dx.
+    bit7 is stored then stripped at spawn (dogs only; role unknown)."""
     seg14 = rom.rom[0x1C000:0x1E000]
     if row < 1:
         return []
@@ -284,8 +290,8 @@ def decode_objects(rom, row, col):
     out = []
     for oid, attr in cells[col]:
         sid = oid & 0x7F
-        x = ((attr >> 4) & 0xF) * 2
-        y = (attr & 0xF) * 2
+        x = (attr & 0x0F) * 2
+        y = ((attr >> 4) & 0xF) * 2
         out.append((sid, bool(oid & 0x80), x, y))
     return out
 
@@ -335,12 +341,13 @@ def render(grid, row, scale, mode, top=PLAY_TOP, doors=None, objects=None,
             x0 = dx * scale - tw - dscale
         if 0 <= y0 < H and x0 + tw > 0:
             draw_text(buf, W, max(0, x0), y0, text, dscale, SPOT_RGB)
-    # Object overlay: outline each placed actor at its cell. 0x1F (placed
-    # hanging bat) is filled red so the old --compare-doors sheets stay readable.
+    # Object overlay: outline each placed actor at its spawn cell (map_cell_at
+    # row = oy-2, then drop HUD). 0x1F (placed hanging bat) is filled red so
+    # the old --compare-doors sheets stay readable.
     for (sid, bit7, ox, oy) in objects or []:
         is_bat = (sid == 0x1f)
         col = OBJ_BAT_RGB if is_bat else OBJ_OTHER_RGB
-        x0, y0 = ox * scale, (oy - top) * scale
+        x0, y0 = ox * scale, (oy - 2 - top) * scale
         w, h = 2 * scale, 2 * scale        # object footprint ~16px = 2 tiles
         for yy in range(h):
             py = y0 + yy
@@ -436,6 +443,55 @@ def _place_vflip(atlas, src_de, dest_de, n):
             atlas[did] = list(reversed(atlas[sid]))
         s, d = _l4a6d_advance(s), _l4a6d_advance(d)
 
+def _portrait_parts_16(data):
+    """8 x 16x16 from dracula_portrait_parts (seg15 0xBBD8).
+
+    0-1 open eyes, 2-3 closed, 4-5 closed mouth, 6-7 open mouth.
+    Mouths are left-half tiles; the right half is H-mirrored at runtime.
+    """
+    import gfxdump
+    fo = 15 * 0x2000 + (0xBBD8 - 0xA000)
+    return gfxdump.tile_grids(data[fo:fo + 8 * 128], "tile4")
+
+
+def _stamp_tile16(buf, W, H, pal_b, grid, dx, dy, scale, flip_h=False):
+    """Opaque HMMM of one 16x16 onto the cropped playfield (Y=0 is screen 0x20)."""
+    import gfxdump
+    if flip_h:
+        grid = gfxdump._hflip_grid(grid)
+    x0 = dx * scale
+    y0 = (dy - 0x20) * scale
+    for y, row in enumerate(grid):
+        for x, pix in enumerate(row):
+            rgb = pal_b[pix & 15]
+            for yy in range(scale):
+                py = y0 + y * scale + yy
+                if not 0 <= py < H:
+                    continue
+                for xx in range(scale):
+                    px = x0 + x * scale + xx
+                    if 0 <= px < W:
+                        o = (py * W + px) * 3
+                        buf[o:o + 3] = rgb
+
+
+def _overlay_dracula_face(buf, W, H, pal_b, data, scale):
+    """HMMM the portrait's eyes and mouth onto the painted nametable.
+
+    Dest pixels match dracula_face_rest (closed eyes 2+3, closed mouth 0+1;
+    page-0, source page-1 Y=0xA0). Colour 0 overwrites, same as HMMM.
+    """
+    parts = _portrait_parts_16(data)
+    if len(parts) < 8:
+        return
+    _stamp_tile16(buf, W, H, pal_b, parts[2], 0x68, 0x58, scale)
+    _stamp_tile16(buf, W, H, pal_b, parts[3], 0x88, 0x58, scale)
+    _stamp_tile16(buf, W, H, pal_b, parts[4], 0x70, 0x80, scale)
+    _stamp_tile16(buf, W, H, pal_b, parts[4], 0x80, 0x80, scale, flip_h=True)
+    _stamp_tile16(buf, W, H, pal_b, parts[5], 0x70, 0x90, scale)
+    _stamp_tile16(buf, W, H, pal_b, parts[5], 0x80, 0x90, scale, flip_h=True)
+
+
 def _overlay_dracula_portrait(atlas, data):
     """dracula_portrait_load (seg0 0x5887): seg15 frame + 108-tile face, then
     H-mirror (0x1E-0x89 -> 0x8A-0xF5) and V-mirror the frame."""
@@ -504,6 +560,8 @@ def render_pixels(rom, grid, stage, room, scale, top=PLAY_TOP):
                         for xx in range(scale):
                             buf[o:o + 3] = rgb
                             o += 3
+    if stage == 18 and room == 9:
+        _overlay_dracula_face(buf, W, H, pal_b, rom.rom, scale)
     return W, H, bytes(buf)
 
 # 3x5 bitmap for sheet labels (room numbers, credits-font chars)

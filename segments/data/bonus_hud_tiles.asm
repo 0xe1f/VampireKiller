@@ -1,6 +1,6 @@
 ; Bonus HUD 16x16 4bpp (seg9 0x9000): ids 1-20 then potion (id 22).
 ; HUD init (seg0 after page_title_banks) blits 20 icons via
-; vram_blit_tile16 / l4a97h to Y=0x50, then potion to (X=80, Y=96).
+; vram_blit_tile16 / vram_blit_tile16_run to Y=0x50, then potion to (X=80, Y=96).
 ; Names live in tools/emit_identified_data.py BONUS_HUD_16X16
 ; (regen this file from the ROM; do not hand-edit).  Id 21
 ; (slime) has no tile here; ids 23-30 are hud_weapon_key_tiles.

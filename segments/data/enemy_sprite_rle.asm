@@ -10,7 +10,7 @@
 ; 0xFC00).  Do not split this file to group weapons — bytes stay here.
 
 ; --- frontend / vdoor / fireball ---
-gfx_rle_a066:  ; 0xA066  packed 66
+gfx_rle_a066:  ; 0xA066  packed 66  ; moving pad, stage 5 SAT D0/D4 @ FE80
 	defb 0xa2
 	defb %00000000
 	defb %01011111
@@ -75,7 +75,7 @@ gfx_rle_a066:  ; 0xA066  packed 66
 	defb %11111111
 	defb %11111110
 	defb 0x00
-gfx_rle_a0a8:  ; 0xA0A8  packed 66
+gfx_rle_a0a8:  ; 0xA0A8  packed 66  ; moving pad, stage 10 SAT D8/DC @ FEC0
 	defb 0xc0
 	defb %00000000
 	defb %01010000

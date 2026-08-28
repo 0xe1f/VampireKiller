@@ -13,6 +13,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gfxdump
+import gfxview
 import pngwrite
 import roomperm
 
@@ -47,9 +48,14 @@ SCALE_ICON = 6
 SCALE_MAP = 2
 BG = (12, 14, 20)
 GOLD = (212, 180, 90)
+# Candle power-up outline (MSX colour 14 / sub_8709h).
+BLOCK_RGB = (255, 255, 255)
 DOOR_RGB = (220, 40, 40)
 SPOT_RGB = (64, 186, 176)
 SPIKE_RGB = (180, 70, 70)
+PAD_PATH_RGB = (255, 255, 255)
+# playfield_draw dest Y: nametable row 2. SAT / table Y is screen space.
+PLAYFIELD_Y0 = 0x20
 
 VENDOR_OFFER = {
     0: 0x0E, 1: 0x12, 2: 0x03, 3: 0x04, 4: 0x0A,
@@ -81,6 +87,7 @@ ENEMY_TITLE = {
     "mummy": "Mummy", "frankenstein": "Frankenstein", "grim-reaper": "Grim Reaper",
     "igor": "Igor", "blob-blue": "Blue blob", "blob-red": "Red blob",
     "blob-white": "White blob", "spike-bars": "Spike bars",
+    "floating-pad": "Moving platform",
 }
 ITEM_META = {
     1: ("small-heart", "Small heart"),
@@ -140,22 +147,46 @@ BOSS = {
     15: ("grim-reaper", "the Grim Reaper", 9),
     18: ("dracula", "Dracula", 9),
 }
+# spawn_actor DE (D=X, E=Y) from the event_*_spawn machines in banks_0123.asm.
+BOSS_SPAWNS = {
+    3:  [(5, "giant-bat", 0x70, 0x40)],
+    6:  [(5, "medusa", 0x90, 0x90)],
+    9:  [(7, "mummy", 0x30, 0xC5), (7, "mummy", 0xD0, 0xC5)],
+    # Frank first, then Igor on the head (spawn Y is 32px higher).
+    12: [(6, "frankenstein", 0xD0, 0xC0), (6, "igor", 0xD0, 0xA0)],
+    15: [(9, "grim-reaper", 0xA0, 0x90)],
+    # Standing pose: torso LMMM is Y=0x91; SAT origin (-16,-64) puts
+    # feet on the floor at 0xC1. Event spawn (0x80,0x49) is the intro drop.
+    18: [(9, "dracula", 0x80, 0xC1)],
+}
+# actor_igor (0x18) reuses hunchback pose 0x67; not in ENEMY_SHAPE_ID.
+IGOR_SHAPE = 0x67
 UNIQUE_NOTES = {
     0: "The courtyard door opens on its own — no white key.",
+    5: "Rooms 1 and 4 have moving platforms. They slide on their own; stand on one and it carries you. The white outline is the rest of the path.",
     6: "Room 1 hangs three spike bars from the arches. They are scenery, not enemies: you cannot whip them away. The falling stroke hits harder than the crawl back up.",
     8: "Rooms 4 and 7 loop vertically. Dropping here is not a pit; it dumps you onto the other floor of the loop.",
-    10: "Water, and mermen who already stand on the platforms in rooms 6–8 (they do not climb out of the drink first).",
-    12: "No up/down exits. Crouch on a floor pad, then tap up, to warp to its twin. The pairs are 0↔3, 1↔4, 2↔11, 5↔8, 7↔10.",
+    10: "Water, and mermen who already stand on the platforms in rooms 6–8 (they do not climb out of the drink first). Rooms 0, 2, 3 and 4 have moving platforms — white outline is the rest of the path.",
+    12: "No up/down exits. Crouch on a floor pad, then tap up, to warp to its twin. The pairs are 0↔3, 1↔4, 2↔11, 5↔8, 7↔10.\n\n"
+        "Shortest run:\n\n"
+        "1. Walk one room left from the start. Take that pad, not the pad in the start room.\n"
+        "2. You land on its twin — do not take it back. Climb the left ledge, walk one room left, take the pad in that room.\n"
+        "3. Same again: leave the pad you landed on, walk one room left, take that room's pad.\n"
+        "4. White key; the boss is through the door on the right.\n\n"
+        "Igor starts on Frankenstein's head, then jumps.",
     15: "The door on the left of room 8 opens onto an isolated room 9 — the Reaper's chamber, not the next stage.",
     18: "The door on the left of room 8 is Dracula's chamber.",
 }
 
+# block_tiles_*: leading 2x2 (kind 2) then 4x4 (kind 3). See block_stamp.
+BLOCK_CASTLE_2 = bytes([0x01, 0x02, 0x0A, 0x0B])
 BLOCK_CASTLE = bytes([
     0x01, 0x02, 0x01, 0x02,
     0x0A, 0x0B, 0x0A, 0x0B,
     0x01, 0x02, 0x01, 0x02,
     0x0A, 0x0B, 0x0A, 0x0B,
 ])
+BLOCK_COURT_2 = bytes([0x01, 0x02, 0x09, 0x0B])
 BLOCK_COURT = bytes([
     0x01, 0x02, 0x01, 0x02,
     0x09, 0x0B, 0x0A, 0x09,
@@ -314,6 +345,30 @@ def dump_icons(data, named):
     return by_id, pal, flame, brazier
 
 
+def sat_origin(data, typ):
+    """Top-left of the SAT composite relative to spawn (ix+5 X, ix+3 Y).
+
+    actor_sat_build adds each shape cell's (dx,dy). _composite_enemy shifts
+    the grid so (0,0) is min(dx,dy); blit at spawn+this or the sprite sits
+    with its top-left on the origin (dogs in the floor, 16x16s one cell low).
+    """
+    ncells = data[gfxdump._cpu_file(1, 0x605E, 0x6000) + typ]
+    if typ == 14:
+        parts, _ = gfxdump._type14_parts()
+        sid = None
+    else:
+        sid = gfxdump.ENEMY_SHAPE_ID.get(typ)
+        if typ == 0x18:
+            sid = IGOR_SHAPE
+        if sid is None or not ncells:
+            return (0, 0)
+        parts = gfxdump._parse_shape(data, sid, ncells)
+        if not parts:
+            return (0, 0)
+    x0, y0, _, _ = gfxdump._sat_bbox(typ, parts, sid)
+    return (x0, y0)
+
+
 def dump_enemies(data):
     types = list(range(1, 23)) + [0x18, 0x1A, 0x1B, 0x1C]
     cache = {}
@@ -326,15 +381,17 @@ def dump_enemies(data):
         21: "frankenstein", 22: "grim-reaper", 0x18: "igor",
         0x1A: "blob-blue", 0x1B: "blob-red", 0x1C: "blob-white",
     }
-    portraits = {}
+    portraits, origins = {}, {}
     for typ in types:
-        grid = gfxdump._composite_enemy(data, typ, cache)
+        sid = IGOR_SHAPE if typ == 0x18 else None
+        grid = gfxdump._composite_enemy(data, typ, cache, shape_id=sid)
         slug = slug_of[typ]
         write_icon(os.path.join(IMG, "enemies", slug + ".png"), grid)
         portraits[slug] = grid
+        origins[slug] = sat_origin(data, typ)
         if typ == 0x1A:
             write_icon(os.path.join(IMG, "items", "slime.png"), grid)
-    return portraits
+    return portraits, origins
 
 
 def dump_vendor(data):
@@ -394,7 +451,98 @@ def dump_hazards(data):
     return bar
 
 
+def parse_platform_tbl(data):
+    """platform_tbl @ 0x9073: {stage, room, n} + n x {Y, X, step, span}; 0xFF.
+
+    Y is the visual row (platform_overlap / Simon feet). SAT writes Y-1
+    because the VDP draws the sprite one line below the SAT Y. X is the
+    room-load position; each tick adds step until the sweep counter hits
+    span, then it reverses without moving that frame (travel = span-1).
+    """
+    fo = gfxdump._cpu_file(2, 0x9073, 0x8000)
+    out = {}
+    i = fo
+    while data[i] != 0xFF:
+        stage, room, n = data[i], data[i + 1], data[i + 2]
+        i += 3
+        recs = []
+        for _ in range(n):
+            y, x, step, span = data[i:i + 4]
+            recs.append((y, x, gfxdump._s8(step), span))
+            i += 4
+        out[(stage, room)] = recs
+    return out
+
+
+def composite_pad(vram, pat0, pal, c0, c1):
+    """32x16 deck: two CC 16x16 halves, both using pat0 / pat0+4.
+
+    platform_sat_ofs is {0,D0} {0,D4} {0x10,D0} {0x10,D4}; colours alternate
+    with CC on the second of each pair (2/4 on stage 5, 9/0xC on 10).
+    """
+    pats = (pat0, pat0 + 4)
+    cols = (c0, c1 | 0x40)
+    grid = [[gfxdump.OFF] * 32 for _ in range(16)]
+    index = [[0] * 32 for _ in range(16)]
+    for xoff in (0, 16):
+        for pat, col in zip(pats, cols):
+            src = 0xF800 + pat * 8
+            raw = bytes(vram[src + k] for k in range(32))
+            spr = gfxview.sprite16_1bpp(raw)
+            idx = col & 0x0F
+            cc = bool(col & 0x40)
+            for y in range(16):
+                for x in range(16):
+                    if spr[y][x] != "#":
+                        continue
+                    xx = xoff + x
+                    if cc and index[y][xx]:
+                        index[y][xx] |= idx
+                    elif not cc or index[y][xx] == 0:
+                        index[y][xx] = idx
+    for y in range(16):
+        for x in range(32):
+            if index[y][x]:
+                grid[y][x] = pal[index[y][x]]
+    return grid
+
+
+def dump_platforms(data):
+    """Moving-pad SAT composites, keyed by stage (5 and 10).
+
+    Stage 5: gfx_script_9de0 loads gfx_rle_a066 at FE80 (D0/D4).
+    Stage 10: D8/DC at FEC0 (script 9db5 / 9eba, gfx_rle_a0a8).
+    """
+    art = {}
+    specs = (
+        (5, 1, 0xD0, 2, 4),
+        (10, 0, 0xD8, 9, 0xC),
+    )
+    for stage, room, pat0, c0, c1 in specs:
+        script = gfxdump._script_key(data, stage, room)
+        vram = gfxdump._load_script_vram(data, script)
+        pal = gfxdump.vk_playfield_palette(data, stage, room)
+        art[stage] = composite_pad(vram, pat0, pal, c0, c1)
+    write_icon(os.path.join(IMG, "hazards", "floating-pad.png"), art[5], None)
+    return art, parse_platform_tbl(data)
+
+
+def sat_crop(x, y, scale):
+    """Screen-space SAT / table pixel -> cropped playfield.
+
+    playfield_draw paints nametable row 2 at Y=0x20. Table Y is the visual
+    row (not SAT Y-1). Unlike object_px this is not 8px-aligned — stage 5
+    pads sit at Y=0x5F.
+    """
+    return x * scale, (y - PLAYFIELD_Y0) * scale
+
+
 def parse_stream(seg14, ptr):
+    """Packed scenery: 0xFE next room, 0xFF next stage, 0x00 end hub.
+
+    attr 0x7F is a 32x32 covering wall; the following byte is the reveal
+    (chest / vendor), not a substitute for the wall. See classify().
+    """
     off = ptr - 0x8000
     stages, room = [[]], []
     while 0 <= off < len(seg14):
@@ -424,23 +572,39 @@ def parse_stream(seg14, ptr):
     return stages
 
 
-def classify(attr, extra):
-    hidden = extra is not None
-    a = extra if hidden else attr
+def classify_attr(a):
     hi6 = a >> 6
     if hi6 == 3:
-        return "vendor", VENDOR_OFFER.get((a >> 2) & 0xF, 0), hidden
+        return "vendor", VENDOR_OFFER.get((a >> 2) & 0xF, 0)
     if hi6 == 2:
-        return "chest", a & 0x1F, hidden
+        return "chest", a & 0x1F
     kind = (a >> 5) & 7
     bonus = a & 0x1F
     if kind == 0:
-        return "floor", bonus, hidden
+        return "floor", bonus
     if kind == 1:
-        return "candle", bonus, hidden
+        return "candle", bonus
+    if kind == 2:
+        return "block16", bonus  # 16x16; packed stream never uses this
     if kind == 3:
-        return "block", bonus, hidden
-    return "other", bonus, hidden
+        return "block", bonus
+    return "other", bonus
+
+
+def classify(attr, extra):
+    """Surface kind, bonus id, hidden, reveal kind.
+
+    attr 0x7F is a 32x32 covering wall (bits7-5 = 011, bonus 0x1F). The extra
+    byte is the reveal (chest / vendor), not the thing that sits in the hole —
+    scenery_room_load still stamps the bricks, then brazier_destroyed swaps
+    in the reveal. Classifying extra in place of attr left those bricks off
+    the map.
+    """
+    if extra is not None:
+        reveal, bonus = classify_attr(extra)
+        return "block", bonus, True, reveal
+    kind, bonus = classify_attr(attr)
+    return kind, bonus, False, None
 
 
 def scenery_for_stage(rom, stage):
@@ -486,6 +650,16 @@ def blit_rgb(buf, W, H, x0, y0, rgb_grid, scale, skip=None):
                     buf[o:o + 3] = bytes(col)
 
 
+def fill_rect(buf, W, H, x0, y0, w, h, rgb):
+    for y in range(y0, y0 + h):
+        if not 0 <= y < H:
+            continue
+        for x in range(x0, x0 + w):
+            if 0 <= x < W:
+                o = (y * W + x) * 3
+                buf[o:o + 3] = bytes(rgb)
+
+
 def outline_rect(buf, W, H, x0, y0, w, h, rgb, t=2):
     for i in range(t):
         for x in range(x0, x0 + w):
@@ -498,6 +672,64 @@ def outline_rect(buf, W, H, x0, y0, w, h, rgb, t=2):
                 if 0 <= y < H and 0 <= px < W:
                     o = (y * W + px) * 3
                     buf[o:o + 3] = bytes(rgb)
+
+
+def blit_vendor_offer(buf, W, H, x0, y0, vendor_grid, item_grid, heart_grid,
+                      price, pal, scale):
+    """32-wide black plate above the vendor: default heart cost + item.
+
+    Bottom edge stops at the cloak's first opaque row so the box sits on
+    the hood, not over the face. Caller blits the vendor afterwards.
+    """
+    head = 8
+    if vendor_grid is not None:
+        for y, row in enumerate(vendor_grid):
+            if any(is_ink(p) for p in row):
+                head = y
+                break
+    bw, bh = 32 * scale, 18 * scale
+    bx, by = x0, y0 + head * scale - bh
+    # Playfield crop has no HUD; a vendor on the first row has no room
+    # above the hood, so sit beside the cloak instead of clipping.
+    if by < 0:
+        by = y0
+        bx = x0 + 32 * scale
+        if bx + bw > W:
+            bx = max(0, x0 - bw)
+    fill_rect(buf, W, H, bx, by, bw, bh, (0, 0, 0))
+    outline_rect(buf, W, H, bx, by, bw, bh, (255, 255, 255), t=max(2, scale))
+
+    inset = scale
+    ix, iy = bx + inset, by + inset
+    iw, ih = bw - 2 * inset, bh - 2 * inset
+    item_w = 16 * scale
+    left_w = max(0, iw - item_w)
+
+    heart_rgb = icon_rgb(heart_grid, pal) if heart_grid is not None else None
+    hs = scale
+    hh = len(heart_rgb) * hs if heart_rgb else 0
+    hw = len(heart_rgb[0]) * hs if heart_rgb else 0
+    label = str(price) if price is not None else ""
+    tw = len(label) * 4 * scale
+    th = 5 * scale if label else 0
+    gap = scale if (heart_rgb and label) else 0
+    stack_h = hh + gap + th
+    sy = iy + max(0, (ih - stack_h) // 2)
+    if heart_rgb:
+        blit_rgb(buf, W, H, ix + max(0, (left_w - hw) // 2), sy, heart_rgb, hs)
+        sy += hh + gap
+    if label:
+        roomperm.draw_text(buf, W, ix + max(0, (left_w - tw) // 2), sy,
+                           label, scale, (255, 255, 255))
+    if item_grid is not None:
+        item = icon_rgb(item_grid, pal)
+        if item and item[0]:
+            ihg, iwg = len(item), len(item[0])
+            twi, thi = iwg * scale, ihg * scale
+            blit_rgb(buf, W, H,
+                     ix + left_w + max(0, (item_w - twi) // 2),
+                     iy + max(0, (ih - thi) // 2),
+                     item, scale)
 
 
 def blit_badge(buf, W, H, x0, y0, rgb_grid, scale):
@@ -554,14 +786,37 @@ def cell_px(cx, cy, scale):
     return cx * 16 * scale, (nt_row - roomperm.PLAY_TOP) * 8 * scale
 
 
-def stamp_block(rom, buf, W, H, stage, room, cx, cy, scale):
+def object_px(ox, oy, origin, scale):
+    """Object-list 8px tiles + SAT bbox origin -> cropped playfield px.
+
+    l61c2h unpacks Attr (Y<<4|X) to pixel DE: E=Y, D=X into spawn_actor
+    (same screen space as scenery_pos_xy). actor_sat_build adds shape
+    (dx,dy). Composite (0,0) is min(dx,dy): walkers/dogs dy=-16 (feet at
+    spawn); hang pose 0x81 is dy=-15 (hook at spawn).
+
+    Crop the same way as cell_px / map_cell_at: nt_row = (Y-0x10)/8, then
+    drop PLAY_TOP. playfield_draw starts nametable row 2 at screen Y=0x20,
+    so subtracting only PLAY_TOP (16px) parks the SAT composite 16px into
+    the floor (dogs) or the ceiling (bats).
+    """
+    bx, by = origin
+    nt_row = oy - 2
+    return (ox * 8 + bx) * scale, ((nt_row - roomperm.PLAY_TOP) * 8 + by) * scale
+
+
+def stamp_block(rom, buf, W, H, stage, room, cx, cy, scale, span=32):
     tiles = roomperm.playfield_atlas(rom, stage, room)
     pal = gfxdump.vk_playfield_palette(rom.rom, stage, room)
-    ids = BLOCK_COURT if stage == 0 else BLOCK_CASTLE
+    if span == 16:
+        ids = BLOCK_COURT_2 if stage == 0 else BLOCK_CASTLE_2
+        cols = 2
+    else:
+        ids = BLOCK_COURT if stage == 0 else BLOCK_CASTLE
+        cols = 4
     tw = 8 * scale
     x0, y0 = cell_px(cx, cy, scale)
     for i, tid in enumerate(ids):
-        tr, tc = divmod(i, 4)
+        tr, tc = divmod(i, cols)
         cell = roomperm.nametable_cell(tiles, tid)
         px, py = x0 + tc * tw, y0 + tr * tw
         for y in range(8):
@@ -573,7 +828,9 @@ def stamp_block(rom, buf, W, H, stage, room, cx, cy, scale):
                         if 0 <= qx < W and 0 <= qy < H:
                             o = (qy * W + qx) * 3
                             buf[o:o + 3] = bytes(col)
-    outline_rect(buf, W, H, x0, y0, 32 * scale, 32 * scale, GOLD, t=max(2, scale))
+    # One game-pixel outline plus one extra inward (candle uses colour 14).
+    outline_rect(buf, W, H, x0, y0, span * scale, span * scale, BLOCK_RGB,
+                 t=max(2, scale) + scale)
 
 
 def icon_rgb(grid, pal):
@@ -581,12 +838,14 @@ def icon_rgb(grid, pal):
 
 
 def render_annotated(rom, data, stage, by_id, pal, enemy_grids,
-                     spike_grid=None, candle=None, brazier=None):
+                     spike_grid=None, candle=None, brazier=None, vendor=None,
+                     enemy_origin=None, pad_art=None, platform_tbl=None):
     n = roomperm.minimap_room_count(rom, stage)
     scenery = scenery_for_stage(rom, stage)
     entry = roomperm.door_table_entry(rom, stage)
     spots = [s for s in roomperm.parse_spots(rom) if s["stage"] == stage]
     stand = brazier if stage == 0 else candle
+    origins = enemy_origin or {}
     images = []
     for col in range(n):
         grid = roomperm.decode_room(rom, stage, col)
@@ -594,15 +853,20 @@ def render_annotated(rom, data, stage, by_id, pal, enemy_grids,
         buf = bytearray(raw)
         recs = scenery[col] if col < len(scenery) else []
         for cx, cy, attr, extra in recs:
-            kind, bonus, hidden = classify(attr, extra)
+            kind, bonus, hidden, reveal = classify(attr, extra)
             x0, y0 = cell_px(cx, cy, SCALE_MAP)
             g = by_id.get(bonus)
-            if kind == "block":
-                stamp_block(rom, buf, W, H, stage, col, cx, cy, SCALE_MAP)
+            if kind in ("block", "block16"):
+                stamp_block(rom, buf, W, H, stage, col, cx, cy, SCALE_MAP,
+                            16 if kind == "block16" else 32)
+            draw = reveal if hidden else kind
+            if draw in ("block", "block16"):
                 if g is not None:
-                    blit_badge(buf, W, H, x0 + 8 * SCALE_MAP, y0 + 8 * SCALE_MAP,
+                    inset = 0 if kind == "block16" else 8
+                    blit_badge(buf, W, H,
+                               x0 + inset * SCALE_MAP, y0 + inset * SCALE_MAP,
                                icon_rgb(g, pal), SCALE_MAP)
-            elif kind == "candle":
+            elif draw == "candle":
                 if stand is not None:
                     blit_rgb(buf, W, H, x0, y0, icon_rgb(stand, pal), SCALE_MAP)
                 if g is not None and bonus:
@@ -610,32 +874,41 @@ def render_annotated(rom, data, stage, by_id, pal, enemy_grids,
                     if bx + 16 * SCALE_MAP > W:
                         bx = x0 - 16 * SCALE_MAP
                     blit_badge(buf, W, H, bx, y0, icon_rgb(g, pal), SCALE_MAP)
-            elif kind == "chest":
+            elif draw == "chest":
+                # 32x32 covering wall: scenery Y is the stamp origin; the
+                # revealed chest (and kind-3 drops) spawn at Y+16, sitting
+                # in the bottom half. Visible floor chests keep the record Y.
+                cy0 = y0 + (16 * SCALE_MAP if hidden else 0)
                 if 25 in by_id:
-                    blit_rgb(buf, W, H, x0, y0, icon_rgb(by_id[25], pal), SCALE_MAP)
+                    blit_rgb(buf, W, H, x0, cy0, icon_rgb(by_id[25], pal), SCALE_MAP)
                 if g is not None:
                     bx = x0 + 16 * SCALE_MAP
                     if bx + 16 * SCALE_MAP > W:
                         bx = x0 - 16 * SCALE_MAP
-                    blit_badge(buf, W, H, bx, y0, icon_rgb(g, pal), SCALE_MAP)
-            elif kind == "floor":
+                    blit_badge(buf, W, H, bx, cy0, icon_rgb(g, pal), SCALE_MAP)
+            elif draw == "floor":
                 if g is not None:
                     blit_badge(buf, W, H, x0, y0, icon_rgb(g, pal), SCALE_MAP)
-            elif kind == "vendor":
-                if g is not None:
-                    blit_badge(buf, W, H, x0, y0, icon_rgb(g, pal), SCALE_MAP)
-                else:
-                    outline_rect(buf, W, H, x0, y0, 16 * SCALE_MAP, 16 * SCALE_MAP,
+            elif draw == "vendor":
+                # 32x32 at stamp Y (vendor_draw LMMM). Reveal vendors do not
+                # get the chest/kind-3 Y+16. Colour 0 is transparent.
+                # Offer plate first so the cloak composites on top of it.
+                prices = VENDOR_PRICE.get(bonus)
+                blit_vendor_offer(
+                    buf, W, H, x0, y0, vendor, g, by_id.get(1),
+                    prices[0] if prices else None, pal, SCALE_MAP)
+                if vendor is not None:
+                    blit_rgb(buf, W, H, x0, y0, to_rgb(vendor, pal), SCALE_MAP)
+                elif g is None:
+                    outline_rect(buf, W, H, x0, y0, 32 * SCALE_MAP, 32 * SCALE_MAP,
                                  (200, 200, 240), t=2)
         for sid, bit7, ox, oy in roomperm.decode_objects(rom, stage, col):
             slug = OBJECT_SLUG.get(sid)
             eg = enemy_grids.get(slug) if slug else None
-            x0 = ox * 8 * SCALE_MAP
-            y0 = (oy - roomperm.PLAY_TOP) * 8 * SCALE_MAP
+            x0, y0 = object_px(ox, oy, origins.get(slug, (0, 0)), SCALE_MAP)
             if eg:
-                rgb = to_rgb(crop_grid(eg, pad=0), None)
-                # shrink tall bosses: blit at 1:1 source pixel inside scale-2 map
-                blit_rgb(buf, W, H, x0, y0, rgb, 1)
+                rgb = to_rgb(eg, None)
+                blit_rgb(buf, W, H, x0, y0, rgb, SCALE_MAP)
             else:
                 outline_rect(buf, W, H, x0, y0, 16 * SCALE_MAP, 16 * SCALE_MAP,
                              (70, 120, 210), t=2)
@@ -677,6 +950,29 @@ def render_annotated(rom, data, stage, by_id, pal, enemy_grids,
             y0 = (0x60 - roomperm.PLAY_TOP * 8) * SCALE_MAP
             for x in (0x3C, 0x7C, 0xBC):
                 blit_rgb(buf, W, H, x * SCALE_MAP, y0, rgb, SCALE_MAP)
+        pad = (pad_art or {}).get(stage)
+        for py, px, step, span in (platform_tbl or {}).get((stage, col), ()):
+            # Visual top = table Y. Travel = span-1 (reverse tick does not move).
+            x_end = px + step * (span - 1)
+            x0 = min(px, x_end)
+            w = abs(x_end - px) + 32
+            if pad is not None:
+                bx, by = sat_crop(px, py, SCALE_MAP)
+                blit_rgb(buf, W, H, bx, by, to_rgb(pad, None), SCALE_MAP)
+            sx, sy = sat_crop(x0, py, SCALE_MAP)
+            # Outline on top of the deck; top edge inset 1 game px.
+            outline_rect(buf, W, H, sx, sy + SCALE_MAP,
+                         w * SCALE_MAP, (16 - 1) * SCALE_MAP,
+                         PAD_PATH_RGB, t=max(2, SCALE_MAP))
+        for room, slug, px, py in BOSS_SPAWNS.get(stage, ()):
+            if room != col:
+                continue
+            eg = enemy_grids.get(slug)
+            if not eg:
+                continue
+            bx, by = origins.get(slug, (0, 0))
+            x0, y0 = sat_crop(px + bx, py + by, SCALE_MAP)
+            blit_rgb(buf, W, H, x0, y0, to_rgb(eg, None), SCALE_MAP)
         images.append((W, H, bytes(buf)))
     pos, gw, gh = roomperm.layout(rom, stage, n)
     W, H, sheet = roomperm.contact_sheet(images, pos, gw, gh, gap=8,
@@ -724,14 +1020,15 @@ def portrait_md(kind, slug, title, href):
     )
 
 
-def emit_stage_page(rom, stage, scenery):
+def emit_stage_page(rom, stage, scenery, platform_tbl=None):
     n = roomperm.minimap_room_count(rom, stage)
     items, weapons, enemies = {}, {}, {}
     vendors = []
     for col, recs in enumerate(scenery):
         for cx, cy, attr, extra in recs:
-            kind, bonus, hidden = classify(attr, extra)
-            if kind == "vendor":
+            kind, bonus, hidden, reveal = classify(attr, extra)
+            listed = reveal if hidden else kind
+            if listed == "vendor":
                 href = item_href(bonus)
                 vendors.append((col, bonus, href))
             elif bonus:
@@ -756,6 +1053,9 @@ def emit_stage_page(rom, stage, scenery):
             enemies.setdefault("igor", set()).add(6)
     if stage == 6:
         enemies.setdefault("spike-bars", set()).add(1)
+    for (st, col), recs in (platform_tbl or {}).items():
+        if st == stage and recs:
+            enemies.setdefault("floating-pad", set()).add(col)
 
     title = "Courtyard" if stage == 0 else "Stage %02d" % stage
     if stage in BOSS:
@@ -796,7 +1096,7 @@ def emit_stage_page(rom, stage, scenery):
     if enemies:
         lines += ["## Enemies", "", '<div class="roster">']
         for slug in sorted(enemies, key=lambda s: ENEMY_TITLE.get(s, s)):
-            kind = "hazards" if slug == "spike-bars" else "enemies"
+            kind = "hazards" if slug in ("spike-bars", "floating-pad") else "enemies"
             name = ENEMY_TITLE.get(slug, slug)
             rooms = ", ".join(str(r) for r in sorted(enemies[slug]))
             href = "/manual/bestiary/#" + slug
@@ -847,10 +1147,11 @@ def main():
     named.update(named_h)
     by_id, pal, candle, brazier = dump_icons(data, named)
     print("enemies")
-    enemy_grids = dump_enemies(data)
+    enemy_grids, enemy_origin = dump_enemies(data)
     print("vendor / hazards")
-    dump_vendor(data)
+    vendor = dump_vendor(data)
     spike_grid = dump_hazards(data)
+    pad_art, platform_tbl = dump_platforms(data)
     blob = enemy_grids.get("blob-blue")
     if blob is not None:
         by_id[21] = blob
@@ -858,8 +1159,9 @@ def main():
     for stage in range(19):
         scenery = scenery_for_stage(rom, stage)
         render_annotated(rom, data, stage, by_id, pal, enemy_grids, spike_grid,
-                         candle, brazier)
-        emit_stage_page(rom, stage, scenery)
+                         candle, brazier, vendor, enemy_origin,
+                         pad_art, platform_tbl)
+        emit_stage_page(rom, stage, scenery, platform_tbl)
     copy_audio()
     print("done")
 

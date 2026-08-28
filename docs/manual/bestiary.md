@@ -231,6 +231,17 @@ Stage 6, room 1 only. Not an enemy: no HP, no death. They drop fast and crawl ba
 </div>
 
 <div class="entry">
+{% include portrait.html kind="hazards" slug="floating-pad" name="Moving platform" %}
+<div class="body">
+
+## Moving platform {#floating-pad}
+
+Stages 5 and 10. Not an enemy: no HP, no hurt. A 32-pixel deck that slides left and right on its own. Stand on it and it carries you. The maps show the pad where it starts, with a white outline for the rest of the path. Jumping up, you pass through; coming down, you land.
+
+</div>
+</div>
+
+<div class="entry">
 {% include portrait.html kind="enemies" slug="giant-bat" name="Giant bat" %}
 <div class="body">
 

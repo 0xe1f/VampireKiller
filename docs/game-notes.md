@@ -52,11 +52,30 @@ them against `game_master_sig` (0x5CF0: `00 30 31 13 35 AA`). Match →
 `0xE600 = 0xFF`, no match → `0`. Nothing else ever writes `0xE600`, so all three
 features below are strictly gated on the cartridge being present.
 
-That address is the **last six bytes** of a 16 KB cartridge page mapped at
-0x4000-0x7FFF, i.e. the very tail of the Game Master ROM — so the six bytes are
-an arbitrary fingerprint, not an encoded ID string (they are not ASCII, and they
-don't spell RC-735 under the `vk` offset either). Confirming them against a
-Game Master ROM dump is still open; we don't have one in `references/`.
+Confirmed against a 16 KB RC-735 dump: those six bytes **are** the tail of
+Game Master (file offset 0x3FFA = CPU 0x7FFA when the cart is mapped at
+0x4000). The last two, `35 AA`, are Konami's standard 16K product stamp —
+BCD last-two-digits of RC-735 plus the 0xAA marker, the same scheme as
+Yie Ar Kung-Fu (`0A 25 AA`), King's Valley (`06 27 AA`), and the rest of
+the 16K lineup. The four bytes in front are just whatever preceded that
+stamp in the ROM (0x30 0x31 happen to read as ASCII `"01"`). VK tests the
+whole six-byte window.
+
+**The cart does not poke Vampire Killer.** Game Master 1 identifies later
+games by a word at CPU 0x4010 (`"AB"` = 0x4241 or `"CD"` = 0x4443) or, failing
+that, by summing 256 bytes at 0x5000 against a built-in table. VK's
+`gm_opt_tbl` (0x4010) is a CD-relative option table written with extra
+zeroes (`43 00 44 00 07 00 44 00` …) so the word at 0x4010 is 0x0043, not
+0x4443; the checksum 0x7B24 is not in GM's list either. If Game Master
+boots in slot 1 it will not recognise this ROM. The working setup is the
+inverse: Vampire Killer boots, fingerprints the other slot, and runs its
+own pause / menu / continue code. The table still names the RAM that
+menu writes (`0xC411` HUD STAGE, `0xD000` stage max 18, `0xC410` lives,
+`0xC405` score) — a handshake GM1 never reads.
+
+The 4th word of that table is BCD **44**. Published catalog numbers are
+RC-745 (Japan) / RC-749 (Europe); the in-ROM Game Master field does not
+match either.
 
 **1. Pause / frame advance** — `gm_pause_check` (seg0 0x40C5) gets first look at
 the keyboard from `int_handler`, ahead of the game tick:
@@ -168,7 +187,7 @@ type 18 in a boss room) use the shared meter `0xC418`; the rest die when
 | 0x1A | `actor_blob_blue` | Candle blob. Bonus-21 slime hatches this if left to land. First in stage 4 (hub 1). 1 HP, 2 SAT cells (shape `0x9B`/`0x9C`). SAT `0F 42`. Sprites `spr_blob` / `spr_blob_cc`. |
 | 0x1B | `actor_blob_red` | Same tick; hub 3+ (stages 10+). SAT `08 42`. |
 | 0x1C | `actor_blob_white` | Same tick; hub 2 (stages 7–9). SAT `0E 42`. |
-| 0x26 | `actor_reward` | Candle/chest drop. Sparkles, falls, then `drop_spawn` with bonus id in `+0x1F`. Not on the enemy sheet. |
+| 0x26 | `actor_reward` | Non-heart candle/chest drop. Cycles SAT colour, falls, then `drop_spawn` with bonus id in `+0x1F`. Hearts use `actor_flame` instead. Not on the enemy sheet. |
 | 0x27–0x2A | intro SAT | `actor_intro_sky` / `_sky_a` / `_sky_b` / `_simon`. Spawned by `intro_scene_build`; poses `0x94`, `0x92`/`0x93`, `0x98`. |
 
 Per-frame `ix+1` machines (DISPATCH_A or `dec a`/`jr z`) are named in
@@ -312,7 +331,7 @@ The world is a hierarchy: **hub → stage → room**.
   the chest's reward latches as its own bonus id (observed **0x13 / 19** once) and
   spawns into the object (0xC490) + pickup (0xC500) lists.
 - **Lockpick** — an alternative to the yellow key: a lockpick opens **3 chests** before it
-  disappears (expected to seed **0xC700 = 3** instead of 1 — unconfirmed).
+  disappears (`bonus_lockpick` writes **0xC700 = 3**).
 
 *Reversing hooks:* expect per-stage state for **key held (white / yellow / lockpick
 charges)**, **door locked/unlocked**, **chest opened** flags, and a **room/stage/hub
@@ -328,10 +347,13 @@ index is a RAM trio:
 - **0xD000 = stage** (0 = courtyard, 1-18 = the 18 stages).
 - **0xD001 = room** within the stage (increments walking right).
 Each hub's packed stream holds 3 stages × up to 16 room slots × up to 4 objects.
-Per object: **list-id = actor type** (`l61c2h` → `spawn_actor+2` with
+Per object: **list-id = actor type** (`l61c2h` → `spawn_actor_ab` with
 `C = id&0x7F`; names in `segments/actors.inc`). Bit7 is stored then stripped;
 only `actor_dog` ever sets it (3 of 6; role unknown — not facing in the actor
-slot). Attr packs the in-room cell (hi nibble X, lo nibble Y, each ×16 px).
+slot). Attr packs the in-room cell the same way as scenery: **Y<<4|X**, each
+nibble ×16 px. `l61c2h` loads high→E (Y / `spawn_actor` +03) and low→D (X /
++05). A decoder that treated it as X<<4|Y swapped the axes — dogs and bats
+looked one cell off on Y whenever the nibbles differed by 1.
 Stage 0 (courtyard) has no object-list entries — `l61c2h` does `dec a; ret m`.
 `D000`/`D001` are stage/room **indices**,
 not map coordinates — room positions come from `minimap_room_pos` (see below).
@@ -346,19 +368,27 @@ hub table — `scenery_list_lookup` 0x5A9F returns it when `D000==0`). Grammar i
 `scenery_unpack` (0x5A63) expands into **0xE000** (3×16×24 bytes); `scenery_room_load`
 (0x5B22) instantiates the current room into **0xC470** (8 candle/block slots), **0xC500**
 (floor items/chests), and **0xC5B5**/**0xC5C5** (vendors). Record: pos (hi
-nibble Y, lo nibble X, ×16 px), attr; attr `0x7F` adds a third reveal byte
-(whipped block → chest or vendor). **attr bits7-5**: `000` floor pickup, `001`
-candle/brazier, `011` 32×32 breakable block (stamped over the nametable).
-bits7-6 `10` = chest; `11` = vendor. bits4-0 = bonus id. Stage 18 room 9
-(Dracula) is omitted and stays empty. ~620 records.
+nibble Y, lo nibble X, ×16 px), attr; attr `0x7F` is a 32×32 covering wall
+plus a third reveal byte (whipped block → chest or vendor). **attr bits7-5**:
+`000` floor pickup, `001` candle/brazier, `010` 16×16 block (engine-ready,
+unused in the packed stream), `011` 32×32 breakable block (stamped over the
+nametable). bits7-6 `10` = chest; `11` = vendor. bits4-0 = bonus id. Stage 18
+room 9 (Dracula) is omitted and stays empty. ~620 records.
 
 **Breakable walls** are scenery blocks (`attr 0x60–0x7F`), not extra tile types.
 `scenery_room_load` sets C470 `+04=3`; the first `brazier_tick` saves the
 nametable under the slot (`block_save_under` → 0xE4A0) then `block_stamp`s a
 4×4 of brick ids (`block_tiles_castle`: 01/02/0A/0B) into VRAM **and** D100,
-so the wall is solid. Whip → `brazier_destroyed` restores the saved tiles
-(`block_restore_map_4x4` / `_vram_4x4`), zeros the E000 pos byte, and
-`drop_spawn`s the bonus. Slime (`0x15`) skips the flame and goes to a C500
+so the wall is solid. **`attr 0x7F` is still this wall** (bits7–5 = `011`,
+bonus `0x1F`, bit7 clear): load stamps the bricks and stores the extra byte
+in C470 `+09`. Whip → `brazier_destroyed` restores the saved tiles, then
+spawns the reveal: a chest at **Y+16** (bottom half of the 4×4, same offset
+as a kind-3 drop) or a vendor at the stamp origin (32×32 LMMM, no offset).
+Ordinary whip drops also use Y+16 on kind 3. `010` would be a 16×16 stamp
+(kind 2); the packed stream never uses it.
+
+Whip of a non-reveal wall zeros the E000 pos byte and `drop_spawn`s the
+bonus. Slime (`0x15`) skips the flame and goes to a C500
 slot that hatches `actor_blob_blue` / `_red` / `_white` if left to land.
 
 Wall-slime (`attr 0x75`) rooms: **s06r0** (6,10)/(8,10)/(10,10); **s08r0**
@@ -450,7 +480,7 @@ built from four 16×16 SAT cells. They exist only on **stages 5 and 10**.
 | off | meaning |
 | ---: | --- |
 | +0 | slot id, 1 or 2; 0 = free |
-| +1 | Y, the fixed row (SAT Y is `+1 − 1`) |
+| +1 | Y, the visual row (SAT writes this minus 1) |
 | +2 | X, the only thing that moves |
 | +3 | step, signed px/tick, negated at each end point |
 | +4 | span, ticks per sweep before reversing |
@@ -473,9 +503,15 @@ already zeroed `0xC470..0xC6FF` on room load, which includes the C598 pool.
 `0xD4E0`, slot 2 to `0xD648`/`0xD520`. Cell geometry comes from
 `platform_sat_ofs` — `{0,D0} {0,D4} {0x10,D0} {0x10,D4}` — so the four cells are
 two X positions × two patterns, and the pattern is shifted by `+8` off stage 5
-to give each hub its own deck artwork. The colour bytes alternate with the CC
+to give each hub its own deck artwork (`gfx_rle_a066` @ FE80 for D0/D4;
+`gfx_rle_a0a8` @ FEC0 for D8/DC). The colour bytes alternate with the CC
 bit (`0x40`) set on the second of each pair, so cells 0+1 and 2+3 OR together
 into one two-colour 16×16 half each: **2/4 on stage 5, 9/0xC on stage 10**.
+SAT Y is table Y−1 (MSX SAT is the line above the sprite); `platform_overlap`
+compares Simon against table Y, the visual top. Guide maps blit at table Y
+minus `playfield_draw`'s dest Y (`0x20`), with a white box from spawn X to
+spawn + step×(span−1) — the reverse tick does not move. The box is drawn on
+top of the deck, top edge inset 1 px.
 
 Simon's side runs from `platform_stand_test` (0x852B), called by
 `simon_action_tick` every frame *before* the action-state dispatch so `0xC439`
@@ -807,7 +843,7 @@ writes throw dir to `C468` (1=left, 0=right), sets projectile slot `C460` type
 (state 2) each frame does `Y += 2*l7084h[phase]` — `l7084h` is the signed dY
 table also used by hurt knockback — and `X += velX` (`projectile_integrate`). It lands when
 `sub_7b9fh` sees a solid tile, plays sfx `0x18`, and goes to state 3: a **24-frame
-flame** on the floor (SAT patterns `0xF4`/`0xF8`, same spark as a falling heart;
+flame** on the floor (SAT patterns `0xF4`/`0xF8`, same `actor_flame` sheet as a falling heart;
 pixels in `gfx_rle_a185`). SAT path `l759ch` paints that state **colour 8** (red).
 
 **Damage.** Unlike the knife (type 2), a hit does **not** despawn the vial
@@ -881,7 +917,7 @@ stage changes.
       0xC700-0xC70F inventory or the 0xC416 weapon (hence "temporary"). The weapon
       pickup path (`l8d77h`, bonus >= 0x1A) falls straight through into this same
       code, so grabbing a whip upgrade also arms a short no-spawn window.
-    - 0xC440 is a per-frame countdown: `sub_75c7h` (seg1) decrements it each frame in
+    - 0xC440 is a per-frame countdown: `timers_tick` (seg1) decrements it each frame in
       the timer bank (`room_edge_detect/75c7/75e9/...`).
     - The enemy spawner (seg0 **room_spawner @0x5EBF**) is called every frame from the
       actor-update loop (seg2 0x98F0) whenever 0xD010==0 (normal play). Its first act
@@ -1097,7 +1133,17 @@ Shared physics header (`actor_integrate` 0x99C0, velocity helpers in seg3):
 | +7F | spawn / `shot_alloc` write 1; no readers found yet |
 
 Hardware SAT is **Y then X**. `actor_sat_build` adds `ix+3` to Y and `ix+5` to
-X. An F8 dump that showed the dog's "X" at +02/+03 was a mis-index of the Y
+X. Spawn pixel is the feet / hook: walker shapes sit at dy=-16 or -32, 16×16
+hang and fly poses use stream `0x81` (dy=-15, dx=-8). Object-list Attr is
+**Y<<4|X** (same as scenery); `l61c2h` loads high→E (Y) and low→D (X). A
+decoder that treated it as X<<4|Y swapped the axes — dogs/bats looked one
+cell off on Y whenever the nibbles differed by 1.
+
+Actor Y is screen space (`playfield_draw` paints nametable row 2 at Y=0x20).
+`map_cell_at` is `(Y-0x10)>>3`, so Y=0x20 → row 2. Guide maps crop nametable
+rows 0–1 then blit the SAT composite at spawn + min(dx,dy) using that same
+row formula; subtracting only the 16px HUD crop parked walkers in the floor.
+An F8 dump that showed the dog's "X" at +02/+03 was a mis-index of the Y
 pixel, not a per-type layout.
 
 SAT sub-block at `slot|0x20`, stride 5 (`actor_sat_patterns` 0x6030,
@@ -1179,7 +1225,7 @@ HUD/title strings are authored with `vk` (ASCII−0x10) in seg0 `l4c07h` /
 ASCII `'0'`–`'_'`), one `defb %xxxxxxxx` row per scanline in
 `segments/data/font_hud.asm`. `hud_font_load` (seg0 0x53BD, from
 `title_build`) expands them via `glyph_blit_run` (ink C=0x0E) onto VRAM
-page 1 at Y=`0x40`. Drawing is HMMM from that atlas (`sub_4aeeh`, source Y
+page 1 at Y=`0x40`. Drawing is HMMM from that atlas (`hud_glyph_blit`, source Y
 += `0x38`). Sheet: `gfx/fonts/font_hud.png` (`make gfx`). The 8x8 1bpp
 ending-credits glyphs are a different sheet in `segments/data/font_credits.asm`:
 seg14 `credits_font` (0x8824: digits 0-9 then `. ' : ,`) and `credits_font_az`
@@ -1451,7 +1497,9 @@ Catalogued so far:
   4bpp `dracula_body_closed` / `dracula_body_open` (seg13 0xB5A1 / 0xB719)
   loaded to page-1 Y=`0x80` by `dracula_body_load`. The 16×16s at page-1 Y=`0xA0`
   (`dracula_portrait_parts`) are the wall portrait's eyes and mouth — closed
-  during the figure fight, then animated after he dies. Event 6 also spawns
+  during the figure fight, then animated after he dies (`dracula_ce35_tick`:
+  `dracula_blit_eyes_open`/`_closed`, mouth closed/open; the in-between frame
+  composites those two, there is no mid-mouth tile). Event 6 also spawns
   **type 0x2E** `actor_dracula_chunk` (six debris chunks after type 17 dies; shape `0x5A`), **type
   0x2D** `actor_dracula_head` (intro SAT head `0x57`/`0x59` arcs away after `dracula_summon`), and **type
   0x2C** `actor_dracula_bat` (robe `0x02` / `0xA5`, then head `0xA6` open /

@@ -201,7 +201,7 @@ def emit_hud_font(rom: bytes) -> None:
         "; HUD/title strings are vk (ASCII-0x10); space is 0x00 (copies the",
         "; ink-0 blit of hud_font_solid at VRAM (0,0)).  hud_font_load",
         "; (seg0 0x53BD) expands these via glyph_blit_run to page 1 at Y=0x40,",
-        "; ink 0x0E.  Drawing is HMMM from that atlas (sub_4aeeh, Y += 0x38).",
+        "; ink 0x0E.  Drawing is HMMM from that atlas (hud_glyph_blit, Y += 0x38).",
         "; Each defb is one row, MSB = left pixel.  Not the credits font.",
         "; Preview: gfx/fonts/font_hud.png.  Source: data/font_hud.asm.",
         "hud_font:",
@@ -1419,7 +1419,7 @@ RLE_NAMES = {
 # Packed order is not grouping order: knife/cross, then skull pile /
 # flying skull, then gfx_rle_a3de, then axe.  Section comments only.
 RLE_GROUPS = (
-    (0xA066, "frontend / vdoor / fireball"),
+    (0xA066, "moving pads / vdoor / fireball"),
     (0xA24E, "thrown knife / cross"),
     (0xA2E5, "skull pile / flying skull"),
     (0xA3DE, "room extra"),
@@ -1773,6 +1773,8 @@ def emit_seg9_10(rom: bytes) -> None:
         packed = bytes(peek(rom, start + i) for i in range(plen))
         extra = ""
         extra_cmt = {
+            0xA066: "moving pad (stage 5 SAT D0/D4 @ FE80)",
+            0xA0A8: "moving pad (stage 10 SAT D8/DC @ FEC0)",
             0xB051: "actor_blob_blue/_red/_white fill (FE80/FE00/FB80/FD00)",
             0xB07A: "actor_blob_blue/_red/_white SAT CC outline",
             0xA0EA: "vertical door (load_vdoor_sprites)",
@@ -2057,8 +2059,10 @@ def emit_seg15(rom: bytes) -> None:
     )
     plines = [
         "; Dracula portrait 16x16 4bpp (seg15 0xBBD8): 4 eye + 4 mouth tiles.",
-        "; dracula_portrait_parts_load / _mirror (l4a97h) blit to page-1 Y=0xA0;",
+        "; Loaded to page-1 Y=0xA0 (eyes X=0..0x30, mouths X=0x40..0x70);",
         "; mouth copies are H-mirrored to X=128.",
+        "; User-confirmed: 0xBBD8/0xBC58 eyes open, 0xBCD8/0xBD58 eyes closed,",
+        "; 0xBDD8/0xBE58 mouth closed, 0xBED8/0xBF58 mouth open.  No mid-mouth tile.",
         "; Uncompressed 16x16 4bpp (SCREEN 5).  Each defb is one pixel-row",
         "; (8 bytes, high nibble = left).  Sixteen rows = one tile (128 bytes).",
         "; Preview: gfx/tilesets/dracula_portrait_parts.png (`make gfx`); cell header = CPU address.",

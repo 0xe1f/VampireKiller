@@ -18,13 +18,13 @@ Some candle drops are [slime]({{ '/manual/items/#slime' | relative_url }}). Catc
 
 ## Game Master cartridge
 
-Konami sold a cheat cart (RC-735). Plug it in next to the game and three extra manners appear:
+Konami sold a cheat cart (RC-735). Plug it in next to the game and three extra manners appear — they live in Vampire Killer, not in the cart. The cart is only a key:
 
 - **STOP** pauses; **;** while paused steps one frame.
 - Starting from the title opens a stage / lives menu instead of the intro.
 - Game over offers **F5** to continue.
 
-Without the cart, none of that exists.
+Without the cart, none of that exists. Game Master's own menu does not recognise this ROM.
 
 ## What death takes
 

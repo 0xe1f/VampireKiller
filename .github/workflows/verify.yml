@@ -22,7 +22,7 @@ jobs:
 
       - name: Build sjasmplus
         run: |
-          git clone --depth 1 --branch v1.24.0 https://github.com/z00m128/sjasmplus.git /tmp/sjasmplus
+          git clone --recursive --branch v1.24.0 https://github.com/z00m128/sjasmplus.git /tmp/sjasmplus
           make -C /tmp/sjasmplus
           cp /tmp/sjasmplus/sjasmplus tools/sjasmplus
 

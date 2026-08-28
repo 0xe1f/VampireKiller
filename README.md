@@ -86,3 +86,12 @@ Regenerate handbook art with `make guide`.
 
 See `docs/game-notes.md` for reverse-engineering notes and `docs/progress.md`
 for current status and next steps.
+
+## License
+
+Original work in this repository (tools, comments, documentation, labels,
+and project structure) is licensed under the Apache License, Version 2.0.
+See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
+
+*Vampire Killer* (*Akumajō Dracula*) is © 1986 Konami. This project does
+not relicense the original game, ROM, graphics, or music.

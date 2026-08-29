@@ -1145,31 +1145,18 @@ use `room_event_ce10` → C409.
 
 ## Next tracing session (resume plan)
 
-The traced CocoaMSX build now lives in `~/code/cocoamsx-disasm` (not this repo).
-Build / run / diff from there:
+Workbench CocoaMSX how-to (launch, present, socket, gotchas) is in MSXDAW
+skill `msx-cocoamsx` and `tools/workbench/cocoamsx/tools/disasm/README.md`.
+VK RAM / WATCH presets stay here.
 
-```
-~/code/cocoamsx-disasm/tools/disasm/build-cocoamsx.sh
-WATCH=... ~/code/cocoamsx-disasm/tools/disasm/trace-run.sh VampireKiller.rom
-~/code/cocoamsx-disasm/tools/disasm/snapdiff.py generated/disasmsnap.bin
-```
+**State snapshots (F9 / `cocoamsx-ctl snap`).** Dump the work-RAM window
+(default 0xC000-0xDFFF, set `SNAPRANGE`) to `generated/disasmsnap.bin`.
+This works with EXEC and WATCH both empty. Snap before an action, snap after,
+then diff offline:
 
-The setup works: `build-cocoamsx.sh` then `trace-run.sh` (software GL
-is forced by default; Input Monitoring must be granted to the built .app once -
-see the tracer notes below).  The tracer only logs bank switches unless EXEC
-and/or WATCH ranges are given, and it reads them once at launch (change ranges =
-relaunch = replay from the logo).
-
-**State snapshots (F9).** New this session: press **F9** in the emulator to dump
-the whole work-RAM window (default 0xC000-0xDFFF, set `SNAPRANGE`) to the
-snapshot file (`generated/disasmsnap.bin`, set `SNAP`).  This works with EXEC and
-WATCH both empty, so it needs no pre-chosen ranges and no replay-on-change - just
-play, snap, keep playing.  The intended workflow is "snap before an action, snap
-after", then diff offline:
-
-  ~/code/cocoamsx-disasm/tools/disasm/snapdiff.py generated/disasmsnap.bin        # diff each consecutive pair
-  ~/code/cocoamsx-disasm/tools/disasm/snapdiff.py -l generated/disasmsnap.bin     # list captured snapshots
-  ~/code/cocoamsx-disasm/tools/disasm/snapdiff.py -a 0 -b 1 -r c400-c4ff ...      # pick snaps + restrict range
+  tools/workbench/cocoamsx/tools/disasm/snapdiff.py generated/disasmsnap.bin
+  tools/workbench/cocoamsx/tools/disasm/snapdiff.py -l generated/disasmsnap.bin
+  tools/workbench/cocoamsx/tools/disasm/snapdiff.py -a 0 -b 1 -r c400-c4ff …
 
 Output is "addr: old -> new" per changed byte, which reads directly against the
 live RAM map below.  This is the fastest way to find *where* a counter/flag lives
@@ -1179,7 +1166,7 @@ kept missing.
 
 **Habit: always diff the score on every recording.**  Score is 3-byte BCD at
 **0xC405-0xC407** (main byte 0xC406, value x100).  Track it across the whole take
-with `~/code/cocoamsx-disasm/tools/disasm/snapdiff.py -t c405-c407` and note the delta for each pickup / kill /
+with `tools/workbench/cocoamsx/tools/disasm/snapdiff.py -t c405-c407` and note the delta for each pickup / kill /
 hit - it's a reliable, quantitative fingerprint of what an action was "worth"
 (e.g. chest = +5400, whipping a candle/object = +100, heart pickup = +0).  Points
 are always multiples of 100, so watch 0xC406.
@@ -1188,9 +1175,9 @@ are always multiples of 100, so watch 0xC406.
 `add_score` (seg0 0x44F5); enemy/destructible kills come via `award_kill_score`
 (seg2 0x81B2) using the per-type value table `l81d5h` (already decoded inline).
 When a recording shows a score delta, tie it back to the responsible code path and
-add/confirm the point value in the annotation (and here).  (Impl: F9 is caught in CMKeyboardManager's IOHID callback under
-`#ifdef DISASMTRACE` and swallowed; disasmTraceRequestSnapshot() sets a flag that
-R800's fetch loop honours at the next opcode via the CPU's own RAM reader.)
+add/confirm the point value in the annotation (and here).  (F9 / `snap` is the
+display-view responder chain → `disasmTraceRequestSnapshot`; the R800 fetch loop
+honours it at the next opcode.)
 
 Highest-value next capture is leftover SAT shape ids (task 4), not inventory:
 those C40x bytes are already `ram.inc`. Death and bosses are named from static
@@ -1538,7 +1525,7 @@ free the floor slot. RAM: `scenery_slots` 0xC470, `pickup_slots` 0xC500.
 - After any edit, run `make verify` before moving on.
 - Reusable methodology (for disassembling OTHER Konami MSX games later) lives in
   workspace skills at `.agents/skills/` (`konami-msx-disasm`, `msx-regen`,
-  `msx-romscan`, `msx-konami-gfx`, `msx-gfx-sheets`). Runtime tracing lives in
-  `~/code/cocoamsx-disasm`.
+  `msx-romscan`, `msx-konami-gfx`, `msx-gfx-sheets`). Runtime tracing:
+  MSXDAW skill `msx-cocoamsx` (`tools/workbench/cocoamsx`).
   When we discover a generally-useful pattern/tool/gotcha, fold it into those skills
   (keep them lean - they load every session) and keep VK-specific findings here.

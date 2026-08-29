@@ -361,9 +361,11 @@ Gotchas:
 ## Companion skills
 
 - `msx-regen` — `regen-bank.sh`, `bank_sym.py`, `strip-listing.py`, `split-rom.sh`
+- `msx-code-data` — early code/data split (`.blocks`, bank roles, DISPATCH_A)
 - `msx-romscan` — xref / jump-table decode
 - `msx-konami-gfx` — RLE + ASCII `gfxview.py` (not labelled PNG sheets)
 - `msx-gfx-sheets` — `gfxdump.py` contact sheets
 
-Runtime tracing (instrumented CocoaMSX, snapshot diffs) lives in
-`~/code/cocoamsx-disasm`, not this repo.
+- `msx-cocoamsx` — workbench CocoaMSX research display (launch, snap, live
+  WATCH, `cocoamsx-ctl`, savestates). VK RAM/WATCH presets stay in this file
+  and `docs/progress.md`.

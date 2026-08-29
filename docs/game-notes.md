@@ -1015,7 +1015,7 @@ in these sheets.
   the screen edge, Y = SimonY−8. The roc is fixed at X=0xE0, Y=0x30 or 0x40,
   and skips the spawn if Simon X ≥ 0xC0.
 - Each generator is rate-gated by `spawn_rate_gate` (per-generator 0xCF00+ counter vs a
-  threshold table, scaled by the 0xD012 difficulty/mood). The spawn **position is
+  threshold table, scaled by the 0xD012 difficulty tier). The spawn **position is
   hardcoded** — it is **NOT** read from the tile map. This is why the small 08/05
   tile pair (see "Room geometry") is *not* a generator: its positions don't line
   up with spawns, and rooms spawn regardless of whether the pair is present.
@@ -1033,81 +1033,16 @@ in these sheets.
   holy water (jump+LEFT/RIGHT), 5 each.
 - **Life refills** — small orbs during play, or **vials** bought from vendors.
 
-### Vendors (runtime-confirmed, seg2 @ 0x92AE–0x9552)
+### Vendors
 
-A vendor is a hidden "cloaked sitting person" revealed by whipping a wall. He is
-**not** a normal 0xC800 actor — he lives in the special-object list at 0xC5B5
-(2 slots of 0x10 bytes) and keeps his transaction state in the 0xC700 block.
-The figure is uncompressed 4bpp (`vendor_tiles` at seg10 `0xBDA7`, eight 8×8
-tiles). `hud_cache_load` builds five 32×32 copies in page-1 Y=`0xA0` with nibble
-`0xF` (the cloak) replaced from `vendor_recolor_tbl`; `vendor_draw` LMMMs one
-slot onto the playfield (colour 0 skip). Event 6 overwrites that cache with
-`dracula_portrait_parts` (no vendors in stage 18 room 9). Assembled preview:
-`gfx/vendor.png`.
+Full map (whip scripts, `0xD012` difficulty, shop, catalogue): **[docs/vendor.md](vendor.md)**.
 
-| Addr   | Meaning |
-|--------|---------|
-| 0xC702 | bible price-modifier flags: bit6 = **black bible** (id 0x10, doubles price), bit7 = **white bible** (id 0x11, halves). Mutually exclusive — each bible clears the other's bit. Set by the collect_bonus handlers at 0x8E24 / 0x8E2D; cleared on reset. |
-| 0xC703 | latched vendor object id |
-| 0xC704/5 | vendor on-screen position |
-| 0xC706 | **offer countdown timer** (armed to 0x14 = 20; ticks every 0x20 frames) |
-| 0xC707 | **price in hearts** (packed BCD, e.g. 0x50 = 50) |
-| 0xC708 | **offered item** = bonus id (0x1B = knife) |
-| 0xC709 | previous button state (edge detection for buy/refuse) |
-| 0xC70B | **cloak recolor slot** 0..4 (from `vendor_state_action_tbl`): 0 magenta / 1 red / 2 grey / 3 white / 4 blue. Idle draws slot 3; a whip reaction flickers 2 vs this id, then `vendor_draw` LMMMs that 32×32 from page-1 Y=`0xA0`. |
-| 0xC70C | **whip-outcome state** (0..6) driving the dispatch |
-| 0xD012 | persistent vendor "mood" tier (0..3), raised/lowered by whips |
-
-**Whipping the vendor** runs a small state machine. Each hit calls
-`vendor_pick_outcome` (0x92C2): it walks a transition table (0x9307, 8-byte rows
-selected by the vendor variant), and for the "random" states (≥7) flips a coin
-using the Z80 **R refresh register** as an RNG — this is why the same actions
-produce different results run to run. The resulting state 0xC70C is executed by
-`vendor_outcome_dispatch` (0x92AE):
-
-| 0xC70C | Outcome |
-|--------|---------|
-| 0 | register the hit (set 0xC40C, latch vendor id) |
-| 1 | raise mood 0xD012 (cap 3) |
-| 2 | lower mood 0xD012 (floor 0) |
-| 3 | **give Simon +5 hearts** (sfx 0x0F) |
-| 4 | **take 5 hearts from Simon** (sfx 0x1D) |
-| 5 | **nothing** (points at a bare `ret`) |
-| 6 | **vendor leaves** (sfx 0x10, then **awards +5000 points**) |
-
-So the full spectrum a player sees while whipping: hearts added, hearts removed,
-nothing, an offer appears, or he leaves. Score only changes on **departure**
-(+5000 via `ld de,0x5000 / jp 0x44F3` → `add_score`); individual whips do not add
-score (a whip that "does nothing" is outcome 5).
-
-**Making / taking an offer** (`vendor_make_offer` 0x938E, called by the resident
-vendor state machine at seg0 `l4411h` while seg2 is paged in): picks the item
-(`vendor_set_offer_item` 0x9406 → 0xC708) and its price, and starts the 0xC706
-timer. Price comes from `vendor_price_tbl` (0x942F), 9 rows of
-`{item id, normal, halved, doubled}`; `vendor_select_price` (0x941F) picks the
-column from the 0xC702 bible flags:
-
-| Item (bonus id) | normal | white bible (½) | black bible (×2) |
-|-----------------|--------|-----------------|------------------|
-| 0x0E (candle)   | 20     | 15              | 60               |
-| 0x12 (lockpick) | 30     | 20              | 60               |
-| 0x03 (red shield)| 20    | 10              | 60               |
-| 0x04 (yellow shield)| 20 | 10              | 80               |
-| 0x0A (hourglass)| 40     | 20              | 80               |
-| 0x16 (potion)   | 40     | 15              | 80               |
-| 0x1E (holy water)| 30    | 10              | 50               |
-| 0x1D (cross)    | 20     | 10              | 80               |
-| 0x1B (knife)    | 50     | 30              | 90               |
-
-While an offer is on screen, `vendor_purchase_tick` (0x94C1) counts the 0xC706
-timer down and polls the controls via `vendor_read_buttons` (0x9526, joystick
-triggers + keyboard **SPACE row 8 = confirm**, **SHIFT row 6 = refuse**,
-edge-detected through 0xC709):
-
-- **SPACE / trigger** and hearts ≥ price → deduct the price (`spend_hearts`) and
-  grant the item (`collect_bonus`), sfx 0x12.
-- **SHIFT / refuse**, can't afford, or timer expires → offer withdrawn, sfx 0x02.
-- nothing pressed → offer stays open.
+A vendor is a hidden cloaked figure, not a `0xC800` actor — two slots at
+`0xC5B5`/`0xC5C5`. Attr bits1–0 pick one of four 8-whip scripts. Outcomes
+are mutually exclusive: shop, ±5 hearts, shrug, leave (+5000), or ±1 on
+the global difficulty byte `0xD012` (same tier hub-clear already bumps;
+speed/spawn only, not damage). Script 1 is +5, +5, then one difficulty-up;
+script 2 has one difficulty-down on whip 7. Preview: `gfx/vendor.png`.
 
 ## Actors (C800 / D700)
 
@@ -1534,7 +1469,7 @@ Catalogued so far:
   Igor (`actor_igor`, type `18`) gets his own sheet; he is not on the group
   sheet. Defeat chunk `0x5A` is on the type-17 sheet. Same `make gfx` pass.
 - `vendor.png` - the cloaked sitting vendor as five 32×32 colour variants
-  (C70B 0..4: hearts / hit / flash / idle / mood). Assembled from
+  (C70B 0..4: hearts / hit / flash / idle / difficulty). Assembled from
   `data/vendor_tiles.asm` plus `vendor_tile_ptr` / `vendor_recolor_tbl`.
   Palette is HUD-fixed. Derived (`make gfx`); the 8 source 8×8s are also
   `gfx/tilesets/vendor_tiles.png`.

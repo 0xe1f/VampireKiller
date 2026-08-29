@@ -1,7 +1,8 @@
 # Progress
 
 Running status of the disassembly. `docs/game-notes.md` holds the detailed
-reverse-engineering findings; this file is the high-level checklist.
+reverse-engineering findings; `docs/vendor.md` is the vendor / `0xD012`
+map; this file is the high-level checklist.
 
 ## End goal
 
@@ -434,14 +435,15 @@ Fully migrated banks (0-15) have no `.bin`.
     * **Vendor fully mapped (seg2 0x92AE-0x9552).** Not a 0xC800 actor - lives in
       the special-object list at 0xC5B5; transaction state in the 0xC700 block:
       0xC706 offer timer, 0xC707 price (BCD), 0xC708 offered item (0x1B = knife),
-      0xC702 bible flags, 0xC70C whip-outcome state, 0xD012 mood tier (0..3).
+      0xC702 bible flags, 0xC70C whip-outcome state, 0xD012 difficulty
+      tier (0..3; also hub-advance; vendor scripts 1/2 nudge it — see
+      `docs/vendor.md`).
     * **Whip-outcome state machine**: each hit runs `vendor_pick_outcome` (0x92C2)
       - a transition table (0x9307, rows per vendor variant) plus the **R refresh
       register as RNG** for the branchy states (>=7); result 0xC70C executed by
-      `vendor_outcome_dispatch` (0x92AE). Outcomes 0..6 = register-hit / mood++ /
-      mood-- / **+5 hearts** (sfx 0x0F) / **-5 hearts** (sfx 0x1D) / **nothing**
-      (bare ret) / **leave**. This is the full spectrum the player observes; the
-      RNG is why timing/results vary run to run.
+      `vendor_outcome_dispatch` (0x92AE). Outcomes 0..6 = register-hit /
+      D012++ / D012-- / **+5 hearts** (sfx 0x0F) / **-5 hearts** (sfx 0x1D) /
+      **nothing** (bare ret) / **leave**. Full script table: `docs/vendor.md`.
     * **Score**: only the **leave** path adds score - **+5000** via
       `ld de,0x5000 / jp 0x44F3` (add_score). Confirmed by 0xC405-07 00 00 00 ->
       00 50 00 at idx 2722, right after the vendor left (0xC70C=6 at idx 2697).
@@ -1311,6 +1313,9 @@ free the floor slot. RAM: `scenery_slots` 0xC470, `pickup_slots` 0xC500.
 
 ## Working notes
 
+- Vendors / `0xD012` difficulty: `docs/vendor.md` (scripts 0–3, shop,
+  speed/spawn readers, 33-entry catalogue). `0xD012` is not a private
+  “mood”; script 1 whip 4 does `D012++`, script 2 whip 7 does `D012--`.
 - Actor SAT streams (`data/actor_shape.asm`, from `SHAPE_ID_NAME` in
   `tools/emit_identified_data.py`) are named `shape_*` where the pose is
   confirmed. ix+0B ids are `pose_*` in `segments/poses.inc` (same stems,

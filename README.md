@@ -28,7 +28,7 @@ segments/           one file per paging window (fills through 0xC000)
   actors.inc etc.   small numeric ids (actor/item/weapon/sfx/pose/scenery/event/state/dir)
 tools/              game-specific helpers (gfx sheets, maps, PSG)
   workbench/        MSXDAW submodule (regen, romscan, RLE, PSG)
-docs/               reverse-engineering notes (`game-notes.md`, `progress.md`)
+docs/               reverse-engineering notes (`game-notes.md`, `vendor.md`, `progress.md`)
 gfx/                readable graphics catalogue (PNG sheets committed; `make gfx`)
                     sprites/ packed 1bpp sprite-asm sheets; tilesets/ 4bpp
                     playfield/title; palettes/ palette_apply swatches;
@@ -53,7 +53,11 @@ You need **sjasmplus**, built from source
 required to assemble or verify. (`make gfx` / `make music` / `make sfx` and
 bank regen use the `tools/workbench` submodule.)
 
+After a clone with the submodule, link generic agent skills into this repo
+(not `~/.cursor/skills`):
+
 ```sh
+make skills     # tools/workbench/bin/install-skills -> .cursor/skills/
 make verify     # assemble, then SHA-1 check against VampireKiller.sha1
 ```
 
@@ -88,8 +92,9 @@ and `gfx/metatiles/mtile_stream_intro.png` (cell header = CPU of the
 (`roomperm.py --composite`; rooms, scenery, enemies, vendors). `gfx/minimap_sNN.png` is the schematic
 F2-minimap layout.
 
-See `docs/game-notes.md` for reverse-engineering notes and `docs/progress.md`
-for current status and next steps.
+See `docs/game-notes.md` for reverse-engineering notes, `docs/vendor.md` for
+the vendor / difficulty-tier map, and `docs/progress.md` for current status
+and next steps.
 
 ## License
 

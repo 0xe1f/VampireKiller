@@ -24,3 +24,6 @@ __pycache__/
 
 # OS cruft
 .DS_Store
+
+# Workbench skill links (`make skills` / tools/workbench/bin/install-skills).
+.cursor/skills/

@@ -46,7 +46,7 @@ relative to this repo root.
   `banks_*.blocks` (code/data split maps, one per paging window). Anything needed to reassemble or
   regenerate belongs here.
 - `docs/` — `progress.md` (checklist + RAM map + working notes), `game-notes.md`
-  (detailed findings).
+  (detailed findings), `vendor.md` (vendor scripts, shop, `0xD012`).
 - `tools/workbench/` — reusable MSX/Konami helpers (`msx/regen-bank.sh`,
   `split-rom.sh`, `strip-listing.py`, `romscan.py`, `bank_sym.py`, `gfxview.py`;
   `konami/` RLE and packed-PSG). Do not copy this tree; it is the submodule.

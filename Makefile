@@ -6,6 +6,7 @@
 #   make gfx        PNG sheets + annotated stage composites
 #   make music      BGM WAVs
 #   make sfx        SFX WAVs
+#   make skills     symlink workbench skills into .cursor/skills/
 #   make clean      remove build output
 #
 # Prerequisite: tools/sjasmplus (built from source, gitignored)
@@ -18,7 +19,7 @@ SHA1FILE := VampireKiller.sha1
 ASM      ?= tools/sjasmplus --longptr
 SHA1SUM  ?= $(shell command -v sha1sum 2>/dev/null || echo "shasum -a 1")
 
-.PHONY: all verify clean segments gfx music sfx
+.PHONY: all verify clean segments gfx music sfx skills
 
 all: $(SRC)
 	$(ASM) $(SRC)
@@ -42,3 +43,6 @@ music:
 
 sfx:
 	python3 tools/psgplay.py --sfx
+
+skills:
+	tools/workbench/bin/install-skills

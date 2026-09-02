@@ -3,8 +3,8 @@
 [![verify](https://github.com/0xe1f/VampireKiller/actions/workflows/verify.yml/badge.svg)](https://github.com/0xe1f/VampireKiller/actions/workflows/verify.yml)
 [![in source](https://img.shields.io/endpoint?style=flat&url=https://raw.githubusercontent.com/0xe1f/VampireKiller/badges/in-source.json)](https://github.com/0xe1f/VampireKiller/actions/workflows/verify.yml)
 [![named](https://img.shields.io/endpoint?style=flat&url=https://raw.githubusercontent.com/0xe1f/VampireKiller/badges/named.json)](https://github.com/0xe1f/VampireKiller/actions/workflows/verify.yml)
-[![comments](https://img.shields.io/endpoint?style=flat&url=https://raw.githubusercontent.com/0xe1f/VampireKiller/badges/commented.json)](https://github.com/0xe1f/VampireKiller/actions/workflows/verify.yml)
-[![subs](https://img.shields.io/endpoint?style=flat&url=https://raw.githubusercontent.com/0xe1f/VampireKiller/badges/subs.json)](https://github.com/0xe1f/VampireKiller/actions/workflows/verify.yml)
+[![op comments](https://img.shields.io/endpoint?style=flat&url=https://raw.githubusercontent.com/0xe1f/VampireKiller/badges/op-comments.json)](https://github.com/0xe1f/VampireKiller/actions/workflows/verify.yml)
+[![sub comments](https://img.shields.io/endpoint?style=flat&url=https://raw.githubusercontent.com/0xe1f/VampireKiller/badges/sub-comments.json)](https://github.com/0xe1f/VampireKiller/actions/workflows/verify.yml)
 
 > This project is a human-guided, largely AI-executed workflow.
 

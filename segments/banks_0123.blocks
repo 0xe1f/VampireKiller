@@ -170,6 +170,8 @@ break_chip_dy: start 0x892F end 0x8942 type bytedata
 pickup_state_tbl: start 0x8A94 end 0x8AA0 type worddata
 ; Hub-1 -> blob colour when slime hatches; courtyard (hub 0) despawns.
 blob_hatch_type: start 0x8AF7 end 0x8AFF type bytedata
+; C500 item SAT colour cycle (same 08 01 0E 01 as reward_sat_col).
+pickup_sat_cols: start 0x8CC4 end 0x8CC8 type bytedata
 ; SAT colour cycle for actor_reward (red / black / white / black).
 reward_sat_col: start 0x9C60 end 0x9C64 type bytedata
 ; Initial CF00 spawn-rate values (7 used; last byte pad before spawn_rate_gate).

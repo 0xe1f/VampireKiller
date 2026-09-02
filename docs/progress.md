@@ -941,16 +941,15 @@ Fully migrated banks (0-15) have no `.bin`.
 **Play-window labels (banks 0–3).** Next pass: rename the remaining z80dasm
 `lXXXXh` locals in `segments/banks_0123.asm` when the site is in front of
 you and the purpose is confirmed (`konami-msx-disasm` — definition + every
-reference + `msx.sym`; do not bulk-guess). Counts: **795** auto locals
-left, **0** `sub_XXXXh`; **1,245 / 2,040** labels already named (61.0%).
-By CPU page: bank 0 **159**, bank 1 **197**, bank 2 **207**, bank 3 **232**.
-This pass named the brazier/candle stamp path (`candle_anim` / `_flame` /
-`_frame` / `_flame_go` / `candle_blit`, `block_tileset` / `block_stamp_go`,
-`map_save_2x2` / `_4x4` / `map_copy_rows`, `candle_outline_box`), then
-block break (`block_break` / `_2x2`, `scenery_drop_xy`, `break_chip_go`,
-`reveal_vendor`, `scenery_white_key` / `white_key_spawn`), plus
-`hud_leather_icon` and `atlas_lmmm16`. Typical still-live example: `l89a5h`
-(scenery drop: alloc a C500 slot after the optional flame).
+reference + `msx.sym`; do not bulk-guess). Counts: **698** auto locals
+left, **0** `sub_XXXXh`; **1,342 / 2,040** labels already named (65.8%).
+By CPU page: bank 0 **159**, bank 1 **197**, bank 2 **110**, bank 3 **232**.
+This pass named spike-bar / platform inners (`spike_bar_copy` / `_up` / `_dy` /
+`_blit`, `spike_bars_slot`, `platform_scan` / `_seed` / `_skip` / `_slot` /
+`_next` / `_turn` / `_add_x`, `platform_sat_*`) plus door hold and the
+vendor slot / offer / price locals through `vendor_purchase_poll`. Typical
+still-live example: `l9589h` (minimap_driver: open map screen after spending
+a use).
 Same pass: per-opcode comments at column 32 when the line is confirmed
 (currently ~9% of play instructions). Graphics / map / sound leftover
 streams are inventoried in `docs/unused.md` (`gfx/**/unused_*.png`).
@@ -1283,7 +1282,9 @@ Known live RAM map (runtime-confirmed this session):
          (colours 2/4 on stage 5, 9/0xC on stage 10).  +5/+6 are skipped by
          platform_load because actor_state_reset already zeroed 0xC470-0xC6FF.
          See game-notes "Moving platforms".
-  0xC5A6 wall-break chips: 2 x 3 bytes (`break_chip_tick`).
+  0xC5A6 wall-break chips: 2 x 3 bytes (`chip_slots` / `break_chip_tick`).
+         +0 age (0=free; bit7 = fly left), +1 Y, +2 X. Right chip seeds 1,
+         left 0x84. SAT: two cells at the same XY, patterns 0xE0/0xE4.
   0xC800 actor slots: 7 slots, stride 0x80 (0xC800, 0xC880, … 0xCB80). Same
          0x80-byte layout as the 8 D700 shot slots. Allocated by `spawn_actor`
          (seg0 0x5F24); SAT helpers `actor_sat_patterns` / `actor_sat_assign`.
@@ -1473,20 +1474,36 @@ free the floor slot. RAM: `scenery_slots` 0xC470, `pickup_slots` 0xC500.
   lose_weapon, shot_throw, shot_spawn, shot_alloc, shot_bone, shot_tick,
   shot_type_tick, fireball, medusa_snake, mummy_bandage, shot_axe, shot_sickle,
   actors_tick, c800_tick, pickup_tick, vendor_tick, break_chip_tick,
-  break_chip_spawn/move/sat/dy, chip_fill16, drop_fx_spawn, pickup_slot_write,
-  drop_own_weapon_heart, pickup_slot_alloc, pickup_state_tick, pickup_state_tbl,
-  pickup_appear/fall/stamp/idle/hop, pickup_try_collect, chest_spill,
-  pickup_sat_draw, bonus_icon_blit, pickup_save_under, pickup_restore_under,
+  break_chip_spawn/seed/slot/next/move/left/fall/add_y/kill_x/kill/sat/sat_slot/sat_cell/dy,
+  chip_fill16/_loop, drop_fx_spawn, drop_fx_reward/go,
+  pickup_slot_appear/_done, pickup_link_e000, pickup_slot_write,
+  drop_own_weapon_heart, pickup_slot_alloc/scan/ok, pickup_tick_slot/_next,
+  pickup_state_tick, pickup_state_tbl,
+  pickup_appear/appear_sat/hatch_blob/hatch_done/fall/hide/bounce/bounce_x/land,
+  pickup_stamp/stamp_timer/idle/free/hop, pickup_try_collect/collect_go/clear_e000, chest_spill,
+  pickup_sat_draw, pickup_sat_sparkle/_pat/_heart/_item/_y/_emit/_fill/_col,
+  hourglass_tip/_2, bonus_icon_blit, pickup_save_under, pickup_restore_under,
+  pickup_restore_cell/_next,
   pickup_collect, already_have_key, sat_fill, hittable_rearm_scan, actor_floor_test,
   hazard_tick, hurt_simon_spikes, spike_bar_overlap,
-  spike_bars_seed_once, spike_bars_seed, spike_bar_seeds,
-  spike_bars_run, spike_bar_slot_tick, spike_bars_restore,
-  platform_tick, platform_load, platform_tbl, platform_move,
-  platform_sat_build, platform_sat_cells, platform_sat_ofs, platform_fill16,
+  spike_bars_seed_once, spike_bars_seed, spike_bar_copy, spike_bar_seeds,
+  spike_bars_run, spike_bars_slot, spike_bar_slot_tick, spike_bar_up/_dy/_blit,
+  spike_bars_restore,
+  platform_tick, platform_load, platform_scan/_seed/_skip, platform_tbl,
+  platform_slot/_next, platform_move, platform_turn, platform_add_x,
+  platform_sat_build/_pick/_attr/_pal/_paint/_cells/_cell/_pat, platform_sat_ofs,
+  platform_fill16/_loop, door_anim_hold,
+  vendor_offer_scan/_done, vendor_tick_slot, vendor_reveal, vendor_whip,
+  vendor_flash_arm, vendor_whip_leave, vendor_flash/_col, vendor_appear,
+  vendor_redraw_slot, vendor_force_hit_slot/_next, vendor_trans_idx,
+  vendor_rng_pair/_pick, vendor_recolor, vendor_bubble_right/_pos,
+  vendor_offer_text, vendor_price_scan/_inc/_store/_blit, vendor_de00_chk/_base,
+  vendor_glyph_loop, vendor_purchase_poll,
   platform_stand_test, platform_overlap (seg1: platform_carry_simon),
   actor_type_tick, actor_tick_tbl, vendor_outcome_tbl, vendor_hit_latch,
   vendor_leave, award_kill_score, collect_bonus_apply, inv_or_c701/c702,
-  hud_weapon_icon, hud_bonus_refresh, spawn_rate_gate, spawn_pick_pos,
+  hud_weapon_icon, hud_bonus_tile/hmmm/scan, hud_chest_key_id, hud_bonus_refresh,
+  chest_try_open/spend/ok/key/dup_key, spawn_rate_gate, spawn_pick_pos,
   spawn_edge_gate,
   minimap_build, minimap_room_pos, minimap_stage_ptr, minimap_room_count,
   actor_pickup_init, actor_reward_init/go, reward_sat_col, merman_splash_init;
@@ -1543,7 +1560,7 @@ free the floor slot. RAM: `scenery_slots` 0xC470, `pickup_slots` 0xC500.
   `state.inc` (`main_*` / `act_*` at the two jump tables), `dir.inc`
   (`dir_*` at `room_edge_detect` / portal), `ram.inc`
   (player stats plus Simon combat / CE00–CE16 / CF00 / C470 / C500 / C580 /
-  C598 / C5AC / C800 / D700; CE03/CE08 stay hex — no writer / no reader).
+  C598 / C5A6 / C5AC / C800 / D700; CE03/CE08 stay hex — no writer / no reader).
   Data files and the play banks (`banks_0123`, `banks_bcd`) use them at
   confirmed sites. Skip-for-later (`sfx_tbl` left next to the
   driver, door 8×8 tiles, emit of the new tables): see

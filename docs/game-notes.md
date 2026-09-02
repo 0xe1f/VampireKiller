@@ -1596,7 +1596,7 @@ item ids. Vendor scenery attrs stay hex (bits5–2 = offer slot, not `item_*`).
   `simon_invuln`, `bonus_flags`, `sapphire_ring`, `swing_weapon`, `blue_gem`,
   `hourglass_timer`, `hurt_facing`, `rosary_timer`, `simon_on_plat`,
   `cell_event`, `scenery_slots`, `pickup_slots`, `spike_slots`,
-  `platform_slots`, `door_state`, `actor_slots`,
+  `platform_slots`, `chip_slots`, `door_state`, `actor_slots`,
   `shot_slots`, `spawn_slot_*`, …).
   Play banks use `sfx_*` / `equip_*` / `pose_*` / `actor_*` / `item_*` /
   `evt_*` / `main_*` / `act_*` / `dir_*` at call sites (`evt_*` at `cell_event_tbl`

@@ -111,6 +111,7 @@ pickup_slots:            equ 0xC500  ; floor items / chests
 ; Hazards / movers / door (inside the 0xC470-0xC6FF wipe).
 spike_slots:             equ 0xC580  ; 3 x 8 bytes; stage 6 room 1 only
 platform_slots:          equ 0xC598  ; 2 x 7 bytes; stages 5 and 10
+chip_slots:              equ 0xC5A6  ; 2 x 3 bytes; wall-break chips
 door_state:              equ 0xC5AC  ; 0xFF blit / 1 armed / 3 open / 0x04 court
 door_y:                  equ 0xC5AD  ; pixel Y; word store also writes door_x
 door_x:                  equ 0xC5AE

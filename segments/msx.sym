@@ -703,6 +703,7 @@ door_proximity: equ 0x8587	; carry if Simon (B=Y,C=X) overlaps door at C5AD=Y / 
 door_prox_right: equ 0x8593	; facing right: X+8
 door_prox_test: equ 0x8597	; Y window 0x38, X window 8
 door_anim_tick: equ 0x914e	; 0xC5AC door state: 0xFF -> door_blit_tiles; 3 = opening frames
+door_anim_hold: equ 0x916f	; keep C5AC = 3 after the 0x2C opening frames
 door_begin_open: equ 0x9175	; if C5AC==1, set 0xFF and jp door_anim_tick (start opening)
 collect_bonus: equ 0x8d33	; apply picked-up bonus id A (latch 0xC419, table @ 0x8D45)
 collect_bonus_apply: equ 0x8d37	; collect_bonus without queuing play_sound
@@ -750,17 +751,24 @@ lose_weapon: equ 0x8E9A		; missed catch: C416=0, refresh HUD
 inv_or_c701: equ 0x8e74	; OR B into inventory bitfield 0xC701
 inv_or_c702: equ 0x8e79	; OR B into bible/candle flags 0xC702
 hud_weapon_icon: equ 0x8ea1	; draw equipped-weapon HUD icon from C416
-hud_bonus_refresh: equ 0x8eed	; redraw C701 bonus icons (map/hourglass/shields/holy)
 hud_bonus_tile: equ 0x8ead	; blit bonus id A as 16x16 HUD tile at DE
+hud_bonus_hmmm: equ 0x8eb8	; jp vram_hmmm16 (ids 1-16 Y=0x50, 17+ Y=0x60)
 hud_keys_refresh: equ 0x8ebb	; yellow-key/lockpick lamp then white-key lamp
 hud_white_key_icon: equ 0x8ec1	; C701 bit0 -> bonus 0x18 at (0xA4,0x0C)
 hud_chest_key_icon: equ 0x8ed0	; C701 bit1/2 + C700 -> yellow key or lockpick lamp
+hud_chest_key_id: equ 0x8eeb	; A = lockpick or yellow key
+hud_bonus_refresh: equ 0x8eed	; redraw C701 bonus icons (map/hourglass/shields/holy)
+hud_bonus_scan: equ 0x8ef7	; walk C701 bits 7..3
 hud_bonus_icon: equ 0x8f0c	; one C701 bit7..3 icon from hud_bonus_pos
 hud_bonus_pos: equ 0x8f20	; 5 x {X, bonus id} for map/hourglass/shields/holy
 pickup_popup_show: equ 0x8f2a	; C5E5=FF, C5E6=0x20, blit C419 at (0xD0,0x0C)
 hud_bonus_clear: equ 0x8f51	; HMMV blank 64x16 at (0xB8,0x0C) page 0
 pickup_popup_tick: equ 0x8f5c	; C5E5 popup countdown; 0 -> hud_bonus_refresh
-chest_try_open: equ 0x8f6f	; if chest (id 0x19) spend C700; CY/A=1 if locked
+chest_try_open: equ 0x8f6f	; if chest (id 0x19) spend C700; NZ if locked
+chest_spend: equ 0x8f81	; C700--, sfx_chest, Z
+chest_try_ok: equ 0x8f87	; Z: ok to collect
+chest_try_key: equ 0x8f8a	; yellow/white: already_have_key
+chest_dup_key: equ 0x8f96	; C701 & B
 projectile_hit_actors: equ 0x8025	; C450/C460 vs C800
 projectile_hit_apply: equ 0x8053	; overlap: sfx, fodder HP or weapon_hit_damage
 projectile_hit_fodder: equ 0x8061	; ix+0D -= fodder_dmg_tbl[type-2]
@@ -852,23 +860,41 @@ block_restore_map_4x4: equ 0x88a0
 tiles_to_map_4x4: equ 0x88a3	; mid: 4x4 tile ids from caller HL into D100
 tiles_to_map: equ 0x88be	; copy BxC tile ids into D100 at HL, stride 0x20
 break_chip_spawn: equ 0x88ce	; two chips at DE: right then left
+break_chip_seed: equ 0x88d4	; write one 3-byte C5A6 slot
 break_chip_tick: equ 0x88df	; 2 x C5A6 wall-break chips
+break_chip_slot: equ 0x88e4	; one chip: move + SAT if live
+break_chip_next: equ 0x88f1	; stride 3 to the next slot
 break_chip_move: equ 0x88f9	; X ±2, Y += break_chip_dy[age]
+break_chip_left: equ 0x890a	; X -= 2
+break_chip_fall: equ 0x890f	; age++, add signed dY
+break_chip_add_y: equ 0x8921	; Y += dY; kill if Y >= 0xD4
+break_chip_kill_x: equ 0x8929	; X wrapped: back up to Y then kill
+break_chip_kill: equ 0x892a	; Y=0xE0, +0 free; falls into dy inc l; ret
 break_chip_dy: equ 0x892f	; dY by chip age; bytes 0-1 are also `inc l; ret`
 break_chip_sat: equ 0x8942	; two chips -> SAT + colour lines
+break_chip_sat_slot: equ 0x894a	; one chip: two SAT cells, same XY
+break_chip_sat_cell: equ 0x8951	; copy Y/X, write pattern E0 then E4
 chip_fill16: equ 0x8979	; fill 16 colour bytes (break-chip SAT)
+chip_fill16_loop: equ 0x897b
 hud_leather_icon: equ 0x8980	; page-1 (80, 0x70) leather whip HUD
 vram_hmmm16: equ 0x8984	; HMMM 16x16 from page 1 at (A*16, L)
 candle_blit: equ 0x8991	; playfield flame: atlas Y=0x70, A=frame
-scenery_drop: equ 0x8996	; bonus B at DE -> C500; slime skips flame
+scenery_drop: equ 0x8996	; bonus B at DE -> C500; slime/empty skip flame
 scenery_drop_slot: equ 0x8999
-drop_spawn: equ 0x89ea	; flame+C500, or slime directly to scenery_drop_slot
+pickup_slot_appear: equ 0x89a5	; C500: live 1, XY, bonus B; +5=2 unless heart/slime
+pickup_slot_appear_done: equ 0x89c2	; write +6 timer and ret
 drop_fx_spawn: equ 0x89c6	; flame (heart) or actor_reward at DE
+drop_fx_reward: equ 0x89db	; C = actor_reward
+drop_fx_go: equ 0x89dd	; spawn_actor_ab; Z = spawned (skip C500)
+drop_spawn: equ 0x89ea	; flame+C500, or slime directly to scenery_drop_slot
 pickup_slot_write: equ 0x89f7	; C500: live 0x83, XY, bonus B, +5=FF
 white_key_spawn: equ 0x8a04	; C500 white key; C70D = E000 pos
+pickup_link_e000: equ 0x8a12	; +0E/+0F = E000 pos from C70D
 pickup_spawn_chest: equ 0x8a1a	; C500 chest container (id 25), contents in +0x0D
 drop_own_weapon_heart: equ 0x8a30	; dropping equipped subweapon -> small heart
 pickup_slot_alloc: equ 0x8a3e	; first free C500 slot; Z+HL, else NZ
+pickup_slot_scan: equ 0x8a44	; walk 8 x stride 0x10
+pickup_slot_ok: equ 0x8a4f	; pop BC, ret (Z=found / NZ=full)
 shot_death_flame: equ 0x9a21	; actor_free + shot_spawn kind 0xFF (type 12 flame)
 actor_cull: equ 0x9a41	; CFFF=1 then actor_kill_go (white cross / actors_kill_all)
 actor_kill: equ 0x9a45	; CFFF=0 then actor_kill_go (whip/touch; may drop)
@@ -879,53 +905,113 @@ kill_drop_roll: equ 0x9ac5	; skip if CE00; type 0x0E four flames; else bag/heart
 kill_drop_pos: equ 0x9b29	; DE = (X, Y - kill_drop_dy[type])
 kill_drop_dy: equ 0x9b3a	; Y subtract per type; byte 0 is also the routine's ret
 pickup_tick: equ 0x8a51	; 8 x C500 floor items/chests
+pickup_tick_slot: equ 0x8a5a	; one C500 slot: state + SAT
+pickup_tick_next: equ 0x8a6a	; stride 0x10 to the next slot
 pickup_state_tick: equ 0x8a74	; C500 +0 dispatch; +3==1 -> pickup_try_collect
 pickup_state_tbl: equ 0x8a94	; (state-1) -> appear/fall/stamp/idle/hop
 pickup_appear: equ 0x8aa0	; 16-frame settle; slime hatches blob
+pickup_appear_sat: equ 0x8abe	; +5 SAT mode; heart also arms bounce
+pickup_hatch_blob: equ 0x8ad7	; slime -> actor_blob_*; courtyard despawns
+pickup_hatch_done: equ 0x8af4	; jp pickup_hide (jr target from courtyard)
 pickup_fall: equ 0x8aff	; +0x0810 gravity; bounce or land
+pickup_hide: equ 0x8b22	; +5=0xFF then pickup_free
+pickup_bounce: equ 0x8b29	; small-heart arc
+pickup_bounce_x: equ 0x8b37	; X16 += vel, vel -= accel
+pickup_land: equ 0x8b6f	; hide SAT, fall -> stamp
 pickup_stamp: equ 0x8b77	; snap to 8px, save under, blit icon
+pickup_stamp_timer: equ 0x8ba2	; +6 idle countdown; 0xFF = keep
 pickup_idle: equ 0x8ba9	; floor wait; +3==2 whip; countdown despawn
+pickup_free: equ 0x8bce	; +0 = 0
 pickup_hop: equ 0x8bd3	; chest-spill: every 32 frames -> fall
 pickup_try_collect: equ 0x8be6	; Simon/key touch: collect or chest_spill
+pickup_collect_go: equ 0x8bfa	; bonus; keys also clear E000
+pickup_clear_e000: equ 0x8c12	; zero the linked scenery pos
 chest_spill: equ 0x8c36	; hop opened chest contents as state 5
 chest_open: equ 0x8c1b	; world chest: spill contents, spend yellow key/lockpick
 hourglass_tip: equ 0x8c4b	; whip: id 10 -> 11 (tip); second hit starts despawn
+hourglass_tip_2: equ 0x8c5f	; already tipped: +6=1 -> idle despawn
 pickup_sat_draw: equ 0x8c67	; SAT/colour for live C500; skip chests
+pickup_sat_sparkle: equ 0x8c85	; +5=0: flicker F4/F8 colour 8
+pickup_sat_sparkle_pat: equ 0x8c94	; C=8 then emit
+pickup_sat_heart: equ 0x8c98	; +5=1: pattern E8 colour 8
+pickup_sat_item: equ 0x8c9d	; +5=2: pattern EC, cycling colour
+pickup_sat_y: equ 0x8cac	; Y from slot
+pickup_sat_emit: equ 0x8caf	; SAT at D628, 16 colour bytes
+pickup_sat_fill: equ 0x8cbf	; 16 colour bytes
+pickup_sat_col: equ 0x8cc4	; colour cycle 08 01 0E 01
 bonus_icon_blit: equ 0x8cc8	; 16x16 LMMM from page-0 atlas (Y 0x50/0x60)
 atlas_lmmm16: equ 0x8cd2	; 16x16 LMMM from (A*16, L) page 0
 pickup_save_under: equ 0x8cdf	; nametable 2x2 under pickup -> E520
 pickup_restore_under: equ 0x8ced	; put the saved 2x2 back, then redraw overlays
+pickup_restore_cell: equ 0x8d14	; 4 tiles: write E800 if nametable differs
+pickup_restore_next: equ 0x8d19	; next of 4 tiles
 pickup_collect: equ 0x8d30	; A = slot+4, then collect_bonus
 already_have_key: equ 0x8f9b	; NZ if C701 has any of B (dup yellow/white key)
 spike_bars_seed_once: equ 0x8fa1	; seed the C580 bars only if slot 0 is free
 spike_bars_seed: equ 0x8fa6	; seed 3 x C580 from spike_bar_seeds (stage 6 room 1)
+spike_bar_copy: equ 0x8fb6	; one C580 slot: 6 seed bytes, +6=0, skip +7
 spike_bar_seeds: equ 0x8fc4	; 3 x 6-byte spike-bar seeds
 hazard_tick: equ 0x8fd6	; 3 x C580 spike bars (hurt_simon_spikes)
 spike_bars_run: equ 0x8fd9	; walk the 3 C580 slots, stride 8
+spike_bars_slot: equ 0x8fde	; one C580 slot: tick if live
 spike_bar_slot_tick: equ 0x8ff1	; advance one bar +-4px and repaint it (32x16 HMMM)
+spike_bar_up: equ 0x9005	; retracting: every 4th tick, -4 px
+spike_bar_dy: equ 0x900b	; apply dY; xor state 1<->2 at sweep end
+spike_bar_blit: equ 0x901c	; commit Y, HMMM 32x16 from page-1 (0x80,0x70)
 spike_bars_restore: equ 0x902e	; reseed + repaint after F2 map (same CPU addr as sfx_0e_block_break in seg14)
 platform_load: equ 0x9034	; seed C598 from platform_tbl for this room
+platform_scan: equ 0x903d	; walk platform_tbl for this stage/room
+platform_seed: equ 0x9056	; copy one {Y,X,step,span} into a C598 slot
+platform_skip: equ 0x9067	; next {stage,room,n} record
 platform_tbl: equ 0x9073	; {stage,room,n}+n×{Y,X,step,span}; stages 5 and 10
 platform_tick: equ 0x90a2	; 2 x C598 moving platforms (carry Simon via C439)
+platform_slot: equ 0x90a7	; one C598 slot: move + SAT
+platform_next: equ 0x90b5	; next 7-byte platform slot
 platform_move: equ 0x90bf	; advance one deck; reverse +3 at each end point
+platform_turn: equ 0x90d0	; Z -> negate step, else X += step
+platform_add_x: equ 0x90da	; X += step
 platform_sat_build: equ 0x90df	; 4 SAT entries + per-line colours for one deck
+platform_sat_pick: equ 0x90e1	; slot 1: D638/D4E0; slot 2: D648/D520
+platform_sat_attr: equ 0x90eb	; write 4 SAT cells then pick colour dest
+platform_sat_pal: equ 0x90f8	; stage 5: 2/4 CC; else 9/0xC CC
+platform_sat_paint: equ 0x9105	; four 16-byte colour fills
 platform_fill16: equ 0x9112	; fill 16 colour bytes (one 16x16 sprite's lines)
+platform_fill16_loop: equ 0x9114	; 16 colour bytes
 platform_sat_cells: equ 0x9119	; write the 4 SAT entries from a C598 slot
+platform_sat_cell: equ 0x911f	; one SAT cell: Y-1, X+ofs, pattern
+platform_sat_pat: equ 0x913a	; pattern; +8 off stage 5
 platform_sat_ofs: equ 0x9146	; 4 x {X offset, pattern} deck cells
 vendor_spawn: equ 0x9180	; special object / vendor into C5B5 or C5C5
 vendor_spawn_fill: equ 0x9190	; write the 16-byte slot (HL already chosen)
 vendor_offer_match: equ 0x91a9	; B = offer-table index; A = matching slot (1/2) or 0
+vendor_offer_scan: equ 0x91b4	; scan DE00 slots for offer type C
+vendor_offer_done: equ 0x91c2	; A = B (slot 1/2 or 0)
 vendor_tick: equ 0x91c5	; 2 x C5B5/C5C5 vendor/special-object slots
+vendor_tick_slot: equ 0x91cb	; one 16-byte vendor slot
 vendor_slot_tick: equ 0x91df	; one slot: reveal / whip-hit / flash
+vendor_reveal: equ 0x91f1	; state 1: latch id, set 0x82, appear
+vendor_whip: equ 0x91f9	; state 2: +3 hit byte (0 idle, FF leave)
+vendor_flash_arm: equ 0x9213	; 32-tick flash, state 3
+vendor_whip_leave: equ 0x921c	; force C70C=6 leave
 vendor_slot_ptr: equ 0x9228	; HL -> DE00 offer byte for this slot
+vendor_flash: equ 0x9230	; state 3: flash countdown then outcome
+vendor_flash_col: equ 0x923f	; even: grey; odd: C70B
+vendor_appear: equ 0x9253	; stash 32x32 under vendor, then idle blit
 vendor_force_hit: equ 0x9294	; occupied C5B5/C5C5 with bit7: hit byte = 0xFF
+vendor_force_hit_slot: equ 0x9299	; one slot: if live+bit7, +3 = FF
+vendor_force_hit_next: equ 0x92a6	; next 16-byte vendor slot
 vendor_draw_idle: equ 0x9263	; LMMM white (slot 3) vendor 32x32 at DE
 vendor_draw: equ 0x9265	; A=C70B 0..4 -> 32x32 LMMM from page-1 Y=0xA0 onto DE
 vendor_redraw_all: equ 0x9273	; idle-blit every occupied C5B5/C5C5 slot
+vendor_redraw_slot: equ 0x9279	; one occupied slot -> vendor_redraw
 vendor_redraw: equ 0x928d	; one slot: D=X E=Y from +2/+1, then vendor_draw_idle
 vendor_outcome_dispatch: equ 0x92ae	; run whip-hit outcome by state 0xC70C (hearts/nothing/leave)
 vendor_outcome_tbl: equ 0x92b4	; word[C70C] -> hit/mood/hearts/leave
 vendor_pick_outcome: equ 0x92c2	; advance vendor state machine (transition tbl + R-reg RNG)
+vendor_trans_idx: equ 0x92d6	; index 8-byte transition row (clamped 0..7)
+vendor_rng_pair: equ 0x92ef	; HL = two candidate C70C states
+vendor_rng_pick: equ 0x92f6	; R-reg coin-flip -> C70C
+vendor_recolor: equ 0x92f9	; C70C -> C70B via vendor_state_action_tbl
 vendor_transition_tbl: equ 0x9307	; 4 x 8-byte rows -> next 0xC70C state (>=7 = RNG coin-flip)
 vendor_state_action_tbl: equ 0x9327	; state 0..6 -> C70B recolor slot (red/blue/magenta/white)
 vendor_hit_latch: equ 0x932e	; outcome 0: C40C=FF, latch vendor id
@@ -933,22 +1019,33 @@ vendor_leave: equ 0x935f	; outcome 6: vanish, +5000
 vendor_restore_tiles: equ 0x937f	; 4x4 from E580 at vendor pixel pos
 vendor_make_offer: equ 0x938e	; arm a sale: item 0xC708, price 0xC707, timer 0xC706
 vendor_offer_draw: equ 0x939e	; HMMM backup + panel_frame + glyphs + price + icon
+vendor_bubble_right: equ 0x93b8	; vendor X>=0x80: panel X = vendorX-32
+vendor_bubble_pos: equ 0x93ba	; panel at (X', vendorY-24) -> C704
+vendor_offer_text: equ 0x93e3	; offer glyphs + price + item icon
 vendor_set_offer_item: equ 0x9406	; pick sale item -> 0xC708 and look up price row
+vendor_price_scan: equ 0x9415	; find item id in vendor_price_tbl
 vendor_select_price: equ 0x941f	; 0xC702 bible flags pick normal/half/double price -> 0xC707
+vendor_price_inc: equ 0x9429	; extra +1 for white/black bible column
+vendor_price_store: equ 0x942a	; write C707
 vendor_price_tbl: equ 0x942f	; 9 x {item id, normal, half(white bible), double(black bible)}
 vendor_de00_this: equ 0x9453	; HL -> DE00 row for C703 (this vendor)
 vendor_de00_slot: equ 0x9456	; HL -> DE00 row for slot A (0/1); D000==0 skips ofs
+vendor_de00_chk: equ 0x945e	; courtyard: skip hub ofs
+vendor_de00_base: equ 0x9468	; DE00 + hub ofs + room*4
 vendor_de00_ofs: equ 0x947a	; byte[stage-1] = DE00 base for that stage's rooms
 vendor_offer_str0: equ 0x948c	; HUD glyphs for the offer bubble
 vendor_offer_str1: equ 0x9491
 vendor_price_draw: equ 0x9498	; BCD price 0xC707 at bubble + (0x18,0x10)
+vendor_price_blit: equ 0x949b	; bubble-relative BCD blit
 vendor_glyphs: equ 0x94a6	; 0xFF-terminated HUD string at HL, pos via vendor_bubble_xy
+vendor_glyph_loop: equ 0x94a9	; next glyph until 0xFF
 vendor_bubble_xy: equ 0x94b6	; DE = C704 + (B,C)
 vendor_offer_withdraw: equ 0x9503	; offer declined/expired/unaffordable: sfx 0x02, ret 0
 vendor_offer_pending: equ 0x950a	; no button this frame: ret 0xFF (keep offer open)
 vendor_offer_dismiss: equ 0x950e	; wipe bubble, candle_outlines_if; then back to play
 vendor_offer_wipe: equ 0x9514	; HMMM 80x32 from (0xB0,0x80) onto C704 (erase bubble)
 vendor_purchase_tick: equ 0x94c1	; offer loop: tick timer 0xC706, poll buy/refuse, buy item
+vendor_purchase_poll: equ 0x94ce	; skip timer; poll buy/refuse
 vendor_read_buttons: equ 0x9526	; edge-detected confirm(SPACE)/refuse(SHIFT)+triggers -> A
 read_kbd_matrix_bit: equ 0x9552	; read one keyboard-matrix bit (row in A) -> 0/1
 minimap_driver: equ 0x9559	; F2 world-map driver: state 0xCF38 (0 play/1 build/2 shown); needs map item 0xC701 bit7 + uses 0xC70F

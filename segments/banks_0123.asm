@@ -11511,122 +11511,122 @@ tiles_to_map:
 	djnz tiles_to_map
 	ret
 break_chip_spawn:                  ; (seg2 0x88CE) two chips at DE: right then left
-	ld hl,0c5a6h
-	ld bc,00201h
-l88d4h:
-	ld (hl),c
+	ld hl,chip_slots
+	ld bc,00201h           ; B=2, C=1 (right, age 1)
+break_chip_seed:
+	ld (hl),c              ; +0 age; bit7 = fly left
 	inc l
-	ld (hl),e
+	ld (hl),e              ; +1 Y
 	inc l
-	ld (hl),d
+	ld (hl),d              ; +2 X
 	inc l
-	ld c,084h
-	djnz l88d4h
+	ld c,084h              ; second: left, age 4
+	djnz break_chip_seed
 	ret
 break_chip_tick:                  ; (seg2 0x88DF) two C5A6 wall-break chips
 	ld b,002h
-	ld hl,0c5a6h
-l88e4h:
+	ld hl,chip_slots
+break_chip_slot:
 	push bc
 	push hl
 	ld a,(hl)
 	ld b,a
 	or a
-	jr z,l88f1h
+	jr z,break_chip_next   ; +0 = 0: free
 	call break_chip_move
 	call break_chip_sat
-l88f1h:
+break_chip_next:
 	pop hl
 	inc l
 	inc l
-	inc l
+	inc l                  ; stride 3
 	pop bc
-	djnz l88e4h
+	djnz break_chip_slot
 	ret
 break_chip_move:                  ; (seg2 0x88F9) X ±2, Y += break_chip_dy[age]
-	and 07fh
+	and 07fh               ; C = age
 	ld c,a
 	inc l
-	inc l
+	inc l                  ; -> +2 X
 	ld a,(hl)
-	bit 7,b
-	jr nz,l890ah
-	add a,002h
-	jr c,l8929h
+	bit 7,b                ; bit7 of +0: fly left
+	jr nz,break_chip_left
+	add a,002h             ; X += 2 (right)
+	jr c,break_chip_kill_x
 	ld (hl),a
-	jr l890fh
-l890ah:
-	sub 002h
-	jr c,l8929h
+	jr break_chip_fall
+break_chip_left:
+	sub 002h               ; X -= 2 (left)
+	jr c,break_chip_kill_x
 	ld (hl),a
-l890fh:
+break_chip_fall:
 	dec l
-	dec l
+	dec l                  ; -> +0
 	ld a,c
-	inc a
+	inc a                  ; table index = age+1
 	ld de,break_chip_dy
 	call ADD_DE_A
-	ld a,(de)
-	inc (hl)
+	ld a,(de)              ; signed dY
+	inc (hl)               ; ++ age
 	or a
-	jr nz,l8921h
-	dec (hl)
+	jr nz,break_chip_add_y
+	dec (hl)               ; dY 0: freeze age, use +10
 	ld a,00ah
-l8921h:
-	inc l
+break_chip_add_y:
+	inc l                  ; -> +1 Y
 	add a,(hl)
 	ld (hl),a
-	cp 0d4h
-	jr nc,l892ah
+	cp 0d4h                ; Y >= 0xD4: off the bottom
+	jr nc,break_chip_kill
 	ret
-l8929h:
+break_chip_kill_x:                 ; (seg2 0x8929) X wrapped: HL was +2
+	dec l                  ; -> +1 Y
+break_chip_kill:                   ; (seg2 0x892A) hide SAT, free slot; falls into dy `inc l; ret`
+	ld (hl),0e0h           ; Y = 0xE0
 	dec l
-l892ah:
-	ld (hl),0e0h
-	dec l
-	ld (hl),000h
+	ld (hl),000h           ; +0 free
 break_chip_dy:                    ; (seg2 0x892F) dY by chip age; 0-1 also `inc l; ret`
 	defb 02ch,0c9h,0fah,0fch,0fch,0fch,0feh,0feh
 	defb 0ffh,0ffh,001h,001h,002h,002h,004h,004h,004h,006h,000h
 break_chip_sat:                   ; (seg2 0x8942) two chips -> SAT + colour lines
-	ld hl,0c5a7h
+	ld hl,chip_slots+1     ; first slot Y
 	ld de,0d628h
 	ld b,002h
-l894ah:
+break_chip_sat_slot:
 	push bc
 	push hl
-	ld bc,002ffh
-	ld a,0e0h
-l8951h:
+	ld bc,002ffh           ; B=2 SAT cells
+	ld a,0e0h              ; cell 0 pattern
+break_chip_sat_cell:
 	push hl
-	ldi
-	ldi
-	ld (de),a
+	ldi                    ; SAT Y
+	ldi                    ; SAT X
+	ld (de),a              ; pattern
 	inc de
-	inc de
-	ld a,0e4h
+	inc de                 ; skip SAT colour
+	ld a,0e4h              ; cell 1 pattern (CC pair, same XY)
 	pop hl
-	djnz l8951h
+	djnz break_chip_sat_cell
 	pop hl
 	inc hl
 	inc hl
-	inc hl
+	inc hl                 ; next 3-byte slot
 	pop bc
-	djnz l894ah
+	djnz break_chip_sat_slot
 	ld hl,0d4a0h
 	ld a,002h
 	call chip_fill16
-	ld a,04ch
+	ld a,04ch              ; colour 0xC + CC
 	call chip_fill16
 	ld a,002h
 	call chip_fill16
 	ld a,04ch
 chip_fill16:                      ; fill 16 colour bytes (break-chip SAT)
 	ld b,010h
-l897bh:
+chip_fill16_loop:
 	ld (hl),a
 	inc hl
-	djnz l897bh
+	djnz chip_fill16_loop
 	ret
 hud_leather_icon:               ; (0x8980) page-1 (80, 0x70) leather whip HUD
 	ld a,005h
@@ -11643,84 +11643,84 @@ vram_hmmm16:                        ; HMMM 16x16 from VRAM page 1 at (A*16, L)
 candle_blit:                    ; (0x8991) playfield flame: atlas Y=0x70, A=frame
 	ld l,070h
 	jp atlas_lmmm16
-scenery_drop:
+scenery_drop:                      ; (seg2 0x8996) bonus B at DE -> C500; slime/empty skip flame
 	call drop_own_weapon_heart
 scenery_drop_slot:
 	ld a,b
 	or a
-	jr z,l89a5h
-	cp 015h                ; slime: no flame, C500 hatches actor_blob_*
-	jr z,l89a5h
+	jr z,pickup_slot_appear ; empty: sparkle, then despawn
+	cp item_slime           ; no flame; C500 hatches actor_blob_*
+	jr z,pickup_slot_appear
 	call drop_fx_spawn
-	ret z
-l89a5h:
+	ret z                   ; actor spawned: flame/reward owns the drop
+pickup_slot_appear:                ; (seg2 0x89A5) C500: live 1, XY, bonus B; +5=2 unless heart/slime
 	call pickup_slot_alloc
-	ret nz
-	ld (hl),001h
+	ret nz                  ; no free slot
+	ld (hl),001h            ; +0 appear
 	inc l
-	ld (hl),e
+	ld (hl),e               ; +1 Y
 	inc l
-	ld (hl),d
+	ld (hl),d               ; +2 X
 	inc l
-	ld (hl),000h
+	ld (hl),000h            ; +3 not collectible yet
 	inc l
-	ld (hl),b
+	ld (hl),b               ; +4 bonus id
 	inc l
-	ld (hl),000h
+	ld (hl),000h            ; +5 SAT 0 = sparkle
 	ld a,b
-	cp 015h
-	jr z,l89c2h
-	cp 002h
-	jr c,l89c2h
-	ld (hl),002h
-l89c2h:
+	cp item_slime
+	jr z,pickup_slot_appear_done
+	cp item_large_heart     ; ids 0 and 1 keep sparkle
+	jr c,pickup_slot_appear_done
+	ld (hl),002h            ; +5 SAT 2 = item sprite during appear
+pickup_slot_appear_done:
 	inc l
-	ld (hl),000h
+	ld (hl),000h            ; +6 timer
 	ret
 drop_fx_spawn:                     ; (seg2 0x89C6) flame (heart) or actor_reward at DE
 	push bc
 	push de
 	push ix
 	ld a,e
-	add a,010h
+	add a,010h             ; spawn 16px below drop Y
 	ld e,a
 	ld a,d
-	add a,008h
+	add a,008h             ; and 8px right
 	ld d,a
 	ld a,b
-	cp 001h
-	jr nz,l89dbh
+	cp item_small_heart
+	jr nz,drop_fx_reward
 	ld c,actor_flame
-	jr l89ddh
-l89dbh:
+	jr drop_fx_go
+drop_fx_reward:
 	ld c,actor_reward
-l89ddh:
+drop_fx_go:
 	xor a
 	call spawn_actor_ab
 	ld a,(0cf31h)
-	dec a
+	dec a                  ; Z = actor spawned (caller skips C500)
 	pop ix
 	pop de
 	pop bc
 	ret
-drop_spawn:
+drop_spawn:                        ; (seg2 0x89EA) flame+C500, or slime directly to scenery_drop_slot
 	ld a,b
-	cp 015h
+	cp item_slime
 	jp z,scenery_drop_slot
 	call drop_own_weapon_heart
 	call pickup_slot_alloc
 	ret nz
 pickup_slot_write:                 ; (seg2 0x89F7) C500: live 0x83, XY, bonus B, +5=FF
-	ld (hl),083h
+	ld (hl),083h            ; +0 stamp (bit7 | 3)
 	inc l
-	ld (hl),e
+	ld (hl),e               ; +1 Y
 	inc l
-	ld (hl),d
+	ld (hl),d               ; +2 X
 	inc l
+	inc l                   ; skip +3
+	ld (hl),b               ; +4 bonus id
 	inc l
-	ld (hl),b
-	inc l
-	ld (hl),0ffh
+	ld (hl),0ffh            ; +5 hide SAT (chests/keys stamp the icon)
 	ret
 white_key_spawn:                ; (0x8A04) C500 white key; C70D = E000 pos
 	ld (0c70dh),hl
@@ -11728,9 +11728,9 @@ white_key_spawn:                ; (0x8A04) C500 white key; C70D = E000 pos
 	ret nz
 	call pickup_slot_write
 	ld a,l
-	add a,009h
+	add a,009h             ; +0x0E
 	ld l,a
-l8a12h:
+pickup_link_e000:                  ; (seg2 0x8A12) +0E/+0F = E000 pos from C70D
 	ld de,(0c70dh)
 	ld (hl),d
 	inc l
@@ -11741,46 +11741,46 @@ pickup_spawn_chest:            ; (0x8A1A) C500 chest container; contents in +0x0
 	call pickup_slot_alloc
 	ret nz
 	push bc
-	ld b,019h              ; chest container (bonus id 25)
+	ld b,item_chest
 	call pickup_slot_write
 	pop bc
 	ld a,l
-	add a,008h
+	add a,008h             ; +0x0D
 	ld l,a
 	ld (hl),b              ; +0x0D = real contents id
 	inc l
-	jr l8a12h
+	jr pickup_link_e000
 drop_own_weapon_heart:             ; (seg2 0x8A30) dropping equipped subweapon -> small heart
 	ld a,b
-	cp 01ah
+	cp item_chain_whip
 	ret c
 	ld a,(weapon_id)
-	add a,019h
+	add a,019h             ; C416 + 0x19 = this subweapon's pickup id
 	cp b
 	ret nz
-	ld b,001h
+	ld b,item_small_heart
 	ret
 pickup_slot_alloc:                 ; (seg2 0x8A3E) first free C500 slot; Z + HL, else NZ
 	push bc
 	ld hl,pickup_slots
 	ld b,008h
-l8a44h:
+pickup_slot_scan:
 	ld a,(hl)
 	or a
-	jr z,l8a4fh
+	jr z,pickup_slot_ok    ; free
 	ld a,010h
 	add a,l
 	ld l,a
-	djnz l8a44h
-	or a
-l8a4fh:
+	djnz pickup_slot_scan
+	or a                   ; none free: NZ
+pickup_slot_ok:
 	pop bc
 	ret
 pickup_tick:                       ; (seg2 0x8A51) 8 x C500 floor items/chests
 	call pickup_popup_tick             ; pickup-popup timer
 	ld bc,00800h
 	ld hl,pickup_slots
-l8a5ah:
+pickup_tick_slot:
 	push hl
 	pop ix
 	push bc
@@ -11788,17 +11788,17 @@ l8a5ah:
 	ld a,(hl)
 	ld b,a
 	or a
-	jr z,l8a6ah
+	jr z,pickup_tick_next
 	call pickup_state_tick
 	call pickup_sat_draw
-l8a6ah:
+pickup_tick_next:
 	pop hl
 	pop bc
 	ld a,010h
 	add a,l
 	ld l,a
 	inc c
-	djnz l8a5ah
+	djnz pickup_tick_slot
 	ret
 pickup_state_tick:                 ; (seg2 0x8A74) C500 +0 dispatch; +3==1 -> pickup_try_collect
 	ld e,(ix+001h)
@@ -11831,87 +11831,87 @@ pickup_appear:                     ; (seg2 0x8AA0) 16-frame settle; slime hatche
 	inc (ix+006h)
 	ld a,(ix+006h)
 	and 00fh
-	ret nz
-	inc (hl)
+	ret nz                 ; wait 16 frames
+	inc (hl)               ; +0 appear -> fall
 	ld a,(ix+004h)
 	or a
-	jp z,l8b22h
-	cp 015h                ; slime fake-item: hatch instead of settling
-	jr z,l8ad7h
-	set 7,(hl)
-	dec a
-	ld a,001h
-	jr z,l8abeh
-	ld a,002h
-l8abeh:
+	jp z,pickup_hide       ; empty: despawn
+	cp item_slime
+	jr z,pickup_hatch_blob
+	set 7,(hl)             ; bit7 on state
+	dec a                  ; bonus-1: Z = small heart
+	ld a,001h              ; SAT 1 = heart bounce sprite
+	jr z,pickup_appear_sat
+	ld a,002h              ; SAT 2 = item sprite
+pickup_appear_sat:                 ; (seg2 0x8ABE) +5 SAT mode; heart also arms bounce
 	ld (ix+005h),a
-	ret nz
-	ld (ix+006h),000h
+	ret nz                 ; item: fall with SAT 2
+	ld (ix+006h),000h      ; heart: bounce timer / vel / accel
 	ld (ix+009h),002h
 	ld (ix+00ah),000h
 	ld (ix+00bh),000h
 	ld (ix+00ch),020h
 	ret
-l8ad7h:
-	ld a,(hub)          ; hub: 0 = courtyard (just despawn)
+pickup_hatch_blob:                 ; (seg2 0x8AD7) slime -> actor_blob_*; courtyard despawns
+	ld a,(hub)
 	or a
 	ld b,a
-	jr z,l8af4h
+	jr z,pickup_hatch_done ; hub 0: no blob
 	ld a,b
 	dec a
 	and 007h
-	ld hl,blob_hatch_type          ; hub-1 -> blue / white / red
+	ld hl,blob_hatch_type  ; hub-1 -> blue / white / red
 	call ADD_HL_A
 	ld c,(hl)
 	push ix
 	ld a,e
-	add a,010h
+	add a,010h             ; spawn 16px below
 	ld e,a
 	call spawn_actor
 	pop ix
-l8af4h:
-	jp l8b22h
+pickup_hatch_done:                 ; (seg2 0x8AF4) trampoline; jr from courtyard must land here
+	jp pickup_hide
 blob_hatch_type:
 	defb actor_blob_blue, actor_blob_white, actor_blob_red, actor_blob_red
 	defb actor_blob_red, actor_blob_red, actor_blob_white, actor_blob_white
 pickup_fall:                       ; (seg2 0x8AFF) +0x0810 gravity; bounce or land
 	ld hl,00810h
-	add hl,de
+	add hl,de              ; probe Y+16, X+8
 	ld a,0dbh
 	cp l
-	jr c,l8b22h
+	jr c,pickup_hide       ; Y past 0xDB: despawn
 	ex de,hl
 	call map_cell_at
 	sub 001h
 	cp 009h
-	jr c,l8b6fh
+	jr c,pickup_land       ; tiles 1-9: solid
 	ld a,(ix+004h)
 	dec a
-	jp z,l8b29h
+	jp z,pickup_bounce     ; small heart
 	ld a,(ix+001h)
-	add a,008h
+	add a,008h             ; else Y += 8
 	ld (ix+001h),a
 	ret
-l8b22h:
+pickup_hide:                       ; (seg2 0x8B22) SAT off, then free the slot
 	ld (ix+005h),0ffh
-	jp l8bceh
-l8b29h:
+	jp pickup_free
+pickup_bounce:                     ; (seg2 0x8B29) small-heart arc: Y nudge, X vel, accel
 	push ix
 	pop hl
-	inc l
+	inc l                  ; HL = +1 Y
 	inc (ix+006h)
 	ld a,(0c003h)
 	rra
-	jr nc,l8b37h
+	jr nc,pickup_bounce_x  ; every other frame: Y++
 	inc (hl)
-l8b37h:
-	inc l
+pickup_bounce_x:
+	inc l                  ; HL = +2 X
 	ld d,(hl)
 	ld e,(ix+008h)
 	ex de,hl
 	ld b,(ix+009h)
 	ld c,(ix+00ah)
-	add hl,bc
+	add hl,bc              ; X16 += vel
 	ex de,hl
 	ld (ix+008h),e
 	ld (hl),d
@@ -11920,13 +11920,13 @@ l8b37h:
 	ld b,(ix+00bh)
 	ld c,(ix+00ch)
 	and a
-	sbc hl,bc
+	sbc hl,bc              ; vel -= accel
 	ld (ix+009h),h
 	ld (ix+00ah),l
 	ld a,(ix+006h)
 	sub 020h
 	ret nz
-	ld (ix+006h),a
+	ld (ix+006h),a         ; 32 frames: reverse accel
 	ld a,b
 	cpl
 	ld (ix+00bh),a
@@ -11934,7 +11934,7 @@ l8b37h:
 	neg
 	ld (ix+00ch),a
 	ret
-l8b6fh:
+pickup_land:                       ; (seg2 0x8B6F) hide SAT, fall -> stamp
 	ld (ix+005h),0ffh
 	inc (ix+000h)
 	ret
@@ -11956,14 +11956,14 @@ pickup_stamp:                      ; (seg2 0x8B77) snap to 8px, save under, blit
 	dec a
 	call bonus_icon_blit
 	ld a,(ix+004h)
-	sub 017h
-	cp 003h
+	sub item_yellow_key
+	cp 003h                ; ids 0x17-0x19 (keys/chest): never despawn
 	ld a,008h
-	jr nc,l8ba2h
+	jr nc,pickup_stamp_timer
 	ld a,0ffh
-l8ba2h:
+pickup_stamp_timer:                ; (seg2 0x8BA2) +6 idle countdown; 0xFF = keep
 	ld (ix+006h),a
-	inc (ix+000h)
+	inc (ix+000h)          ; stamp -> idle
 	ret
 pickup_idle:                       ; (seg2 0x8BA9) floor wait; +3==2 whip; countdown despawn
 	set 7,(hl)
@@ -11977,14 +11977,14 @@ pickup_idle:                       ; (seg2 0x8BA9) floor wait; +3==2 whip; count
 	pop de
 	ld a,(ix+006h)
 	inc a
-	ret z
+	ret z                  ; 0xFF: stay
 	ld a,(0c003h)
 	and 00fh
 	ret nz
 	dec (ix+006h)
 	ret nz
 	call pickup_restore_under
-l8bceh:
+pickup_free:                       ; (seg2 0x8BCE) +0 = 0
 	ld (ix+000h),000h
 	ret
 pickup_hop:                        ; (seg2 0x8BD3) chest-spill: every 32 frames -> fall
@@ -11995,7 +11995,7 @@ pickup_hop:                        ; (seg2 0x8BD3) chest-spill: every 32 frames 
 	ld (hl),002h
 	ld a,(ix+004h)
 	or a
-	jp z,l8b22h
+	jp z,pickup_hide
 	ret
 pickup_try_collect:                ; (seg2 0x8BE6) Simon/key touch: collect or chest_spill
 	ld (ix+003h),000h
@@ -12005,20 +12005,20 @@ pickup_try_collect:                ; (seg2 0x8BE6) Simon/key touch: collect or c
 	and 07fh
 	ld (hl),000h
 	cp 004h
-	jr nz,l8bfah
+	jr nz,pickup_collect_go
 	call pickup_restore_under
-l8bfah:
+pickup_collect_go:                 ; (seg2 0x8BFA) bonus; keys also clear E000
 	ld a,(ix+004h)
-	cp 019h                ; chest: don't collect_bonus(25); reveal contents
+	cp item_chest
 	jr z,chest_open
 	ld (ix+005h),0ffh
 	call pickup_collect
 	ld a,(ix+004h)
-	cp 017h
-	jr z,l8c12h
-	cp 018h
+	cp item_yellow_key
+	jr z,pickup_clear_e000
+	cp item_white_key
 	ret nz
-l8c12h:
+pickup_clear_e000:                 ; (seg2 0x8C12) zero the linked scenery pos
 	ld h,(ix+00eh)
 	ld l,(ix+00fh)
 	ld (hl),000h
@@ -12029,13 +12029,13 @@ chest_open:                    ; (0x8C1B) spill contents; spend yellow key/lockp
 	call chest_spill         ; hop it as a normal pickup
 	ld a,(0c700h)
 	or a
-	jr nz,l8c12h
+	jr nz,pickup_clear_e000
 	ld hl,0c701h
 	ld a,(hl)
 	and 0f9h
 	ld (hl),a
 	call hud_chest_key_icon
-	jr l8c12h
+	jr pickup_clear_e000
 chest_spill:                       ; (seg2 0x8C36) hop opened chest contents as state 5
 	ld a,(ix+001h)
 	sub 008h
@@ -12050,74 +12050,73 @@ hourglass_tip:                 ; (0x8C4B) whip: id 10 -> 11; second hit starts d
 	ld (ix+003h),000h
 	ld a,(ix+004h)
 	cp item_hourglass      ; upright hourglass?
-	jr nz,l8c5fh
+	jr nz,hourglass_tip_2
 	ld (ix+004h),item_tipped_hourglass
 	call pickup_restore_under
 	jr chest_spill
-l8c5fh:
-	cp item_tipped_hourglass ; already tipped: another whip deletes it
+hourglass_tip_2:                   ; (seg2 0x8C5F) already tipped: +6=1 -> idle despawn
+	cp item_tipped_hourglass
 	ret nz
 	ld (ix+006h),001h
 	ret
 pickup_sat_draw:                   ; (seg2 0x8C67) SAT/colour for live C500; skip chests
 	ld a,(ix+004h)
-	cp 019h
+	cp item_chest
 	ret z
 	ld a,(ix+000h)
 	and 00fh
 	cp 004h
-	ret z
+	ret z                  ; idle: icon is on the playfield
 	ld a,(ix+005h)
 	or a
-	jr z,l8c85h
+	jr z,pickup_sat_sparkle
 	dec a
-	jr z,l8c98h
+	jr z,pickup_sat_heart
 	dec a
-	jr z,l8c9dh
-	ld a,0e0h
-	jr l8cafh
-l8c85h:
+	jr z,pickup_sat_item
+	ld a,0e0h              ; +5=0xFF: hide
+	jr pickup_sat_emit
+pickup_sat_sparkle:                ; (seg2 0x8C85) +5=0: flicker F4/F8 colour 8
 	ld a,(0c003h)
 	ld b,a
 	and 001h
-	ret nz
+	ret nz                 ; odd frames off
 	bit 2,b
 	ld b,0f4h
-	jr nz,l8c94h
+	jr nz,pickup_sat_sparkle_pat
 	ld b,0f8h
-l8c94h:
+pickup_sat_sparkle_pat:
 	ld c,008h
-	jr l8cach
-l8c98h:
+	jr pickup_sat_y
+pickup_sat_heart:                  ; (seg2 0x8C98) +5=1: pattern E8 colour 8
 	ld bc,0e808h
-	jr l8cach
-l8c9dh:
+	jr pickup_sat_y
+pickup_sat_item:                   ; (seg2 0x8C9D) +5=2: pattern EC, cycling colour
 	ld bc,0ec0eh
 	ld a,(0c003h)
 	and 003h
-	ld hl,l8cc4h
+	ld hl,pickup_sat_col
 	call ADD_HL_A
 	ld c,(hl)
-l8cach:
+pickup_sat_y:                      ; (seg2 0x8CAC) Y from slot
 	ld a,(ix+001h)
-l8cafh:
+pickup_sat_emit:                   ; (seg2 0x8CAF) SAT at D628, 16 colour bytes
 	ld hl,0d628h
-	ld (hl),a
+	ld (hl),a              ; Y
 	inc hl
 	ld a,(ix+002h)
-	ld (hl),a
+	ld (hl),a              ; X
 	inc hl
-	ld (hl),b
+	ld (hl),b              ; pattern
 	ld hl,0d4a0h
 	ld b,010h
-l8cbfh:
+pickup_sat_fill:
 	ld (hl),c
 	inc hl
-	djnz l8cbfh
+	djnz pickup_sat_fill
 	ret
-l8cc4h:
-	ex af,af'
-	ld bc,0010eh
+pickup_sat_col:                    ; (seg2 0x8CC4) colour cycle 08 01 0E 01
+	defb 008h,001h,00eh,001h
 bonus_icon_blit:                   ; (seg2 0x8CC8) 16x16 LMMM from page-0 atlas (Y 0x50/0x60)
 	ld l,050h
 	cp 010h
@@ -12162,15 +12161,15 @@ pickup_restore_under:              ; (seg2 0x8CED) put the saved 2x2 back, then 
 	call ADD_HL_A
 	ld b,004h
 	ld de,0e800h
-l8d14h:
+pickup_restore_cell:               ; (seg2 0x8D14) 4 tiles: write E800 if nametable differs
 	ld a,(de)
 	cp (hl)
-	jr z,l8d19h
+	jr z,pickup_restore_next
 	ld (hl),a
-l8d19h:
+pickup_restore_next:
 	inc hl
 	inc de
-	djnz l8d14h
+	djnz pickup_restore_cell
 	pop hl
 	pop bc
 	pop de
@@ -12426,7 +12425,7 @@ lose_weapon:                   ; (0x8E9A) C416=0 leather; refresh HUD (missed ca
 	jp hud_weapon_icon
 hud_weapon_icon:                     ; HUD equipped-weapon icon from C416
 	ld a,(weapon_id)
-	ld de,l800ch
+	ld de,0800ch           ; HUD dest (80, 0x0C); not the bank-2 code at l800ch
 	or a
 	jp z,hud_leather_icon  ; 0 = leather (not in the bonus sheet)
 	add a,019h             ; C416 1..4 -> bonus ids 0x1A..0x1D
@@ -12434,10 +12433,10 @@ hud_bonus_tile:                        ; A = bonus id -> blit that HUD tile
 	dec a                  ; 0-based index
 	ld l,050h              ; ids 1-16 at Y=0x50
 	cp 010h
-	jr c,l8eb8h
+	jr c,hud_bonus_hmmm
 	sub 010h
 	ld l,060h              ; ids 17+ at Y=0x60
-l8eb8h:
+hud_bonus_hmmm:                    ; (seg2 0x8EB8) 16x16 from page 1
 	jp vram_hmmm16
 hud_keys_refresh:
 	call hud_chest_key_icon
@@ -12459,10 +12458,10 @@ hud_chest_key_icon:
 	or a
 	jp z,hud_leather_icon
 	bit 2,b                ; C701 bit2 = lockpick
-	ld a,012h              ; bonus 0x12 lockpick
-	jr nz,l8eebh
-	ld a,017h              ; bonus 0x17 yellow key
-l8eebh:
+	ld a,item_lockpick
+	jr nz,hud_chest_key_id
+	ld a,item_yellow_key
+hud_chest_key_id:                  ; (seg2 0x8EEB)
 	jr hud_bonus_tile
 hud_bonus_refresh:
 	call hud_bonus_clear
@@ -12470,11 +12469,11 @@ hud_bonus_refresh:
 	ld c,a
 	ld b,005h              ; bits 7..3: map, hourglass, Y shield, R shield, holy
 	xor a
-l8ef7h:
+hud_bonus_scan:
 	rl c
 	call c,hud_bonus_icon
 	inc a
-	djnz l8ef7h
+	djnz hud_bonus_scan
 	ret
 	ld c,b
 	ld b,005h
@@ -12551,30 +12550,30 @@ chest_try_open:
 	push hl
 	ld a,(ix+004h)
 	cp item_chest          ; chest: need C700 (yellow key / lockpick charges)
-	jr nz,l8f8ah
+	jr nz,chest_try_key
 	ld hl,0c700h
 	ld a,(hl)
 	or a
-	jr nz,l8f81h
+	jr nz,chest_spend
 	inc a                      ; NZ: no chest-key charges
 	pop hl
 	ret
-l8f81h:
+chest_spend:                       ; (seg2 0x8F81) C700--, sfx, Z
 	dec (hl)
 	ld a,sfx_chest
 	call play_sound
-l8f87h:
-	xor a                      ; Z: ok to collect
+chest_try_ok:                      ; (seg2 0x8F87) Z: ok to collect
+	xor a
 	pop hl
 	ret
-l8f8ah:
-	cp 017h                    ; yellow key: skip if bit1 or lockpick bit2
-	ld b,006h
-	jr z,l8f96h
-	cp 018h                    ; white key: skip if bit0 already set
+chest_try_key:                     ; (seg2 0x8F8A) yellow/white: NZ if already held
+	cp item_yellow_key
+	ld b,006h              ; bits 1+2 (key or lockpick)
+	jr z,chest_dup_key
+	cp item_white_key
 	ld b,001h
-	jr nz,l8f87h
-l8f96h:
+	jr nz,chest_try_ok
+chest_dup_key:                     ; (seg2 0x8F96)
 	call already_have_key
 	pop hl
 	ret
@@ -12624,16 +12623,16 @@ spike_bars_seed:                   ; (0x8FA6) seed unconditionally
 	ld hl,spike_bar_seeds
 	ld de,spike_slots
 	ld b,003h
-l8fb6h:
+spike_bar_copy:                    ; (seg2 0x8FB6) one slot: 6 seed bytes, +6=0, skip +7
 	push bc
 	ld bc,00006h
-	ldir                   ; 6 seed bytes -> slot
+	ldir
 	xor a
 	ld (de),a
 	inc e
-	inc e                  ; zero +6, skip +7 (stride 8)
+	inc e
 	pop bc
-	djnz l8fb6h
+	djnz spike_bar_copy
 	ret
 spike_bar_seeds:                   ; 3 x 6-byte C580 seeds (stage 6 room 1)
 	defb 001h,060h,03ch,000h,000h,00bh ; left arch:   X=0x3C, every tick
@@ -12644,20 +12643,20 @@ hazard_tick:                       ; (seg2 0x8FD6) tick the 3 spike bars
 spike_bars_run:                    ; (0x8FD9) walk the 3 slots, stride 8
 	ld hl,spike_slots
 	ld b,003h
-l8fdeh:
+spike_bars_slot:
 	push hl
 	pop ix
 	push bc
 	push hl
 	ld a,(hl)
 	or a
-	call nz,spike_bar_slot_tick    ; state != 0 -> live
+	call nz,spike_bar_slot_tick
 	pop hl
 	pop bc
 	ld a,008h
 	add a,l
 	ld l,a
-	djnz l8fdeh
+	djnz spike_bars_slot
 	ret
 ; spike_bar_slot_tick (0x8FF1): advance and repaint one bar.  IX/HL = slot,
 ; A = state.  Falls through to the HMMM, so the bar is redrawn only on the
@@ -12674,36 +12673,36 @@ spike_bar_slot_tick:
 	ld b,(hl)              ; B = +4 tick counter (post-increment)
 	inc hl                 ; -> +5
 	dec a
-	jr nz,l9005h           ; state 2 -> retracting
+	jr nz,spike_bar_up     ; state 2 -> retracting
 	ld a,c
 	and b
 	ret nz                 ; descending: gate on tick & +3
 	ld a,004h              ; +4 px (downwards)
-	jr l900bh
-l9005h:
+	jr spike_bar_dy
+spike_bar_up:                      ; (seg2 0x9005) retract: every 4th tick, -4
 	ld a,003h
 	and b
 	ret nz                 ; retracting: only every 4th tick
 	ld a,0fch              ; -4 px (upwards)
-l900bh:
+spike_bar_dy:                      ; (seg2 0x900B) E += dY; toggle at sweep end
 	add a,e
 	ld e,a                 ; E = new Y
 	ld a,(hl)              ; A = +5 steps per sweep
 	inc hl                 ; -> +6
 	inc (hl)
 	sub (hl)               ; steps - count
-	jr nz,l901ch
+	jr nz,spike_bar_blit
 	ld (hl),a              ; end of sweep: count = 0
 	ld a,(ix+000h)
 	xor 003h               ; state 1 <-> 2 (descend <-> retract)
 	ld (ix+000h),a
-l901ch:
+spike_bar_blit:                    ; (seg2 0x901C) commit Y, HMMM 32x16 at Y-4
 	ld (ix+001h),e         ; commit Y
 	ld a,e
 	sub 004h
 	ld e,a                 ; draw 4px high: block row 0 is the chain link
-	ld hl,08070h           ; SX=0x80 SY=0x70: the spike-bar staging block, page 1
-	ld bc,02010h           ; 32x16 (spike_bar_mount + 4x spike, staged by seg0 0x54AD)
+	ld hl,08070h           ; SX=0x80 SY=0x70: spike-bar staging, page 1
+	ld bc,02010h           ; 32x16 (spike_bar_mount + bar, staged at 0x54AD)
 	ld a,001h
 	jp vdp_hmmm            ; src page 1 -> dest page 0 at (X, Y-4)
 ; spike_bars_restore (0x902E): repaint the bars after the F2 map screen has
@@ -12736,7 +12735,7 @@ platform_load:                     ; (seg2 0x9034) seed C598 from platform_tbl
 	or a
 	ret nz                 ; already seeded for this room
 	ld hl,platform_tbl
-l903dh:
+platform_scan:
 	ld a,(hl)
 	inc a
 	ret z                  ; 0xFF terminator: no platforms in this room
@@ -12744,17 +12743,17 @@ l903dh:
 	push hl
 	ld de,(stage)         ; E = stage (0xD000), D = room (0xD001)
 	cp e
-	jr nz,l9067h
+	jr nz,platform_skip
 	inc hl
 	ld a,(hl)
 	cp d
-	jr nz,l9067h
+	jr nz,platform_skip
 	inc hl
 	ld b,(hl)              ; B = platform count for this room
 	inc hl
 	ld de,platform_slots
 	ld c,001h              ; slot ids start at 1
-l9056h:
+platform_seed:
 	push bc
 	ld a,c
 	ld (de),a              ; +0 = slot id
@@ -12762,22 +12761,22 @@ l9056h:
 	ld bc,00004h
 	ldir                   ; +1..+4 = Y, X, step, span
 	inc de
-	inc de                 ; leave +5/+6 alone, land on the next slot
+	inc de                 ; leave +5/+6, land on the next slot
 	pop bc
 	inc c
-	djnz l9056h
+	djnz platform_seed
 	pop hl
 	ret
-l9067h:
+platform_skip:                     ; (seg2 0x9067) next {stage,room,n} record
 	pop hl
 	inc hl
 	inc hl
-	ld a,(hl)              ; skip this record: 3 header bytes + n*4
+	ld a,(hl)
 	inc hl
 	add a,a
 	add a,a
 	call ADD_HL_A
-	jr l903dh
+	jr platform_scan
 platform_tbl:                      ; (seg2 0x9073) {stage,room,n} + n x {Y,X,step,span}; 0xFF end
 	; Y is the visual top (stand test). SAT is Y-1 (VDP draws at SAT+1).
 	defb 005h,001h,001h        ; stage 5 room 1
@@ -12797,23 +12796,23 @@ platform_tbl:                      ; (seg2 0x9073) {stage,room,n} + n x {Y,X,ste
 platform_tick:                     ; (seg2 0x90A2) 2 x C598 moving platforms
 	ld hl,platform_slots
 	ld b,002h
-l90a7h:
+platform_slot:
 	push bc
 	push hl
 	ld a,(hl)
 	or a
-	jr z,l90b5h            ; slot free
+	jr z,platform_next     ; slot free
 	push hl
 	call platform_move
 	pop hl
 	call platform_sat_build
-l90b5h:
+platform_next:
 	pop hl
 	pop bc
 	ld de,00007h
 	add hl,de              ; next slot
 	inc c
-	djnz l90a7h
+	djnz platform_slot
 	ret
 ; platform_move (0x90BF): advance one platform.  HL = slot.  On the tick where
 ; the sweep counter reaches +4 it reverses (+3 = -+3) and does NOT move, so the
@@ -12833,22 +12832,22 @@ platform_move:
 	inc (hl)               ; ++ +6 sweep counter
 	ld a,c
 	sub (hl)               ; span - count
-	jr nz,l90d0h
+	jr nz,platform_turn
 	ld (hl),a              ; end of sweep: count = 0
-l90d0h:
+platform_turn:                     ; (seg2 0x90D0) Z -> reverse, else X += step
 	dec hl
 	dec hl
 	dec hl                 ; -> +3
-	jr nz,l90dah
+	jr nz,platform_add_x
 	ld a,(hl)
 	neg
-	ld (hl),a              ; reverse direction
+	ld (hl),a
 	ret
-l90dah:
+platform_add_x:
 	dec hl                 ; -> +2
 	ld a,d
 	add a,e
-	ld (hl),a              ; X += step
+	ld (hl),a
 	ret
 ; platform_sat_build (0x90DF): emit one platform's 4 sprite attribute entries
 ; and their per-line colours.  Slot 1 uses SAT 0xD638 / colours 0xD4E0, slot 2
@@ -12858,26 +12857,26 @@ l90dah:
 platform_sat_build:
 	ld a,(hl)              ; A = +0 slot id
 	push af
-l90e1h:
-	inc hl                 ; -> +1 (Y), where platform_sat_cells starts reading
+platform_sat_pick:                 ; (seg2 0x90E1) slot 1: D638/D4E0; slot 2: D648/D520
+	inc hl                 ; -> +1 Y
 	ld de,0d638h
 	dec a
-	jr z,l90ebh
+	jr z,platform_sat_attr
 	ld de,0d648h
-l90ebh:
+platform_sat_attr:
 	call platform_sat_cells
 	pop af
 	ld hl,0d4e0h
 	dec a
-	jr z,l90f8h
+	jr z,platform_sat_pal
 	ld hl,0d520h
-l90f8h:
+platform_sat_pal:
 	ld de,00244h           ; stage 5: colour 2 + colour 4 with CC
 	ld a,(stage)
 	cp 005h
-	jr z,l9105h
+	jr z,platform_sat_paint
 	ld de,0094ch           ; elsewhere: colour 9 + colour 0xC with CC
-l9105h:
+platform_sat_paint:
 	ld a,d
 	call platform_fill16
 	ld a,e
@@ -12887,10 +12886,10 @@ l9105h:
 	ld a,e                 ; falls through for the fourth cell
 platform_fill16:                   ; 16 colour bytes (one 16x16 sprite's lines)
 	ld b,010h
-l9114h:
+platform_fill16_loop:
 	ld (hl),a
 	inc hl
-	djnz l9114h
+	djnz platform_fill16_loop
 	ret
 ; platform_sat_cells (0x9119): write 4 SAT entries at DE from the slot at HL.
 ; Y is the visual row minus 1 (MSX SAT Y is the line above the sprite, so
@@ -12901,7 +12900,7 @@ l9114h:
 platform_sat_cells:
 	ld ix,platform_sat_ofs
 	ld b,004h
-l911fh:
+platform_sat_cell:
 	push bc
 	push hl
 	ld a,(hl)              ; A = +1 visual Y
@@ -12918,9 +12917,9 @@ l911fh:
 	ld a,(stage)
 	cp 005h
 	ld a,c
-	jr z,l913ah
+	jr z,platform_sat_pat
 	add a,008h             ; not stage 5 -> the other deck patterns
-l913ah:
+platform_sat_pat:
 	ld (de),a              ; SAT pattern
 	inc de
 	inc de                 ; skip the colour byte -> next SAT entry
@@ -12928,7 +12927,7 @@ l913ah:
 	inc ix
 	pop hl
 	pop bc
-	djnz l911fh
+	djnz platform_sat_cell
 	ret
 platform_sat_ofs:                  ; 4 x {X offset, pattern}: two 16x16 halves,
 	defb 000h,0d0h             ; each built from two OR'd planes (CC).
@@ -12943,7 +12942,7 @@ platform_sat_ofs:                  ; 4 x {X offset, pattern}: two 16x16 halves,
 ;   0xC5AC   != 3  -> nothing to do yet
 ;  When == 3, 0xC5AD=Y / 0xC5AE=X give the door position; +3 is a frame
 ;  counter that advances each call, blitting opening frames via 0x494D
-;  until it reaches 0x2C, then latches "open" (state stays 3 at l916fh).
+;  until it reaches 0x2C, then latches "open" (state stays 3 at door_anim_hold).
 door_anim_tick:
 	ld hl,door_state
 	ld a,(hl)
@@ -12959,14 +12958,14 @@ door_anim_tick:
 	inc (hl)               ; advance the opening-frame counter (+3)
 	ld a,(hl)
 	cp 02ch
-	jr nc,l916fh           ; done animating
+	jr nc,door_anim_hold   ; done animating
 	ld h,d
 	ld l,e
 	inc l
 	ld bc,0082fh
 	ld a,000h
 	jp vdp_hmmm              ; blit the next open frame
-l916fh:
+door_anim_hold:                    ; (seg2 0x916F) keep C5AC = 3 (open)
 	ld a,003h
 	ld (door_state),a          ; hold "open" state
 	ret
@@ -13019,7 +13018,7 @@ vendor_offer_match:
 	call ADD_HL_A
 	ld c,(hl)
 	ld b,002h
-l91b4h:
+vendor_offer_scan:
 	push bc
 	ld a,002h
 	sub b
@@ -13027,16 +13026,16 @@ l91b4h:
 	ld a,(hl)
 	pop bc
 	cp c
-	jr z,l91c2h
-	djnz l91b4h
-l91c2h:
+	jr z,vendor_offer_done
+	djnz vendor_offer_scan
+vendor_offer_done:                 ; (seg2 0x91C2) A = matching slot 1/2, or 0
 	ld a,b
 	exx
 	ret
 vendor_tick:                       ; (seg2 0x91C5) 2 x C5B5/C5C5 vendor slots
 	ld hl,0c5b5h
 	ld bc,00200h
-l91cbh:
+vendor_tick_slot:
 	push bc
 	push hl
 	push hl
@@ -13050,7 +13049,7 @@ l91cbh:
 	ld l,a
 	pop bc
 	inc c
-	djnz l91cbh
+	djnz vendor_tick_slot
 	ret
 vendor_slot_tick:
 	inc l
@@ -13061,17 +13060,17 @@ vendor_slot_tick:
 	dec l
 	and 00fh
 	dec a
-	jr z,l91f1h
+	jr z,vendor_reveal     ; nibble 1: first appear
 	dec a
-	jr z,l91f9h
+	jr z,vendor_whip       ; nibble 2: idle / whip-hit
 	dec a
-	jr z,l9230h
+	jr z,vendor_flash      ; nibble 3: hit flash
 	ret
-l91f1h:
+vendor_reveal:                     ; (seg2 0x91F1) latch slot id, state 0x82, draw
 	ld (ix+009h),c
 	ld (hl),082h
-	jp l9253h
-l91f9h:
+	jp vendor_appear
+vendor_whip:                       ; (seg2 0x91F9) +3 hit byte: 0 idle, FF leave
 	inc l
 	inc l
 	inc l
@@ -13085,35 +13084,35 @@ l91f9h:
 	ld c,(hl)
 	inc l
 	cp 0ffh
-	jr z,l921ch
+	jr z,vendor_whip_leave
 	call vendor_slot_ptr
 	res 7,(hl)
 	inc (hl)
 	call vendor_pick_outcome
-l9213h:
+vendor_flash_arm:                  ; (seg2 0x9213) 32-tick flash, state 3
 	ld (ix+00ah),020h
 	ld (ix+000h),003h
 	ret
-l921ch:
+vendor_whip_leave:                 ; (seg2 0x921C) force outcome 6 (leave)
 	ld a,006h
 	ld (0c70ch),a
 	ld a,003h
 	ld (0c70bh),a
-	jr l9213h
+	jr vendor_flash_arm
 vendor_slot_ptr:
 	ld a,(ix+009h)
 	call vendor_de00_slot
 	inc hl
 	ret
-l9230h:
+vendor_flash:                      ; (seg2 0x9230) countdown ix+0A, then dispatch
 	dec (ix+00ah)
 	ld a,(ix+00ah)
 	push af
 	rra
 	ld a,002h              ; even frames: grey flash (C70B slot 2)
-	jr c,l923fh
+	jr c,vendor_flash_col
 	ld a,(0c70bh)          ; odd frames: reaction colour
-l923fh:
+vendor_flash_col:
 	push de
 	call vendor_draw
 	pop de
@@ -13123,7 +13122,7 @@ l923fh:
 	call vendor_draw
 	ld (ix+000h),082h
 	jp vendor_outcome_dispatch
-l9253h:
+vendor_appear:                     ; (seg2 0x9253) stash 32x32, then idle blit
 	push de
 	ld hl,0e580h
 	call map_save_4x4      ; stash 32x32 under the vendor
@@ -13151,7 +13150,7 @@ vendor_draw:
 vendor_redraw_all:
 	ld hl,0c5b5h
 	ld bc,00200h
-l9279h:
+vendor_redraw_slot:
 	push bc
 	push hl
 	push hl
@@ -13165,7 +13164,7 @@ l9279h:
 	ld l,a
 	pop bc
 	inc c
-	djnz l9279h
+	djnz vendor_redraw_slot
 	ret
 vendor_redraw:
 	inc l
@@ -13176,23 +13175,23 @@ vendor_redraw:
 vendor_force_hit:
 	ld hl,0c5b5h
 	ld b,002h
-l9299h:
+vendor_force_hit_slot:
 	push hl
 	ld a,(hl)
 	or a
-	jr z,l92a6h
+	jr z,vendor_force_hit_next
 	add a,a
-	jr nc,l92a6h
+	jr nc,vendor_force_hit_next
 	inc l
 	inc l
 	inc l
-	ld (hl),0ffh
-l92a6h:
+	ld (hl),0ffh           ; occupied with bit7: hit byte = 0xFF (leave)
+vendor_force_hit_next:
 	pop hl
 	ld a,010h
 	add a,l
 	ld l,a
-	djnz l9299h
+	djnz vendor_force_hit_slot
 	ret
 ; --- vendor_outcome_dispatch (0x92AE) -----------------------------------------
 ; Execute the vendor's reaction to a whip hit, selected by state byte 0xC70C.
@@ -13235,30 +13234,30 @@ vendor_pick_outcome:
 	ld a,(hl)
 	dec a
 	cp 008h
-	jr c,l92d6h
+	jr c,vendor_trans_idx
 	ld a,007h
-l92d6h:
+vendor_trans_idx:                  ; (seg2 0x92D6) index the 8-byte row
 	call ADD_DE_A
 	ld a,(de)
 	ld (0c70ch),a
 	sub 007h
-	jr c,l92f9h            ; states 0..6: use directly
+	jr c,vendor_recolor    ; states 0..6: use directly
 	; states 7/8/9: coin-flip between two candidates via R register (RNG)
 	ld hl,00305h
-	jr z,l92efh
+	jr z,vendor_rng_pair
 	dec a
 	ld hl,00405h
-	jr z,l92efh
+	jr z,vendor_rng_pair
 	ld hl,00304h
-l92efh:
+vendor_rng_pair:
 	ld a,r
 	rra
 	ld a,h
-	jr c,l92f6h
+	jr c,vendor_rng_pick
 	ld a,l
-l92f6h:
+vendor_rng_pick:
 	ld (0c70ch),a
-l92f9h:
+vendor_recolor:                    ; (seg2 0x92F9) C70C -> C70B via action tbl
 	ld a,(0c70ch)
 	ld hl,vendor_state_action_tbl
 	call ADD_HL_A
@@ -13349,15 +13348,15 @@ vendor_offer_draw:             ; (0x939E) HMMM backup, panel, glyphs, price, ico
 	ld d,(hl)
 	ld a,d
 	cp 080h
-	jr nc,l93b8h
-	sub 010h
-	jr l93bah
-l93b8h:
+	jr nc,vendor_bubble_right
+	sub 010h               ; left half: panel X = vendorX - 16
+	jr vendor_bubble_pos
+vendor_bubble_right:               ; (seg2 0x93B8) right half: X - 32
 	sub 020h
-l93bah:
+vendor_bubble_pos:
 	ld h,a
 	ld a,e
-	sub 018h
+	sub 018h               ; panel Y = vendorY - 24
 	ld l,a
 	ld (0c704h),hl
 	ld de,0b080h
@@ -13375,7 +13374,7 @@ l93bah:
 	ex de,hl
 	ld c,00eh
 	call vdp_box
-l93e3h:
+vendor_offer_text:                 ; (seg2 0x93E3) glyphs + price + icon
 	ld bc,00804h
 	ld hl,vendor_offer_str0
 	call vendor_glyphs
@@ -13399,14 +13398,14 @@ vendor_set_offer_item:
 	set 7,(hl)
 	ld hl,vendor_price_tbl            ; vendor_price_tbl (9 rows of 4: id,normal,half,double)
 	ld b,009h
-l9415h:
+vendor_price_scan:
 	cp (hl)
 	inc hl
 	jr z,vendor_select_price
 	inc hl
 	inc hl
 	inc hl
-	djnz l9415h
+	djnz vendor_price_scan
 	ret
 ; vendor_select_price: high bits of 0xC702 (bible flags) pick the price variant.
 ;   no bible  -> +1 normal price     (knife = 0x50 = 50 hearts, BCD)
@@ -13415,13 +13414,13 @@ l9415h:
 vendor_select_price:
 	ld a,(0c702h)          ; bible price-modifier flags
 	add a,a
-	jr c,l9429h
+	jr c,vendor_price_inc  ; white bible: +2
 	add a,a
-	jr nc,l942ah
+	jr nc,vendor_price_store ; neither: +1 (already at normal)
+	inc hl                 ; black bible: +3
+vendor_price_inc:
 	inc hl
-l9429h:
-	inc hl
-l942ah:
+vendor_price_store:
 	ld a,(hl)
 	ld (0c707h),a          ; price in hearts (BCD)
 	ret
@@ -13443,13 +13442,13 @@ vendor_de00_slot:
 	ld bc,00000h
 	ld a,(stage)
 	or a
-l945eh:
-	jr z,l9468h
+vendor_de00_chk:
+	jr z,vendor_de00_base  ; courtyard: BC already 0
 	dec a
 	ld hl,vendor_de00_ofs
 	call ADD_HL_A
 	ld c,(hl)
-l9468h:
+vendor_de00_base:                  ; (seg2 0x9468) DE00 + hub ofs + room*4
 	ld hl,0de00h
 	add hl,bc
 	ld a,(room)
@@ -13472,14 +13471,14 @@ vendor_offer_str1:
 	defb 050h,04dh,000h,000h,04eh,04fh,0ffh
 vendor_price_draw:
 	ld bc,01810h
-l949bh:
+vendor_price_blit:
 	call vendor_bubble_xy
 	ld hl,0c707h
 	ld b,001h
 	jp hud_bcd_draw
 vendor_glyphs:
 	call vendor_bubble_xy
-l94a9h:
+vendor_glyph_loop:
 	ld a,(hl)
 	inc a
 	ret z
@@ -13487,7 +13486,7 @@ l94a9h:
 	call hud_glyph_blit
 	call blit_advance_x
 	inc hl
-	jr l94a9h
+	jr vendor_glyph_loop
 vendor_bubble_xy:
 	ld de,(0c704h)
 	ld a,d
@@ -13507,11 +13506,11 @@ vendor_bubble_xy:
 vendor_purchase_tick:
 	ld a,(0c003h)
 	and 01fh
-	jr nz,l94ceh
+	jr nz,vendor_purchase_poll
 	ld hl,0c706h           ; offer countdown
 	dec (hl)
 	jr z,vendor_offer_withdraw            ; expired -> withdraw offer
-l94ceh:
+vendor_purchase_poll:              ; (seg2 0x94CE) skip timer; poll buy/refuse
 	call vendor_read_buttons         ; read confirm/refuse buttons (edge-detected)
 	jr z,vendor_offer_pending            ; nothing pressed -> keep offer open
 	rra

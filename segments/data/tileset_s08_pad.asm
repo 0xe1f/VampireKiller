@@ -1,4 +1,5 @@
 ; 0xFF pad to end of seg8 (0xBFD2).
+; Unused complete tile: gfx/tilesets/unused_tiles.png (`make gfx`).
 
 ; 0xBFD2  pad tile 0x00
 	defb 0xff,0xff,0xff,0xff

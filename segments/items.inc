@@ -3,7 +3,7 @@
 ;  Readability only — not emitted.  Named item_* so they do not collide
 ;  with the collect_bonus handlers (bonus_small_heart, …) in banks_0123.
 ;  collect_bonus_tbl is word[id-1] for 1..25; id >= 0x1A falls through to
-;  the weapon-pickup path (C416 = id-0x19, except 0x1E holy water).
+;  collect_weapon (C416 = id-0x19, except 0x1E holy water).
 ; ===========================================================================
 
 item_none:               equ 0x00  ; empty candle / no drop

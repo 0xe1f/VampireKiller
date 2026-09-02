@@ -221,13 +221,13 @@ clearing one hub early. At tier 3, `vendor_mood_up` is a no-op.
 
 | C001 | Path | What |
 | ---: | --- | --- |
-| 0 | `l4411h` | clear C40C, `vendor_make_offer`, `main_phase_next` → 1 |
+| 0 | `vendor_begin` | clear C40C, `vendor_make_offer`, `main_phase_next` → 1 |
 | 1 | fallthrough | `vendor_purchase_tick`; NZ = still open. Z → `main_timer_set 0x0F` (C004 = 15, C001 → 2) |
-| 2 | `l4402h` | dec C004; at 0, `0x950E` dismiss and `main_state_set` play |
+| 2 | `vendor_hold` | dec C004; at 0, `vendor_offer_dismiss` and `main_state_set` play |
 
 `vendor_make_offer` (`0x938E`): `vendor_set_offer_item` copies DE00 offer id
 → `0xC708`, looks up `vendor_price_tbl`, arms `0xC706 = 0x14` (20), sfx
-`0x19`, draws the bubble (`l939eh`: HMMM backup, `panel_frame`, HUD glyphs
+`0x19`, draws the bubble (`vendor_offer_draw`: HMMM backup, `panel_frame`, HUD glyphs
 `vendor_offer_str0` / `_str1`, BCD price, bonus icon).
 
 `vendor_select_price`: `0xC702` bit7 (white bible `0x11`) = halved column,

@@ -11,6 +11,9 @@ MegaROM (Konami4, no SCC).
 The goal is a readable, commented, buildable source that reproduces the original
 ROM exactly, so the game can be understood and modified.
 
+You can find random interesting facts from the disassembly at
+[@msxti.me](https://bsky.app/profile/msxti.me) on Bluesky.
+
 ## What's here
 
 ```
@@ -28,7 +31,7 @@ segments/           one file per paging window (fills through 0xC000)
   actors.inc etc.   small numeric ids (actor/item/weapon/sfx/pose/scenery/event/state/dir)
 tools/              game-specific helpers (gfx sheets, maps, PSG)
   workbench/        MSXDAW submodule (regen, romscan, RLE, PSG)
-docs/               reverse-engineering notes (`game-notes.md`, `vendor.md`, `progress.md`)
+docs/               reverse-engineering notes (`game-notes.md`, `vendor.md`, `progress.md`, `unused.md`)
 gfx/                readable graphics catalogue (PNG sheets committed; `make gfx`)
                     sprites/ packed 1bpp sprite-asm sheets; tilesets/ 4bpp
                     playfield/title; palettes/ palette_apply swatches;
@@ -81,6 +84,9 @@ scanline). Sprites stay RLE-packed in source (`tools/workbench/konami/rleenc.py`
 `make gfx` writes PNG previews from the ROM, including `gfx/enemy_sheet.png`
 and a full-frame sheet per enemy (`gfx/sheet_enemy_zombie_01.png`, …).
 Packed 1bpp sprite asms dump to `gfx/sprites/<stem>.png`.
+Orphan / unused slices: `gfx/sprites/unused_*.png`,
+`gfx/tilesets/unused_tiles.png`, `gfx/unused_poses.png`
+(`docs/unused.md`).
 Each 4bpp tileset asm has a sheet at `gfx/tilesets/<stem>.png`.
 Each palette_apply asm has a sheet at `gfx/palettes/<stem>.png`
 (16 columns = VDP index; cell header = CPU address of the 3-byte record).
@@ -93,7 +99,8 @@ and `gfx/metatiles/mtile_stream_intro.png` (cell header = CPU of the
 F2-minimap layout.
 
 See `docs/game-notes.md` for reverse-engineering notes, `docs/vendor.md` for
-the vendor / difficulty-tier map, and `docs/progress.md` for current status
+the vendor / difficulty-tier map, `docs/unused.md` for leftover ROM assets,
+and `docs/progress.md` for current status
 and next steps.
 
 ## License

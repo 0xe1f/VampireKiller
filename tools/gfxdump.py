@@ -16,11 +16,13 @@
 """Build PNG graphics sheets in gfx/ from identified asm / ROM tables.
 
   gfx/sprites/<stem>.png   - packed 1bpp sprite asms (ASM_SPRITE_STEMS)
+  gfx/sprites/unused_*.png - orphan / unidentified sprite planes
   gfx/tilesets/<stem>.png  - 4bpp tileset asms (plus spike_bar, dracula_body)
+  gfx/tilesets/unused_*.png - unused 8x8 tiles (blank portrait gap, FF pads)
   gfx/palettes/<stem>.png  - palette_apply tables (solid 8x8 swatches)
   gfx/metatiles/<stem>.png - 4x4 metatile def tables and 8x6 room streams
   gfx/fonts/<stem>.png     - 1bpp font asms (ASM_FONT_STEMS)
-  gfx/<name>.png           - derived sheets (composites, vendor)
+  gfx/<name>.png           - derived sheets (composites, vendor, unused poses)
 
 Tileset / metatile / palette cell header is the CPU address. Sprite-asm
 cell header is the VRAM dest. Font cell header is the hex glyph id. One
@@ -459,6 +461,7 @@ def main():
     dump_enemy_frames(data)
     dump_vendor(data)
     dump_asm_sprite_rles(data)
+    dump_unused(data)
     dump_asm_tilesets(data)
     dump_asm_palettes()
     dump_asm_metatiles(data)
@@ -482,7 +485,7 @@ ENEMY_SHAPE_ID = {
     6: 0x50, 7: 0x16, 8: 0x71, 9: 0x21, 10: 0x05,
     11: 0x49, 12: 0x89, 13: 0x67, 14: None, 15: 0x6D,
     16: 0x5F, 17: 0x5B, 18: 0x4F, 19: 0x2B, 20: 0x35,
-    21: 0x79, 22: 0x7C,
+    21: 0x79, 22: 0x7C, 0x18: 0x69,
     0x1A: 0x9B, 0x1B: 0x9B, 0x1C: 0x9B,
 }
 # actor_* stem (segments/actors.inc) for gfx/sheet_enemy_<name>_<id>.png.
@@ -496,13 +499,15 @@ ENEMY_NAME = {
     0x18: "igor",
     0x1A: "blob_blue", 0x1B: "blob_red", 0x1C: "blob_white",
 }
-# Every ix+0B pose the tick actually writes.  Type 14 has no 0x644C shape
-# cycle; labels 0x80/0x70 are the SAT head patterns (idle closed / spit open).
-# Blob 0x9D-0xA2 are the same two frames retargeted to other VRAM dests, so
-# 0x9B/0x9C is the whole anim.  Roc init pose 0x67 is the hunchback sheet,
-# not roc VRAM.  Skull pile 0x04/0x05 are the FE00 facing pair (vertical
-# swap of the two 16x16s = H-flip); 0x06/0x07 are the same art at FE40
-# (s9r4) and read as blob if composited from an FE00 room.
+# Every ix+0B pose the *actor* tick writes.  Shot poses packed in the same
+# RLE (bandage / bone / axe / snake / sickle) are ENEMY_SHOT_FRAMES — they
+# use shot_sat_ptr colours, not actor_sat_colors.  Type 14 has no 0x644C
+# shape cycle; labels 0x80/0x70 are the SAT head patterns (idle closed /
+# spit open).  Blob 0x9D-0xA2 are the same two frames retargeted to other
+# VRAM dests, so 0x9B/0x9C is the whole anim.  Roc init pose 0x67 is the
+# hunchback sheet, not roc VRAM.  Skull pile 0x04/0x05 are the FE00 facing
+# pair (vertical swap of the two 16x16s = H-flip); 0x06/0x07 are the same
+# art at FE40 (s9r4) and read as blob if composited from an FE00 room.
 ENEMY_FRAMES = {
     1: (0x3B, 0x3C, 0x3D, 0x3E),
     2: (0x08, 0x09, 0x0B, 0x0C),
@@ -529,8 +534,18 @@ ENEMY_FRAMES = {
     0x18: (0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C),
     0x1A: (0x9B, 0x9C), 0x1B: (0x9B, 0x9C), 0x1C: (0x9B, 0x9C),
 }
-# ROM has no gfx_script_convert facing.  Sheets append an H-flip of each cell.
-ENEMY_SYNTH_MIRROR = frozenset((14, 21))
+# Host actor type -> (shot type, pose ids).  Shot type indexes actor_spr_count
+# and shot_sat_ptr (0xA0C4).  Bone 0x4E aliases giant-bat shape 0x4E; omit it.
+ENEMY_SHOT_FRAMES = {
+    11: (4, (0x4B, 0x4C, 0x4D)),
+    16: (9, (0x63, 0x64, 0x65, 0x66)),
+    19: (6, (0x27, 0x28, 0x29, 0x2A)),
+    20: (7, (0x39, 0x3A)),
+    22: (8, (0x7D, 0x7E, 0x7F, 0x80)),
+}
+# Types 14 and 21 have no gfx_script_convert facing (bone dragon SAT is
+# always the stored head-left layout; Frankenstein reuses 0x79-7B both ways).
+# Do not H-flip those cells in the sheet.
 # room_spawner bit -> actor type (bits 0-6).
 SPAWN_BIT_TYPE = {0: 1, 1: 2, 2: 3, 3: 4, 4: 7, 5: 8, 6: 15}
 # Types with no spawn bit: rooms that actually host them (object list / boss
@@ -644,31 +659,30 @@ def dump_enemy_frames(data):
         vram_info = _vram_info_for_type(data, typ, vram_cache)
         if frames is None:
             frames = (None,)
-        for sid in frames:
-            grid = _composite_enemy(data, typ, vram_cache, sid,
-                                    vram_info=vram_info)
+
+        def add_frame(sid, grid):
             if _cell_ink(grid) < 8:
-                continue
+                return
             key = _cell_key(grid)
             if key in seen:
-                continue
+                return
             seen.add(key)
             cells.append(grid)
             if sid is not None:
                 labels.append(_hex_id(sid))
-        if typ in ENEMY_SYNTH_MIRROR:
-            extra_c, extra_l = [], []
-            for grid, lab in zip(cells, labels or [None] * len(cells)):
-                flipped = _hflip_grid(grid)
-                key = _cell_key(flipped)
-                if key in seen:
-                    continue
-                seen.add(key)
-                extra_c.append(flipped)
-                extra_l.append(lab)
-            cells.extend(extra_c)
-            if labels:
-                labels.extend(extra_l)
+
+        for sid in frames:
+            add_frame(sid, _composite_enemy(data, typ, vram_cache, sid,
+                                            vram_info=vram_info))
+        shot = ENEMY_SHOT_FRAMES.get(typ)
+        if shot:
+            shot_typ, shot_sids = shot
+            sn = _shot_ncells(data, shot_typ)
+            scols = _shot_colors(data, shot_typ, sn)
+            for sid in shot_sids:
+                add_frame(sid, _composite_enemy(
+                    data, typ, vram_cache, sid, vram_info=vram_info,
+                    ncells=sn, colors=scols))
         if not cells:
             continue
         fname = "sheet_enemy_%s_%02x.png" % (name, typ)
@@ -685,6 +699,8 @@ def _cell_key(grid):
     return tuple(tuple(px for px in row) for row in grid)
 
 def _hflip_grid(grid):
+    """Pixel-row reverse. Used where the ROM itself H-mirrors (portrait
+    mouths); not for enemy SAT sheets that lack a convert facing."""
     return [list(reversed(row)) for row in grid]
 
 def _sat_bbox(typ, parts, shape_id=None):
@@ -698,8 +714,10 @@ def _sat_bbox(typ, parts, shape_id=None):
         x1, y1 = max(x1, 16), max(y1, -16)
     return x0, y0, x1 - x0, y1 - y0
 
-def _composite_enemy(data, typ, vram_cache, shape_id=None, vram_info=None):
-    ncells = data[_cpu_file(1, 0x605E, 0x6000) + typ]
+def _composite_enemy(data, typ, vram_cache, shape_id=None, vram_info=None,
+                     ncells=None, colors=None):
+    if ncells is None:
+        ncells = data[_cpu_file(1, 0x605E, 0x6000) + typ]
     if typ == 14:
         parts, colors = _type14_parts(shape_id)
         sid = shape_id
@@ -708,7 +726,8 @@ def _composite_enemy(data, typ, vram_cache, shape_id=None, vram_info=None):
         if sid is None or not ncells:
             return [[OFF]]
         parts = _parse_shape(data, sid, ncells)
-        colors = _type_colors(data, typ, ncells)
+        if colors is None:
+            colors = _type_colors(data, typ, ncells)
         if typ == 17 and sid in DRACULA_STAND:
             # spawn table only colours 2 cells (intro 0x56). Standing 0x5B
             # fills all 8 from dracula_sat_cols (02 48 repeated).
@@ -844,6 +863,22 @@ def _type_colors(data, typ, ncells):
     ptr = _word(data, _cpu_file(1, 0x608B, 0x6000) + typ * 2)
     fo = _cpu_file(1, ptr, 0x6000)
     return list(data[fo:fo + ncells])
+
+def _shot_ncells(data, shot_typ):
+    return data[_cpu_file(1, 0x605E, 0x6000) + shot_typ]
+
+def _shot_colors(data, shot_typ, ncells):
+    """shot_sat_ptr (seg3 0xA0C4): word[type] -> SAT colour bytes."""
+    ptr = _word(data, _cpu_file(3, 0xA0C4, 0xA000) + shot_typ * 2)
+    fo = _cpu_file(3, ptr, 0xA000)
+    return list(data[fo:fo + ncells])
+
+def _map_sat_planes(cmap, parts, colors):
+    for i, (_dy, _dx, pat) in enumerate(parts):
+        col = colors[i] if i < len(colors) else 0x02
+        idx = col & 0x0F
+        if idx:
+            cmap[0xF800 + pat * 8] = idx
 
 def _vram_for_type(data, typ, parts, cache):
     bit = {v: k for k, v in SPAWN_BIT_TYPE.items()}.get(typ)
@@ -1117,6 +1152,10 @@ SPRITE_RLE_TYPE = {
     "spr_medusa": 19, "spr_mummy": 20, "spr_frankenstein": 21,
     "spr_grim_reaper": 22, "spr_blob": 0x1A, "spr_blob_cc": 0x1A,
 }
+# Extra SAT types whose used poses live in the same packed stream.
+SPRITE_RLE_EXTRA_TYPES = {
+    "spr_hunchback": (0x18,),    # Igor land 0x69/0x6C at FDC0
+}
 # Streams not in room gfx-scripts (load_weapon_sprites / load_vdoor / frontend).
 SPRITE_RLE_DEST = {
     0xA0EA: 0xF900, 0xA147: 0xF9C0, 0xA185: 0xFF00,
@@ -1220,11 +1259,14 @@ def _sat_plane_map(data, typ, vram_cache):
             colors = _type_colors(data, typ, ncells)
             if typ == 17 and sid in DRACULA_STAND:
                 colors = [0x02, 0x48] * 4
-        for i, (_dy, _dx, pat) in enumerate(parts):
-            col = colors[i] if i < len(colors) else 0x02
-            idx = col & 0x0F
-            if idx:
-                cmap[0xF800 + pat * 8] = idx
+        _map_sat_planes(cmap, parts, colors)
+    shot = ENEMY_SHOT_FRAMES.get(typ)
+    if shot:
+        shot_typ, shot_sids = shot
+        sn = _shot_ncells(data, shot_typ)
+        scols = _shot_colors(data, shot_typ, sn)
+        for sid in shot_sids:
+            _map_sat_planes(cmap, _parse_shape(data, sid, sn), scols)
     for src, dest, count in converts:
         for i in range(count):
             d, s = dest + i * 32, src + i * 32
@@ -1280,6 +1322,16 @@ def _enemy_colour_maps(data, streams, dest_of, vram_cache, type_maps, hud_pal):
             if typ not in type_maps:
                 type_maps[typ] = _sat_plane_map(data, typ, vram_cache)
             pal, cmap, _room = type_maps[typ]
+            extras = SPRITE_RLE_EXTRA_TYPES.get(name)
+            if extras:
+                cmap = dict(cmap)
+                for extra in extras:
+                    if extra not in type_maps:
+                        type_maps[extra] = _sat_plane_map(
+                            data, extra, vram_cache)
+                    _p, cm, _r = type_maps[extra]
+                    for addr, idx in cm.items():
+                        cmap.setdefault(addr, idx)
         else:
             pal, cmap = hud_pal, {}
             try:
@@ -1374,6 +1426,118 @@ def dump_asm_sprite_rles(data):
     _dump_sprite_rle_asm(
         data, "title_jp_sprites.asm", {0xBBF6: 0xF800}, hud, title_idx,
         skip_prefix=2, force_pal2_black=True)
+
+
+# Packed streams with no loader / pointer-table consumer.
+UNUSED_ENEMY_CPU = frozenset((0xAEE0, 0xAF96))
+# ix+0B ids never stored.  Type is the SAT layout used to composite.
+# 0xA3/0xA4 are 1-cell aliases of pickup/fireball patterns not in room
+# gfx-scripts (no VRAM to composite); listed in docs/unused.md.
+UNUSED_POSE_TYPE = (
+    (0x0A, 2), (0x0D, 3),
+    (0x2D, 13), (0x2E, 13), (0x2F, 0x18), (0x30, 13), (0x31, 13), (0x32, 0x18),
+    (0x76, 13), (0x77, 0x18), (0x78, 13),
+    (0x8E, 15),
+)
+
+
+def _dump_unused_rle(fname, want_cpus, out_stem, pal, idx_for):
+    """Subset of a packed-sprite asm.  Header = packed CPU + plane offset."""
+    path = os.path.join(DATA_DIR, fname)
+    streams = _parse_asm_sprite_rle(path)
+    cells, labels = [], []
+    n_skip = 0
+    for name, cpu, packed in streams:
+        if cpu not in want_cpus:
+            continue
+        try:
+            out, _base, _end = rledec.decompress(packed, 0, cpu)
+        except Exception:
+            n_skip += 1
+            continue
+        for off in range(0, len(out) - 31, 32):
+            idx = idx_for(cpu + off, off)
+            cells.append(_paint_plane(bytes(out[off:off + 32]), pal, idx))
+            labels.append("%04X" % (cpu + off))
+    if not cells:
+        print("%-28s (no unused streams)" % (out_stem + ".png"))
+        return
+    render_png(os.path.join(SPRITE_DIR, out_stem + ".png"), cells, [OFF],
+               cols=8, labels=labels, size=16, scale=8)
+    print("%-28s %d streams, %d cells (skip %d)"
+          % (out_stem + ".png", len(want_cpus), len(cells), n_skip))
+
+
+def dump_unused(data):
+    """Orphan / unidentified / unused-pose sheets.  Prefix unused_."""
+    os.makedirs(SPRITE_DIR, exist_ok=True)
+    os.makedirs(TILESET_DIR, exist_ok=True)
+    hud = vk_play_palette(data)
+
+    def simon_idx(_addr, off):
+        return 1 if (off // 32) % 2 == 0 else 2
+
+    _dump_unused_rle(
+        "simon_rle.asm", frozenset(SIMON_RLE_ORPHANS),
+        "unused_simon", hud, simon_idx)
+    _dump_unused_rle(
+        "enemy_sprite_rle.asm", UNUSED_ENEMY_CPU,
+        "unused_enemy", hud, lambda addr, off: 14)
+
+    raw = bytes(data[_cpu_file(10, 0xB50B, 0xA000):
+                     _cpu_file(10, 0xB50B, 0xA000) + 64])
+    cells, labels = [], []
+    for off in range(0, 64, 32):
+        cells.append(_paint_plane(raw[off:off + 32], hud, 14))
+        labels.append("%04X" % (0xB50B + off))
+    render_png(os.path.join(SPRITE_DIR, "unused_unid_b50b.png"), cells, [OFF],
+               cols=8, labels=labels, size=16, scale=8)
+    print("%-28s %d cells (raw 1bpp, not RLE)"
+          % ("unused_unid_b50b.png", len(cells)))
+
+    dump_unused_tiles(data)
+    dump_unused_poses(data)
+
+
+def dump_unused_tiles(data):
+    """8x8 4bpp leftovers that form a complete tile.  Header = CPU."""
+    hud = vk_play_palette(data)
+    port = _tileset_asm_palette("dracula_portrait.asm", data)
+    cells, labels = [], []
+
+    def add_raw(cpu, seg, win, n, pal):
+        fo = _cpu_file(seg, cpu, win)
+        grids = tile_grids(bytes(data[fo:fo + n]), "tile8")
+        for i, grid in enumerate(grids):
+            cells.append(
+                [[OFF if p == 0 else pal[p] for p in row] for row in grid])
+            labels.append("%04X" % (cpu + i * 32))
+
+    add_raw(0xBB18, 15, 0xA000, 6 * 32, port)  # blank portrait gap
+    add_raw(0xBFD2, 8, 0xA000, 32, hud)        # tileset_s08 0xFF pad
+    add_raw(0xBFC8, 6, 0xA000, 32, hud)        # hud_weapon_key 0xFF pad
+    if not cells:
+        return
+    render_png(os.path.join(TILESET_DIR, "unused_tiles.png"), cells, [OFF],
+               cols=8, labels=labels, size=8, scale=8)
+    print("%-28s %d tiles" % ("unused_tiles.png", len(cells)))
+
+
+def dump_unused_poses(data):
+    """SAT composites for ix+0B ids the game never stores."""
+    vram_cache = {}
+    cells, labels = [], []
+    for sid, typ in UNUSED_POSE_TYPE:
+        grid = _composite_enemy(data, typ, vram_cache, sid)
+        if _cell_ink(grid) < 8:
+            continue
+        cells.append(grid)
+        labels.append(_hex_id(sid))
+    if not cells:
+        return
+    render_packed_png(os.path.join(GFX, "unused_poses.png"), cells,
+                      labels=labels)
+    print("%-28s %d poses" % ("unused_poses.png", len(cells)))
 
 
 def _tileset_file(stage, cpu):

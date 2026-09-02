@@ -147,7 +147,7 @@ def is_solid_ctx(grid, r, c, row, mode, room=None):
     decoration (and stage-1 stair trim); treating them as surfaces made 09
     specks next to wallpaper render as solid noise (stages 6, 10, 15, 17).
     Event 6 (s18r9) uses threshold 6 for perm and collision (tile_is_solid
-    l7c7ah).  Walls/floors are built by pairing 01-04 with 09-0b, so real
+    via tile_is_solid_evt6).  Walls/floors are built by pairing 01-04 with 09-0b, so real
     ones stay solid, while a standalone body tile is passable instead of a
     stray 1x1 block."""
     tid = grid[r][c]

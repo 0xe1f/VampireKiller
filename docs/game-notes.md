@@ -156,7 +156,7 @@ against the `=` at x=0xB0.
 
 `actor_*` names live in `segments/actors.inc`. Pictures are from the sheet
 (play + SAT); behaviour is the ROM handler. HP is `0x60E9[type]` (`ix+0D`);
-unshielded contact is **2×** the odd byte of `l81d5h`. Types **17–22** (and
+unshielded contact is **2×** the odd byte of `actor_value_tbl`. Types **17–22** (and
 type 18 in a boss room) use the shared meter `0xC418`; the rest die when
 `ix+0D` hits 0. Leather whip subtracts 1 from fodder HP, other weapons 2.
 
@@ -216,7 +216,7 @@ then calls `credits_tick` (seg1 0x66C1) instead of the normal loop:
 2. **CE40=2** `credits_pump` — each frame `credits_clock` bumps CE33 every 4th
    frame (byte, wraps). `credits_keyframe` pages **seg8 @ 0xA000** and
    **seg5 @ 0x8000**, looks up `credits_script_ptr[CE31]`, and if the
-   record's tick equals CE33 blits it via `l4adch` (C=0xFF).
+   record's tick equals CE33 blits it via `hud_string_glyphs` (C=0xFF).
    `credits_wipe` FILVRMs the strip two ticks behind so scrolled-off glyphs
    don't wrap. Format `{tick, x, chars..., 0xFF}`; letters are ASCII, space
    is `0x00` (not `0x20`); X is
@@ -282,7 +282,7 @@ The world is a hierarchy: **hub → stage → room**.
   wall. Stage 0's first byte is `0x42` (room 2, bit6 set, bit7 clear); the loader
   only uses the low nibble and bit7.
 - **Two layers, not two kinds of door.** (1) **Object:** the table places the door;
-  the key opens it. (2) **Post-open walk** (`l77d8h`): the connectivity nibble on
+  the key opens it. (2) **Post-open walk** (`door_open_exit`): the connectivity nibble on
   that edge is the *destination*. `0xF` → `set_stage_boundary` (`0xC408`) →
   `advance_stage` (seg0 0x438B then 0x434E: `0xD000++`, `0xD001=0`; 438B also
   clears bit0 if still set). Valid room → intra-stage wrap. Intra-stage key doors
@@ -290,7 +290,7 @@ The world is a hierarchy: **hub → stage → room**.
   left → isolated room 9; stage 18 room 8 left → room 9 (Dracula). Stage 15 is not
   a unique mechanism — it is the intra-stage case we traced live (`C5AD=0x80`,
   `C5AE=0x0C`).
-- **Display-type `0x1F` is not this door.** `l87f6h` → `l881bh` → `vendor_spawn` is the
+- **Display-type `0x1F` is not this door.** `scenery_break_result` → `scenery_reveal` → `vendor_spawn` is the
   vendor / brazier-reveal special-object path (`0xC5B5`/`0xC5C5`). An earlier A/B
   scan that "ruled out" placed-object doors was right to reject 0x1F as the
   *white-key door*, but it never found `door_tbl` either. `tools/roomperm.py`
@@ -418,7 +418,7 @@ those handlers with a different spawn-init (overflow of `entity_tbl` into seg1
 | 0x21 | 5 | `actor_placed_merman` | Play-confirmed: already on the platform, does not jump out of water. `enemy_placed_merman_init` 0xA2CE skips the `actor_merman_splash` pair and jumps into the walk. Stage 10 rooms 6–8 |
 
 **Not** white-key doors and **not** the vendor: display-type `0x1F` on a brazier
-(`l87f6h`) is a different field. An earlier overlay treated list-id `0x1F` as a
+(`scenery_break_result`) is a different field. An earlier overlay treated list-id `0x1F` as a
 door candidate because those 3 rooms matched a scan — they are the placed bats.
 
 ### Spike bars (the 0xC580 hazard pool)
@@ -712,7 +712,7 @@ on-screen **ENEMY/BOSS energy** (full `0x80`, used by HP-bar enemies, types ≥ 
 
 **Simon takes damage** (both floor at 0 via `damage_health`, seg0 0x4632):
 - **Enemy contact** — `hurt_simon_contact` (seg2 0x8173). Damage = `2 ×` the *odd*
-  byte of the enemy type's `l81d5h` entry. Confirmed: zombie = **2**, dog = **6**.
+  byte of the enemy type's `actor_value_tbl` entry. Confirmed: zombie = **2**, dog = **6**.
   A raised **red shield** (`0xC701` bit 4, bonus id 3) uses table damage instead
   of 2× when Simon is facing the hit, and spends a shield charge (`0xC441`);
   when charges run out the shield drops.  The **yellow shield** (id 4, bit 5)
@@ -723,7 +723,7 @@ on-screen **ENEMY/BOSS energy** (full `0x80`, used by HP-bar enemies, types ≥ 
   (`spike_bars_seed` is the only writer, and only on stage 6 room 1); enemy shots
   live in the 8 D700 slots. State is 1 while descending and 2 while retracting —
   so the 16 is the falling bar and the 8 is the rising one. Also forces the hurt
-  state (`0xC420 = 5`). Ignored during i-frame/freeze timers (`0xC42D`, `0xC43A`).
+  state (`0xC420 = 5`). Ignored during i-frame/invis timers (`simon_invuln`, `blue_gem`).
   See [Spike bars](#spike-bars-the-0xc580-hazard-pool).
 
 **Simon deals damage** to HP-bar enemies via `weapon_hit_damage` (seg1 0x7E33) →
@@ -758,8 +758,8 @@ death flame (type 12).
 - **normal**: chain whip, boomerang cross
 - **strong**: boomerang axe
 
-The HP-bar table (`l7e60h` / `l7e67h`) treats **axe and cross both as strong**
-(same 1.5× row as the chain whip). Fodder (`l804fh`) is knife 1 / axe 4 / cross 2
+The HP-bar table (`hpbar_dmg_weak` / `hpbar_dmg_strong`) treats **axe and cross both as strong**
+(same 1.5× row as the chain whip). Fodder (`fodder_dmg_tbl`) is knife 1 / axe 4 / cross 2
 / holy 2 per connected hit.
 
 Weapon behaviour (ROM):
@@ -772,7 +772,7 @@ Weapon behaviour (ROM):
   SPACE, `velX` ±3, 24-frame outbound then the shared boomerang (`boomerang_back`
   decelerates and reverses). Overlap Simon (`proj_overlap_simon`) = catch (keep
   `C416`). Flying into the X wrap zone = `lose_weapon` (back to leather).
-  `l74ach` can also spawn bonus `0x1C` at the projectile and unequip when `C433`
+  `axe_drop_unequip` can also spawn bonus `0x1C` at the projectile and unequip when `C433`
   is 2 or 3 that frame.
 - **Cross** (`C416=4`, bonus `0x1D`, vendor 20 hearts). Same boomerang as the
   axe but `velX` ±5, so the 24-frame outbound covers more of the screen
@@ -785,7 +785,7 @@ Weapon behaviour (ROM):
 - **0xC416 = equipped weapon id:** **0 leather, 1 chain, 2 knife, 3 axe, 4
   cross.** Weapons 0 and 1 take the whip path (`cp 002h / jr nc`); **>= 2** take
   the projectile path on **SPACE**. Holy water is `C701` bit 3.
-- **Weapon pickups** via `l8d77h`: `C416 = bonus id - 0x19`, except **`0x1E`**
+- **Weapon pickups** via `collect_weapon`: `C416 = bonus id - 0x19`, except **`0x1E`**
   (holy water). Chain `0x1A` → 1 was runtime-confirmed; knife `0x1B` → 2 is the
   vendor dagger (despawn-on-hit, two slots). Axe vs cross is **3 = axe
   (`0x1C`), 4 = cross (`0x1D`)** from throw speed + vendor stock (the cross is
@@ -795,7 +795,7 @@ Weapon behaviour (ROM):
   the thrown SAT `0x0F`). Type 3's lose path hardcodes a `0x1C` world drop —
   that is this weapon's own bonus id, not a second item.
 - **Damage table split** (`weapon_hit_damage` 0x7E33): leather and knife use
-  `l7e60h` (`04 08 08 04 04 04 10`); chain/axe/cross use `l7e67h`
+  `hpbar_dmg_weak` (`04 08 08 04 04 04 10`); chain/axe/cross use `hpbar_dmg_strong`
   (`06 0C 0C 06 06 06 18`). Index = enemy type − 0x11. Type 0x17 with weapon
   ≥ 2 quarters the hit.
 - On death (`inv_reset_life`) `C416` is cleared to 0. Missing a cross/axe catch also
@@ -825,7 +825,7 @@ Sub-items / consumables:
   and is available in `tools/roomperm.py` via `--minimap` (default placement is the
   BFS spatial reconstruction; the two are generated side by side for comparison).
 - **Hourglass** — bonus id **10** (`C701` bit 6). Use: while **jumping** (C420==1),
-  **DOWN** new-press, spend **5 hearts**. Arms `C43B` (90 frames ~1.5s, or 150
+  **DOWN** new-press, spend **5 hearts**. Arms `hourglass_timer` (`C43B`; 90 frames ~1.5s, or 150
   ~2.5s with the tipped-hourglass flag below) and `D010` bit0, which skips enemy
   AI/movement. Not 5 seconds in the ROM; not a grounded UP+DOWN chord.
 
@@ -838,23 +838,23 @@ keeps only `C701` bit 7 (map); the vial is lost. Vendor row **`0x1E`** is this
 item (30 / 10 / 50 hearts).
 
 **How to throw.** While **jumping** (`C420==1`) and SPACE is **not** a new-press
-(`l713dh`), **LEFT** or **RIGHT** new-press (`C006` bits 2/3). Costs **5 hearts**
+(`simon_try_air_item`), **LEFT** or **RIGHT** new-press (`C006` bits 2/3). Costs **5 hearts**
 (BCD) and needs `C461==0` (one vial at a time). `holy_water_use` (seg1 **0x7154**)
 writes throw dir to `C468` (1=left, 0=right), sets projectile slot `C460` type
 **5**, and spends the hearts. Jump+DOWN is the hourglass if you also have bit 6.
 
 **Arc and flame.** `holy_water_tick` (0x73AB) on the **C460** slot (type at
 `C461`). Spawn copies Simon (`C425`/`C427`) with `velX` ±2 and `velY` 0. In flight
-(state 2) each frame does `Y += 2*l7084h[phase]` — `l7084h` is the signed dY
+(state 2) each frame does `Y += 2*arc_dy_tbl[phase]` — `arc_dy_tbl` is the signed dY
 table also used by hurt knockback — and `X += velX` (`projectile_integrate`). It lands when
-`sub_7b9fh` sees a solid tile, plays sfx `0x18`, and goes to state 3: a **24-frame
+`map_solid_pair` sees a solid tile, plays sfx `0x18`, and goes to state 3: a **24-frame
 flame** on the floor (SAT patterns `0xF4`/`0xF8`, same `actor_flame` sheet as a falling heart;
-pixels in `gfx_rle_a185`). SAT path `l759ch` paints that state **colour 8** (red).
+pixels in `gfx_rle_a185`). SAT path `projectile_sat_ink` paints that state **colour 8** (red).
 
 **Damage.** Unlike the knife (type 2), a hit does **not** despawn the vial
-(`l807fh`). Fodder uses `l804fh` byte 3 = **2** HP per connected hit
+(`projectile_after_hit`). Fodder uses `fodder_dmg_tbl` byte 3 = **2** HP per connected hit
 (knife/axe/cross/holy = 1/4/2/2). The flame can connect more than once: a hit
-clears enemy `+0x0E` bit 0, and `0x99A6` (called from the flame flicker) restores
+clears enemy `+0x0E` bit 0, and `actors_rearm_hittable` (called from the flame flicker) restores
 it on actors that still have bit 2. HP-bar types `0x11–0x17` go through
 `weapon_hit_damage` / `C416` (the equipped whip), not that 2.
 
@@ -864,18 +864,18 @@ The world hourglass pickup can be whipped before you grab it. That is a hidden
 second item, not a glitch. Period guides called the result "1.5× timed-item
 duration"; the ROM is slightly more generous than that.
 
-**How.** Whip the hourglass **once**. `l8c4bh` (seg2 **0x8C4B**) rewrites the
-pickup type (`ix+4`) from **0x0A → 0x0B**, nudges it up 8 pixels (`sub_8c36h`),
+**How.** Whip the hourglass **once**. `hourglass_tip` (seg2 **0x8C4B**) rewrites the
+pickup type (`ix+4`) from **0x0A → 0x0B**, nudges it up 8 pixels (`chest_spill`),
 and the 4bpp blit switches to the sideways graphic (the tile next to the upright
 hourglass in `gfx/tilesets/bonus_hud_tiles.png`). Collecting that form
 runs `bonus_tipped_hourglass` (id **11**, 0x8DFC) which does only
-`set 2,(0xC431)`. Whip it a **second** time and `ix+6` is set to 1, so the
+`set 2,(bonus_flags)`. Whip it a **second** time and `ix+6` is set to 1, so the
 pickup despawns on the next tick — the item is gone.
 
 This is world-pickups only (the 0xC500 list). Buying the hourglass from a vendor
 calls `collect_bonus(0x0A)` immediately; there is nothing to whip.
 
-**What it does.** `0xC431` bit 2 is a persistent "longer timed bonuses" flag. It
+**What it does.** `bonus_flags` (`0xC431`) bit 2 is a persistent "longer timed bonuses" flag. It
 is **not** a second hourglass. The tipped collect path does **not** set `C701`
 bit 6, so this pickup does not grant freeze — you spent the hourglass on the
 duration buff. An hourglass you already held is left alone (bit 6 is not
@@ -887,10 +887,10 @@ that is already counting down. Seconds below assume 60 Hz.
 
 | Effect | RAM | Default | With bit 2 | Ratio |
 |--------|-----|---------|------------|-------|
-| Rosary (no new enemy spawns) | `C440` | `0x96` (150 frames ≈ 2.5 s) | `0xF0` (240 frames ≈ 4 s) | 1.6× |
-| Blue gem (invisibility) | `C43A` | `0x96` | `0xF0` | 1.6× |
-| Sapphire ring (touch-kills) | `C434` | `0x96` | `0xF0` | 1.6× |
-| Hourglass freeze | `C43B` | `0x5A` (90 frames ≈ 1.5 s) | `0x96` (150 frames ≈ 2.5 s) | 1.67× |
+| Rosary (no new enemy spawns) | `rosary_timer` (`C440`) | `0x96` (150 frames ≈ 2.5 s) | `0xF0` (240 frames ≈ 4 s) | 1.6× |
+| Blue gem (invisibility) | `blue_gem` (`C43A`) | `0x96` | `0xF0` | 1.6× |
+| Sapphire ring (touch-kills) | `sapphire_ring` (`C434`) | `0x96` | `0xF0` | 1.6× |
+| Hourglass freeze | `hourglass_timer` (`C43B`) | `0x5A` (90 frames ≈ 1.5 s) | `0x96` (150 frames ≈ 2.5 s) | 1.67× |
 
 Weapon pickups fall through into `bonus_rosary`, so grabbing a whip upgrade also
 gets the long 240-frame no-spawn window if the flag is set.
@@ -900,7 +900,7 @@ score bags) and the persistent inventory bits (boots, wings, candle, map, bibles
 keys, lockpick, shields).
 
 **How long it lasts.** Until death. The life-lost reset (`inv_reset_life`) zeros all
-of `0xC431`, so this flag, boots, and wings go together. It survives room and
+of `bonus_flags`, so this flag, boots, and wings go together. It survives room and
 stage changes.
 
 - **Life orbs / potion** restore `0xC415` (not heart currency). **7** small orb
@@ -917,16 +917,16 @@ stage changes.
   Static trace of the effect (confirmed, immediate, not next-room):
     - Handler `collect_bonus[6]` (seg2 **0x8D83**) arms a countdown timer at
       **0xC440** to **0xF0** (240 frames ≈ 4 s) or **0x96** (150 frames ≈ 2.5 s),
-      selected by `0xC431` bit 2 (tipped hourglass; see that section). Same bit
+      selected by `bonus_flags` bit 2 (tipped hourglass; see that section). Same bit
       lengthens the blue gem, sapphire ring, and hourglass freeze. It does NOT touch
       0xC700-0xC70F inventory or the 0xC416 weapon (hence "temporary"). The weapon
-      pickup path (`l8d77h`, bonus >= 0x1A) falls straight through into this same
+      pickup path (`collect_weapon`, bonus >= 0x1A) falls straight through into this same
       code, so grabbing a whip upgrade also arms a short no-spawn window.
     - 0xC440 is a per-frame countdown: `timers_tick` (seg1) decrements it each frame in
       the timer bank (`room_edge_detect/75c7/75e9/...`).
     - The enemy spawner (seg0 **room_spawner @0x5EBF**) is called every frame from the
       actor-update loop (seg2 0x98F0) whenever 0xD010==0 (normal play). Its first act
-      is `ld a,(0c440h) / and a / ret nz` -> while the rosary timer is nonzero it
+      is `ld a,(rosary_timer) / and a / ret nz` -> while the rosary timer is nonzero it
       spawns nothing. When 0==C440, it reads a per-room **spawn bitmask** and
       dispatches one generator per set bit (see below).
     - **Effect is immediate and current-room** (the gate is checked per frame in
@@ -934,7 +934,7 @@ stage changes.
       *new* spawns; enemies already in the 0xC800 slots are untouched.
 
 `collect_bonus_tbl` (seg2 **0x8D45**) is the 25-entry handler table for pickup
-ids 1–25 (index = id−1; id ≥ 0x1A goes through `l8d77h`). Confirmed: **1/2**
+ids 1–25 (index = id−1; id ≥ 0x1A goes through `collect_weapon`). Confirmed: **1/2**
 small/large heart, **3** red shield (face-on contact uses table damage, not 2×),
 **4** yellow shield (absorbs enemy shots), **5** white cross (kill on-screen
 actors), **6** rosary, **7** small life orb (+8 HP), **8** blue gem (C43A invis, sprite
@@ -946,13 +946,13 @@ whip the id-10 world pickup once; see section above),
 white/blue money bag (+5000/+1000), **21** slime (fake candle drop; collecting
 it is a no-effect stub, leaving it hatches `actor_blob_blue` / `_red` / `_white` by hub), **22**
 potion/bottle (+32 = full bar; vendor 0x16; not the boss orb), **23** yellow
-key, **24** white key, **25** treasure chest (container; `l8c1bh` spends key/lockpick
+key, **24** white key, **25** treasure chest (container; `chest_open` spends key/lockpick
 and reveals the contents id at `ix+0x0D`). Bonus **`0x1E`** (holy water) is not
-in this 1–25 table; `l8d77h` takes `id - 0x19 == 5` to `bonus_holy_water`.
+in this 1–25 table; `collect_weapon` takes `id - 0x19 == 5` to `bonus_holy_water`.
 
 ### HUD bonus tiles (uncompressed 16×16 4bpp)
 
-Pickup popup (`l8eadh`) and the equipped-weapon icon (`hud_weapon_icon`) HMMM these
+Pickup popup (`hud_bonus_tile`) and the equipped-weapon icon (`hud_weapon_icon`) HMMM these
 tiles from VRAM page 1. Loaded at the HUD init copy (seg0 ~0x548C):
 
 | ids | CPU source | ROM file | VRAM dest | dump |
@@ -1065,7 +1065,7 @@ Shared physics header (`actor_integrate` 0x99C0, velocity helpers in seg3):
 | +0B | pose id (`pose_*` in `poses.inc`; stream is `shape_*` in `data/actor_shape.asm` / `actor_shape_ptr`). Unused (no store): **0x0A, 0x0D, 0x2D–0x32, 0x76–0x78, 0x8E, 0xA3–0xA4**. **0x58** is intro_0 left (`dracula_intro` stores 0x56+2). Event 6: **0x02 / 0xA5** robe and **0xA6** open / **0xA7** closed head (`actor_dracula_bat`); **0x57 / 0x59** flying SAT head (`actor_dracula_head`); **0x5A** `actor_dracula_chunk`. |
 | +0C | timer |
 | +0D | HP from `actor_hp_tbl` (0x60E9; spawn indexes as 0x60E8+type) |
-| +0E | flags. **bit 0 = hittable** this frame (`rra`/`jr nc` in whip/proj tests; `res 0` on a hit). **bit 2** = rearm hittable (`actors_rearm_hittable`). Spawn writes 7. |
+| +0E | flags. **bit 0 = hittable** this frame (`rra`/`jr nc` in whip/proj tests; `res 0` on a hit). **bit 1 = contact** vs Simon (`rra`/`rra`/`jr nc` in `actors_vs_simon`). **bit 2** = rearm hittable (`actors_rearm_hittable`). Spawn writes 7. |
 | +0F | copied from CFFA at spawn (spawn zeros CFFA first; unused on C800) |
 | +10..+1E | per-type scratch (merman spit at +1B, facing, saved Y, …) |
 | +1F | drop gate. Spawn copies CFFB (always 0); callers write `ix+1F` after `spawn_actor`. Flame→pickup uses this. |
@@ -1102,7 +1102,7 @@ SAT sub-block at `slot|0x20`, stride 5 (`actor_sat_patterns` 0x6030,
 DONE: HUD/title strings use the `vk` macro (`vk "PUSH SPACE KEY"`): each
 char is (ASCII−0x10), space is 0x00. Position/attr bytes and 0xFE/0xFF
 stay as `defb`. Credits use `cr` (ASCII letters, space still 0x00).
-The HUD set (`l4c07h`) and title strings (`l4d0fh`, `l4d30h`, `l4d41h`)
+The HUD set (`hud_status_str`) and title strings (`title_prompt_str`, `play_start_str`, `game_over_str`)
 in seg00 are converted, as are the Game Master menu strings (`gm_menu_text`,
 `gm_stage_text`, `gm_player_text`, `gm_continue_text`). `title_layout`
 0x4C3F-0x4D0E is `defb`.
@@ -1157,11 +1157,11 @@ credits* above.
 - 0x4D21 `PUSH`, 0x4D26 `SPACE`, 0x4D2C `KEY`
 - 0x4D34 `PLAY`, 0x4D39 `START`
 - 0x4D43 `GAME`, 0x4D49 `OVER`
-Data region is `l4c07h` .. 0x4D4D (right before `sub_4d4eh`, the title builder).
+Data region is `hud_status_str` .. 0x4D4D (right before `title_build`, the title builder).
 `0x4C00-0x4C06` is real code (a keyboard-read routine).
 
-HUD/title strings are authored with `vk` (ASCII−0x10) in seg0 `l4c07h` /
-`l4d0fh`. The HUD/title glyphs are seg8 `hud_font` (0xBD80: 48 × 8×8 1bpp,
+HUD/title strings are authored with `vk` (ASCII−0x10) in seg0 `hud_status_str` /
+`title_prompt_str`. The HUD/title glyphs are seg8 `hud_font` (0xBD80: 48 × 8×8 1bpp,
 ASCII `'0'`–`'_'`), one `defb %xxxxxxxx` row per scanline in
 `segments/data/font_hud.asm`. `hud_font_load` (seg0 0x53BD, from
 `title_build`) expands them via `glyph_blit_run` (ink C=0x0E) onto VRAM
@@ -1388,15 +1388,16 @@ The committed build stays byte-exact because identified graphics are stored as
 the original bytes (labeled `defb` for uncompressed tilesets / metatiles; packed
 1bpp sprite RLE with `%xxxxxxxx` pixel rows; hex PSG / unidentified slices).
 PNG copies live in `gfx/`, generated by `tools/gfxdump.py` (`make gfx`):
-- `gfx/<name>.png` - derived sheets (composites)
+- `gfx/<name>.png` - derived sheets (composites, `unused_poses.png`)
 - `gfx/fonts/<stem>.png` - 1bpp font asms (`font_credits`, `font_hud`,
   `font_logo`)
-- `gfx/sprites/<stem>.png` - packed 1bpp sprite-asm sheets only
-  (`enemy_sprite_rle`, `simon_rle`, `intro_sky`, `title_jp_sprites`)
-- `gfx/tilesets/<stem>.png` - 4bpp tileset sheets
+- `gfx/sprites/<stem>.png` - packed 1bpp sprite-asm sheets
+  (`enemy_sprite_rle`, `simon_rle`, `intro_sky`, `title_jp_sprites`) plus
+  `unused_*.png` orphans / unid
+- `gfx/tilesets/<stem>.png` - 4bpp tileset sheets plus `unused_tiles.png`
 - `gfx/metatiles/<stem>.png` - 4x4 metatile-def sheets and 8x6 room streams
 PNG sheets are committed; the packed/uncompressed bytes in `segments/data/`
-are the assemble source.
+are the assemble source. Unused inventory: `docs/unused.md`.
 
 Catalogued so far:
 - `intro_simon` / `simon_cell0` / `simon_cell1` / `intro_sky` — packed streams
@@ -1462,8 +1463,9 @@ Catalogued so far:
 - `gfx/sheet_enemy_<name>_<id>.png` - every `ix+0B` pose for one actor (same
   compositor as `enemy_sheet.png`). Filename id is the hex type (`sheet_enemy_axe_knight_10`);
   the cell label is the hex shape id only (no `WxH`). Type 14 labels are SAT
-  head patterns (`80` idle / `70` spit); Frankenstein and the bone dragon
-  append H-flips (ROM has no convert facing). Skull pile is `04`/`05` (the
+  head patterns (`80` idle / `70` spit). Types **14** and **21** have no
+  convert facing (Frankenstein reuses `0x79–0x7B` both ways; the bone dragon
+  SAT is always the stored layout). Skull pile is `04`/`05` (the
   FE00 pair); `06`/`07` are the same art at FE40. Raven includes `8C` (convert
   of `89`). Blob `0x9D–0xA2` are dest retargets of `0x9B/0x9C`.
   Igor (`actor_igor`, type `18`) gets his own sheet; he is not on the group
@@ -1549,6 +1551,14 @@ record used by the entity dispatch at 0x5FD0 / `entity_tbl`).
 
 ## Open questions to resolve in code
 
+- **Play-window `lXXXXh` locals** — banks 0–3 still have 795 z80dasm local
+  labels (no `sub_XXXXh` left). Tackle in `docs/progress.md` “Play-window
+  labels”; rename only with a confirmed purpose.
+- Graphics / map / sound banks are labelled `.asm` end to end. Leftover
+  identification (orphans, `seg10_unid_b50b`, unused poses, bank-end pads)
+  is inventoried in **[docs/unused.md](unused.md)**; dumpable slices are
+  `gfx/sprites/unused_*.png`, `gfx/tilesets/unused_tiles.png`,
+  `gfx/unused_poses.png`.
 - Per-level / per-boss data tables (which bank they live in). Boss CE01
   machines for events 1–6 are named; leftover is other unnamed tables.
 
@@ -1583,7 +1593,8 @@ item ids. Vendor scenery attrs stay hex (bits5–2 = offer slot, not `item_*`).
 - **RAM / play-bank immediates** — `segments/ram.inc` covers the confirmed
   cluster (`lives`, `weapon_id`, `health`, `stage`, `simon_action`,
   `simon_whip`, `simon_jump_dir`, `simon_hurt_step`, `simon_arc`, `simon_facing`,
-  `simon_invuln`, `simon_on_plat`,
+  `simon_invuln`, `bonus_flags`, `sapphire_ring`, `swing_weapon`, `blue_gem`,
+  `hourglass_timer`, `hurt_facing`, `rosary_timer`, `simon_on_plat`,
   `cell_event`, `scenery_slots`, `pickup_slots`, `spike_slots`,
   `platform_slots`, `door_state`, `actor_slots`,
   `shot_slots`, `spawn_slot_*`, …).

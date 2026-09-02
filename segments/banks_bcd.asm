@@ -52,7 +52,7 @@
 
 ; ---------------------------------------------------------------------------
 ;  conn_lookup (seg13 0xB963) - room-transition BRAIN.
-;  Pending dir 0xC41B is dir_up..dir_right (from room_edge_detect / l77d8h).
+;  Pending dir 0xC41B is dir_up..dir_right (from room_edge_detect / door_open_exit).
 ;  Looks up conn_ptr[stage][room], picks the matching nibble, writes 0xD001.
 ;  0xF = blocked -> return without carry (state_room_trans treats that as death).
 ;  0xC41B == dir_portal (simon_portal_wait after crouch+UP on a pad) skips the

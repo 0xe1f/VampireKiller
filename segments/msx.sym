@@ -187,7 +187,7 @@ hud_knife: equ 0xbbc8		; bonus 0x1B
 hud_axe: equ 0xbc48		; bonus 0x1C
 hud_cross: equ 0xbcc8		; bonus 0x1D
 hud_holy_water: equ 0xbd48	; bonus 0x1E
-candle_0: equ 0xbdc8		; playfield candle flame 0 (l8991h A=0, VRAM Y=0x70)
+candle_0: equ 0xbdc8		; playfield candle flame 0 (candle_blit A=0, VRAM Y=0x70)
 candle_1: equ 0xbe48		; playfield candle flame 1
 candle_2: equ 0xbec8		; playfield candle flame 2
 candle_3: equ 0xbf48		; playfield candle flame 3
@@ -269,6 +269,7 @@ glyph_blit: equ 0x4a37	; one glyph: expand to 0xC110 then blit to the bitmap
 hud_string_draw: equ 0x4ad2	; HUD/title string at HL (C=0xFF); 0xFE new pos, 0xFF end
 hud_string_masked: equ 0x4ad6	; same stream, C=0 (blank glyphs)
 hud_string_glyphs: equ 0x4adc	; glyph loop of hud_string_draw
+hud_status_str: equ 0x4c07	; HUD SCORE/PLAYER/ENEMY/STAGE vk strings
 hud_glyph_blit: equ 0x4aee	; HMMM 8x8 HUD glyph A at DE (atlas Y+0x38; 0 = space)
 hud_glyph_run: equ 0x4b07	; B glyphs via hud_glyph_blit + blit_advance_x
 tile_blit: equ 0x4b12	; HMMM 8x8 tile A from page-1 atlas to DE page 0
@@ -320,14 +321,21 @@ state_room_trans: equ 0x437e	; 9 C41B: conn_lookup_paged then play_screen_redraw
 state_stage_exit: equ 0x438e	; 10 C408: spend white key, advance_stage
 state_pause: equ 0x43e1	; C40A: F1 freeze; F1 again resumes play
 state_vendor: equ 0x43f7	; 12 C40C whip-hit vendor
+vendor_hold: equ 0x4402	; C001=2: wait C004 then vendor_offer_dismiss, back to play
+vendor_begin: equ 0x4411	; C001=0: clear C40C, vendor_make_offer, phase_next
 state_game_master_menu: equ 0x441b	; 13 GM cartridge menu
 restore_enemy_meter: equ 0x461f	; 0xC418 += B, clamp to 0x80
 hurt_simon_1: equ 0x4655	; B=1 then damage_health
 heal_simon_1: equ 0x4658	; B=1 then restore_health (boss_clear_heal)
 damage_enemy_1: equ 0x465d	; B=1 then damage_enemy
 damage_enemy: equ 0x4643	; 0xC418 enemy/boss energy -= B (floored at 0)
-hurt_simon_contact: equ 0x8173	; Simon -= 2*l81d5h[type].odd on enemy contact (shield halves)
+hurt_simon_contact: equ 0x8173	; Simon -= 2*actor_value_tbl[type].odd on enemy contact (shield halves)
+contact_dmg_full: equ 0x819a	; unshielded / backstab: B *= 2
+contact_dmg_left: equ 0x8197	; actor left of Simon: facing-left = face-on
+contact_dmg_block: equ 0x819f	; face-on red shield: spend a charge
+contact_dmg_apply: equ 0x81af	; jp damage_health
 hurt_simon_spikes: equ 0x85ad	; Simon -= 8/16 from a C580 spike bar (16 descending, 8 retracting)
+spike_dmg_apply: equ 0x85da	; jp damage_health with B=8/16
 spike_bar_overlap: equ 0x85e5	; carry if Simon overlaps this C580 bar's 32x8 box
 weapon_hit_damage: equ 0x7e33	; whip/sub-weapon damage to enemy 0xC418 (per weapon+type table)
 advance_stage: equ 0x434e	; next stage: 0xD000++ (stage), 0xD001=0 (room), bump 0xC410/11, transition 4
@@ -342,6 +350,9 @@ title_load_finish: equ 0x5a32	; restore play banks
 title_castle: equ 0x4c3f	; title_layout: castle emblem (drawn in both regions)
 title_logo_jp: equ 0x4c5a	; title_layout: Japanese title "Akumajo Dracula"
 title_logo_intl: equ 0x4ca0	; title_layout: export title "VAMPIRE KILLER"
+title_prompt_str: equ 0x4d0f	; "KONAMI 1986" / "PUSH SPACE KEY"
+play_start_str: equ 0x4d30	; "PLAY START"
+game_over_str: equ 0x4d41	; "GAME  OVER"
 title_layout_intl: equ 0x4dc3	; non-Japanese 0x002B: VAMPIRE KILLER + castle
 title_layout_finish: equ 0x4dd5	; HUD string + vdp_screen_on
 ; --- Game Master cartridge (Konami's RC-735 cheat cart): detect, pause, menu -
@@ -472,6 +483,7 @@ pattern_shadow_blit: equ 0x65ab	; copy 0xD400 shadow (0x280 bytes) to VRAM 0xF40
 room_edge_detect: equ 0x7682	; set C41B pending exit from Simon vs screen edges
 room_edge_up: equ 0x76ab	; stairs top: wrap Y, pending dir 1
 room_edge_down: equ 0x76c3	; bottom: pit death or room_edge_down_go
+pit_water_sfx: equ 0x76ea	; stages 2/10 pit: sfx_water_in
 room_edge_down_go: equ 0x76ef	; wrap Y to 0x30, pending dir 2
 room_edge_left: equ 0x7709	; pending dir 3 if C41E permits
 room_edge_right: equ 0x7714	; pending dir 4 if C41F permits
@@ -485,7 +497,7 @@ actor_sat_colors: equ 0x6119	; SAT colour/attr init streams (cell+4)
 actor_sat_build: equ 0x644c	; one actor: seg6 shape stream -> SAT block at slot|0x20
 shot_sat_emit: equ 0x64ec	; 8 x shot SAT blocks -> 0xD638 hardware shadow
 c800_sat_emit: equ 0x64f3	; 7 x C800 SAT blocks -> 0xD638 hardware shadow
-actor_sat_emit: equ 0x6508	; one actor SAT block -> 0xD638
+actor_sat_emit: equ 0x6508	; one actor SAT block -> 0xD638; colour at 0xD4E0+id*16
 lookup_word_tbl: equ 0x6549	; DE = ((word*)DE)[A]  (generic word-table lookup)
 frame_vram_refresh: equ 0x6552	; per-frame pattern upload (or pattern_shadow_blit)
 credits_tick: equ 0x66c1	; ending credits (CE40 after event 6); 4-step machine
@@ -526,6 +538,7 @@ dracula_chunk_go: equ 0x6874	; type 0x2E tick: ret (integrate only)
 dracula_chunk_init: equ 0x69c3	; type 0x2E spawn: shape 0x5A + l69ebh velocity
 event_dracula_spawn_bat: equ 0x6a50	; CE36==2: one actor_dracula_bat at (0x80,0x98)
 dracula_bat_init: equ 0x6a64	; type 0x2C spawn: robe 0x02, fall, home on Simon
+dracula_bat_xvel: equ 0x6a93	; 8 home-X speeds; index CF32&7
 dracula_bat_go: equ 0x6aa3	; type 0x2C tick: robe 0x02/0xA5, head open/closed, then bat fly
 hanging_bat_pose: equ 0x6b00	; trampoline to hanging_bat_flap_slow (one rra)
 player_tick: equ 0x6b06	; door + simon_action + attack + edge detector + timers
@@ -533,7 +546,7 @@ timers_tick: equ 0x75c7	; dec C440 (rosary), C434 (ring), C42D (i-frames)
 dec_nonzero: equ 0x75d6	; dec (hl) unless already 0
 boss_flash_delay_tick: equ 0x75db	; C445 -> arm C43E=0x18 backdrop flash
 gem_timer_tick: equ 0x75e9	; C43A invis; sfx 0x17 at 16 frames left
-hourglass_timer_tick: equ 0x75f9	; C43B; on 0: res D010.0, play_sound 0xFC
+hourglass_timer_tick: equ 0x75f9	; hourglass_timer; on 0: res D010.0, play_sound 0xFC
 backdrop_flash_tick: equ 0x760b	; C43E CHGCLR 0x0E/0 (white cross / boss kill)
 simon_action_tick: equ 0x6b40	; Simon per-frame action-state machine (0xC420)
 simon_grounded: equ 0x6b59	; C420=0 walk/idle
@@ -552,14 +565,37 @@ simon_stair_frames_down: equ 0x6f10	; descending: C42E/C42F from C42B bit2
 simon_stair_frames_up: equ 0x6f2b	; ascending: same C, legs step 1 or 2
 simon_fall: equ 0x6f44	; C420=4
 simon_hurt: equ 0x6f8c	; C420=5
-simon_dying: equ 0x709a	; C420=6
+simon_hurt_init: equ 0x6f9a	; sfx, i-frames; stairs if C42B else knock
+simon_hurt_knock: equ 0x6fc3	; hurt_facing -> simon_facing; step 1 left / 2 right
+simon_hurt_left: equ 0x6fdb	; knock left then simon_hurt_arc
+simon_hurt_arc: equ 0x6fde	; shared knock arc; land -> step 3
+simon_hurt_land: equ 0x6ff9	; snap Y; short/long C42A; step 3
+simon_hurt_right: equ 0x701e	; knock right then simon_hurt_arc
+simon_hurt_slide: equ 0x7024	; countdown C42A, then clear hurt
+simon_hurt_recover: equ 0x705a	; after knock: if HP ret; else dying (skip facing-flip on door 2/3/5)
+simon_dying_enter: equ 0x706a	; act_dying; jump_dir=0 as dying phase
+simon_dying: equ 0x709a	; C420=6; jump_dir = dying phase (not jump)
+simon_dying_hold: equ 0x70b6	; wait death BGM; clamp hearts to 5
+simon_dying_leave: equ 0x70c6	; wipe timers; stay_in_play=0 -> death_respawn
 simon_portal_wait: equ 0x7102	; C420=7: wait C42D after crouch+UP on pad, then C41B=0xFF
 inv_reset_life: equ 0x70e3	; new-life/death: keep C701 bit7 (map); clear weapon/keys/sub
 simon_attack_tick: equ 0x7114	; try/start whip + tick + emit SAT
-simon_torso_from_weapon: equ 0x7213	; C42F from C436 (chain 6 / leather 9 / other)
+simon_torso_from_weapon: equ 0x7213	; C42F from swing_weapon (leather 6 / chain 9 / thrown 0x0C)
 simon_attack_start: equ 0x711d	; SPACE new-press: whip or throw; jump+dir holy water/hourglass
+whip_begin: equ 0x713A	; latch simon_whip=1 after alloc (or melee)
+simon_try_air_item: equ 0x713d	; jump + C701: holy water (bit3) then hourglass (bit6)
+hourglass_arm: equ 0x718E	; store C43B; D010 bit0 freeze; BGM 0xFB
+projectile_alloc_go: equ 0x71CF	; scan C450/C460 for free +1
 whip_tick: equ 0x71e7	; dispatch 0xC422 whip phase
+whip_phase_1: equ 0x7201	; legs + torso + whip sfx
+whip_thrown_pose: equ 0x7231	; load_weapon_sprites; torso 0x0C
+whip_timer_set: equ 0x723F	; A -> simon_whip_timer, then phase++
+whip_phase_next: equ 0x7242	; inc simon_whip
+whip_phase_2: equ 0x7247	; inc torso; thrown reloads SAT
+whip_phase_3: equ 0x7257	; melee rearm+timer=4; thrown jumps to phase 2
+whip_phase_4: equ 0x7269	; thrown projectile_arm; melee wait timer
 simon_attack_end: equ 0x7275	; clear C422/C429; torso 0, or 2 on stairs
+whip_idle_torso: equ 0x7287	; store C42F then simon_mirror_frames
 whip_slots_clear: equ 0x751a	; zero 0xC450 whip slots + hide SAT
 simon_mirror_frames: equ 0x7666	; facing-left: C42E/C42F += 0x0A/0x0F
 tile_layout_draw: equ 0x7b39	; blit title_layout stream (FF=end, FE=next row)
@@ -567,14 +603,16 @@ holy_water_use: equ 0x7154	; C701 bit3: jump+LEFT/RIGHT, 5 hearts, one vial (C46
 holy_water_throw_left: equ 0x719B
 holy_water_throw_right: equ 0x71A8
 holy_water_throw: equ 0x71B1	; C461=5, spend 5 hearts
-holy_water_tick: equ 0x73AB	; C460 type 5: spawn, arc (l7084h), floor flame
+holy_water_tick: equ 0x73AB	; C460 type 5: spawn, arc (arc_dy_tbl), floor flame
 holy_water_arc: equ 0x73E5
+arc_dy_tbl: equ 0x7084	; signed dY[22]; knockback + holy-water arc (doubled)
 holy_water_flame: equ 0x7420	; 24 frames on floor, SAT colour 8, patterns F4/F8
 projectile_alloc: equ 0x71C5	; free C450/C460 slot; knife may take two
-projectile_arm: equ 0x728D	; whip phase 4: C436 -> slot type
+projectile_arm: equ 0x728D	; whip phase 4: swing_weapon -> slot type
 projectile_tick: equ 0x72B9	; both slots: motion + integrate + clip + SAT
 knife_tick: equ 0x743D		; C416=2 / bonus 0x1B; straight ±5
 axe_tick: equ 0x747A		; C416=3 / bonus 0x1C; boomerang ±3
+axe_drop_unequip: equ 0x74ac	; C433 in {2,3}: scenery_drop_slot axe, lose_weapon
 cross_tick: equ 0x72E5		; C416=4 / bonus 0x1D; boomerang ±5, SAT 0x0F/0x0E
 boomerang_throw: equ 0x730E
 boomerang_out: equ 0x7344
@@ -585,9 +623,12 @@ projectile_clip: equ 0x74D5	; offscreen; cross/axe X-wrap -> lose_weapon
 projectile_clear: equ 0x74F0
 projectile_clear_hl: equ 0x74F3
 sat_fill: equ 0x7597	; fill B bytes at HL with A (SAT colour run)
-l7e60h: equ 0x7E60		; HP-bar dmg leather/knife (types 0x11..0x17)
-l7e67h: equ 0x7E67		; HP-bar dmg chain/axe/cross
+projectile_sat: equ 0x753c	; C450/C460 SAT D618/D620 + colour D460/D480
+projectile_sat_ink: equ 0x759c	; non-cross 0x02/0x4C; holy-water flame colour 8
+hpbar_dmg_weak: equ 0x7E60		; HP-bar dmg leather/knife (types 0x11..0x17)
+hpbar_dmg_strong: equ 0x7E67		; HP-bar dmg chain/axe/cross
 tile_is_solid: equ 0x7c65	; carry=solid iff (tile-1) < row_solid_thresh[0xD000]
+tile_is_solid_evt6: equ 0x7c7a	; event-6 (s18r9): solid iff (tile-1) < 6
 row_solid_thresh: equ 0x7c7f	; per-world-row solidity threshold byte table
 map_cell_at: equ 0x7d36	; A = room tile id under pixel (D=X,E=Y) from the 0xD100 map
 simon_land_test: equ 0x7b6f	; carry if tile at (SimonX, SimonY+7) is solid
@@ -609,6 +650,7 @@ door_interact: equ 0x771f	; white-key door tick: proximity vs C5AD/Y,C5AE/X; spe
 door_state_tbl: equ 0x7725	; C5AC DISPATCH_A: idle / try_open / open_walk
 door_try_open: equ 0x7731	; armed: proximity + spend key
 door_open_walk: equ 0x7791	; C5AC 3/5: auto-walk through the open door
+door_open_exit: equ 0x77d8	; post-open walk: CONN permit -> wrap or set_stage_boundary
 stage_bgm_change: equ 0x777e	; byte[stage 0..18]: 1 = BGM changes leaving this stage
 set_stage_boundary: equ 0x7807	; blocked horizontal edge walk-off -> set 0xC408 (advance_stage)
 door_idle: equ 0x780c	; ret; door_state_tbl 0/2
@@ -627,9 +669,19 @@ actors_kill_all: equ 0x780d	; cull C800 (no drops) + D700 death flames
 combat_tick: equ 0x7d6f	; per-frame whip/projectile hits + yellow_shield_tick
 combat_busy_wait: equ 0x7da7	; pad subweapon combat_tick (~17k T); no RAM side effects
 whip_hit_actors: equ 0x7db4	; whip phase 3 vs C800 (+0E bit0)
+whip_hit_apply: equ 0x7ddb	; overlap: sfx, drop hittable, fodder vs meter
+whip_hit_fodder: equ 0x7ded	; ix+0D: leather 1, other weapons 2
+whip_kill_fodder: equ 0x7e00	; award_kill_score then actor_kill
+whip_hit_metered: equ 0x7e06	; types 0x11..0x17; giant bat + no event -> fodder
+whip_hit_hpbar: equ 0x7e13	; weapon_hit_damage; empty bar -> boss_killed
 boss_killed: equ 0x7e1e	; bar empty: C445 flash, sfx 0x1C, CE15, actors_kill_all
+hpbar_dmg_lookup: equ 0x7e43	; B = weak/strong table[type-0x11]; type 0x17 + thrown /4
 actors_vs_simon: equ 0x7e6e	; C800 vs Simon (i-frame/gem/hurt; ring instant-kill)
+actors_vs_simon_scan: equ 0x7e84	; ring skips i-frame / gem / already-hurt
+simon_touch_enemy: equ 0x7eb7	; after orb/pickup: ring kill or simon_contact_hurt
+simon_contact_hurt: equ 0x7ec8	; arm act_hurt; Xvel sign -> hurt_facing
 shots_vs_simon: equ 0x7eeb	; D700 vs Simon
+shots_vs_simon_scan: equ 0x7f01	; ring skips i-frame / gem / already-hurt
 whip_hit_shots: equ 0x7f50	; whip phase 3 vs D700
 proj_hit_shots: equ 0x7f80	; C450/C460 vs D700
 whip_hit_candles: equ 0x7fbe	; whip phase 3 vs C470; inc hit byte
@@ -640,17 +692,37 @@ proj_hit_candles: equ 0x80ad	; C450/C460 vs C470 candles/blocks
 vendors_vs_attack: equ 0x80e3	; both vendor slots vs whip/proj
 vendor_vs_attack: equ 0x80ec	; one C5B5/C5C5 slot vs whip then proj; inc hit
 hourglass_vs_attack: equ 0x8122	; C500 ids 0x0A/0x0B vs whip/proj
-award_kill_score: equ 0x81b2	; add_score from l81d5h[type] (C:D:E BCD)
+vendor_try_proj: equ 0x8104	; skip whip; knife consumed on hit
+vendor_struck: equ 0x8119	; vendor +3 hit counter
+hourglass_hit_test: equ 0x813C	; hourglass/tipped vs whip then proj
+hourglass_try_proj: equ 0x8151	; projectile always consumed
+hourglass_struck: equ 0x8160	; pickup +3=2 -> hourglass_tip
+award_kill_score: equ 0x81b2	; add_score from actor_value_tbl[type] (C:D:E BCD)
+actor_value_tbl: equ 0x81d5	; word[type-1]: even=score/100 BCD, odd=contact dmg
 door_proximity: equ 0x8587	; carry if Simon (B=Y,C=X) overlaps door at C5AD=Y / C5AE=X
+door_prox_right: equ 0x8593	; facing right: X+8
+door_prox_test: equ 0x8597	; Y window 0x38, X window 8
 door_anim_tick: equ 0x914e	; 0xC5AC door state: 0xFF -> door_blit_tiles; 3 = opening frames
 door_begin_open: equ 0x9175	; if C5AC==1, set 0xFF and jp door_anim_tick (start opening)
 collect_bonus: equ 0x8d33	; apply picked-up bonus id A (latch 0xC419, table @ 0x8D45)
 collect_bonus_apply: equ 0x8d37	; collect_bonus without queuing play_sound
 collect_bonus_tbl: equ 0x8D45	; word[id-1] handlers; id>=0x1A weapon except 0x1E holy water
+collect_weapon: equ 0x8d77	; bonus >= 0x1A: C416 = id-0x19, except 0x1E holy water
 bonus_red_shield: equ 0x8D9F	; id 3: C701 bit4, face-on contact uses table dmg
 bonus_yellow_shield: equ 0x8DA8	; id 4: C701 bit5, absorb enemy shots
 bonus_white_cross: equ 0x8DC2	; id 5: despawn on-screen actors
 bonus_rosary: equ 0x8D83	; id 6: C440 no-spawn timer
+rosary_arm: equ 0x8D8E	; store rosary_timer (0xF0 / 0x96)
+bonus_ret_collect: equ 0x8D91	; A = sfx_collect
+bonus_grant_c701: equ 0x8D96	; C701 |= B, then collect sfx
+shield_arm_charges: equ 0x8DAF	; C441=16, then grant C701 bit
+bonus_hearts_add: equ 0x8DB8	; add_hearts then sfx_heart
+blue_gem_arm: equ 0x8DDF	; store blue_gem (0xF0 / 0x96)
+sapphire_ring_arm: equ 0x8DF7	; store sapphire_ring (0xF0 / 0x96)
+bonus_done: equ 0x8E11	; jp bonus_ret_collect (jr-reach)
+bonus_grant_c702: equ 0x8E34	; C702 |= B, then collect sfx
+bonus_bag_score: equ 0x8E4C	; add_score_c0 then sfx_money_bag
+inv_or_apply: equ 0x8E7C	; (HL) |= B
 bonus_small_heart: equ 0x8DB6	; id 1: +1 heart
 bonus_large_heart: equ 0x8DBE	; id 2: +5 hearts
 bonus_small_orb: equ 0x8DE5	; id 7: +8 HP (1/4 of 0x20 bar)
@@ -658,16 +730,16 @@ bonus_blue_gem: equ 0x8DD4	; id 8: C43A invis, sprite flash white
 bonus_sapphire_ring: equ 0x8DEC	; id 9: C434, sprite flash red, touch-kills
 bonus_hourglass: equ 0x8D9B	; id 10: C701 bit6; jump+DOWN spends 5 hearts
 bonus_holy_water: equ 0x8D94	; bonus 0x1E: C701 bit3; jump+LEFT/RIGHT, not C416
-bonus_tipped_hourglass: equ 0x8DFC	; id 11: whip id 10 once; C431 bit2 1.5x timers
-bonus_boots: equ 0x8E03		; id 12: C431 bit3 faster walk
-bonus_wings: equ 0x8E0A		; id 13: C431 bit4 higher jump
+bonus_tipped_hourglass: equ 0x8DFC	; id 11: whip id 10 once; bonus_flags bit2 1.5x timers
+bonus_boots: equ 0x8E03		; id 12: bonus_flags bit3 faster walk
+bonus_wings: equ 0x8E0A		; id 13: bonus_flags bit4 higher jump
 bonus_slime: equ 0x8E1B		; id 21: fake pickup (hatches actor_blob_blue/_red/_white if left); collect is a stub
 blob_hatch_type: equ 0x8AF7	; (hub-1)&7 -> blue/white/red; courtyard hub 0 despawns
-bonus_chest: equ 0x8E1B		; id 25: chest container (same stub; world path opens at l8c1bh)
+bonus_chest: equ 0x8E1B		; id 25: chest container (same stub; world path opens at chest_open)
 bonus_candle: equ 0x8E1D	; id 14: C702 bit0, white outlines on C470 blocks
 bonus_black_bible: equ 0x8E24	; id 16: C702 bit6, vendor price doubled
 bonus_white_bible: equ 0x8E2D	; id 17: C702 bit7, vendor price halved
-bonus_map: equ 0x8E3A		; id 15: C431 bit6, C701 bit7, C70F=3
+bonus_map: equ 0x8E3A		; id 15: bonus_flags bit6, C701 bit7, C70F=3
 bonus_white_bag: equ 0x8E49	; id 19: +5000 score
 bonus_blue_bag: equ 0x8E52	; id 20: +1000 score
 bonus_yellow_key: equ 0x8E57	; id 23: C701 bit1, C700=1
@@ -690,6 +762,14 @@ hud_bonus_clear: equ 0x8f51	; HMMV blank 64x16 at (0xB8,0x0C) page 0
 pickup_popup_tick: equ 0x8f5c	; C5E5 popup countdown; 0 -> hud_bonus_refresh
 chest_try_open: equ 0x8f6f	; if chest (id 0x19) spend C700; CY/A=1 if locked
 projectile_hit_actors: equ 0x8025	; C450/C460 vs C800
+projectile_hit_apply: equ 0x8053	; overlap: sfx, fodder HP or weapon_hit_damage
+projectile_hit_fodder: equ 0x8061	; ix+0D -= fodder_dmg_tbl[type-2]
+projectile_kill_fodder: equ 0x8079	; award_kill_score then actor_kill
+projectile_after_hit: equ 0x807f	; knife despawn; else keep proj, res hittable
+projectile_hit_metered: equ 0x808f	; types 0x11..0x17; giant bat + no event -> fodder
+projectile_hit_hpbar: equ 0x809c	; weapon_hit_damage; empty bar -> projectile_meter_empty
+projectile_meter_empty: equ 0x80a8	; boss_killed then projectile_after_hit
+fodder_dmg_tbl: equ 0x804f	; knife/axe/cross/holy dmg to fodder (iy+1)-2
 add_score_100: equ 0x8231	; +100 for destroying a shot
 pickup_vs_simon: equ 0x8237	; C500 slot vs Simon
 proj_overlap_simon: equ 0x8247	; projectile box vs Simon (boomerang catch)
@@ -705,30 +785,63 @@ hit_class_c800_tbl: equ 0x82d2	; type-1 -> class 1..7
 hit_class_shot: equ 0x8302	; shot type -> class 0..2, B=X C=Y
 hit_class_shot_tbl: equ 0x8314	; shot type-1 -> class 0..2
 overlap_simon: equ 0x8481	; DE/HL box vs Simon
+overlap_simon_ht: equ 0x849d	; jump/crouch 0x12 else 0x1A added to H
+overlap_simon_y: equ 0x84a8	; Y test; jump already Y-8
 overlap_whip: equ 0x84ae	; DE/HL box vs whip
-whip_reach_x: equ 0x84e0	; whip X from Simon facing + C42C
+overlap_whip_w: equ 0x84b8	; chain +0x10 else +0x0C to L
+overlap_whip_x: equ 0x84c1	; tip on-screen; abs vs actor X
+overlap_whip_y: equ 0x84d3	; crouch 0x0A else 0x12
+whip_reach_x: equ 0x84e0	; whip tip X from facing; CY = wrapped
+whip_reach_len: equ 0x84ea	; chain 0x18 else 0x14
+whip_reach_right: equ 0x84f5	; facing right: X+reach
 overlap_projectile: equ 0x84f7	; DE/HL box vs C450 then C460
 proj_slot_overlap: equ 0x8507	; one IY projectile slot vs DE/HL box
+proj_slot_ht: equ 0x8520	; knife 6 else 0x0C
 platform_stand_test: equ 0x852b	; recompute 0xC439 = C598 slot Simon stands on
+platform_stand_scan: equ 0x8538	; two C598 slots after rise skip
 platform_overlap: equ 0x8556	; one slot: 32x8 box vs Simon, -> D/E by slot id
+platform_miss: equ 0x8575	; even -> D=0; odd -> E=0
+platform_miss_e: equ 0x857c
+platform_hit: equ 0x857f	; even -> D=id; odd -> E=id
+platform_hit_e: equ 0x8585
 candle_vs_whip: equ 0x8457	; C470 slot vs whip
-candle_vs_proj: equ 0x8467	; C470 slot vs C450/C460 (16x8 or 32x16)
+candle_vs_proj: equ 0x8467	; C470 vs C450/C460; type<2 8×16 else 16×32
+candle_proj_test: equ 0x8474	; DE = slot XY + box
 overlap_shield: equ 0x8652	; yellow shield box vs shot
+shield_off_x: equ 0x8660	; facing right +8 / left -8
 actors_rearm_hittable: equ 0x99A6	; +0E bit2 -> set bit0 on C800/shot
 hittable_rearm_scan: equ 0x99B6	; one pool: bit2 -> bit0, B slots, stride DE
 yellow_shield_tick: equ 0x8617	; absorb enemy shots while C701 bit5
-hourglass_use: equ 0x7166	; jump+DOWN + 5 hearts -> C43B / D010 freeze
+hourglass_use: equ 0x7166	; jump+DOWN + 5 hearts -> hourglass_timer / D010 freeze
 brazier_tick_all: equ 0x8678	; per-frame update of the 8 C470 candle/block slots
 brazier_tick: equ 0x8693	; one C470 slot: first frame stamps, hit -> destroyed
+candle_anim: equ 0x86ba	; every 4 frames; blocks stay stamped
+candle_flame: equ 0x86c2	; kind 0 -> frames 0/1; kind 1 -> 2/3
+candle_frame: equ 0x86c9	; +6 bit3 toggles the pair
+candle_flame_go: equ 0x86ce	; jp candle_blit
 block_stamp: equ 0x86d1	; overlay 2x2/4x4 brick tiles on VRAM + D100
+block_tileset: equ 0x86de	; court vs castle tile ids
+block_stamp_go: equ 0x86ee	; blit VRAM then D100
 vdp_box_white: equ 0x8709	; vdp_box colour 14 (candle-bonus outlines)
 candle_outlines_if: equ 0x870e	; if C702 bit0, draw C470 outlines
 candle_outlines: equ 0x8713	; white boxes on live C470 candles/blocks
+candle_outline_box: equ 0x8734	; 16x16 (kind 2) or 32x32 (kind 3)
 block_save_under: equ 0x8741	; copy nametable under slot to E480/E4A0
+map_save_2x2: equ 0x874b	; dest HL, slot C*4; pickups E520
+map_save_4x4: equ 0x875e	; dest HL, slot C*16; vendor E580
+map_copy_rows: equ 0x8773	; B rows of C bytes; HL += 32 per row
 tiles_blit_vram: equ 0x8783	; B rows x C tile-ids from (HL) at pixel DE
 block_tiles_court: equ 0x8799	; 2x2 then 4x4 tile ids (courtyard)
 block_tiles_castle: equ 0x87ad	; 2x2 then 4x4 tile ids (castle)
 brazier_destroyed: equ 0x87c1	; candle/block hit: restore tiles + drop
+block_break: equ 0x87d9	; kind 2/3: sfx then restore
+block_break_2x2: equ 0x87f0	; restore 16x16 nametable + VRAM
+scenery_break_result: equ 0x87f6	; after tile restore: drop, white key, or scenery_reveal
+scenery_drop_xy: equ 0x8815	; drop_spawn after optional 4x4 Y+16
+break_chip_go: equ 0x8818	; jp break_chip_spawn
+scenery_reveal: equ 0x881b	; bonus 0x1F: vendor (bits7-6=11) or chest at Y+16
+reveal_vendor: equ 0x8838	; bits5-2 offer slot, bits1-0 facing
+scenery_white_key: equ 0x8845	; bonus 0x18: E000 pos -> white_key_spawn
 block_restore_vram_2x2: equ 0x8851
 tiles_blit_2x2: equ 0x8854	; mid: 2x2 from caller HL at pixel DE
 block_restore_vram_4x4: equ 0x8865
@@ -744,12 +857,16 @@ break_chip_move: equ 0x88f9	; X ±2, Y += break_chip_dy[age]
 break_chip_dy: equ 0x892f	; dY by chip age; bytes 0-1 are also `inc l; ret`
 break_chip_sat: equ 0x8942	; two chips -> SAT + colour lines
 chip_fill16: equ 0x8979	; fill 16 colour bytes (break-chip SAT)
+hud_leather_icon: equ 0x8980	; page-1 (80, 0x70) leather whip HUD
 vram_hmmm16: equ 0x8984	; HMMM 16x16 from page 1 at (A*16, L)
+candle_blit: equ 0x8991	; playfield flame: atlas Y=0x70, A=frame
 scenery_drop: equ 0x8996	; bonus B at DE -> C500; slime skips flame
 scenery_drop_slot: equ 0x8999
 drop_spawn: equ 0x89ea	; flame+C500, or slime directly to scenery_drop_slot
 drop_fx_spawn: equ 0x89c6	; flame (heart) or actor_reward at DE
 pickup_slot_write: equ 0x89f7	; C500: live 0x83, XY, bonus B, +5=FF
+white_key_spawn: equ 0x8a04	; C500 white key; C70D = E000 pos
+pickup_spawn_chest: equ 0x8a1a	; C500 chest container (id 25), contents in +0x0D
 drop_own_weapon_heart: equ 0x8a30	; dropping equipped subweapon -> small heart
 pickup_slot_alloc: equ 0x8a3e	; first free C500 slot; Z+HL, else NZ
 shot_death_flame: equ 0x9a21	; actor_free + shot_spawn kind 0xFF (type 12 flame)
@@ -771,8 +888,11 @@ pickup_idle: equ 0x8ba9	; floor wait; +3==2 whip; countdown despawn
 pickup_hop: equ 0x8bd3	; chest-spill: every 32 frames -> fall
 pickup_try_collect: equ 0x8be6	; Simon/key touch: collect or chest_spill
 chest_spill: equ 0x8c36	; hop opened chest contents as state 5
+chest_open: equ 0x8c1b	; world chest: spill contents, spend yellow key/lockpick
+hourglass_tip: equ 0x8c4b	; whip: id 10 -> 11 (tip); second hit starts despawn
 pickup_sat_draw: equ 0x8c67	; SAT/colour for live C500; skip chests
 bonus_icon_blit: equ 0x8cc8	; 16x16 LMMM from page-0 atlas (Y 0x50/0x60)
+atlas_lmmm16: equ 0x8cd2	; 16x16 LMMM from (A*16, L) page 0
 pickup_save_under: equ 0x8cdf	; nametable 2x2 under pickup -> E520
 pickup_restore_under: equ 0x8ced	; put the saved 2x2 back, then redraw overlays
 pickup_collect: equ 0x8d30	; A = slot+4, then collect_bonus
@@ -812,6 +932,7 @@ vendor_hit_latch: equ 0x932e	; outcome 0: C40C=FF, latch vendor id
 vendor_leave: equ 0x935f	; outcome 6: vanish, +5000
 vendor_restore_tiles: equ 0x937f	; 4x4 from E580 at vendor pixel pos
 vendor_make_offer: equ 0x938e	; arm a sale: item 0xC708, price 0xC707, timer 0xC706
+vendor_offer_draw: equ 0x939e	; HMMM backup + panel_frame + glyphs + price + icon
 vendor_set_offer_item: equ 0x9406	; pick sale item -> 0xC708 and look up price row
 vendor_select_price: equ 0x941f	; 0xC702 bible flags pick normal/half/double price -> 0xC707
 vendor_price_tbl: equ 0x942f	; 9 x {item id, normal, half(white bible), double(black bible)}
@@ -825,6 +946,7 @@ vendor_glyphs: equ 0x94a6	; 0xFF-terminated HUD string at HL, pos via vendor_bub
 vendor_bubble_xy: equ 0x94b6	; DE = C704 + (B,C)
 vendor_offer_withdraw: equ 0x9503	; offer declined/expired/unaffordable: sfx 0x02, ret 0
 vendor_offer_pending: equ 0x950a	; no button this frame: ret 0xFF (keep offer open)
+vendor_offer_dismiss: equ 0x950e	; wipe bubble, candle_outlines_if; then back to play
 vendor_offer_wipe: equ 0x9514	; HMMM 80x32 from (0xB0,0x80) onto C704 (erase bubble)
 vendor_purchase_tick: equ 0x94c1	; offer loop: tick timer 0xC706, poll buy/refuse, buy item
 vendor_read_buttons: equ 0x9526	; edge-detected confirm(SPACE)/refuse(SHIFT)+triggers -> A

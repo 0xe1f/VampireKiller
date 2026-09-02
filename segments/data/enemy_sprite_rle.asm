@@ -5,6 +5,7 @@
 ; Dest is sprite-generator VRAM (0xF800+).  Unidentified 0xB50B-0xB54A
 ; is not a valid stream (decompressor overruns into spr_hanging_bat).
 ; Preview: gfx/sprites/enemy_sprite_rle.png (`make gfx`); cell header = VRAM dest.
+; Unused orphans: gfx/sprites/unused_enemy.png; unid 0xB50B: gfx/sprites/unused_unid_b50b.png.
 ; Packed order sandwiches knife/cross, skull pile, flying skull, then
 ; the axe (load_weapon_sprites dest 0xF8C0; some rooms also load it at
 ; 0xFC00).  Do not split this file to group weapons — bytes stay here.

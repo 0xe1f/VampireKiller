@@ -7,6 +7,7 @@
 ; 0x5682 (intro_simon_0..7).  Six orphan streams are the second
 ; 16x16 plane after a listed frame; not in those tables.
 ; PNG preview: gfx/sprites/simon_rle.png (`make gfx`); cell header = VRAM dest.
+; Unused orphans: gfx/sprites/unused_simon.png (`make gfx`); header = packed CPU + plane.
 
 
 ; simon_cell0_ptr (seg13 0xA281): 40 words, indexed by 0xC42E (legs).

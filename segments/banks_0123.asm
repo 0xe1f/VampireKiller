@@ -355,7 +355,7 @@ state_intro:                   ; 3 (0x41D1)
 	dec (hl)
 	jr z,main_phase_next
 	bit 2,(hl)
-	ld hl,l4d30h
+	ld hl,play_start_str
 	jp z,hud_string_draw
 	jp hud_string_masked
 l41e4h:
@@ -496,7 +496,7 @@ l42d3h:
 	jr death_respawn
 l42e3h:
 	call video_reset
-	ld hl,l4d41h           ; "GAME  OVER"
+	ld hl,game_over_str           ; "GAME  OVER"
 	call hud_string_draw
 	ld a,(0e600h)          ; Game Master cartridge present?
 	or a
@@ -661,23 +661,23 @@ state_pause:                   ; 11 (0x43E1): F1 froze play (0xC40A); wait F1 (0
 	ld a,main_play
 	jp main_state_set              ; back to play
 state_vendor:                  ; 12 (0x43F7): 0xC40C whip-hit vendor
-	djnz l4402h
+	djnz vendor_hold
 	call vendor_purchase_tick  ; poll buy/refuse (seg2)
 	ret nz
 	ld a,00fh
 	jp main_timer_set
 ; Vendor-interaction states (this resident state machine drives the vendor code
-; in seg2, which is paged at 0x8000): 0x94C1 = vendor_purchase_tick body, 0x950E
-; = offer dismiss, vendor_make_offer (0x938E) = arm a sale.
-l4402h:
-	djnz l4411h
+; in seg2, which is paged at 0x8000): vendor_purchase_tick (0x94C1),
+; vendor_offer_dismiss (0x950E), vendor_make_offer (0x938E).
+vendor_hold:                   ; (0x4402) C001=2: wait C004, then dismiss
+	djnz vendor_begin
 	ld hl,0c004h
 	dec (hl)               ; hold the offer for 0xC004 frames...
 	ret nz
-	call 0950eh            ; ...then run the vendor offer-dismiss (seg2)
+	call vendor_offer_dismiss ; wipe bubble, restore candle outlines
 	ld a,main_play
 	jp main_state_set
-l4411h:
+vendor_begin:                  ; (0x4411) C001=0: arm a sale
 	xor a
 	ld (vendor_hit),a          ; clear the whip-hit flag
 	call vendor_make_offer ; arm a sale (seg2 0x938E)
@@ -849,7 +849,7 @@ add_score:
 ; --- hud_draw_all (seg0 0x451A) - paint the whole HUD from scratch: the static
 ;     labels, then every counter, meter, frame and icon.
 hud_draw_all:
-	ld hl,l4c07h           ; HUD label strings (vk-encoded)
+	ld hl,hud_status_str           ; HUD label strings (vk-encoded)
 	call hud_string_draw
 	call draw_stage_hud
 	call draw_hearts_hud
@@ -857,7 +857,7 @@ hud_draw_all:
 	call hud_bars_redraw
 	call hud_panel_frames
 	call hud_weapon_icon
-	call 08ebbh            ; seg2: HUD key/weapon tiles
+	call hud_keys_refresh  ; yellow/lockpick lamp, then white-key lamp
 	call hud_bonus_refresh
 l4538h:
 	ld hl,score_hi
@@ -2191,10 +2191,10 @@ read_fkeys:
 	rlca
 	and 007h
 	ret
-; --- HUD / status-bar text set (drawn via 0x451a).  vk "TEXT" is ASCII-0x10
+; --- hud_status_str (0x4C07): HUD / status-bar text.  vk "TEXT" is ASCII-0x10
 ;     (space = 0x00).  Leading numbers are VDP positions; 0xFE ends a field,
 ;     0xFF ends the set.  Byte-for-byte identical to the original.
-l4c07h:
+hud_status_str:
 	defb 008h, 000h
 	vk "SCORE"
 	defb 030h, 0feh            ; + score-digit tile
@@ -2250,18 +2250,18 @@ title_logo_intl:               ; 0x4CA0 - export title ("VAMPIRE KILLER")
 	defb 064h,066h,0ffh
 ; --- Title / front-end text (drawn by title_build).  vk "TEXT" is ASCII-0x10;
 ;     leading numbers are VDP position/attribute prefixes, 0xFE/0xFF separators.
-l4d0fh:
+title_prompt_str:              ; (0x4D0F) "KONAMI 1986" / "PUSH SPACE KEY"
 	defb 048h, 088h, 02ah, 000h
 	vk "KONAMI 1986"
 	defb 0feh
 	defb 048h, 0a0h
 	vk "PUSH SPACE KEY"
 	defb 0ffh
-l4d30h:
+play_start_str:                ; (0x4D30) "PLAY START"
 	defb 048h, 0a0h, 000h, 000h
 	vk "PLAY START"
 	defb 000h, 000h, 0ffh
-l4d41h:
+game_over_str:                 ; (0x4D41) "GAME  OVER"
 	defb 058h, 058h
 	vk "GAME  OVER"
 	defb 0ffh
@@ -2327,7 +2327,7 @@ title_layout_intl:                        ; international/other machine
 	ld hl,title_castle
 	call tile_layout_draw
 title_layout_finish:
-	ld hl,l4d0fh
+	ld hl,title_prompt_str
 	call hud_string_draw
 	jp vdp_screen_on
 vram_clear_page1:
@@ -4889,7 +4889,7 @@ gm_cursor_y:                   ; per-item cursor row, matching gm_menu_text
 ;   0xC440 - rosary / weapon-pickup "no-spawn" timer (nonzero -> suppress all new
 ;            spawns this frame; armed by collect_bonus, ticked down by seg1 0x75C7).
 room_spawner:
-	ld a,(0c440h)          ; rosary/pickup no-spawn timer active?
+	ld a,(rosary_timer)    ; rosary / pickup no-spawn
 	and a
 	ret nz                 ; yes -> spawn nothing this frame (immediate, current room)
 	ld a,(simon_action)          ; Simon action state
@@ -6085,7 +6085,8 @@ l64f8h:
 ; --- actor_sat_emit (seg1 0x6508) - one actor's SAT block -> 0xD638 shadow --
 ;  HL -> actor slot.  Reads the sprite count from the 0x20-offset sub-block,
 ;  then for each sprite copies Y/X/pattern into the VDP sprite-attribute shadow
-;  at 0xD638 + id*4 and fills the 0x10-byte pattern from the l6a70h table.
+;  at 0xD638 + id*4 and fills 16 SAT-colour bytes at 0xD4E0 + id*16
+;  (computed as (0x6A70 + id*8)*2 — 0x6A70 is not a table).
 actor_sat_emit:
 	set 5,l                ; HL -> sprite sub-block (slot | 0x20)
 	ld b,(hl)              ; B = sprite count
@@ -6095,49 +6096,49 @@ actor_sat_emit:
 	inc l
 l650fh:
 	push bc
-	ld a,(hl)
+	ld a,(hl)              ; sprite id
 	ld b,a
-	inc l
+	inc l                  ; HL -> Y
 	add a,a
-	add a,a
-	ld de,0d638h
+	add a,a                ; id*4
+	ld de,0d638h           ; SAT attr base
 	add a,e
-	ld e,a
+	ld e,a                 ; DE -> this sprite's SAT record
 	ld c,0ffh
-	ldi
-	ldi
-	ldi
-	ld a,(hl)
+	ldi                    ; Y
+	ldi                    ; X
+	ldi                    ; pattern
+	ld a,(hl)              ; colour byte
 	and a
-	jr nz,l652fh
+	jr nz,l652fh           ; 0 = hide this sprite
 	dec e
 	dec e
-	dec e
+	dec e                  ; DE -> SAT Y
 	ld a,0e1h
-	ld (de),a
+	ld (de),a              ; Y=0xE1 (off-screen)
 	inc e
 	inc e
 	inc e
 l652fh:
 	ex de,hl
-	ld hl,l6a70h
+	ld hl,06a70h           ; (0x6A70 + id*8)*2 = 0xD4E0 + id*16 SAT colour
 	ld a,b
 	add a,a
 	add a,a
-	add a,a
+	add a,a                ; id*8
 	ld c,a
 	ld b,000h
 	add hl,bc
-	add hl,hl
-	ex de,hl
+	add hl,hl              ; *2 -> 0xD4E0 + id*16
+	ex de,hl               ; DE -> colour run, HL -> colour byte
 	ld a,(hl)
 	ld b,010h
 l6540h:
-	ld (de),a
+	ld (de),a              ; 16 identical colour bytes
 	inc e
 	djnz l6540h
 	pop bc
-	inc l
+	inc l                  ; next sprite in the sub-block
 	djnz l650fh
 	ret
 ; --- lookup_word_tbl - DE = ((word*)DE)[A] ----------------------------------
@@ -6464,7 +6465,7 @@ credits_keyframe:
 	add a,0d8h
 	ld e,a                 ; E = CE33+0xD8 (Y)
 	ld c,0ffh              ; pass tile ids through (ASCII; space already 0)
-	call 04adch            ; blit the line, +8 X per glyph
+	call hud_string_glyphs ; blit the line, +8 X per glyph
 	ld hl,0ce31h
 	inc (hl)               ; next credits_script_ptr entry
 	jp page_play_banks              ; restore banks and return
@@ -6857,7 +6858,6 @@ dracula_bat_init:
 	ld (ix+006h),001h      ; physics on
 	ld (ix+00ch),008h      ; 8 frames at pose 0
 	ld (ix+011h),000h      ; fly-pose timer
-l6a70h:
 	ld (ix+00bh),pose_dracula_robe_0      ; pose_dracula_robe_0
 	ld de,00300h
 	call actor_set_yvel
@@ -6865,13 +6865,13 @@ l6a70h:
 	inc (hl)
 	ld a,(hl)
 	and 007h
-	ld de,l6a93h
+	ld de,dracula_bat_xvel
 	call lookup_word_tbl
 	ld a,(simon_x)          ; Simon X
 	sub (ix+005h)
 	call c,neg_de
 	jp actor_set_xvel
-l6a93h:
+dracula_bat_xvel:              ; (0x6A93) 8 home-X speeds; index CF32&7
 	defw 00100h,00280h,00180h,00200h
 	defw 00240h,00140h,00300h,001c0h
 dracula_bat_go:                ; (0x6AA3)
@@ -7107,7 +7107,7 @@ simon_walk_left:               ; (0x6C36) face left (0xC42C=1), try -X
 l6c47h:
 	call simon_wall_left
 	ret c
-	ld a,(0c431h)
+	ld a,(bonus_flags)
 	and 008h               ; boots (id 12): faster walk
 	ld bc,0fe00h
 	jr z,l6c58h
@@ -7126,7 +7126,7 @@ simon_walk_right:              ; (0x6C5A) face right (0xC42C=0), try +X
 l6c6ah:
 	call simon_wall_right
 	ret c
-	ld a,(0c431h)
+	ld a,(bonus_flags)
 	and 008h               ; boots (id 12): faster walk
 	ld bc,00200h
 	jr z,l6c7ah
@@ -7201,7 +7201,7 @@ l6ce9h:
 	ld (hl),b
 	ret
 simon_jump_arc:                ; (0x6CEE) advance 0xC428 through jump_y_delta
-	ld a,(0c431h)
+	ld a,(bonus_flags)
 	and 010h               ; wings (id 13): taller jump table
 	ld bc,jump_y_delta+1
 	ld d,013h
@@ -7568,42 +7568,42 @@ l6f88h:
 simon_hurt:                    ; 5 (0x6F8C)
 	ld a,(simon_hurt_step)
 	call DISPATCH_A
-	defw l6f9ah
-	defw l6fdbh
-	defw l701eh
-	defw l7024h
-l6f9ah:
+	defw simon_hurt_init
+	defw simon_hurt_left
+	defw simon_hurt_right
+	defw simon_hurt_slide
+simon_hurt_init:                ; (0x6F9A) sfx, i-frames; stairs if C42B, else knock
 	ld a,(0c002h)
 	and 040h
-	ld a,013h
+	ld a,sfx_simon_hurt
 	call nz,play_sound
 	ld a,05ah
-	ld (simon_invuln),a          ; arm state timer (0xC42D); in hurt = i-frame/blink
+	ld (simon_invuln),a    ; 78 frames blink
 	ld a,(0c42bh)
 	and a
-	jp z,l6fc3h
-	ld a,(health)          ; Simon health
+	jp z,simon_hurt_knock
+	ld a,(health)
 	and a
-	jr z,l6fc3h            ; health 0 -> death/knockdown branch
+	jr z,simon_hurt_knock  ; HP 0 -> knockdown (death)
 	ld a,act_stairs
 	ld (simon_action),a
 	ld a,002h
 	ld (simon_torso),a
 	jp simon_mirror_frames
-l6fc3h:
-	ld a,(0c43ch)
+simon_hurt_knock:               ; (0x6FC3) apply hurt_facing; step 1 (left) or 2
+	ld a,(hurt_facing)
 	ld (simon_facing),a
-	inc a
+	inc a                  ; facing 0 -> step 1 left; 1 -> step 2 right
 	ld (simon_hurt_step),a
 	xor a
 	ld (simon_knockback),a
 	ld de,00307h
 	ld (simon_legs),de
 	jp simon_mirror_frames
-l6fdbh:
+simon_hurt_left:                ; (0x6FDB) step 1: knock left
 	call simon_walk_left
-l6fdeh:
-	ld bc,l7084h
+simon_hurt_arc:                 ; (0x6FDE) shared knock arc; land -> step 3
+	ld bc,arc_dy_tbl
 	ld d,015h
 	ld hl,simon_knockback
 	push hl
@@ -7613,120 +7613,119 @@ l6fdeh:
 	cp 00bh
 	ret c
 	call simon_floor_test
-	jr c,l6ff9h
+	jr c,simon_hurt_land
 	ld a,(simon_on_plat)
 	and a
 	ret z
-l6ff9h:
-	ld a,(simon_y)          ; Simon Y, snapped to an 8px grid on landing
-	and 0f8h
+simon_hurt_land:                ; (0x6FF9)
+	ld a,(simon_y)
+	and 0f8h               ; snap Y to 8px
 	ld (simon_y),a
 	ld a,003h
-	ld (simon_hurt_step),a          ; hurt sub-state = 3
-	ld a,(health)          ; health: alive -> short knockback, dead -> long
+	ld (simon_hurt_step),a ; slide
+	ld a,(health)
 	and a
-	ld a,004h
+	ld a,004h              ; alive: short slide
 	jr nz,l7010h
-	ld a,010h
+	ld a,010h              ; dead: long slide
 l7010h:
-	ld (simon_knockback),a          ; knockback velocity/timer (0xC42A)
+	ld (simon_knockback),a
 	ld de,(simon_legs)
 	inc d
 	inc e
 	ld (simon_legs),de
 	ret
-l701eh:
+simon_hurt_right:               ; (0x701E) step 2: knock right
 	call simon_walk_right
-	jp l6fdeh
-l7024h:
+	jp simon_hurt_arc
+simon_hurt_slide:               ; (0x7024) step 3: countdown C42A, then clear hurt
 	ld a,(simon_on_plat)
 	and a
 	call nz,platform_carry_simon
-	ld hl,simon_knockback           ; knockback counts down; while nonzero Simon slides
+	ld hl,simon_knockback
 	dec (hl)
 	ret nz
-	xor a                  ; knockback done: clear the whole hurt state
-	ld (simon_action),a          ; action state -> normal
+	xor a
+	ld (simon_action),a
 	ld (simon_jump_dir),a
-	ld (simon_hurt_step),a          ; hurt sub-state -> 0
+	ld (simon_hurt_step),a
 	ld (simon_whip),a
 	ld (simon_knockback),a
 	ld (simon_arc),a
 	ld a,(door_state)
-	cp 002h
-	jr z,l705ah
-	cp 003h
-	jr z,l705ah
-	cp 005h
-	jr z,l705ah
+	cp 002h                ; idle (tbl 2)
+	jr z,simon_hurt_recover
+	cp 003h                ; open walk
+	jr z,simon_hurt_recover
+	cp 005h                ; vertical open walk
+	jr z,simon_hurt_recover
 	ld a,(simon_facing)
-	xor 001h
+	xor 001h               ; turn around after knock
 	ld (simon_facing),a
-l705ah:
+simon_hurt_recover:             ; (0x705A) if HP, done; else dying
 	ld a,(health)
 	and a
 	ret nz
 	ld hl,simon_x
 	ld a,(hl)
 	cp 010h
-	jr nc,l706ah
-	add a,008h
+	jr nc,simon_dying_enter
+	add a,008h             ; nudge off the left edge
 	ld (hl),a
-l706ah:
+simon_dying_enter:              ; (0x706A) act_dying; jump_dir reused as phase 0
 	xor a
 	ld (simon_invuln),a
-	ld (simon_jump_dir),a
+	ld (simon_jump_dir),a  ; dying phase 0
 	inc a
-	ld (simon_arc),a
+	ld (simon_arc),a       ; 1 frame, then death BGM
 	ld a,act_dying
 	ld (simon_action),a
-	ld bc,00509h
+	ld bc,00509h           ; death pose (legs/torso)
 	ld (simon_legs),bc
 	jp simon_mirror_frames
 ; Signed dY (22 bytes).  Hurt knockback uses this via simon_jump_y_step;
 ; holy_water_tick doubles each entry for the vial's arc.  l7090h is also a
 ; VRAM dest (0x7090) in the HUD blits above — keep the label at this address.
-l7084h:
+arc_dy_tbl:                    ; (0x7084) signed dY[22]; knockback + holy-water arc
 	defb 0fdh,0fdh,0feh,0feh,0feh,0ffh,0ffh,0ffh,0ffh,000h,000h,000h
 l7090h:
 	defb 000h,001h,001h,001h,001h,002h,002h,002h,003h,003h
-simon_dying:                   ; 6 (0x709A)
+simon_dying:                    ; 6 (0x709A) jump_dir = dying phase (not jump)
 	ld a,(simon_jump_dir)
 	ld hl,simon_arc
-l70a0h:
 	and a
-	jr nz,l70b6h
+	jr nz,simon_dying_hold ; phase 1: hold death BGM
 	dec (hl)
 	ret nz
-	ld (hl),05ah
+	ld (hl),05ah           ; 90 frames of death BGM
 	ld a,001h
-	ld (simon_jump_dir),a
+	ld (simon_jump_dir),a  ; phase 1
 	ld a,sound_stop
 	call play_sound
 	ld a,bgm_simon_death
 	jp play_sound
-l70b6h:
+simon_dying_hold:               ; (0x70B6) then clamp hearts to 5
 	ld hl,simon_arc
 	dec (hl)
 	ret nz
 	ld de,hearts
 	ld a,(de)
 	cp 005h
-	jr c,l70c6h
-	ld a,005h
+	jr c,simon_dying_leave
+	ld a,005h              ; death penalty: hearts max 5
 	ld (de),a
-l70c6h:
+simon_dying_leave:              ; (0x70C6) wipe timers; stay_in_play=0 -> death_respawn
 	xor a
 	ld (hl),a
 	ld (simon_jump_dir),a
 	ld (simon_whip),a
-	ld (0c434h),a
-	ld (0c43ah),a
-	ld (0c43bh),a
-	ld (0c440h),a
-	ld (0d010h),a
+	ld (sapphire_ring),a
+	ld (blue_gem),a
+	ld (hourglass_timer),a
+	ld (rosary_timer),a
+	ld (0d010h),a          ; hourglass / whip freeze
 	ld (room),a
-	ld (stay_in_play),a          ; leave play (death)
+	ld (stay_in_play),a    ; leave play (death)
 ; inv_reset_life (seg1 0x70E3): new-life / death fallthrough. Keep C701 bit7
 ; (map); clear weapon, keys, holy water, hourglass, C431/32, C441/42, C700/02.
 inv_reset_life:
@@ -7735,7 +7734,7 @@ inv_reset_life:
 	ld (0c701h),a
 	xor a
 	ld (weapon_id),a
-	ld (0c431h),a
+	ld (bonus_flags),a
 	ld (0c432h),a
 	ld (0c441h),a
 	ld (0c442h),a
@@ -7763,23 +7762,23 @@ simon_attack_tick:
 simon_attack_start:
 	ld a,(btn_edge)
 	and 010h               ; SPACE/trig new-press
-	jr z,l713dh
+	jr z,simon_try_air_item
 	ld hl,simon_whip
 	ld a,(hl)
 	and a
-	ret nz
+	ret nz                 ; already whipping
 	ld a,(weapon_id)
-	ld (0c436h),a
+	ld (swing_weapon),a    ; latch for pose + projectile
 	cp equip_knife
-	jr c,l713ah
+	jr c,whip_begin        ; leather/chain: no slot
 	call projectile_alloc
 	ld a,b
 	and a
-	ret z
-l713ah:
+	ret z                  ; no free C450/C460
+whip_begin:                     ; (0x713A) whip phase 1
 	ld (hl),001h
 	ret
-l713dh:
+simon_try_air_item:            ; (0x713D) jump + C701: holy water then hourglass
 	ld a,(simon_action)
 	dec a
 	ret nz                 ; hourglass/holy-water only while jumping
@@ -7811,11 +7810,11 @@ holy_water_use:
 	jr c,holy_water_throw_right
 	ret
 ; hourglass_use (seg1 0x7166): C701 bit6 (bonus id 10).  Only reached from
-; l713dh while jumping (C420==1) and SPACE is not a new-press.  Needs a DOWN
-; new-press (C006 bit1), 5 hearts, and C43B==0.  Arms C43B (0x5A ~1.5s, or
-; 0x96 ~2.5s with id 11) and D010 bit0, which skips enemy AI/movement.
+; simon_try_air_item while jumping (C420==1) and SPACE is not a new-press.  Needs a DOWN
+; new-press (C006 bit1), 5 hearts, and hourglass_timer==0.  Arms hourglass_timer
+; (0x5A ~1.5s, or 0x96 ~2.5s with bonus_flags bit2) and D010 bit0, which skips enemy AI/movement.
 hourglass_use:
-	ld a,(0c43bh)
+	ld a,(hourglass_timer)
 	and a
 	ret nz
 	ld a,(hearts)
@@ -7823,20 +7822,20 @@ hourglass_use:
 	ret c
 	ld a,(btn_edge)
 	rra
-	rra
+	rra                    ; C006 bit1 = DOWN
 	ret nc
 	ld a,(hearts)
 	sub 005h
 	daa
 	ld (hearts),a
-	call 0456dh
-	ld a,(0c431h)
-	and 004h
-	ld a,096h
-	jr nz,l718eh
-	ld a,05ah
-l718eh:
-	ld (0c43bh),a
+	call draw_hearts_hud
+	ld a,(bonus_flags)
+	and 004h               ; bit2 = tipped hourglass
+	ld a,096h              ; 150 frames ~2.5s
+	jr nz,hourglass_arm
+	ld a,05ah              ; 90 frames ~1.5s
+hourglass_arm:                  ; (0x718E) store timer, freeze actors, BGM 0xFB
+	ld (hourglass_timer),a
 	ld hl,0d010h
 	set 0,(hl)
 	ld a,sound_fb
@@ -7862,23 +7861,23 @@ holy_water_throw:              ; (0x71B1) arm C460 slot as type 5, spend 5 heart
 	sub 005h
 	daa
 	ld (hearts),a
-	jp 0456dh
+	jp draw_hearts_hud
 ; projectile_alloc (0x71C5): find a free C450/C460 slot (+1==0), set +0=1.
-; Knife (C436==2) may occupy both slots; axe/cross take one.
+; Knife (swing_weapon==knife) may occupy both slots; axe/cross take one.
 projectile_alloc:
-	ld a,(0c436h)
-	cp 002h
-	ld b,002h
-	jr z,l71cfh
-	dec b
-l71cfh:
+	ld a,(swing_weapon)
+	cp equip_knife
+	ld b,002h              ; knife: try both slots
+	jr z,projectile_alloc_go
+	dec b                  ; axe/cross: one slot
+projectile_alloc_go:            ; (0x71CF)
 	ld ix,0c450h
 l71d3h:
-	ld a,(ix+001h)
+	ld a,(ix+001h)         ; type; 0 = free
 	and a
 	jr nz,l71dfh
 	ld a,001h
-	ld (ix+000h),a
+	ld (ix+000h),a         ; waiting for projectile_arm
 	ret
 l71dfh:
 	ld de,00010h
@@ -7897,68 +7896,68 @@ whip_tick:
 	ld a,(simon_whip)
 	dec a
 	call DISPATCH_A
-	defw l7201h
-	defw l7247h
-	defw l7257h
-	defw l7269h
-l7201h:
+	defw whip_phase_1
+	defw whip_phase_2
+	defw whip_phase_3
+	defw whip_phase_4
+whip_phase_1:                   ; (0x7201)
 	ld a,(simon_action)
 	cp act_stairs
 	jr z,simon_torso_from_weapon
-	cp 002h
-	ld a,000h
+	cp act_crouch
+	ld a,000h              ; stand
 	jr nz,l7210h
-	ld a,006h
+	ld a,006h              ; crouch legs
 l7210h:
 	ld (simon_legs),a
-simon_torso_from_weapon:                        ; set torso frame 0xC42F from weapon 0xC436
-	ld a,(0c436h)
-	cp 002h
-	jr nc,l7231h
-	ld a,(0c436h)
-	dec a
-	ld a,006h
+simon_torso_from_weapon:        ; (0x7213) leather 6 / chain 9 / thrown 0x0C
+	ld a,(swing_weapon)
+	cp equip_knife
+	jr nc,whip_thrown_pose
+	ld a,(swing_weapon)
+	dec a                  ; flags: chain (1) -> Z
+	ld a,006h              ; leather
 	jr nz,l7224h
-	ld a,009h
+	ld a,009h              ; chain
 l7224h:
 	ld (simon_torso),a
 	call simon_mirror_frames
 	ld a,sfx_whip
 	call play_sound
-	jr l7242h
-l7231h:
+	jr whip_phase_next
+whip_thrown_pose:               ; (0x7231) knife/axe/cross torso 0x0C
 	call load_weapon_sprites
 	ld a,00ch
 	ld (simon_torso),a
 	call simon_mirror_frames
-	jr l7242h
-	xor a
-l723fh:
+	jr whip_phase_next
+	xor a                  ; unreachable
+whip_timer_set:                 ; (0x723F) A = timer, then phase++
 	ld (simon_whip_timer),a
-l7242h:
+whip_phase_next:                ; (0x7242)
 	ld hl,simon_whip
 	inc (hl)
 	ret
-l7247h:
+whip_phase_2:                   ; (0x7247) inc torso; thrown: reload SAT
 	ld hl,simon_torso
 	inc (hl)
-	call l7242h
-	ld a,(0c436h)
-	cp 002h
+	call whip_phase_next
+	ld a,(swing_weapon)
+	cp equip_knife
 	ret c
 	jp load_weapon_sprites
-l7257h:
-	ld a,(0c436h)
-	cp 002h
-	jr nc,l7247h
+whip_phase_3:                   ; (0x7257) melee: rearm, torso++, timer=4; thrown: phase 2
+	ld a,(swing_weapon)
+	cp equip_knife
+	jr nc,whip_phase_2
 	call actors_rearm_hittable
 	ld hl,simon_torso
 	inc (hl)
 	ld a,004h
-	jr l723fh
-l7269h:
-	ld a,(0c436h)
-	cp 002h
+	jr whip_timer_set
+whip_phase_4:                   ; (0x7269) thrown: projectile_arm; melee: wait timer
+	ld a,(swing_weapon)
+	cp equip_knife
 	jr nc,projectile_arm
 	ld hl,simon_whip_timer
 	dec (hl)
@@ -7967,31 +7966,31 @@ l7269h:
 ; stairs.  Melee whip timeout and projectile_arm both land here.
 simon_attack_end:
 	xor a
-	ld (simon_whip),a          ; whip phase
-	ld (simon_whip_timer),a          ; whip timer
+	ld (simon_whip),a
+	ld (simon_whip_timer),a
 	ld a,(simon_action)
 	cp act_stairs
 	ld a,000h
-	jr nz,l7287h
+	jr nz,whip_idle_torso
 	ld a,002h              ; on stairs: keep climb torso
-l7287h:
+whip_idle_torso:                ; (0x7287)
 	ld (simon_torso),a
 	jp simon_mirror_frames
-projectile_arm:                ; (0x728D) whip-phase 4: copy C436 into a waiting slot
+projectile_arm:                 ; (0x728D) phase 4: copy swing_weapon into waiting slot
 	call actors_rearm_hittable
 	call simon_attack_end
 	ld ix,0c450h
 	ld b,002h
 l7299h:
 	ld a,(ix+000h)
-	dec a
+	dec a                  ; waiting state was 1
 	jr nz,l72b1h
 	ld a,018h
-	ld (ix+006h),a
+	ld (ix+006h),a         ; pattern
 	ld a,(simon_facing)
 	ld (ix+008h),a
-	ld a,(0c436h)
-	ld (ix+001h),a
+	ld a,(swing_weapon)
+	ld (ix+001h),a         ; type = latched weapon
 	ret
 l72b1h:
 	ld de,00010h
@@ -8011,7 +8010,7 @@ projectile_tick_slot:
 	call projectile_motion
 	call projectile_integrate
 	call projectile_clip
-	jp l753ch
+	jp projectile_sat
 projectile_motion:
 	ld a,(ix+001h)
 	dec a
@@ -8126,7 +8125,7 @@ boomerang_catch:               ; (0x73A4) overlap Simon -> despawn (keep C416)
 	jp projectile_clear
 ; holy_water_tick (seg1 0x73AB): C460 slot type 5.  State 0/1 spawn at Simon
 ; (Y=C425+offset, X=C427, velX=±2 from C468, velY=0).  State 2 = arc
-; (Y += 2*l7084h[phase], land via map_solid_pair tile_is_solid).  State 3 =
+; (Y += 2*arc_dy_tbl[phase], land via map_solid_pair tile_is_solid).  State 3 =
 ; floor flame (24 frames, SAT colour 8, patterns 0xF4/0xF8 — same
 ; actor_flame sheet as a falling heart; pixels in gfx_rle_a185).
 holy_water_tick:
@@ -8158,9 +8157,9 @@ l73d5h:
 	ld (ix+005h),a
 	ld (ix+006h),038h
 	jp l7356h
-holy_water_arc:                ; (0x73E5) Y += 2*l7084h[ix+7]; land -> flame
+holy_water_arc:                ; (0x73E5) Y += 2*arc_dy_tbl[ix+7]; land -> flame
 	ld a,(ix+007h)
-	ld hl,l7084h
+	ld hl,arc_dy_tbl
 	call ADD_HL_A
 	ld c,(ix+004h)
 	ld a,(hl)
@@ -8248,7 +8247,7 @@ l7493h:
 	ld a,(hl)
 	sub 002h
 	cp 002h
-	jr c,l74ach
+	jr c,axe_drop_unequip
 	ld a,(ix+000h)
 	dec a
 	call DISPATCH_A
@@ -8256,16 +8255,16 @@ l7493h:
 	defw boomerang_out
 	defw boomerang_back
 	defw boomerang_catch
-l74ach:
-	ld (hl),000h           ; C433 in {2,3}: drop bonus 0x1C (this weapon) and unequip
-	ld b,01ch
-	ld d,(ix+005h)
+axe_drop_unequip:              ; (0x74AC) C433 in {2,3}: drop axe, unequip
+	ld (hl),000h           ; clear C433
+	ld b,item_axe          ; world drop = this weapon's bonus id
+	ld d,(ix+005h)         ; drop X = projectile X
 	ld a,(ix+004h)
 	sub 010h
-	ld e,a
-	call 08999h
+	ld e,a                 ; drop Y = projectile Y - 16
+	call scenery_drop_slot ; flame + C500 at projectile XY
 	call projectile_clear
-	jp lose_weapon
+	jp lose_weapon         ; C416 = leather
 projectile_integrate:
 	ld a,(ix+004h)
 	add a,(ix+002h)
@@ -8292,7 +8291,7 @@ projectile_clear:
 	pop hl
 projectile_clear_hl:
 	push hl
-	ld (hl),000h
+	ld (hl),000h           ; free the 16-byte slot
 	ld d,h
 	ld e,l
 	inc de
@@ -8300,14 +8299,14 @@ projectile_clear_hl:
 	ldir
 	pop hl
 	ld a,l
-	cp 050h
-	ld a,0e0h
+	cp 050h                ; C450 vs C460
+	ld a,0e0h              ; hide SAT Y
 	jr nz,l750eh
-	ld (0d618h),a
+	ld (0d618h),a          ; C450 SAT pair
 	ld (0d61ch),a
 	jr l7514h
 l750eh:
-	ld (0d620h),a
+	ld (0d620h),a          ; C460 SAT pair
 	ld (0d624h),a
 l7514h:
 	inc l
@@ -8332,53 +8331,53 @@ whip_slots_clear:
 	ld (0d620h),a
 	ld (0d624h),a
 	ret
-l753ch:
-	ld a,(ix+000h)
+projectile_sat:                ; (0x753C) C450/C460 -> SAT D618/D620 + colour
+	ld a,(ix+000h)         ; slot live?
 	and a
 	ret z
 	push ix
-	pop hl
+	pop hl                 ; HL = slot (C450 L=0x50 / C460 L=0x60)
 	ld a,l
-	cp 050h
-	ld hl,0d618h
+	cp 050h                ; C450 vs C460
+	ld hl,0d618h           ; C450 SAT pair (two 16x16 cells)
 	jr z,l754fh
-	ld hl,0d620h
+	ld hl,0d620h           ; C460 SAT pair
 l754fh:
+	ld a,(ix+004h)         ; Y
+	sub 010h               ; SAT Y = Y - 16
+	ld (hl),a
+	inc hl
+	ld a,(ix+005h)         ; X
+	sub 008h               ; SAT X = X - 8
+	ld (hl),a
+	inc hl
+	ld a,(ix+006h)         ; pattern
+	ld (hl),a
+	inc hl
+	inc hl                 ; skip SAT colour byte (CC lives in D4xx)
 	ld a,(ix+004h)
-	sub 010h
+	sub 010h               ; second cell: same Y
 	ld (hl),a
 	inc hl
 	ld a,(ix+005h)
-	sub 008h
+	sub 008h               ; same X
 	ld (hl),a
 	inc hl
 	ld a,(ix+006h)
-	ld (hl),a
-	inc hl
-	inc hl
-	ld a,(ix+004h)
-	sub 010h
-	ld (hl),a
-	inc hl
-	ld a,(ix+005h)
-	sub 008h
-	ld (hl),a
-	inc hl
-	ld a,(ix+006h)
-	add a,004h
+	add a,004h             ; second cell pattern = first + 4
 	ld (hl),a
 	push ix
 	pop hl
 	ld a,l
-	cp 050h
+	cp 050h                ; C450 colour at D460, C460 at D480
 	ld hl,0d460h
 	jr z,l7585h
 	ld hl,0d480h
 l7585h:
-	ld a,(ix+001h)
-	cp 004h
-	jr nz,l759ch           ; type 4 (cross): SAT colours 0x0F / 0x0E
-	ld a,00fh
+	ld a,(ix+001h)         ; projectile type
+	cp 004h                ; cross?
+	jr nz,projectile_sat_ink ; not cross -> 0x02/0x4C (holy-water flame below)
+	ld a,00fh              ; type 4: colours 0x0F then 0x0E (fall into sat_fill)
 	ld b,010h
 	call sat_fill
 	ld a,00eh
@@ -8388,40 +8387,40 @@ sat_fill:                          ; fill B bytes at HL with A (SAT colour run)
 	inc hl
 	djnz sat_fill
 	ret
-l759ch:
-	ld a,002h
+projectile_sat_ink:            ; (0x759C) knife/axe/holy: 0x02/0x4C; flame = 8
+	ld a,002h              ; first 16 colour bytes
 	ld b,010h
 	call sat_fill
-	ld a,04ch
+	ld a,04ch              ; second 16: CC bit (0x40) + colour 0x0C
 	ld b,010h
 	call sat_fill
 	ld a,(ix+001h)
-	cp 005h
+	cp 005h                ; holy water?
 	ret nz
 	ld a,(ix+000h)
 	cp 003h
-	ret nz                 ; type 5 state 3 = holy-water flame: SAT colour 8
-	ld hl,0d480h
+	ret nz                 ; type 5 state 3 = floor flame: colour 8
+	ld hl,0d480h           ; C460 colour (vial lives in C460)
 	ld de,0d490h
 	ld b,010h
 l75beh:
-	ld (hl),008h
+	ld (hl),008h           ; red
 	xor a
-	ld (de),a
+	ld (de),a              ; clear the paired colour run
 	inc hl
 	inc de
 	djnz l75beh
 	ret
 ; Per-frame countdown bank: decrement each of these timers toward 0 (clamped).
-;   0xC440 - enemy-spawn suppression (rosary / weapon-pickup grace); while nonzero
+;   rosary_timer - enemy-spawn suppression (rosary / weapon-pickup grace); while nonzero
 ;            room_spawner (seg0 0x5EBF) spawns nothing.
-;   0xC434 / 0xC42D - per-frame timers (C42D = i-frames, also portal wind-up).
+;   sapphire_ring / simon_invuln - per-frame timers (i-frames also portal wind-up).
 timers_tick:
-	ld hl,0c440h           ; rosary / weapon-pickup no-spawn
+	ld hl,rosary_timer     ; rosary / weapon-pickup no-spawn
 	call dec_nonzero
-	ld hl,0c434h           ; sapphire ring
+	ld hl,sapphire_ring
 	call dec_nonzero
-	ld hl,simon_invuln           ; i-frames / portal wind-up (falls into dec_nonzero)
+	ld hl,simon_invuln     ; i-frames / portal wind-up (falls into dec_nonzero)
 dec_nonzero:
 	ld a,(hl)
 	and a
@@ -8439,7 +8438,7 @@ boss_flash_delay_tick:         ; C445; on 0 arm backdrop flash C43E=0x18
 	ld (0c43eh),a
 	ret
 gem_timer_tick:                ; C43A invis; sfx 0x17 (gem warn) at 16 frames left
-	ld hl,0c43ah
+	ld hl,blue_gem
 	ld a,(hl)
 	and a
 	ret z
@@ -8449,8 +8448,8 @@ gem_timer_tick:                ; C43A invis; sfx 0x17 (gem warn) at 16 frames le
 	ret nz
 	ld a,sfx_gem_warn
 	jp play_sound
-hourglass_timer_tick:          ; C43B freeze; on 0: res D010.0, restore BGM (0xFC)
-	ld hl,0c43bh
+hourglass_timer_tick:          ; hourglass_timer; on 0: res D010.0, restore BGM (0xFC)
+	ld hl,hourglass_timer
 	ld a,(hl)
 	and a
 	ret z
@@ -8549,7 +8548,7 @@ l767eh:
 ; - which the transition brain (seg13 0xB963, via seg0 conn_lookup_paged) turns
 ; into the new 0xD001.  Horizontal exits also gate on the cached permit bytes
 ; 0xC41E/0xC41F (0xFF = blocked); a blocked horizontal edge is instead handled as
-; a stage boundary at l77d8h/set_stage_boundary.  0xC420 = Simon's action state
+; a stage boundary at door_open_exit/set_stage_boundary.  0xC420 = Simon's action state
 ; (3 = on stairs, 6 = mid-transition -> skip).
 room_edge_detect:
 	ld a,(simon_action)
@@ -8605,13 +8604,13 @@ room_edge_down:                        ; past the bottom edge
 	ld (hl),a
 	ld a,(stage)
 	cp 002h
-	jr z,l76eah
+	jr z,pit_water_sfx
 	cp 00ah
-	jr z,l76eah
+	jr z,pit_water_sfx
 	ld a,001h
 	ld (hl),a
 	ret
-l76eah:
+pit_water_sfx:                 ; (0x76EA) stages 2/10 bottomless pit: splash
 	ld a,sfx_water_in
 	jp play_sound
 room_edge_down_go:                        ; room below exists -> down transition
@@ -8655,7 +8654,7 @@ room_edge_right:                        ; right edge
 ; (0xC425=Y, 0xC427=X) against those coords via door_proximity; on overlap it
 ; spends the white key (0xC701 bit0; courtyard/stage 0 opens freely) and starts
 ; the open effect.  After the door is open, walking the edge is a SEPARATE
-; layer (l77d8h): blocked permit -> set_stage_boundary / advance_stage; valid
+; layer (door_open_exit): blocked permit -> set_stage_boundary / advance_stage; valid
 ; room -> intra-stage wrap (stages 3,6,9,12,15,18).
 door_interact:
 	ld a,(door_state)          ; door sub-state (armed=1, open=3, ...)
@@ -8686,7 +8685,7 @@ door_try_open:
 	ret nc                 ; no white key -> door stays shut
 l774ah:
 	res 0,(hl)             ; spend the white key (clear bit 0)
-	call 08ec1h            ; play door-open effect
+	call hud_white_key_icon ; HUD: white-key lamp off (C701 bit0 now clear)
 	xor a
 	ld (simon_whip),a
 	call actors_kill_all
@@ -8748,7 +8747,7 @@ l77b4h:
 	sub 008h
 	cp 0f0h
 	ret c
-	jr l77d8h
+	jr door_open_exit
 l77cbh:
 	ld a,(door_x)          ; door X
 	add a,008h
@@ -8763,7 +8762,7 @@ l77cbh:
 ; (seg13 CONN nibbles, 0xB99A).  Heading is 0xC427 bit7 (rla: set = right).
 ; 0xFF = blocked -> set_stage_boundary / advance_stage; else wrap to that room
 ; (the intra-stage key-door cases: 3,6,9,12,15,18).
-l77d8h:
+door_open_exit:                ; (seg1 0x77D8)
 	ld hl,permit_left           ; hl -> left exit permit (0xC41E)
 	ld de,simon_x           ; de -> Simon X / heading byte
 	ld a,(de)
@@ -8786,12 +8785,12 @@ l77f3h:
 	ld a,c
 	ld (de),a              ; wrap Simon's X to the far side of the new room
 	ld a,(stage)
-	cp 012h                ; stage 18? -> different transition action id
-	ld a,087h
+	cp 012h                ; stage 18 (Dracula wrap uses the other track)
+	ld a,bgm_boss
 	jr nz,l7804h
-	ld a,086h
+	ld a,bgm_boss_dracula
 l7804h:
-	jp play_sound              ; queue the room-transition action
+	jp play_sound              ; intra-stage key-door wrap: start boss BGM
 ; set_stage_boundary (seg1 0x7807): walking a BLOCKED left/right edge after the
 ; door is open.  0xC408 is later seen by the frame dispatcher (seg0 0x424xh)
 ; which calls 0x438B (clears 0xC701 bit0 if still set) and advance_stage.
@@ -8989,7 +8988,7 @@ l791eh:
 	jr nz,l792bh
 	ld hl,0d480h
 l792bh:
-	ld a,(0c43ah)
+	ld a,(blue_gem)
 	and a
 	jr z,l7939h
 	ld a,(0c003h)
@@ -8997,7 +8996,7 @@ l792bh:
 	ld a,00eh              ; blue gem (id 8): flash sprite white
 	jr c,l7951h
 l7939h:
-	ld a,(0c434h)
+	ld a,(sapphire_ring)
 	and a
 	jr z,l7947h
 	ld a,(0c003h)
@@ -9534,7 +9533,7 @@ tile_is_solid:
 	ld c,a
 	ld a,(cell_event)          ; current cell event code
 	cp evt_dracula
-	jr z,l7c7ah            ; event-6 cells use a fixed threshold of 6
+	jr z,tile_is_solid_evt6            ; event-6 cells use a fixed threshold of 6
 	ld a,(stage)          ; A = world row
 	ld hl,row_solid_thresh
 	call ADD_HL_A          ; HL -> threshold for this row
@@ -9542,7 +9541,7 @@ tile_is_solid:
 	dec a
 	cp (hl)                ; carry = (id-1) < threshold -> solid
 	ret
-l7c7ah:
+tile_is_solid_evt6:            ; (0x7C7A) event-6 (s18r9): solid iff (id-1) < 6
 	ld a,c
 	dec a
 	cp 006h                ; event-6: solid iff (id-1) < 6
@@ -9770,67 +9769,67 @@ l7dach:
 	pop bc
 	djnz l7da9h
 	ret
-whip_hit_actors:
+whip_hit_actors:                ; (0x7DB4) whip phase 3 vs C800 (+0E bit0)
 	ld a,(simon_whip)
-	cp 003h
+	cp 003h                ; hit frame only
 	ret nz
 	ld ix,actor_slots
 	ld b,007h
 l7dc0h:
-	ld a,(ix+000h)
+	ld a,(ix+000h)         ; type; 0 = free
 	and a
 	jr z,l7dd3h
 	ld a,(ix+00eh)
-	rra
+	rra                    ; bit0 = hittable
 	jr nc,l7dd3h
 	push bc
 	call actor_vs_whip
 	pop bc
-	jr c,l7ddbh
+	jr c,whip_hit_apply
 l7dd3h:
 	ld de,00080h
 	add ix,de
 	djnz l7dc0h
 	ret
-l7ddbh:
+whip_hit_apply:                 ; (0x7DDB) overlap: sfx, drop hittable, fodder vs meter
 	ld a,sfx_hit
 	call play_sound
-	res 0,(ix+00eh)
-	ld a,(ix+000h)
-	sub 011h
+	res 0,(ix+00eh)        ; one hit per rearm
+	ld a,(ix+000h)         ; actor type
+	sub actor_dracula      ; 0x11..0x17 = HP-bar
 	cp 007h
-	jr c,l7e06h
-l7dedh:
+	jr c,whip_hit_metered
+whip_hit_fodder:                ; (0x7DED) ix+0D: leather 1, other weapons 2
 	ld a,(weapon_id)
-	and a
-	jr z,l7df6h
+	and a                  ; leather?
+	jr z,l7df6h            ; skip the extra dec
 	dec (ix+00dh)
 l7df6h:
 	dec (ix+00dh)
-	jr z,l7e00h
+	jr z,whip_kill_fodder  ; HP hit 0
 	ld a,(ix+00dh)
-	rla
-	ret nc
-l7e00h:
+	rla                    ; wrapped negative (bit7)?
+	ret nc                 ; still alive
+whip_kill_fodder:               ; (0x7E00)
 	call award_kill_score
 	jp actor_kill
-l7e06h:
+whip_hit_metered:               ; (0x7E06) types 0x11..0x17; giant bat dual-use
 	ld a,(ix+000h)
-	cp 012h
-	jr nz,l7e13h
+	cp actor_giant_bat     ; type 0x12: event-1 boss, or fodder on s16
+	jr nz,whip_hit_hpbar
 	ld a,(cell_event)
 	and a
-	jr z,l7dedh
-l7e13h:
+	jr z,whip_hit_fodder   ; no event: per-actor HP
+whip_hit_hpbar:                 ; (0x7E13) 0xC418 -= table[weapon, type-0x11]
 	call weapon_hit_damage
 	ld a,(enemy_meter)
 	and a
-	jr z,boss_killed
+	jr z,boss_killed       ; bar already empty
 	rla
-	ret nc
-boss_killed:
+	ret nc                 ; still positive
+boss_killed:                    ; (0x7E1E) bar empty: flash, sfx, CE15, cull
 	ld a,014h
-	ld (0c445h),a
+	ld (0c445h),a          ; boss-death flash timer
 	ld a,sfx_boss_clear
 	call play_sound
 	call award_kill_score
@@ -9841,53 +9840,53 @@ boss_killed:
 ; IX.  Picks a damage byte B from a per-weapon table indexed by (enemy type-0x11),
 ; then jp damage_enemy (0xC418 -= B).  Only the HP-bar enemies (types 0x11..0x17)
 ; take metered damage here; lesser enemies die outright on the hit test.
-;   weapon 0xC416 = 0 (leather whip) or 2 (knife)  -> base table l7e60h
-;   weapon = 1 (chain) / 3 (axe) / 4 (cross)        -> strong table l7e67h (1.5x)
+;   weapon 0xC416 = 0 (leather whip) or 2 (knife)  -> base table hpbar_dmg_weak
+;   weapon = 1 (chain) / 3 (axe) / 4 (cross)        -> strong table hpbar_dmg_strong (1.5x)
 ;   Base   (types 0x11..0x17): 04 08 08 04 04 04 10
 ;   Strong (types 0x11..0x17): 06 0C 0C 06 06 06 18
 ; Special: vs type 0x17 with weapon >= 2 (knife/axe/cross) the damage is >>2 (/4).
-weapon_hit_damage:
-	ld hl,l7e60h
-	ld a,(weapon_id)          ; equipped weapon id
+weapon_hit_damage:              ; (seg1 0x7E33)
+	ld hl,hpbar_dmg_weak
+	ld a,(weapon_id)
 	and a
-	jr z,l7e43h            ; leather whip -> base table
+	jr z,hpbar_dmg_lookup  ; leather -> weak table
 	cp equip_knife
-	jr z,l7e43h            ; knife -> base table
-	ld hl,l7e67h           ; chain/axe/cross -> strong table
-l7e43h:
+	jr z,hpbar_dmg_lookup  ; knife -> weak table
+	ld hl,hpbar_dmg_strong ; chain/axe/cross -> 1.5x
+hpbar_dmg_lookup:               ; (0x7E43) B = table[type-0x11]
 	ld a,(ix+000h)         ; struck enemy type
 	ld c,a
 	sub actor_dracula      ; index = type - 0x11
 	call ADD_HL_A
-	ld b,(hl)              ; B = damage for this weapon vs this enemy
+	ld b,(hl)
 	ld a,c
-	cp 017h
+	cp 017h                ; 7th HP-bar slot (no actor_* name)
 	jr nz,l7e5dh
 	ld a,(weapon_id)
 	cp equip_knife
-	jr c,l7e5dh
-	srl b                  ; type 0x17 + weapon>=2: quarter the damage
+	jr c,l7e5dh            ; leather/chain: full table byte
+	srl b                  ; type 0x17 + knife/axe/cross: /4
 	srl b
 l7e5dh:
 	jp damage_enemy        ; 0xC418 -= B
-l7e60h:
+hpbar_dmg_weak:                ; (0x7E60) leather/knife vs types 0x11..0x17
 	defb 004h,008h,008h,004h,004h,004h,010h
-l7e67h:
+hpbar_dmg_strong:              ; (0x7E67) chain/axe/cross (1.5x)
 	defb 006h,00ch,00ch,006h,006h,006h,018h
-actors_vs_simon:
-	ld a,(0c434h)
+actors_vs_simon:                ; (0x7E6E) C800 vs Simon
+	ld a,(sapphire_ring)
 	and a
-	jr nz,l7e84h
+	jr nz,actors_vs_simon_scan ; ring: skip i-frame / gem / already-hurt
 	ld a,(simon_invuln)
 	and a
 	ret nz
-	ld a,(0c43ah)
+	ld a,(blue_gem)
 	and a
-	ret nz
+	ret nz                 ; invis: no contact
 	ld a,(simon_action)
 	cp act_hurt
-	ret nc
-l7e84h:
+	ret nc                 ; already hurt or dying
+actors_vs_simon_scan:           ; (0x7E84)
 	ld ix,actor_slots
 	ld b,007h
 l7e8ah:
@@ -9896,63 +9895,63 @@ l7e8ah:
 	jr z,l7ee3h
 	ld a,(ix+00eh)
 	rra
-	rra
+	rra                    ; bit1 = can touch Simon (spawn writes 7)
 	jr nc,l7ee3h
 	push bc
 	call actor_vs_simon
 	pop bc
 	jr nc,l7ee3h
 	ld a,(ix+000h)
-	cp 024h
-	jp z,09a45h
-	cp 026h
-	jp z,09a45h
-	cp 022h                ; boss-clear orb (sprite 0x8F); not bonus id 22
-	jr nz,l7eb7h
+	cp actor_pickup
+	jp z,actor_kill        ; heart already on the floor
+	cp actor_reward
+	jp z,actor_kill        ; sparkle drop, no contact dmg
+	cp actor_orb           ; boss-clear orb (sprite 0x8F); not bonus id 22
+	jr nz,simon_touch_enemy
 	ld a,001h
-	ld (orb_got),a          ; collected: drip-fill HP then advance stage
+	ld (orb_got),a         ; collected: drip-fill HP then advance stage
 	jp actor_kill
-l7eb7h:
-	ld a,(0c434h)
+simon_touch_enemy:              ; (0x7EB7) after orb/pickup: ring kill or contact
+	ld a,(sapphire_ring)
 	and a
-	jr z,l7ec8h
+	jr z,simon_contact_hurt
 	call award_kill_score
 	call actor_kill
 	ld a,sfx_ring_kill
 	jp play_sound
-l7ec8h:
+simon_contact_hurt:             ; (0x7EC8) arm act_hurt; Xvel sign -> hurt_facing
 	ld a,act_hurt
 	ld (simon_action),a
 	xor a
 	ld (simon_hurt_step),a
 	ld (simon_whip),a
-	ld a,(ix+00ah)
+	ld a,(ix+00ah)         ; actor X vel
 	rla
-	ld a,001h
+	ld a,001h              ; rightward vel -> facing 1
 	jr nc,l7eddh
-	xor a
+	xor a                  ; leftward vel -> facing 0
 l7eddh:
-	ld (0c43ch),a
-	jp 08173h
+	ld (hurt_facing),a
+	jp hurt_simon_contact
 l7ee3h:
 	ld de,00080h
 	add ix,de
 	djnz l7e8ah
 	ret
-shots_vs_simon:
-	ld a,(0c434h)
+shots_vs_simon:                 ; (0x7EEB) D700 vs Simon
+	ld a,(sapphire_ring)
 	and a
-	jr nz,l7f01h
+	jr nz,shots_vs_simon_scan
 	ld a,(simon_invuln)
 	and a
 	ret nz
-	ld a,(0c43ah)
+	ld a,(blue_gem)
 	and a
 	ret nz
 	ld a,(simon_action)
 	cp act_hurt
 	ret nc
-l7f01h:
+shots_vs_simon_scan:            ; (0x7F01)
 	ld ix,shot_slots
 	ld b,008h
 l7f07h:
@@ -9960,15 +9959,15 @@ l7f07h:
 	ld a,(ix+000h)
 	and a
 	jr z,l7f47h
-	cp 00ch
+	cp 00ch                ; death flame (shot_death_flame type 12)
 	jr z,l7f47h
 	call shot_vs_simon
 	jr nc,l7f47h
 	call actor_free
 	pop bc
-	ld a,(0c434h)
+	ld a,(sapphire_ring)
 	and a
-	jp nz,add_score_100
+	jp nz,add_score_100    ; ring: destroy shot, +100, no hurt
 	ld a,act_hurt
 	ld (simon_action),a
 	xor a
@@ -9980,14 +9979,14 @@ l7f07h:
 	jr nc,l7f37h
 	xor a
 l7f37h:
-	ld (0c43ch),a
+	ld (hurt_facing),a
 	ld a,(ix+000h)
-	cp 009h
+	cp 009h                ; axe shot (shot_kind_type[16])
 	ld b,001h
 	jr nz,l7f44h
-	inc b
+	inc b                  ; axe: 2 HP
 l7f44h:
-	jp 04632h
+	jp damage_health
 l7f47h:
 	pop bc
 	ld de,00080h
@@ -10005,7 +10004,7 @@ l7f5ch:
 	ld a,(ix+000h)
 	and a
 	jr z,l7f77h
-	cp 00ch
+	cp 00ch                ; death flame: ignore
 	jr z,l7f77h
 	call shot_vs_whip
 	jr nc,l7f77h
@@ -10031,7 +10030,7 @@ l7f8fh:
 	ld a,(ix+000h)
 	and a
 	jr z,l7fb6h
-	cp 00ch
+	cp 00ch                ; death flame: ignore
 	jr z,l7fb6h
 	push bc
 	call shot_vs_proj
@@ -10128,79 +10127,78 @@ l801ch:
 	ld l,a
 	djnz $-47
 	ret
-projectile_hit_actors:         ; (0x8025) C450/C460 vs C800 if +0E bit0
+projectile_hit_actors:          ; (0x8025) C450/C460 vs C800 if +0E bit0
 	ld a,(0c450h)
 	ld b,a
 	ld a,(0c460h)
 	or b
-	ret z
+	ret z                  ; no live projectile
 	ld ix,actor_slots
 	ld b,007h
 l8034h:
-	ld a,(ix+000h)
+	ld a,(ix+000h)         ; type; 0 = free
 	and a
 	jr z,l8047h
 	ld a,(ix+00eh)
-	rra
+	rra                    ; bit0 = hittable
 	jr nc,l8047h
 	push bc
 	call actor_vs_proj
 	pop bc
-	jr c,l8053h
+	jr c,projectile_hit_apply
 l8047h:
 	ld de,00080h
 	add ix,de
 	djnz l8034h
 	ret
-l804fh:
+fodder_dmg_tbl:                 ; (0x804F) knife/axe/cross/holy vs fodder
 	defb 001h,004h,002h,002h  ; fodder dmg: knife/axe/cross/holy (iy+1)-2
-l8053h:
+projectile_hit_apply:           ; (0x8053) overlap: sfx, then fodder HP or meter
 	ld a,sfx_hit
 	call play_sound
-	ld a,(ix+000h)
-	sub 011h
+	ld a,(ix+000h)         ; actor type
+	sub actor_dracula      ; 0x11..0x17 = HP-bar
 	cp 007h
-	jr c,l808fh
-l8061h:
-	ld a,(iy+001h)
-	sub 002h
-	ld hl,l804fh
+	jr c,projectile_hit_metered
+projectile_hit_fodder:          ; (0x8061) ix+0D -= fodder_dmg_tbl[type-2]
+	ld a,(iy+001h)         ; projectile type
+	sub 002h               ; 2=knife .. 5=holy -> 0..3
+	ld hl,fodder_dmg_tbl
 	call ADD_HL_A
 	ld b,(hl)
-	ld a,(ix+00dh)
-l8070h:
+	ld a,(ix+00dh)         ; actor HP
 	sub b
 	ld (ix+00dh),a
-	jr z,l8079h
-	jp p,l807fh
-l8079h:
+	jr z,projectile_kill_fodder
+	jp p,projectile_after_hit ; still alive (signed)
+projectile_kill_fodder:         ; (0x8079)
 	call award_kill_score
 	call actor_kill
-l807fh:
+projectile_after_hit:           ; (0x807F) knife despawns; axe/cross/holy keep flying
 	ld a,(iy+001h)
-	cp 002h
+	cp 002h                ; knife?
 	push iy
 	pop hl
-	jp z,projectile_clear_hl  ; knife (type 2): despawn on hit
-	res 0,(ix+00eh)        ; axe/cross/holy: keep projectile, drop hittable
+	jp z,projectile_clear_hl
+	res 0,(ix+00eh)        ; keep projectile, drop hittable until rearm
 	ret
-l808fh:
+projectile_hit_metered:         ; (0x808F) types 0x11..0x17; giant bat dual-use
 	ld a,(ix+000h)
-	cp 012h
-	jr nz,l809ch
+	cp actor_giant_bat     ; type 0x12: event-1 boss, or fodder on s16
+	jr nz,projectile_hit_hpbar
 	ld a,(cell_event)
 	and a
-	jr z,l8061h
-l809ch:
+	jr z,projectile_hit_fodder
+projectile_hit_hpbar:           ; (0x809C) 0xC418 -= table[weapon, type-0x11]
 	call weapon_hit_damage
 	ld a,(enemy_meter)
 	and a
-	jr z,l80a8h
+	jr z,projectile_meter_empty
 	rla
-	jr nc,l807fh
-l80a8h:
+	jr nc,projectile_after_hit ; still positive
+projectile_meter_empty:         ; (0x80A8) bar empty: boss_killed, then after_hit
 	call boss_killed
-	jr l807fh
+	jr projectile_after_hit
 proj_hit_candles:              ; (0x80AD) C450/C460 vs C470 candles/blocks
 	ld ix,scenery_slots
 	ld b,008h
@@ -10237,31 +10235,31 @@ vendors_vs_attack:             ; (0x80E3) both C5B5/C5C5 slots vs whip/proj
 vendor_vs_attack:              ; (0x80EC) one vendor slot HL vs whip then proj
 	ld a,(hl)
 	rla
-	ret nc
+	ret nc                 ; bit7 clear = inactive
 	ld a,(weapon_id)
 	cp equip_knife
-	jr nc,l8104h
+	jr nc,vendor_try_proj  ; thrown: skip whip box
 	ld a,(simon_whip)
-	cp equip_axe
-	jr nz,l8104h
+	cp 003h                ; hit frame only
+	jr nz,vendor_try_proj
 	push hl
 	call obj_vs_whip_lo
 	pop hl
-	jr c,l8119h
-l8104h:
+	jr c,vendor_struck
+vendor_try_proj:                ; (0x8104)
 	push hl
 	call obj_vs_proj_lo
 	pop hl
 	ret nc
 	ld a,(iy+001h)
-	cp 002h
-	jr nz,l8119h
+	cp equip_knife
+	jr nz,vendor_struck    ; knife is consumed
 	push hl
 	push iy
 	pop hl
 	call projectile_clear_hl
 	pop hl
-l8119h:
+vendor_struck:                  ; (0x8119) +3 hit counter
 	inc l
 	inc l
 	inc l
@@ -10276,29 +10274,29 @@ l8127h:
 	push hl
 	ld a,(hl)
 	rla
-	jr nc,l816ah
+	jr nc,l816ah           ; inactive
 	push hl
 	ld a,004h
 	add a,l
 	ld l,a
-	ld a,(hl)
+	ld a,(hl)              ; +4 type
 	pop hl
-	cp 00ah
-	jr z,l813ch
-	cp 00bh
+	cp item_hourglass
+	jr z,hourglass_hit_test
+	cp item_tipped_hourglass
 	jr nz,l816ah
-l813ch:
+hourglass_hit_test:             ; (0x813C)
 	ld a,(weapon_id)
 	cp equip_knife
-	jr nc,l8151h
+	jr nc,hourglass_try_proj
 	ld a,(simon_whip)
-	cp equip_axe
-	jr nz,l8151h
+	cp 003h                ; hit frame only
+	jr nz,hourglass_try_proj
 	push hl
 	call obj_vs_whip_hi
 	pop hl
-	jr c,l8160h
-l8151h:
+	jr c,hourglass_struck
+hourglass_try_proj:             ; (0x8151) any projectile; always consumed
 	push hl
 	call obj_vs_proj_hi
 	pop hl
@@ -10308,7 +10306,7 @@ l8151h:
 	pop hl
 	call projectile_clear_hl
 	pop hl
-l8160h:
+hourglass_struck:               ; (0x8160) +3=2 -> pickup_idle / hourglass_tip
 	inc l
 	inc l
 	inc l
@@ -10324,53 +10322,53 @@ l816ah:
 	djnz l8127h
 	ret
 ; --- hurt_simon_contact (seg2 0x8173) - Simon TAKES contact damage from actor IX -
-; Base damage B = the ODD byte of this actor type's l81d5h entry (the even byte is
-; the kill score - see l81d5h below).  Then:
+; Base damage B = the ODD byte of this actor type's actor_value_tbl entry (the even byte is
+; the kill score - see actor_value_tbl below).  Then:
 ;   * Red shield (0xC701 bit 4, bonus id 3): if Simon is facing the hit, take B
 ;     as-is (not doubled) and spend a charge (0xC441--; at 0, res bit4 +
 ;     hud_bonus_refresh drops the HUD).  A backstab still takes the doubled hit.
 ;   * Otherwise (no red shield / not facing): B is DOUBLED, so unshielded
-;     contact = 2 * (l81d5h odd byte).  Runtime-confirmed: zombie(t01) odd 1 -> 2,
+;     contact = 2 * (actor_value_tbl odd byte).  Runtime-confirmed: zombie(t01) odd 1 -> 2,
 ;     dog(t05) odd 3 -> 6 (0x1E->0x18).  Then jp damage_health (0xC415 -= B).
 hurt_simon_contact:
 	ld a,(ix+000h)
 	dec a
 	add a,a
-	ld hl,l81d5h
+	ld hl,actor_value_tbl
 	call ADD_HL_A
-	inc hl                 ; -> odd byte = base contact damage for this type
+	inc hl                 ; odd byte = base contact damage
 	ld b,(hl)
 	ld a,(0c701h)
 	bit 4,a                ; red shield (id 3)?
-	jr z,l819ah            ; no shield -> full (doubled) damage
+	jr z,contact_dmg_full  ; no shield -> doubled
 	ld a,(simon_x)
-	sub (ix+005h)
+	sub (ix+005h)          ; CY if actor is to Simon's right
 	ld a,(simon_facing)
-	jr nc,l8197h
+	jr nc,contact_dmg_left ; actor to the left
 	and a
-	jr z,l819fh
-	jr l819ah
-l8197h:
+	jr z,contact_dmg_block ; facing right + actor right = face-on
+	jr contact_dmg_full    ; facing left = backstab
+contact_dmg_left:               ; (0x8197) actor left of Simon
 	and a
-	jr nz,l819fh
-l819ah:
-	ld a,b                 ; unshielded: double the base damage
+	jr nz,contact_dmg_block ; facing left + actor left = face-on
+contact_dmg_full:               ; (0x819A) unshielded / backstab: B *= 2
+	ld a,b
 	add a,a
 	ld b,a
-	jr l81afh
-l819fh:
-	ld hl,0c441h           ; shielded hit: spend a shield charge
+	jr contact_dmg_apply
+contact_dmg_block:              ; (0x819F) face-on red shield: spend a charge
+	ld hl,0c441h
 	dec (hl)
-	jr nz,l81afh
+	jr nz,contact_dmg_apply
 	ld hl,0c701h
-	res 4,(hl)             ; charges gone -> drop the red shield
+	res 4,(hl)             ; charges gone -> drop the HUD icon
 	push bc
 	call hud_bonus_refresh
 	pop bc
-l81afh:
+contact_dmg_apply:              ; (0x81AF)
 	jp damage_health       ; 0xC415 -= B
 ; award_kill_score (seg2 0x81B2): give points for killing the actor in IX.
-; Looks up the per-type hundreds value D from table l81d5h[(type-1)] (E=0 low pair),
+; Looks up the per-type hundreds value D from table actor_value_tbl[(type-1)] (E=0 low pair),
 ; then picks the high pair C by type (0x11 -> 3, 0x17 -> 5, else 0) and calls
 ; add_score with C:D:E.
 award_kill_score:
@@ -10378,20 +10376,20 @@ award_kill_score:
 	ld b,a
 	dec a
 	add a,a
-	ld hl,l81d5h
+	ld hl,actor_value_tbl
 	call ADD_HL_A
 	ld e,000h
 	ld d,(hl)               ; D = hundreds pair for this enemy type
 	ld a,b
-	cp 011h
-	ld c,003h
+	cp actor_dracula
+	ld c,003h              ; type 0x11: 30000
 	jp z,add_score
-	ld c,005h
+	ld c,005h              ; type 0x17: 50000
 	cp 017h
 	jp z,add_score
 	ld c,000h
 	jp add_score
-; l81d5h - per-actor-type table, 2 bytes/entry, indexed by (type - 1):
+; actor_value_tbl (0x81D5) - per-actor-type table, 2 bytes/entry, indexed by (type - 1):
 ;   even byte = kill SCORE / 100 in BCD (read by award_kill_score above)
 ;   odd  byte = base CONTACT damage to Simon (read by hurt_simon_contact; the
 ;               real damage is 2x this when unshielded)
@@ -10402,7 +10400,7 @@ award_kill_score:
 ; Confirmed: t01 zombie 100/2; t02/t03 merman 200/4; t04 hanging bat 100/2;
 ; t05 dog 100/6; t07 flying skull 200/2; t08 ghost head 200/4; t0F roc 400/4.
 ; Hearts/keys are pickups (collect_bonus), not kills, so they award 0 here.
-l81d5h:
+actor_value_tbl:
 	defb 001h,001h, 002h,002h, 002h,002h, 001h,001h  ; t01-04
 	defb 001h,003h, 002h,002h, 002h,001h, 002h,002h  ; t05-08
 	defb 002h,001h, 003h,001h, 002h,001h, 001h,001h  ; t09-0c
@@ -10717,13 +10715,13 @@ candle_vs_whip:                ; (0x8457) C470 slot HL vs whip
 	ld d,a
 	ld hl,01008h
 	jp overlap_whip
-candle_vs_proj:
+candle_vs_proj:                 ; (0x8467) C470 vs C450/C460; type<2 8×16 else 16×32
 	ld a,(ix+004h)
-	cp 002h
-	ld hl,01008h
-	jr c,l8474h
-	ld hl,02010h
-l8474h:
+	cp 002h                ; 0/1 candle, 2+ block
+	ld hl,01008h           ; H=16 W=8
+	jr c,candle_proj_test
+	ld hl,02010h           ; H=32 W=16
+candle_proj_test:               ; (0x8474) DE = slot XY + box
 	ld a,(ix+001h)
 	add a,h
 	ld e,a
@@ -10746,19 +10744,19 @@ l848dh:
 	ld a,(simon_action)
 	ld b,a
 	dec a
-	cp 002h
+	cp 002h                ; jump/crouch: shorter
 	ld a,012h
-	jr c,l849dh
-	ld a,01ah
-l849dh:
+	jr c,overlap_simon_ht
+	ld a,01ah              ; grounded/stairs/fall/hurt
+overlap_simon_ht:               ; (0x849D)
 	add a,h
 	ld h,a
 	ld a,b
-	dec a
+	dec a                  ; Z if jumping
 	ld a,(simon_y)
-	jr nz,l84a8h
-	sub 008h
-l84a8h:
+	jr nz,overlap_simon_y
+	sub 008h               ; jump: lift the box
+overlap_simon_y:                ; (0x84A8)
 	sub 002h
 	sub e
 	add a,c
@@ -10766,18 +10764,18 @@ l84a8h:
 	ret
 overlap_whip:                  ; (0x84AE) DE=actor XY, HL=box; vs whip (facing + C416)
 	ld a,(weapon_id)
-	dec a
-	ld a,00ch
-	jr nz,l84b8h
-	ld a,010h
-l84b8h:
+	dec a                  ; Z if chain
+	ld a,00ch              ; leather / thrown
+	jr nz,overlap_whip_w
+	ld a,010h              ; chain: longer
+overlap_whip_w:                 ; (0x84B8)
 	add a,l
 	ld l,a
 	call whip_reach_x
-	jr nc,l84c1h
-	xor a
+	jr nc,overlap_whip_x
+	xor a                  ; tip wrapped off-screen
 	ret
-l84c1h:
+overlap_whip_x:                 ; (0x84C1) abs(tip X - actor X)
 	sub d
 	jr nc,l84c6h
 	neg
@@ -10786,10 +10784,10 @@ l84c6h:
 	ret nc
 	ld a,(simon_action)
 	cp act_crouch
-	ld b,012h
-	jr nz,l84d3h
-	ld b,00ah
-l84d3h:
+	ld b,012h              ; stand
+	jr nz,overlap_whip_y
+	ld b,00ah              ; crouch: shorter
+overlap_whip_y:                 ; (0x84D3)
 	ld c,h
 	ld a,004h
 	add a,h
@@ -10800,20 +10798,20 @@ l84d3h:
 	add a,c
 	cp h
 	ret
-whip_reach_x:
+whip_reach_x:                   ; (0x84E0) A = whip tip X; CY = wrapped
 	ld a,(weapon_id)
 	dec a
-	ld b,014h
-	jr nz,l84eah
-	ld b,018h
-l84eah:
+	ld b,014h              ; leather / thrown
+	jr nz,whip_reach_len
+	ld b,018h              ; chain
+whip_reach_len:                 ; (0x84EA)
 	ld a,(simon_facing)
 	and a
 	ld a,(simon_x)
-	jr z,l84f5h
-	sub b
+	jr z,whip_reach_right
+	sub b                  ; facing left: X-reach
 	ret
-l84f5h:
+whip_reach_right:               ; (0x84F5) facing right: X+reach
 	add a,b
 	ret
 overlap_projectile:            ; (0x84F7) DE=actor XY, HL=box; vs C450 then C460
@@ -10823,7 +10821,7 @@ overlap_projectile:            ; (0x84F7) DE=actor XY, HL=box; vs C450 then C460
 	ld iy,0c460h
 	call proj_slot_overlap
 	ret
-proj_slot_overlap:
+proj_slot_overlap:              ; (0x8507)
 	ld a,006h
 	add a,l
 	ld l,a
@@ -10835,11 +10833,11 @@ l8513h:
 	cp l
 	ret nc
 	ld a,(iy+001h)
-	cp 002h
-	ld b,00ch
-	jr nz,l8520h
-	ld b,006h
-l8520h:
+	cp equip_knife
+	ld b,00ch              ; axe/cross/holy
+	jr nz,proj_slot_ht
+	ld b,006h              ; knife: shorter
+proj_slot_ht:                   ; (0x8520)
 	ld c,h
 	ld a,b
 	add a,h
@@ -10858,11 +10856,11 @@ l8520h:
 platform_stand_test:
 	ld a,(simon_action)
 	cp act_fall
-	jr nz,l8538h
+	jr nz,platform_stand_scan
 	ld a,(simon_arc)
 	cp 003h
 	ret c                  ; still rising -> don't land on anything
-l8538h:
+platform_stand_scan:            ; (0x8538)
 	ld hl,platform_slots
 	ld de,00000h           ; D = slot 2 result, E = slot 1 result
 	ld b,002h
@@ -10890,35 +10888,35 @@ platform_overlap:
 	ld a,(simon_y)          ; Simon Y
 	sub (hl)               ; - platform Y (+1)
 	cp 008h
-	jr nc,l8575h           ; Y miss: not resting on the deck
+	jr nc,platform_miss    ; Y miss: not resting on the deck
 	ld b,007h
 	inc hl
 	ld a,(simon_x)          ; Simon X
 	sub b
 	sub (hl)               ; - platform X (+2), left foot
 	cp 020h
-	jr c,l857fh            ; within the 32px deck
+	jr c,platform_hit      ; within the 32px deck
 	ld a,(simon_x)
 	add a,b
 	sub (hl)               ; right foot
 	cp 020h
-	jr c,l857fh
-l8575h:
+	jr c,platform_hit
+platform_miss:                  ; (0x8575) even id -> D=0; odd -> E=0
 	ld a,c
 	rra
-	jr c,l857ch
+	jr c,platform_miss_e
 	ld d,000h
 	ret
-l857ch:
+platform_miss_e:                ; (0x857C)
 	ld e,000h
 	ret
-l857fh:
+platform_hit:                   ; (0x857F) even id -> D=id; odd -> E=id
 	ld a,c
 	rra
-	jr c,l8585h
+	jr c,platform_hit_e
 	ld d,c
 	ret
-l8585h:
+platform_hit_e:                 ; (0x8585)
 	ld e,c
 	ret
 ; door_proximity (0x8587): carry set if Simon overlaps the white-key door.
@@ -10928,16 +10926,16 @@ l8585h:
 door_proximity:
 	ld a,(simon_facing)
 	and a
-	jr z,l8593h
+	jr z,door_prox_right   ; facing 0 = right: X+8
 	ld a,c
-	sub 008h
+	sub 008h               ; facing left: X-8
 	ld c,a
-	jr l8597h
-l8593h:
+	jr door_prox_test
+door_prox_right:                ; (0x8593)
 	ld a,c
 	add a,008h
 	ld c,a
-l8597h:
+door_prox_test:                 ; (0x8597) Y window 0x38, X window 8
 	dec b
 	dec b
 	ld a,(door_y)          ; door Y
@@ -10959,8 +10957,8 @@ l8597h:
 ; fixed damage: B = 8, or B = 16 when bit 0 of the slot byte is set (descending).
 ; Nothing else ever seeds C580 (only spike_bars_seed, and only on stage 6 room 1);
 ; enemy shots live in the 8 D700 slots and hit Simon by a different path.
-; Skipped while Simon is already dying (0xC420==6) or during the 0xC42D /
-; 0xC43A i-frame / freeze timers.
+; Skipped while Simon is already dying (0xC420==6) or during
+; simon_invuln / blue_gem timers.
 hurt_simon_spikes:
 	ld a,(simon_action)
 	cp act_dying
@@ -10968,7 +10966,7 @@ hurt_simon_spikes:
 	ld a,(simon_invuln)
 	and a
 	ret nz
-	ld a,(0c43ah)
+	ld a,(blue_gem)
 	and a
 	ret nz
 	ld hl,spike_slots           ; 3 spike-bar slots
@@ -10986,9 +10984,9 @@ l85c2h:
 	ld a,(hl)
 	rra
 	ld b,008h              ; retracting = 8
-	jr nc,l85dah
+	jr nc,spike_dmg_apply
 	ld b,010h              ; descending (bit 0 set) = 16
-l85dah:
+spike_dmg_apply:                ; (0x85DA)
 	jp damage_health       ; 0xC415 -= B
 l85ddh:
 	ld a,008h
@@ -11075,10 +11073,10 @@ overlap_shield:                ; (0x8652) yellow shield: Simon X ±8 by facing
 	ld l,a
 	ld a,(simon_facing)
 	and a
-	ld a,008h
-	jr z,l8660h
-	neg
-l8660h:
+	ld a,008h              ; facing right
+	jr z,shield_off_x
+	neg                    ; facing left
+shield_off_x:                   ; (0x8660)
 	ld b,a
 	ld a,(simon_x)
 	add a,b
@@ -11147,9 +11145,9 @@ brazier_tick:
 	inc l
 	inc l
 	inc (hl)                ; +0x06 anim
-	ld a,b
+	ld a,b                  ; old state
 	cp 001h
-	jr nz,l86bah            ; already stamped
+	jr nz,candle_anim      ; already stamped
 	ex af,af'
 	push af
 	push de
@@ -11157,26 +11155,26 @@ brazier_tick:
 	pop de
 	pop af
 	cp 002h
-	jp c,l86c2h             ; kind 0/1: candle flame
-	jp block_stamp          ; kind 2/3: overlay brick tiles
-l86bah:
+	jp c,candle_flame      ; kind 0/1: candle flame
+	jp block_stamp         ; kind 2/3: overlay brick tiles
+candle_anim:                    ; (0x86BA) every 4 frames; blocks stay stamped
 	ld a,(hl)
 	and 003h
 	ret nz
-	ex af,af'
+	ex af,af'              ; kind
 	cp 002h
-	ret nc                  ; blocks: stamp once
-l86c2h:
+	ret nc                 ; blocks: stamp once
+candle_flame:                   ; (0x86C2) kind 0 -> frames 0/1; kind 1 -> 2/3
 	or a
 	ld a,000h
-	jr z,l86c9h
+	jr z,candle_frame
 	ld a,002h
-l86c9h:
+candle_frame:                   ; (0x86C9) +6 bit3 toggles the pair
 	bit 3,(hl)
-	jr z,l86ceh
+	jr z,candle_flame_go
 	inc a
-l86ceh:
-	jp l8991h
+candle_flame_go:                ; (0x86CE)
+	jp candle_blit
 ; block_stamp (seg2 0x86D1) - blit brick tile ids to VRAM and into D100.
 ; kind 2 = 16x16 (2x2); kind 3 = 32x32 (4x4, skip the leading 2x2 bytes).
 ; Courtyard uses block_tiles_court; castle uses block_tiles_castle.
@@ -11185,17 +11183,17 @@ block_stamp:
 	ld a,(hub)
 	or a
 	ld hl,block_tiles_court
-	jr z,l86deh
+	jr z,block_tileset
 	ld hl,block_tiles_castle
-l86deh:
+block_tileset:                  ; (0x86DE)
 	ld a,b
-	ld bc,01002h
+	ld bc,01002h           ; 16x16, 2x2 tiles
 	cp 002h
-	jr z,l86eeh
-	ld bc,02004h
+	jr z,block_stamp_go
+	ld bc,02004h           ; 32x32, 4x4
 	ld a,004h
-	call ADD_HL_A
-l86eeh:
+	call ADD_HL_A          ; skip leading 2x2 bytes
+block_stamp_go:                 ; (0x86EE) blit VRAM then D100
 	push bc
 	push de
 	ld b,c
@@ -11241,10 +11239,10 @@ l8719h:
 	cp 002h
 	jr c,l8737h
 	ex de,hl
-	ld de,01010h
-	jr z,l8734h
-	ld de,02020h
-l8734h:
+	ld de,01010h           ; kind 2: 16x16
+	jr z,candle_outline_box
+	ld de,02020h           ; kind 3: 32x32
+candle_outline_box:             ; (0x8734)
 	call vdp_box_white
 l8737h:
 	pop hl
@@ -11260,9 +11258,9 @@ l8737h:
 block_save_under:
 	cp 003h
 	ld hl,0e4a0h
-	jr z,l875eh
-	ld hl,0e480h
-l874bh:
+	jr z,map_save_4x4      ; kind 3: 4x4 stash
+	ld hl,0e480h           ; 2x2 stash
+map_save_2x2:                   ; (0x874B) dest HL, slot C * 4; also pickups -> E520
 	push hl
 	push bc
 	call map_cell_at
@@ -11273,8 +11271,8 @@ l874bh:
 	add a,a
 	call ADD_DE_A
 	ld bc,00202h
-	jp l8773h
-l875eh:
+	jp map_copy_rows
+map_save_4x4:                   ; (0x875E) dest HL, slot C * 16; also vendor -> E580
 	push hl
 	push bc
 	call map_cell_at
@@ -11287,8 +11285,8 @@ l875eh:
 	add a,a
 	call ADD_DE_A
 	ld bc,00404h
-	jp l8773h
-l8773h:
+	jp map_copy_rows
+map_copy_rows:                  ; (0x8773) B rows of C bytes; HL += 32 per row
 	push bc
 	ld b,000h
 	push hl
@@ -11297,7 +11295,7 @@ l8773h:
 	pop bc
 	ld a,020h
 	call ADD_HL_A
-	djnz l8773h
+	djnz map_copy_rows
 	ret
 ; tiles_blit_vram (seg2 0x8783) - B rows x C tile-ids from (HL) at pixel DE.
 tiles_blit_vram:
@@ -11344,11 +11342,11 @@ brazier_destroyed:
 	inc l
 	ld b,(hl)               ; B = +0x05 bonus id
 	cp 002h
-	jp nc,l87d9h
+	jp nc,block_break      ; kind 2/3: bricks
 	call block_restore_vram_2x2
 	call scenery_clear_rec
 	jp scenery_drop
-l87d9h:
+block_break:                    ; (0x87D9) sfx, then restore 2x2 or 4x4
 	push bc
 	push de
 	push bc
@@ -11358,40 +11356,40 @@ l87d9h:
 	ld a,c
 	pop bc
 	cp 002h
-	jr z,l87f0h
+	jr z,block_break_2x2
 	call block_restore_vram_4x4
 	call block_restore_map_4x4
-	jr l87f6h
-l87f0h:
+	jr scenery_break_result
+block_break_2x2:                ; (0x87F0)
 	call block_restore_vram_2x2
 	call block_restore_map_2x2
-l87f6h:
+scenery_break_result:          ; (0x87F6) after tile restore: drop / key / reveal
 	ld a,(ix+005h)         ; bonus id
 	cp 01fh
-	jr z,l881bh            ; 0x1F = reveal (third scenery byte)
-	cp 018h
-	jr z,l8845h            ; 0x18 = white key
+	jr z,scenery_reveal            ; 0x1F = reveal (third scenery byte)
+	cp item_white_key
+	jr z,scenery_white_key
 	call scenery_clear_rec
 	pop de
 	pop bc
 	ld a,b
 	or a
-	jr z,l8818h
+	jr z,break_chip_go     ; empty: chips only
 	ld a,(ix+004h)
 	cp 003h
-	jr nz,l8815h
+	jr nz,scenery_drop_xy
 	ld a,e
 	add a,010h             ; 4x4 block: drop at Y+16
 	ld e,a
-l8815h:
+scenery_drop_xy:                ; (0x8815)
 	call drop_spawn
-l8818h:
+break_chip_go:                  ; (0x8818)
 	jp break_chip_spawn
 ; --- reveal (bonus 0x1F): +09 is the third scenery byte, +07/+08 -> E000 pos.
 ;  bits7-6 == 11 -> vendor at stamp Y (32x32 LMMM, no offset) via vendor_spawn.
-;  otherwise -> chest at Y+16 (bottom half of the 4x4) via l8a1ah. Same
+;  otherwise -> chest at Y+16 (bottom half of the 4x4) via pickup_spawn_chest. Same
 ;  Y+16 as a kind-3 whip drop; scenery Y is the top of the stamp.
-l881bh:
+scenery_reveal:                ; (0x881B)
 	pop de
 	pop bc
 	ld a,(ix+009h)         ; reveal byte
@@ -11401,14 +11399,14 @@ l881bh:
 	and 0c0h
 	cp 0c0h
 	ld a,b
-	jr z,l8838h            ; vendor: keep stamp Y
+	jr z,reveal_vendor     ; vendor: keep stamp Y
 	and 01fh
 	ld b,a
 	ld a,e
 	add a,010h             ; chest: Y+16
 	ld e,a
-	jp l8a1ah
-l8838h:
+	jp pickup_spawn_chest
+reveal_vendor:                  ; (0x8838) bits5-2 offer slot, bits1-0 facing
 	ld c,a
 	and 03ch
 	rrca
@@ -11418,13 +11416,13 @@ l8838h:
 	and 003h
 	ld c,a
 	jp vendor_spawn
-l8845h:
+scenery_white_key:              ; (0x8845) bonus 0x18: E000 pos -> white_key_spawn
 	ld b,a
 	pop de
 	pop bc
 	ld h,(ix+007h)
 	ld l,(ix+008h)
-	jp l8a04h
+	jp white_key_spawn
 block_restore_vram_2x2:
 	ld hl,0e480h
 tiles_blit_2x2:                     ; also: blit 2x2 from caller HL (door path)
@@ -11630,9 +11628,9 @@ l897bh:
 	inc hl
 	djnz l897bh
 	ret
-l8980h:
-	ld a,005h              ; leather whip: source X = 5*16
-	ld l,070h              ; source Y = 0x70
+hud_leather_icon:               ; (0x8980) page-1 (80, 0x70) leather whip HUD
+	ld a,005h
+	ld l,070h
 vram_hmmm16:                        ; HMMM 16x16 from VRAM page 1 at (A*16, L)
 	add a,a
 	add a,a
@@ -11642,9 +11640,9 @@ vram_hmmm16:                        ; HMMM 16x16 from VRAM page 1 at (A*16, L)
 	ld bc,01010h
 	ld a,001h
 	jp vdp_hmmm
-l8991h:
+candle_blit:                    ; (0x8991) playfield flame: atlas Y=0x70, A=frame
 	ld l,070h
-	jp l8cd2h
+	jp atlas_lmmm16
 scenery_drop:
 	call drop_own_weapon_heart
 scenery_drop_slot:
@@ -11724,7 +11722,7 @@ pickup_slot_write:                 ; (seg2 0x89F7) C500: live 0x83, XY, bonus B,
 	inc l
 	ld (hl),0ffh
 	ret
-l8a04h:
+white_key_spawn:                ; (0x8A04) C500 white key; C70D = E000 pos
 	ld (0c70dh),hl
 	call pickup_slot_alloc
 	ret nz
@@ -11738,7 +11736,7 @@ l8a12h:
 	inc l
 	ld (hl),e
 	ret
-l8a1ah:
+pickup_spawn_chest:            ; (0x8A1A) C500 chest container; contents in +0x0D
 	ld (0c70dh),hl
 	call pickup_slot_alloc
 	ret nz
@@ -11971,7 +11969,7 @@ pickup_idle:                       ; (seg2 0x8BA9) floor wait; +3==2 whip; count
 	set 7,(hl)
 	ld a,(ix+003h)
 	cp 002h
-	jp z,l8c4bh
+	jp z,hourglass_tip
 	push de
 	ld a,(ix+004h)
 	dec a
@@ -12012,7 +12010,7 @@ pickup_try_collect:                ; (seg2 0x8BE6) Simon/key touch: collect or c
 l8bfah:
 	ld a,(ix+004h)
 	cp 019h                ; chest: don't collect_bonus(25); reveal contents
-	jr z,l8c1bh
+	jr z,chest_open
 	ld (ix+005h),0ffh
 	call pickup_collect
 	ld a,(ix+004h)
@@ -12025,7 +12023,7 @@ l8c12h:
 	ld l,(ix+00fh)
 	ld (hl),000h
 	ret
-l8c1bh:
+chest_open:                    ; (0x8C1B) spill contents; spend yellow key/lockpick
 	ld a,(ix+00dh)         ; contents id stashed when the chest spawned
 	ld (ix+004h),a
 	call chest_spill         ; hop it as a normal pickup
@@ -12048,16 +12046,16 @@ chest_spill:                       ; (seg2 0x8C36) hop opened chest contents as 
 	ret
 ; Whip-hit on a world pickup: hourglass (id 10) tips onto its side (id 11);
 ; a second hit on the tipped one starts its despawn timer (ix+6=1).
-l8c4bh:
+hourglass_tip:                 ; (0x8C4B) whip: id 10 -> 11; second hit starts despawn
 	ld (ix+003h),000h
 	ld a,(ix+004h)
-	cp 00ah                ; upright hourglass?
+	cp item_hourglass      ; upright hourglass?
 	jr nz,l8c5fh
-	ld (ix+004h),00bh      ; -> tipped (bonus_tipped_hourglass)
+	ld (ix+004h),item_tipped_hourglass
 	call pickup_restore_under
 	jr chest_spill
 l8c5fh:
-	cp 00bh                ; already tipped: another whip deletes it
+	cp item_tipped_hourglass ; already tipped: another whip deletes it
 	ret nz
 	ld (ix+006h),001h
 	ret
@@ -12123,10 +12121,10 @@ l8cc4h:
 bonus_icon_blit:                   ; (seg2 0x8CC8) 16x16 LMMM from page-0 atlas (Y 0x50/0x60)
 	ld l,050h
 	cp 010h
-	jr c,l8cd2h
+	jr c,atlas_lmmm16
 	sub 010h
-	ld l,060h
-l8cd2h:
+	ld l,060h              ; ids 17+ at Y=0x60
+atlas_lmmm16:                   ; (0x8CD2) 16x16 LMMM from (A*16, L) page 0
 	add a,a
 	add a,a
 	add a,a
@@ -12141,7 +12139,7 @@ pickup_save_under:                 ; (seg2 0x8CDF) nametable 2x2 under pickup ->
 	pop bc
 	ld (ix+007h),c
 	ld hl,0e520h
-	jp l874bh
+	jp map_save_2x2
 pickup_restore_under:              ; (seg2 0x8CED) put the saved 2x2 back, then redraw overlays
 	push ix
 	push de
@@ -12153,7 +12151,7 @@ pickup_restore_under:              ; (seg2 0x8CED) put the saved 2x2 back, then 
 	call map_cell_at
 	ld de,0e800h
 	ld bc,00202h
-	call l8773h
+	call map_copy_rows
 	pop hl
 	pop bc
 	push bc
@@ -12190,7 +12188,7 @@ pickup_collect:                    ; (seg2 0x8D30) A = slot+4, then collect_bonu
 ;  Entry collect_bonus pushes the common tail play_sound; collect_bonus_apply is the bare entry
 ;  (caller supplies its own continuation).  Latches the bonus id into 0xC419
 ;  (last-pickup latch, drives the pickup HUD/message) then dispatches through the
-;  25-entry word table collect_bonus_tbl at 0x8D45 (index = A-1; A>=0x1A falls through to l8d77h):
+;  25-entry word table collect_bonus_tbl at 0x8D45 (index = A-1; A>=0x1A falls through to collect_weapon):
 ;    1/2 hearts, 3/4 shields, 5 white cross, 6 rosary, 7 small orb, 8 blue gem,
 ;    9 sapphire ring, 10/11 hourglass (upright / tipped), 12/13 boots/wings,
 ;    14 candle, 15 map, 16/17 bibles, 18 lockpick, 19/20 money bags,
@@ -12204,12 +12202,12 @@ collect_bonus:
 	push hl
 collect_bonus_apply:
 	ld (bonus_id),a          ; latch last-collected bonus id
-	call 08f2ah
-	cp 01ah
-	jr nc,l8d77h
+	call pickup_popup_show
+	cp item_chain_whip     ; id>=0x1A -> collect_weapon (holy water 0x1E too)
+	jr nc,collect_weapon
 	dec a
 	call DISPATCH_A
-collect_bonus_tbl:             ; (seg2 0x8D45) word[id-1]; id>=0x1A -> l8d77h
+collect_bonus_tbl:             ; (seg2 0x8D45) word[id-1]; id>=0x1A -> collect_weapon
 	defw bonus_small_heart
 	defw bonus_large_heart
 	defw bonus_red_shield
@@ -12240,61 +12238,59 @@ collect_bonus_tbl:             ; (seg2 0x8D45) word[id-1]; id>=0x1A -> l8d77h
 ; 0x1D cross (4). Index 5 is holy water (bonus_holy_water / C701 bit3), not a
 ; C416 weapon. Otherwise store the new weapon id, run hud_weapon_icon (HUD), then
 ; FALL THROUGH into bonus_rosary (brief C440 no-spawn window).
-l8d77h:
+collect_weapon:                ; (0x8D77) bonus >= 0x1A: C416 = id-0x19 except 0x1E
 	sub item_chest
 	cp item_holy_water - item_chest
 	jr z,bonus_holy_water
 	ld (weapon_id),a          ; set equipped weapon id
 	call hud_weapon_icon
 ; --- bonus_rosary (id 6, 0x8D83) - temporary "no new enemies" power-up ------
-; Arms the enemy-spawn suppression timer 0xC440: while nonzero, room_spawner
-; (seg0 0x5EBF) bails every frame and no new enemies spawn. Duration depends on
-; bonus id 11 (0xC431 bit 2): 0xF0 (240 frames ~4s) if set, else 0x96 (150
-; frames ~2.5s).  Same bit also lengthens the blue gem, sapphire ring, and
-; hourglass.  0xC440 counts down each frame in
-; seg1 0x75C7. Effect is immediate/current-room; existing 0xC800 actors are kept.
-; Weapon pickups fall through into this same code (brief no-spawn window).
+; Arms rosary_timer: while nonzero, room_spawner (seg0 0x5EBF) bails every
+; frame and no new enemies spawn. Duration: 0xF0 (~4s) if bonus_flags bit2
+; (tipped hourglass), else 0x96 (~2.5s). Same bit lengthens blue gem, sapphire
+; ring, and hourglass freeze. Counts down in timers_tick. Existing C800 actors
+; stay. Weapon pickups fall through into this same code (brief no-spawn window).
 bonus_rosary:
-	ld a,(0c431h)          ; id 11 (C431 bit2) selects the duration
+	ld a,(bonus_flags)     ; bit2 = tipped hourglass
 	and 004h
-	ld a,0f0h              ; -> 240-frame timer
-	jr nz,l8d8eh
-	ld a,096h              ; -> 150-frame timer
-l8d8eh:
-	ld (0c440h),a          ; arm the no-spawn timer
-l8d91h:
-	ld a,012h
+	ld a,0f0h              ; 240 frames ~4s
+	jr nz,rosary_arm
+	ld a,096h              ; 150 frames ~2.5s
+rosary_arm:                     ; (0x8D8E)
+	ld (rosary_timer),a
+bonus_ret_collect:              ; (0x8D91) A = sfx_collect
+	ld a,sfx_collect
 	ret
 bonus_holy_water:              ; id 0x1E (0x8D94): C701 bit3; jump+LEFT/RIGHT, 5 hearts
 	ld b,008h
-l8d96h:
+bonus_grant_c701:               ; (0x8D96) C701 |= B, then collect sfx
 	call inv_or_c701
-	jr l8d91h
+	jr bonus_ret_collect
 bonus_hourglass:               ; id 10 (0x8D9B): C701 bit6
 	ld b,040h
-	jr l8d96h
+	jr bonus_grant_c701
 bonus_red_shield:              ; id 3 (0x8D9F): C701 bit4, drop bit5, C441=16
 	ld hl,0c701h
 	res 5,(hl)             ; drop yellow (mutually exclusive)
 	ld b,010h              ; bit4 = red shield (face-on contact dmg not 2x)
-	jr l8dafh
+	jr shield_arm_charges
 bonus_yellow_shield:           ; id 4 (0x8DA8): C701 bit5, drop bit4, C441=16
 	ld hl,0c701h
 	res 4,(hl)             ; drop red
 	ld b,020h              ; bit5 = yellow (absorb enemy shots)
-l8dafh:
+shield_arm_charges:             ; (0x8DAF) 16 charges, then C701 bit
 	ld a,010h
-	ld (0c441h),a          ; 16 charges
-	jr l8d96h
+	ld (0c441h),a
+	jr bonus_grant_c701
 bonus_small_heart:             ; id 1 (0x8DB6): +1 heart currency
 	ld b,001h
-l8db8h:
+bonus_hearts_add:               ; (0x8DB8)
 	call add_hearts         ; B=1 small (+1); B=5 large (+5)
-	ld a,00fh
+	ld a,sfx_heart
 	ret
 bonus_large_heart:             ; id 2 (0x8DBE): +5 heart currency
 	ld b,005h
-	jr l8db8h
+	jr bonus_hearts_add
 bonus_white_cross:             ; id 5 (0x8DC2): despawn on-screen actors
 	push ix
 	call actors_kill_all            ; kill C800 actors and shots
@@ -12302,118 +12298,118 @@ bonus_white_cross:             ; id 5 (0x8DC2): despawn on-screen actors
 	call vendor_force_hit
 	ld a,018h
 	ld (0c43eh),a          ; backdrop flash
-	ld a,01bh
+	ld a,sfx_white_cross
 	ret
 bonus_blue_gem:                ; id 8 (0x8DD4): invis; sprite flash white
-	ld a,(0c431h)          ; id 11 -> longer
-	and 004h
+	ld a,(bonus_flags)
+	and 004h               ; tipped -> longer
 	ld a,0f0h              ; 240 frames ~4s
-	jr nz,l8ddfh
+	jr nz,blue_gem_arm
 	ld a,096h              ; 150 frames ~2.5s
-l8ddfh:
-	ld (0c43ah),a          ; skip contact + projectile hits while nonzero
-	ld a,016h
+blue_gem_arm:                   ; (0x8DDF)
+	ld (blue_gem),a        ; skip contact + projectile hits while nonzero
+	ld a,sfx_blue_gem
 	ret
 bonus_small_orb:               ; id 7 (0x8DE5): +8 HP (1/4 of 0x20 bar)
 	ld b,008h
 	call restore_health
-	jr l8e11h
+	jr bonus_done
 bonus_sapphire_ring:           ; id 9 (0x8DEC): sprite flash red; touch-kills
-	ld a,(0c431h)          ; id 11 -> longer
+	ld a,(bonus_flags)
 	and 004h
 	ld a,0f0h
-	jr nz,l8df7h
+	jr nz,sapphire_ring_arm
 	ld a,096h
-l8df7h:
-	ld (0c434h),a
-	jr l8e11h
-bonus_tipped_hourglass:        ; id 11 (0x8DFC): C431 bit2, 1.5x timed bonuses
-	ld hl,0c431h           ; whip the hourglass pickup once to get this
+sapphire_ring_arm:              ; (0x8DF7)
+	ld (sapphire_ring),a
+	jr bonus_done
+bonus_tipped_hourglass:        ; id 11 (0x8DFC): bonus_flags bit2, 1.5x timed bonuses
+	ld hl,bonus_flags      ; whip the hourglass pickup once to get this
 	set 2,(hl)
-	jr l8e11h
-bonus_boots:                   ; id 12 (0x8E03): C431 bit3 faster walk
-	ld hl,0c431h
+	jr bonus_done
+bonus_boots:                   ; id 12 (0x8E03): bonus_flags bit3 faster walk
+	ld hl,bonus_flags
 	set 3,(hl)
-	jr l8e11h
-bonus_wings:                   ; id 13 (0x8E0A): C431 bit4 higher jump
-	ld hl,0c431h
+	jr bonus_done
+bonus_wings:                   ; id 13 (0x8E0A): bonus_flags bit4 higher jump
+	ld hl,bonus_flags
 	set 4,(hl)
-	jr l8e11h
-l8e11h:
-	jp l8d91h
+	jr bonus_done
+bonus_done:                     ; (0x8E11) jr-reach collect sfx
+	jp bonus_ret_collect
 bonus_potion:                  ; id 22 (0x8E14): bottle, +32 HP = full bar
 	ld b,020h              ; vendor sells this (price tbl 0x16); HUD tile @ 0x9A00
 	call restore_health
-	jr l8e11h
+	jr bonus_done
 ; Shared stub for slime (id 21) and chest (id 25).  collect_bonus has already
 ; latched C419 and shown the popup; this pops the play_sound continuation and
-; returns with no effect.  World chests never get here (l8c1bh opens them).
+; returns with no effect.  World chests never get here (chest_open opens them).
 bonus_slime:                   ; id 21 (0x8E1B): fake candle drop; hatches if left
-bonus_chest:                   ; id 25: treasure-chest container (see l8a1ah)
+bonus_chest:                   ; id 25: treasure-chest container (see pickup_spawn_chest)
 	pop hl
 	ret
 bonus_candle:                  ; id 14 (0x8E1D): C702 bit0, white C470 outlines
 	call candle_outlines         ; draw 0x0E rectangles on breakable blocks
 	ld b,001h
-	jr l8e34h
+	jr bonus_grant_c702
 bonus_black_bible:             ; id 16 (0x8E24): C702 bit6, vendor price doubled
 	ld hl,0c702h
 	res 7,(hl)             ; drop the white-bible bit (mutually exclusive)
 	ld b,040h
-	jr l8e34h
+	jr bonus_grant_c702
 bonus_white_bible:             ; id 17 (0x8E2D): C702 bit7, vendor price halved
 	ld hl,0c702h
 	res 6,(hl)             ; drop the black-bible bit (mutually exclusive)
 	ld b,080h
-l8e34h:
-	call inv_or_c702         ; 0xC702 |= B
-	ld a,012h              ; pickup popup message id
+bonus_grant_c702:               ; (0x8E34) C702 |= B, then collect sfx
+	call inv_or_c702
+	ld a,sfx_collect
 	ret
-bonus_map:                     ; id 15 (0x8E3A): C431 bit6, C701 bit7, C70F=3
-	ld hl,0c431h
+bonus_map:                     ; id 15 (0x8E3A): bonus_flags bit6, C701 bit7, C70F=3
+	ld hl,bonus_flags
 	set 6,(hl)
 	ld a,003h
 	ld (0c70fh),a          ; 3 map uses (F2)
 	ld b,080h
-	jp l8d96h
+	jp bonus_grant_c701
 bonus_white_bag:               ; id 19 (0x8E49): +5000 score
 	ld de,05000h
-l8e4ch:
+bonus_bag_score:                ; (0x8E4C)
 	call add_score_c0
-	ld a,010h
+	ld a,sfx_money_bag
 	ret
 bonus_blue_bag:                ; id 20 (0x8E52): +1000 score
 	ld de,01000h
-	jr l8e4ch
+	jr bonus_bag_score
 bonus_yellow_key:              ; id 23 (0x8E57): C701 bit1, C700=1 (chests)
 	ld b,002h
 	call inv_or_c701
 	ld hl,0c700h
 	ld (hl),001h
 	call hud_chest_key_icon
-	ld a,014h
+	ld a,sfx_key
 	ret
 bonus_white_key:               ; id 24 (0x8E67): C701 bit0 (stage-exit door)
 	ld b,001h
 	call inv_or_c701
 	call hud_white_key_icon
-	ld a,014h
+	ld a,sfx_key
 	ret
 	pop hl
 	ret
 ; OR bit-mask B into an inventory byte: inv_or_c701 -> 0xC701, inv_or_c702 -> 0xC702
 inv_or_c701:
 	ld hl,0c701h
-	jr l8e7ch
+	jr inv_or_apply
 inv_or_c702:
 	ld hl,0c702h
-l8e7ch:
+inv_or_apply:                   ; (0x8E7C)
 	ld a,b
 	or (hl)
 	ld (hl),a
 	ret
 bonus_lockpick:                ; id 18 (0x8E80): C700=3, C701 bit2; drops yellow key
-	ld hl,0c431h
+	ld hl,bonus_flags
 	set 1,(hl)
 	ld hl,0c701h
 	res 1,(hl)             ; can't hold yellow key with the lockpick
@@ -12432,7 +12428,7 @@ hud_weapon_icon:                     ; HUD equipped-weapon icon from C416
 	ld a,(weapon_id)
 	ld de,l800ch
 	or a
-	jp z,l8980h            ; 0 = leather (not in the bonus sheet)
+	jp z,hud_leather_icon  ; 0 = leather (not in the bonus sheet)
 	add a,019h             ; C416 1..4 -> bonus ids 0x1A..0x1D
 hud_bonus_tile:                        ; A = bonus id -> blit that HUD tile
 	dec a                  ; 0-based index
@@ -12450,7 +12446,7 @@ hud_white_key_icon:
 	ld de,0a40ch
 	ld a,(0c701h)
 	and 001h
-	jp z,l8980h
+	jp z,hud_leather_icon
 	ld a,018h
 	jr hud_bonus_tile
 hud_chest_key_icon:
@@ -12458,10 +12454,10 @@ hud_chest_key_icon:
 	ld a,(0c701h)
 	ld b,a
 	and 006h
-	jp z,l8980h
+	jp z,hud_leather_icon
 	ld a,(0c700h)
 	or a
-	jp z,l8980h
+	jp z,hud_leather_icon
 	bit 2,b                ; C701 bit2 = lockpick
 	ld a,012h              ; bonus 0x12 lockpick
 	jr nz,l8eebh
@@ -13130,7 +13126,7 @@ l923fh:
 l9253h:
 	push de
 	ld hl,0e580h
-	call l875eh
+	call map_save_4x4      ; stash 32x32 under the vendor
 	pop de
 	call vendor_slot_ptr
 	bit 7,(hl)
@@ -13330,16 +13326,16 @@ vendor_restore_tiles:
 ; --- vendor_make_offer (0x938E) -----------------------------------------------
 ; Arm a sale: pick the item + price (vendor_set_offer_item -> 0xC708 item, 0xC707 price),
 ; start the 0xC706 offer countdown (0x14 = 20 ticks), play the "offer" jingle
-; (sfx 0x19) and draw the price/item bubble (l939eh).  Called from the resident
-; vendor state machine (seg0 l4411h) while seg2 is paged in.
+; (sfx 0x19) and draw the price/item bubble (vendor_offer_draw).  Called from the resident
+; vendor state machine (seg0 vendor_begin) while seg2 is paged in.
 vendor_make_offer:
 	call vendor_set_offer_item
 	ld a,014h
 	ld (0c706h),a          ; offer timer = 0x14; decremented in vendor_purchase_tick
 	ld a,sfx_vendor_offer
 	call play_sound
-	jp l939eh
-l939eh:
+	jp vendor_offer_draw
+vendor_offer_draw:             ; (0x939E) HMMM backup, panel, glyphs, price, icon
 	ld a,(0c703h)
 	ld hl,0c5b5h
 	add a,a
@@ -13533,7 +13529,7 @@ l94ceh:
 	ld a,(0c708h)
 	call collect_bonus_apply         ; collect_bonus(item) -> give the purchased item
 	pop af
-	call c,l939eh
+	call c,vendor_offer_draw
 	ld a,sfx_collect
 	call play_sound            ; purchase-confirmed jingle
 	call vendor_de00_this
@@ -13550,6 +13546,7 @@ vendor_offer_pending:                        ; no button this frame -> leave off
 	ld a,0ffh
 	or a
 	ret
+vendor_offer_dismiss:          ; (0x950E) wipe bubble, restore candle outlines
 	call vendor_offer_wipe
 	jp candle_outlines_if
 vendor_offer_wipe:

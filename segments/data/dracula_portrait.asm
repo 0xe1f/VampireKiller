@@ -4,6 +4,7 @@
 ; Uncompressed 8x8 4bpp (SCREEN 5).  Each defb is one pixel-row
 ; (4 bytes, high nibble = left).  Eight rows = one tile (32 bytes).
 ; Preview: gfx/tilesets/dracula_portrait.png (`make gfx`); cell header = CPU address.
+; Unused blank gap: gfx/tilesets/unused_tiles.png (`make gfx`).
 
 dracula_frame_abf8:  ; 0xABF8  8 tiles -> VRAM 0x8018
 ; 0xABF8  portrait tile 0x00

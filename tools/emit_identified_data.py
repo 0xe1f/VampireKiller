@@ -85,7 +85,7 @@ BONUS_HUD_GROUPS = [
 
 # HUD init copy (seg0 after page_tileset_banks): 8 x 16x16 item icons at
 # 0xB9C8 -> VRAM Y=0x60 X=96 (bonus 0x17-0x1E), then 4 candle flames at
-# 0xBDC8 -> Y=0x70 (playfield, l8991h A=0..3).  Each entry is one 16x16.
+# 0xBDC8 -> Y=0x70 (playfield, candle_blit A=0..3).  Each entry is one 16x16.
 HUD_16X16 = [
     (0xB9C8, "hud_yellow_key", "bonus 0x17"),
     (0xBA48, "hud_white_key", "bonus 0x18"),
@@ -95,7 +95,7 @@ HUD_16X16 = [
     (0xBC48, "hud_axe", "bonus 0x1C"),
     (0xBCC8, "hud_cross", "bonus 0x1D"),
     (0xBD48, "hud_holy_water", "bonus 0x1E"),
-    (0xBDC8, "candle_0", "playfield flame 0 (l8991h A=0, Y=0x70)"),
+    (0xBDC8, "candle_0", "playfield flame 0 (candle_blit A=0, Y=0x70)"),
     (0xBE48, "candle_1", "playfield flame 1"),
     (0xBEC8, "candle_2", "playfield flame 2"),
     (0xBF48, "candle_3", "playfield flame 3"),
@@ -1038,6 +1038,7 @@ def emit_tileset_banks(rom: bytes) -> None:
     )
     hlines.append("")
     hlines.append("; 0xFF pad to end of seg6 (0xBFC8).")
+    hlines.append("; Unused complete tile: gfx/tilesets/unused_tiles.png (`make gfx`).")
     hlines.extend(defb_lines(hud_pad))
     write_lines(os.path.join(DATA, "hud_weapon_key_tiles.asm"), hlines)
     write_tile_file(
@@ -1097,7 +1098,8 @@ def emit_tileset_banks(rom: bytes) -> None:
     emit_hud_font(rom)
     write_tile_file(
         "tileset_s08_pad.asm",
-        ["; 0xFF pad to end of seg8 (0xBFD2)."],
+        ["; 0xFF pad to end of seg8 (0xBFD2).",
+         "; Unused complete tile: gfx/tilesets/unused_tiles.png (`make gfx`)."],
         b8[0x1FD2:],
         0xBFD2,
         [(0xBFD2, "pad")],
@@ -1217,6 +1219,7 @@ def emit_simon_rle(rom: bytes) -> None:
         "; 0x5682 (intro_simon_0..7).  Six orphan streams are the second",
         "; 16x16 plane after a listed frame; not in those tables.",
         "; PNG preview: gfx/sprites/simon_rle.png (`make gfx`); cell header = VRAM dest.",
+        "; Unused orphans: gfx/sprites/unused_simon.png (`make gfx`); header = packed CPU + plane.",
         "",
     ]
     lines.extend(
@@ -1881,6 +1884,7 @@ def emit_seg9_10(rom: bytes) -> None:
         "; Dest is sprite-generator VRAM (0xF800+).  Unidentified 0xB50B-0xB54A",
         "; is not a valid stream (decompressor overruns into spr_hanging_bat).",
         "; Preview: gfx/sprites/enemy_sprite_rle.png (`make gfx`); cell header = VRAM dest.",
+        "; Unused orphans: gfx/sprites/unused_enemy.png; unid 0xB50B: gfx/sprites/unused_unid_b50b.png.",
         "; Packed order sandwiches knife/cross, skull pile, flying skull, then",
         "; the axe (load_weapon_sprites dest 0xF8C0; some rooms also load it at",
         "; 0xFC00).  Do not split this file to group weapons — bytes stay here.",
@@ -2184,6 +2188,7 @@ def emit_seg15(rom: bytes) -> None:
             "; Uncompressed 8x8 4bpp (SCREEN 5).  Each defb is one pixel-row",
             "; (4 bytes, high nibble = left).  Eight rows = one tile (32 bytes).",
             "; Preview: gfx/tilesets/dracula_portrait.png (`make gfx`); cell header = CPU address.",
+            "; Unused blank gap: gfx/tilesets/unused_tiles.png (`make gfx`).",
         ],
         portrait,
         0xABF8,

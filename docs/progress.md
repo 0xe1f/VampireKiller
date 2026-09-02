@@ -104,7 +104,8 @@ Fully migrated banks (0-15) have no `.bin`.
     - `shot_sat_emit` (0x64EC) / `c800_sat_emit` (0x64F3): render every active
       slot in a list (8 shots @ 0xD700 / 7 actors @ 0xC800, stride 0x80) via
       `actor_sat_emit` (0x6508), which copies Y/X/pattern into the 0xD638
-      sprite-attr shadow and fills the pattern from the l6a70h table.
+      sprite-attr shadow and fills SAT colour at 0xD4E0+id*16 (the `ld hl,06a70h`
+      is `(base + id*8)*2`, not a table at 0x6A70).
     - `frame_vram_refresh` (0x6552): per-frame VRAM refresh - re-uploads the
       animated tile/sprite patterns each frame; animation phase in 0xC00F.
       Falls back to the plain shadow blit pattern_shadow_blit (copy 0xD400 -> VRAM 0xF400)
@@ -221,7 +222,7 @@ Fully migrated banks (0-15) have no `.bin`.
       main visible byte; on-screen value strips leading zeros, e.g. 00 82 00 = 8200).
       Written by **add_score (seg0 0x44F5)** which adds C:D:E (hi:mid:lo BCD pairs)
       with daa; enemy kills route through seg2 award_kill_score (0x81B2, per-type
-      value table l81d5h). Heart counter = 0xC417 (BCD, separate).
+      value table actor_value_tbl). Heart counter = 0xC417 (BCD, separate).
   - Sixth session (whip destructible wall -> grab white key -> whip candle -> grab
     small heart), via F8 snapshot timeline (baseline frame 357).  Pins the inventory
     that sat below 0xC420, plus the destructible-wall / pickup-actor mechanism:
@@ -230,7 +231,7 @@ Fully migrated banks (0-15) have no `.bin`.
       the spend path seg1 hourglass_use/0x7176 does `sub 5 / daa`), so 0x15 = "15" hearts.
     * **0xC700-0xC70F = inventory / item block** (NOT a single flag).  0xC701 is an
       item *bitfield*: bit 0 = white key (0 -> 1 on the key pickup, frame 414); other
-      bits are sub-weapons that cost hearts (seg1 l713dh shifts 0xC701 and does
+      bits are sub-weapons that cost hearts (seg1 simon_try_air_item shifts 0xC701 and does
       `call c,holy_water_use` on bit 3 / `call c,hourglass_use` on bit 6); bit 7 is a
       timed item (seg2 0x95C0-area counts 0xC70F down then `res 7,(0xC701)`).  The
       per-life reset inv_reset_life (seg1 0x70E3) keeps only bit 7 (`and 0x80`), so the
@@ -280,7 +281,7 @@ Fully migrated banks (0-15) have no `.bin`.
     * NEXT (partially done in twenty-eighth): `collect_bonus_tbl` is `defw`.
       3-5/8-14 named from domain + code (red/yellow shield, white cross, blue
       gem, sapphire ring, hourglass, boots, wings, candle).  Id 11 is a
-      **tipped hourglass** (whip the id-10 world pickup once — `l8c4bh`;
+      **tipped hourglass** (whip the id-10 world pickup once — `hourglass_tip`;
       write-up in `docs/game-notes.md`). C431 bit2 lengthens 6/8/9/10.  Also the
       0x24->0x84 landing path.
 
@@ -343,12 +344,12 @@ Fully migrated banks (0-15) have no `.bin`.
 - Tenth session (pick up chain whip; was leather). Pins the weapon system:
     * **0xC416 = equipped weapon id**: 0 = leather whip, 1 = chain whip (0xC416 flipped
       0 -> 1 on pickup, frame 78; 0xC419 latched bonus id 0x1A).
-    * Weapon pickups: collect_bonus fallthrough l8d77h does `sub 0x19` -> 0xC416, so
+    * Weapon pickups: collect_bonus fallthrough collect_weapon does `sub 0x19` -> 0xC416, so
       weapon id = bonus id - 0x19 (chain whip = bonus 0x1A), except bonus 0x1E
       (index 5) which is holy water (`C701` bit 3) and does not write 0xC416.
     * Attack path split (seg1 ~0x7D80): weapon < 2 = whip (stays with Simon), >= 2 =
       projectile (2=knife, 3=axe, 4=cross). Damage tables (seg1 weapon_hit_damage):
-      weapon 0 + 2 use l7e60h, others use l7e67h. Catch-or-lose is lose_weapon
+      weapon 0 + 2 use hpbar_dmg_weak, others use hpbar_dmg_strong. Catch-or-lose is lose_weapon
       0x8E9A. See game-notes "Equippable weapons".
 
 - Eleventh session (stairs: climb up, whip a candle while on the stairway, climb
@@ -408,17 +409,17 @@ Fully migrated banks (0-15) have no `.bin`.
       reverses and runs left off-screen (dogX 0x84->0x30, slot freed idx 2158). No
       score (never killed) - consistent with the flee-right/left AI keyed on Simon's
       relative X.
-    * Decoded the per-type score table **l81d5h** (seg2) and annotated it inline:
+    * Decoded the per-type score table **actor_value_tbl** (seg2) and annotated it inline:
       zombie(t01)=100, dog(t05)=100, candle/destructible(t04)=100, up to bosses
       (t0e=1000, t12-14=2000, t11=+30000, t17=+50000).
 
 - Damage model annotated (byte-exact) - Simon HP = 0xC415 (max 0x20), enemy/boss
   energy = 0xC418 (max 0x80):
     * **Simon takes damage** via damage_health (0x4632): `hurt_simon_contact`
-      (seg2 0x8173) = 2x the *odd* byte of l81d5h[type] (zombie 2, dog 6; shield
+      (seg2 0x8173) = 2x the *odd* byte of actor_value_tbl[type] (zombie 2, dog 6; shield
       0xC701 bit4 halves + spends 0xC441 charge); `hurt_simon_spikes` (seg2
       0x85AD) = fixed 8 or 16 from a 0xC580 spike-bar slot (16 while it
-      descends, 8 while it retracts), and sets hurt state 0xC420=5.  l81d5h's odd byte is the per-type contact-damage field (its even
+      descends, 8 while it retracts), and sets hurt state 0xC420=5.  actor_value_tbl's odd byte is the per-type contact-damage field (its even
       byte is the kill score).
     * **Simon deals damage** via `weapon_hit_damage` (seg1 0x7E33) -> `damage_enemy`
       (0x4643, 0xC418 -= B).  Per-weapon table by (type-0x11): leather/knife =
@@ -431,7 +432,7 @@ Fully migrated banks (0-15) have no `.bin`.
   (2) reveal a wall vendor, whip him repeatedly, refuse a 50-heart knife offer,
   keep whipping until he gives two +5 hearts and leaves.
     * **Dog contact damage = 6 confirmed**: 0xC415 0x20 -> 0x1A at idx 2200
-      (matches l81d5h dog odd-byte 3 x2 = 6).
+      (matches actor_value_tbl dog odd-byte 3 x2 = 6).
     * **Vendor fully mapped (seg2 0x92AE-0x9552).** Not a 0xC800 actor - lives in
       the special-object list at 0xC5B5; transaction state in the 0xC700 block:
       0xC706 offer timer, 0xC707 price (BCD), 0xC708 offered item (0x1B = knife),
@@ -451,7 +452,7 @@ Fully migrated banks (0-15) have no `.bin`.
     * **Offer** armed by `vendor_make_offer` (0x938E): sets item/price and the
       0xC706 timer (=0x14). Empirically the first offer fired at reveal (idx 2331:
       0xC706=0x14, 0xC707=0x50, 0xC708=0x1B). [RESOLVED later via tools/disasm/romscan.py:
-      the caller is the **resident** vendor state machine at seg0 l4411h
+      the caller is the **resident** vendor state machine at seg0 vendor_begin
       (`call 0938eh`), which a `segments/*.bin` grep missed because seg0 has no bin.
       seg0 also calls 0x94C1 (vendor_purchase_tick body) and 0x950E (offer dismiss).]
     * **Price** = `vendor_price_tbl` (0x942F), 9 rows of {id, normal, half, double};
@@ -579,7 +580,7 @@ Fully migrated banks (0-15) have no `.bin`.
       C5AD=`0x80`, C5AE=`0x0C` = flush-left door at tile row 16. This supersedes
       "0x1F is the door" and the C5AD=X / C5AE=Y comments.
     * **Two layers on EVERY stage.** (1) Table object + key (`door_interact` /
-      `door_proximity`). (2) After open, `l77d8h` uses the CONN permit: blocked ->
+      `door_proximity`). (2) After open, `door_open_exit` uses the CONN permit: blocked ->
       `set_stage_boundary` / `advance_stage`; valid room -> intra-stage wrap.
       Intra-stage (table edge is not 0xF): stages **3, 6, 9, 12, 15, 18**. Stage 15
       is not special except that we traced it (room 8 left -> isolated room 9).
@@ -599,13 +600,13 @@ Fully migrated banks (0-15) have no `.bin`.
     * **Stage 15's door is INTRA-STAGE, not a stage exit.** Decoded stage-15
       connectivity: room 8 `left=9`, and **room 9 is fully isolated** (up/down/left/
       right all `F`) - a dead-end room reachable only through the room-8 door. The
-      horizontal transition code (`seg1 l77d8h`) fires `set_stage_boundary` (-> 0xC408
+      horizontal transition code (`seg1 door_open_exit`) fires `set_stage_boundary` (-> 0xC408
       -> advance_stage) ONLY on a **blocked** left/right permit (0xFF); room 8's left
       permit is a valid room index, so mechanism A treats it as a FREE crossing and
       never gates it. Mechanism A (blocked-edge stage exit) therefore structurally
       cannot be stage 15's door.
-    * **The type-0x1F special object is a brazier/block REVEAL.** `l87f6h` (checks
-      display-type `0x1F` -> promoter `l881bh` -> spawner `vendor_spawn` -> struct at
+    * **The type-0x1F special object is a brazier/block REVEAL.** `scenery_break_result` (checks
+      display-type `0x1F` -> promoter `scenery_reveal` -> spawner `vendor_spawn` -> struct at
       0xC5B5/0xC5C5) lives inside `brazier_destroyed` (seg2 0x87C1). So a whippable
       object whose DEFINITION display-type is `0x1F` becomes an in-room special object
       at its spot; its position feeds 0xC5AD/0xC5AE, which `sub_771fh`/`0x8587`
@@ -713,7 +714,7 @@ Fully migrated banks (0-15) have no `.bin`.
       DATA, not pixels.
     * **Door is a placed special object (type 0x1F).** Traced the runtime path end to
       end: the object renderer (seg2 ~0x87F6) treats display-type **0x1F** as a special
-      object. seg2 `l881bh` reads its attribute `ix+009`; if bits7-6 are set (`&0xC0 ==
+      object. seg2 `scenery_reveal` reads its attribute `ix+009`; if bits7-6 are set (`&0xC0 ==
       0xC0`) it splits the attr into **subtype = bits5-2**, **slot = bits1-0** and calls
       the spawner **`vendor_spawn`** (0x9180). The spawner writes a 16-byte struct into
       **0xC5B5** (or 0xC5C5): +0=active, +1/+2 = position, +4 = subtype, +5 = slot,
@@ -730,7 +731,7 @@ Fully migrated banks (0-15) have no `.bin`.
       real game: **doors are mechanism A** (blocked edge + opening), correct for EVERY
       stage except 15. Mechanism B is a dead end for white-key doors: id-0x1f objects
       exist in only **3 rooms game-wide** (stages 3 and 4), none a white-key door. So
-      the type-0x1F code path (seg2 `l881bh`/`vendor_spawn`/`0xC5AC`) is real but it's the
+      the type-0x1F code path (seg2 `scenery_reveal`/`vendor_spawn`/`0xC5AC`) is real but it's the
       **vendor / a rare special object**, NOT the stage door. (Stage-15 room 8's list
       object `0x10 @ (11,10)` is the painting, confirming B doesn't mark the door.)
     * **Shipped: mechanism A is now the default door detector.** `door_rects()` rewritten
@@ -801,7 +802,7 @@ Fully migrated banks (0-15) have no `.bin`.
       the heuristic gets wrong; longer-term, decode the special-object door data
       source (feeds 0xC5AD/0xC5AE) for principled detection.
     * **Source annotated** (seg0/seg1, all in-source; `make verify` byte-identical):
-      seg1 room-edge crossing handler l77d8h (+ renamed `set_stage_boundary` 0x7807),
+      seg1 room-edge crossing handler door_open_exit (+ renamed `set_stage_boundary` 0x7807),
       the edge/stair detector `room_edge_detect` (sets pending dir 0xC41B by direction, with
       the up/down/left/right cases + bottomless-pit path), the white-key door check
       `sub_771fh`, and seg0 `conn_lookup_paged` (the seg13-paged transition-brain wrappers:
@@ -885,7 +886,7 @@ Fully migrated banks (0-15) have no `.bin`.
   transfers (`code`) from bare word matches (`data?`); `table` decodes jump/handler
   tables (with `--index-base 1` for `dec a` dispatchers). It reads each bank
   straight from the ROM, so it sees **seg0** (which has no committed `.bin`). First
-  use immediately found the resident caller of `vendor_make_offer` (seg0 l4411h) that
+  use immediately found the resident caller of `vendor_make_offer` (seg0 vendor_begin) that
   a `segments/*.bin` grep had missed. Recipes folded into the two skills.
 - Segments 2 & 3 imported as disassembled source (byte-exact): both graduated
   from INCBIN to INCLUDE (org 0x8000 / 0xA000, pages 2a / 2b).  Raw disassembly
@@ -936,6 +937,23 @@ Fully migrated banks (0-15) have no `.bin`.
   what had left seg02-04.bin missing); it now regenerates seg01-15.bin cleanly.
 
 ## In progress / next
+
+**Play-window labels (banks 0–3).** Next pass: rename the remaining z80dasm
+`lXXXXh` locals in `segments/banks_0123.asm` when the site is in front of
+you and the purpose is confirmed (`konami-msx-disasm` — definition + every
+reference + `msx.sym`; do not bulk-guess). Counts: **795** auto locals
+left, **0** `sub_XXXXh`; **1,245 / 2,040** labels already named (61.0%).
+By CPU page: bank 0 **159**, bank 1 **197**, bank 2 **207**, bank 3 **232**.
+This pass named the brazier/candle stamp path (`candle_anim` / `_flame` /
+`_frame` / `_flame_go` / `candle_blit`, `block_tileset` / `block_stamp_go`,
+`map_save_2x2` / `_4x4` / `map_copy_rows`, `candle_outline_box`), then
+block break (`block_break` / `_2x2`, `scenery_drop_xy`, `break_chip_go`,
+`reveal_vendor`, `scenery_white_key` / `white_key_spawn`), plus
+`hud_leather_icon` and `atlas_lmmm16`. Typical still-live example: `l89a5h`
+(scenery drop: alloc a C500 slot after the optional flame).
+Same pass: per-opcode comments at column 32 when the line is confirmed
+(currently ~9% of play instructions). Graphics / map / sound leftover
+streams are inventoried in `docs/unused.md` (`gfx/**/unused_*.png`).
 
 Seg0 VDP layer named end to end: the command-engine primitives
 (`vdp_cmd_wait` / `vdp_status_read` / `vdp_line_h` / `vdp_line_v` / `vdp_box` /
@@ -1061,7 +1079,7 @@ blit named (`dracula_save_bg` / `dracula_blit_torso`; 32x32s are packed
 16x16s are `dracula_portrait_parts` at Y=0xA0.
 Event 6 extras: `actor_dracula_bat` 0x2C, `actor_dracula_head` 0x2D
 (intro SAT 0x57/0x59, arc away after summon), `actor_dracula_chunk` 0x2E.
-s18r9 collision uses event-6 threshold 6 (`tile_is_solid` l7c7ah). Leftover
+s18r9 collision uses event-6 threshold 6 (`tile_is_solid` tile_is_solid_evt6). Leftover
 fake `DISPATCH_A`
 in-lines converted to `defw` (seg1 `dracula_ce35_tick` / 0x6AB4). Seg2 hit-class
 named: `hit_class_c800` / `_shot` tables, `actor_vs_*` / `shot_vs_*`,
@@ -1175,7 +1193,7 @@ are always multiples of 100, so watch 0xC406.
 
 **Habit: annotate score increments in code whenever found.**  All awards go through
 `add_score` (seg0 0x44F5); enemy/destructible kills come via `award_kill_score`
-(seg2 0x81B2) using the per-type value table `l81d5h` (already decoded inline).
+(seg2 0x81B2) using the per-type value table `actor_value_tbl` (already decoded inline).
 When a recording shows a score delta, tie it back to the responsible code path and
 add/confirm the point value in the annotation (and here).  (F9 / `snap` is the
 display-view responder chain → `disasmTraceRequestSnapshot`; the R800 fetch loop
@@ -1431,7 +1449,7 @@ free the floor slot. RAM: `scenery_slots` 0xC470, `pickup_slots` 0xC500.
   main_state_tbl, state_logo/title/attract/intro/stage_bridge/play/death/
   game_over/room_trans/stage_exit/vendor/game_master_menu;
   seg1: simon_action_tick, simon_walk_left/right, simon_jump_tick, simon_mirror_frames,
-  simon_crouch, simon_stairs, simon_stair_frames_up/down, simon_fall, simon_hurt, simon_dying,
+  simon_crouch, simon_stairs, simon_stair_frames_up/down, simon_fall, simon_hurt, simon_hurt_init/knock/left/arc/land/right/slide, simon_hurt_recover, simon_dying, simon_dying_enter/hold/leave,
   simon_portal_wait, simon_attack_tick, simon_attack_start, simon_attack_end, whip_tick, projectile_tick,
   knife_tick, cross_tick, axe_tick, tile_layout_draw, holy_water_use,
   holy_water_tick, map_cell_at, tile_is_solid, row_solid_thresh,
@@ -1439,6 +1457,8 @@ free the floor slot. RAM: `scenery_slots` 0xC470, `pickup_slots` 0xC500.
   hourglass_use, stage_bgm_tbl, stage_bgm_play, stage_bgm_change,
   event_vscroll, credits_tick, credits_init, credits_frame, credits_clock,
   credits_keyframe, credits_script_ptr, credits_wipe, player_tick, simon_sat_build, simon_sat_emit, simon_sat_colour, simon_sat_cell0/1, combat_tick,
+  whip_hit_apply/fodder/metered/hpbar, hpbar_dmg_lookup,
+  actors_vs_simon_scan, simon_touch_enemy, simon_contact_hurt, shots_vs_simon_scan,
   title_fill_strips, title_set_color2, title_sat_init, actor_sat_build,
   actor_sat_emit, c800_sat_build/emit, shot_sat_build/emit, frame_vram_refresh,
   object_list_load/unpack/lookup/clear, tile_string_draw, cell_event_set,
@@ -1448,6 +1468,7 @@ free the floor slot. RAM: `scenery_slots` 0xC470, `pickup_slots` 0xC500.
   stair_probe_down_right/left, simon_land_sfx_arm, dracula_face_rest, hanging_bat_pose;
   seg2: door_proximity, door_anim_tick, door_begin_open, spot_proximity,
   collect_bonus_tbl, bonus_holy_water, yellow_shield_tick, projectile_hit_actors,
+  projectile_hit_fodder/metered/hpbar, projectile_meter_empty, contact_dmg_full/block/apply,
   actor_vs_whip/simon/proj, shot_vs_simon/proj/shield/whip, overlap_simon/whip/projectile/shield,
   lose_weapon, shot_throw, shot_spawn, shot_alloc, shot_bone, shot_tick,
   shot_type_tick, fireball, medusa_snake, mummy_bandage, shot_axe, shot_sickle,
@@ -1528,9 +1549,10 @@ free the floor slot. RAM: `scenery_slots` 0xC470, `pickup_slots` 0xC500.
   driver, door 8×8 tiles, emit of the new tables): see
   `docs/game-notes.md` “Deferred constants”.
 - After any edit, run `make verify` before moving on.
-- Reusable methodology (for disassembling OTHER Konami MSX games later) lives in
-  workspace skills at `.agents/skills/` (`konami-msx-disasm`, `msx-regen`,
-  `msx-romscan`, `msx-konami-gfx`, `msx-gfx-sheets`). Runtime tracing:
-  MSXDAW skill `msx-cocoamsx` (`tools/workbench/cocoamsx`).
-  When we discover a generally-useful pattern/tool/gotcha, fold it into those skills
-  (keep them lean - they load every session) and keep VK-specific findings here.
+- Reusable methodology lives in workbench skills (`tools/workbench/skills/`,
+  linked by `make skills` into `.cursor/skills/`): `konami-msx-disasm`,
+  `msx-scaffold`, `msx-bootstrap`, `msx-code-data`, `msx-regen`, `msx-romscan`,
+  `msx-gfx`, `msx-gfx-sheets`, `konami-psg`, `msx-psg-catalogue`, `msx-cocoamsx`
+  (`msx-trace` is a stub for that last). VK-only notes stay in
+  `.agents/skills/` (`vk-disasm`, `vk-gfx-sheets`) and this file.
+  Fold a generally-useful pattern into the workbench skill, not here.

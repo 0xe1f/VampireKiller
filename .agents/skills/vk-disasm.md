@@ -19,8 +19,8 @@ New games: `msx-scaffold`, then `msx-bootstrap` — do not copy this repo’s
 
 Status only. How to rename and comment is `konami-msx-disasm`.
 
-- **Play window (`banks_0123`).** All `sub_XXXXh` are named. Auto `lXXXXh`
-  counts and the live example are in `docs/progress.md` “Play-window labels”.
+- **Play window (`banks_0123`).** All `sub_XXXXh` / `lXXXXh` are named.
+  Status lives in `docs/progress.md` “Play-window labels”.
 - **Graphics / map / sound windows.** Labelled `.asm` (no `INCBIN`). Orphan /
   unid / pad leftovers: `docs/unused.md` and `gfx/**/unused_*.png`.
 

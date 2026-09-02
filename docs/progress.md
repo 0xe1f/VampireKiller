@@ -938,20 +938,16 @@ Fully migrated banks (0-15) have no `.bin`.
 
 ## In progress / next
 
-**Play-window labels (banks 0–3).** Next pass: rename the remaining z80dasm
-`lXXXXh` locals in `segments/banks_0123.asm` when the site is in front of
-you and the purpose is confirmed (`konami-msx-disasm` — definition + every
-reference + `msx.sym`; do not bulk-guess). Counts: **698** auto locals
-left, **0** `sub_XXXXh`; **1,342 / 2,040** labels already named (65.8%).
-By CPU page: bank 0 **159**, bank 1 **197**, bank 2 **110**, bank 3 **232**.
-This pass named spike-bar / platform inners (`spike_bar_copy` / `_up` / `_dy` /
-`_blit`, `spike_bars_slot`, `platform_scan` / `_seed` / `_skip` / `_slot` /
-`_next` / `_turn` / `_add_x`, `platform_sat_*`) plus door hold and the
-vendor slot / offer / price locals through `vendor_purchase_poll`. Typical
-still-live example: `l9589h` (minimap_driver: open map screen after spending
-a use).
+**Play-window labels (banks 0–3).** Done: **0** z80dasm `lXXXXh` / `sub_XXXXh`
+left in `segments/banks_0123.asm`; **2,045** labels named. `blob_pose_tbl` is
+`defb` (was fake code). Unreferenced idle labels dropped; `arc_dy_tbl` is one
+table again (HUD VRAM 0x7090 stays a hex immediate). Far calls now
+`play_hud_meter` / `vdp_sprites_off` / `frontend_gfx_load`.
 Same pass: per-opcode comments at column 32 when the line is confirmed
-(currently ~9% of play instructions). Graphics / map / sound leftover
+(currently ~17% of play instructions). Hottest 50 `call` targets in this
+window now have opcode comments plus a purpose header (`ADD_HL_A`,
+`DISPATCH_A`, `play_sound`, `vdp_hmmm`/`vdp_hmmv`, `map_cell_at`,
+`spawn_actor`, actor vel, wall probes, …). Graphics / map / sound leftover
 streams are inventoried in `docs/unused.md` (`gfx/**/unused_*.png`).
 
 Seg0 VDP layer named end to end: the command-engine primitives

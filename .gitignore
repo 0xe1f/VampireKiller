@@ -22,6 +22,9 @@ generated/
 tools/__pycache__/
 __pycache__/
 
+# Local CocoaMSX display config (volume, scale, socket).
+cocoamsx.json
+
 # OS cruft
 .DS_Store
 

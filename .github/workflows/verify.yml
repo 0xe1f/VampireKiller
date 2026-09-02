@@ -2,6 +2,7 @@ name: verify
 
 on:
   push:
+  pull_request:
 
 permissions:
   contents: read
@@ -14,10 +15,13 @@ jobs:
         with:
           persist-credentials: false
 
+      # Same pin as tools/workbench/bin/install-sjasmplus (v1.24.0).
+      # Inlined so verify does not need the workbench submodule.
       - name: Build sjasmplus
         run: |
           git clone --recursive --branch v1.24.0 https://github.com/z00m128/sjasmplus.git /tmp/sjasmplus
           make -C /tmp/sjasmplus
+          mkdir -p tools
           cp /tmp/sjasmplus/sjasmplus tools/sjasmplus
 
       - name: make verify
@@ -26,3 +30,52 @@ jobs:
       - name: Discard assembled ROM
         if: always()
         run: rm -f VampireKiller.rom
+
+  coverage:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Coverage tools
+        run: |
+          set -euo pipefail
+          if [ -f tools/workbench/msx/coverage.py ]; then
+            echo "workbench already present"
+            exit 0
+          fi
+          url="$(git config --file .gitmodules --get submodule.tools/workbench.url)"
+          url="${url/#git@github.com:/https://github.com/}"
+          url="${url/#ssh:\/\/git@github.com\//https://github.com/}"
+          sha="$(git rev-parse HEAD:tools/workbench)"
+          rm -rf tools/workbench
+          git clone --filter=blob:none --sparse --no-checkout "$url" tools/workbench
+          git -C tools/workbench sparse-checkout set msx lib
+          git -C tools/workbench fetch --depth 1 origin "$sha"
+          git -C tools/workbench checkout --force "$sha"
+
+      - name: Report
+        run: |
+          python3 tools/workbench/msx/coverage.py --badges "$RUNNER_TEMP/badges" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish badges branch
+        if: github.event_name == 'push' && github.ref_name == github.event.repository.default_branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          d="$RUNNER_TEMP/badges-git"
+          mkdir -p "$d"
+          cp -R "$RUNNER_TEMP/badges/." "$d/"
+          cd "$d"
+          git init
+          git checkout -b badges
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "coverage"
+          git push --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:badges

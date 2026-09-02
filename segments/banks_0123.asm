@@ -87,7 +87,7 @@ int_tick:
 	jp nz,int_tick_done            ; tick still running -> skip this frame
 	inc (hl)                ; mark tick in progress
 	ei
-	call 04ba4h             ; input / timers update
+	call play_input           ; attract demo or fkeys+buttons
 	call main_tick          ; MAIN TICK (top-level state machine)
 	xor a
 	ld (0c005h),a           ; clear tick-in-progress flag
@@ -96,17 +96,17 @@ int_tick_done:
 	ret
 ; ADD_HL_A - HL += A (unsigned), carry into H.  Indexes byte tables.
 ADD_HL_A:
-	add a,l
-	ld l,a
-	ret nc
-	inc h
+	add a,l                 ; L += A
+	ld l,a                  ; store new L
+	ret nc                  ; done if no wrap
+	inc h                   ; carry into H
 	ret
 ; ADD_DE_A - DE += A (unsigned), carry into D.
 ADD_DE_A:
-	add a,e
-	ld e,a
-	ret nc
-	inc d
+	add a,e                 ; E += A
+	ld e,a                  ; store new E
+	ret nc                  ; done if no wrap
+	inc d                   ; carry into D
 	ret
 ; DISPATCH_A - jump-table dispatch on A.  The word table is inlined right
 ; after the `call`; jumps to table[A].
@@ -115,9 +115,9 @@ DISPATCH_A:
 	add a,a                 ; A *= 2 (word index)
 	call ADD_HL_A           ; HL += A -> &table[A]
 	ld e,(hl)               ; DE = table[A]
-	inc hl
-	ld d,(hl)
-	ex de,hl
+	inc hl                  ; high byte
+	ld d,(hl)               ; handler address
+	ex de,hl                ; HL = handler
 	jp (hl)                 ; jump to selected handler
 ; ===========================================================================
 ;  init - cartridge entry point (from header +2).  Called by the BIOS at boot:
@@ -166,8 +166,8 @@ init:
 	xor a
 	ld (0f3dbh),a
 	ei                      ; interrupts on: game now runs from the tick
-l40c3h:
-	jr l40c3h               ; idle forever; work happens in int_handler
+init_idle:                      ; halt: IRQ runs the game
+	jr init_idle               ; idle forever; work happens in int_handler
 ; ===========================================================================
 ;  gm_pause_check (0x40C5) - the Game Master cartridge's pause / frame-advance
 ;  cheat, reached from int_handler only when 0xE600 is set.  Two edge-detected
@@ -274,10 +274,10 @@ main_tick:
 	ld bc,(0c000h)          ; C=primary state, B=secondary state
 	ld a,c
 	cp main_intro           ; front-end states 0..2?
-	jr nc,l415eh            ; no -> in-game, skip post-handler
+	jr nc,main_dispatch            ; no -> in-game, skip post-handler
 	ld hl,frontend_input    ; yes -> run front-end post-handler...
 	push hl                 ; ...after the state handler returns
-l415eh:
+main_dispatch:
 	call DISPATCH_A         ; jump to main_state_tbl[primary state]
 
 ; main_state_tbl - primary game-state handlers (indexed by 0xC000).
@@ -301,22 +301,22 @@ main_state_tbl:
 	defw state_game_master_menu ; 13 main_game_master
 main_state_tbl_end:
 state_logo:                    ; 0 (0x417D)
-	djnz l418ah
+	djnz logo_wait
 	call konami_logo_step   ; wipe the Konami logo in one more row (seg1)
 	ld a,(simon_whip)           ; 0xC422 set once the reveal has finished
 	or a
 	ret z
 	xor a
 	jr main_timer_set
-l418ah:
-	djnz l4198h
+logo_wait:
+	djnz logo_draw
 	ld hl,0c004h
 	dec (hl)
 	ret nz
 	call title_build
 	xor a
 	jp main_state_inc
-l4198h:
+logo_draw:
 	call video_reset
 	call konami_logo_draw   ; draw Konami logo + start the top-to-bottom wipe (seg1)
 	jr main_phase_next
@@ -327,7 +327,7 @@ state_title:                   ; 1 (0x41A0): idle until C004==0, then attract
 	call title_set_color2
 	jp main_state_inc_20              ; C004=0x20, inc C000 -> state 2 attract
 state_attract:                 ; 2 (0x41AB)
-	djnz l41c1h
+	djnz attract_setup
 	call attract_tick
 	ld a,(stay_in_play)
 	or a
@@ -339,7 +339,7 @@ main_state_set:
 	ld a,020h
 	ld (0c004h),a
 	jp main_phase_reset
-l41c1h:
+attract_setup:
 	call video_reset
 	call attract_run_init
 	ld a,020h
@@ -350,7 +350,7 @@ main_phase_next:
 	inc (hl)
 	ret
 state_intro:                   ; 3 (0x41D1)
-	djnz l41e4h
+	djnz intro_wipe
 	ld hl,0c004h
 	dec (hl)
 	jr z,main_phase_next
@@ -358,23 +358,23 @@ state_intro:                   ; 3 (0x41D1)
 	ld hl,play_start_str
 	jp z,hud_string_draw
 	jp hud_string_masked
-l41e4h:
-	djnz l41ech
+intro_wipe:
+	djnz intro_build
 	call reset_run_state   ; wipe run work RAM (0xC405..0xDFFF) + seed defaults
 	jp main_phase_next
-l41ech:
-	djnz l41fbh
+intro_build:
+	djnz intro_walk
 	ld a,001h
 	ld (flag_intro_map),a          ; intro: use mtile_stream_intro
 	call intro_scene_build
 	ld a,0a0h
 	jp main_timer_set
-l41fbh:
-	djnz l4222h
+intro_walk:
+	djnz intro_bgm
 	call intro_actors_frame
 	ld hl,0c004h
 	ld a,(0c003h)
-l4206h:
+intro_walk_odd:
 	rra
 	ret c
 	dec (hl)
@@ -386,12 +386,12 @@ l4206h:
 	ld hl,0e604h
 	ld a,(hl)
 	or a
-	jr z,l4220h
+	jr z,intro_gm_skip
 	ld (hl),000h
 	call gm_apply_values
-l4220h:
+intro_gm_skip:
 	jr main_state_inc_20
-l4222h:
+intro_bgm:
 	ld a,bgm_enter_castle
 	call play_sound
 	ld a,050h
@@ -467,13 +467,13 @@ death_game_over:
 	call play_sound
 	jr main_state_inc_20
 state_game_over:               ; 7 (0x42B2)
-	djnz l42e3h
+	djnz game_over_draw
 	ld a,(0e600h)          ; Game Master cartridge present?
 	or a
-	jr z,l42bfh            ; no -> plain GAME OVER, fall back to the title
+	jr z,game_over_timeout            ; no -> plain GAME OVER, fall back to the title
 	call gm_continue_key   ; yes -> F5 continues the run
-	jr nz,l42d3h
-l42bfh:
+	jr nz,game_over_continue
+game_over_timeout:
 	ld a,(0c0a7h)
 	and a
 	ret nz
@@ -485,7 +485,7 @@ l42bfh:
 	and 0bfh
 	ld (hl),a
 	jp main_state_set_0
-l42d3h:
+game_over_continue:
 	ld a,003h
 	ld (lives),a
 	xor a
@@ -494,16 +494,16 @@ l42d3h:
 	ld (score),hl
 	ld (score_hi),a
 	jr death_respawn
-l42e3h:
+game_over_draw:
 	call video_reset
 	ld hl,game_over_str           ; "GAME  OVER"
 	call hud_string_draw
 	ld a,(0e600h)          ; Game Master cartridge present?
 	or a
-	jr z,l42f8h
+	jr z,game_over_hud
 	ld hl,gm_continue_text ; yes -> add the "F5 -> CONTINUE" line
 	call hud_string_draw
-l42f8h:
+game_over_hud:
 	call hud_draw_all
 	ld a,078h
 	jp main_timer_set
@@ -535,12 +535,12 @@ gm_continue_key:
 	and (hl)               ; set only on the press edge
 	ret
 state_hub_advance:             ; 8 (0x4324): boss-clear/credits set 0xC409; hub 0xD002++ then advance_stage
-	djnz l4377h
+	djnz hub_wait_reset
 	ld hl,hub
 	inc (hl)
 	ld a,006h
 	sub (hl)
-	jr nz,l434bh
+	jr nz,hub_next_stage
 	ld (hl),a
 	ld a,0ffh
 	ld (stage),a
@@ -550,12 +550,12 @@ state_hub_advance:             ; 8 (0x4324): boss-clear/credits set 0xC409; hub 
 	inc (hl)
 	ld a,(hl)
 	cp 002h
-	jr nz,l434bh
+	jr nz,hub_next_stage
 	ld hl,0c002h
 	res 6,(hl)
 	jp main_state_set_0
-l434bh:
-	call 062dch
+hub_next_stage:                 ; HUD meter/font then advance_stage
+	call play_hud_meter
 ; advance_stage (0x434E): move to the next stage.  Bumps the two BCD progress
 ; counters 0xC410/0xC411, increments the stage id 0xD000, resets the room id
 ; 0xD001 to 0, clears 0xC408/0xC409, then runs transition type 4 (jp main_state_set).
@@ -583,7 +583,7 @@ advance_stage:
 	ld hl,00000h
 	ld (0c000h),hl
 	ret
-l4377h:
+hub_wait_reset:                 ; djnz wait: video_reset + main_timer_set
 	call video_reset
 	xor a
 	jp main_timer_set
@@ -697,7 +697,7 @@ vendor_begin:                  ; (0x4411) C001=0: arm a sale
 ;  into the run later by gm_apply_values.
 ; ===========================================================================
 state_game_master_menu:
-	djnz l4453h
+	djnz gm_menu_entry
 	ld a,(btn_edge)          ; latched input
 	and 033h
 	ret z
@@ -705,31 +705,31 @@ state_game_master_menu:
 	jp nz,gm_menu_move
 	ld a,(0e60bh)          ; fire: which item is highlighted?
 	or a
-	jp nz,l4439h           ; 1/2 -> a MODIFY prompt
+	jp nz,gm_menu_modify           ; 1/2 -> a MODIFY prompt
 	call gm_menu_clear     ; 0 = START GAME
 	ld hl,main_intro
 	ld (0c000h),hl         ; -> intro, secondary 0
 	ret
-l4439h:
+gm_menu_modify:
 	dec a
-	jr z,l4447h
+	jr z,gm_menu_stage_pos
 	ld hl,0b8b8h           ; item 2: PLAYER NUMBER digit position
 	ld (0e602h),hl
-l4442h:
+gm_menu_player_pos:
 	call gm_prompt_player
-	jr l4450h
-l4447h:
+	jr gm_menu_digit_phase
+gm_menu_stage_pos:
 	ld hl,0b0b8h           ; item 1: STAGE NUMBER digit position
 	ld (0e602h),hl
 	call gm_prompt_stage
-l4450h:
+gm_menu_digit_phase:
 	jp main_phase_next              ; -> number-entry phase (C001=1)
-l4453h:
-	djnz l4488h
+gm_menu_entry:
+	djnz gm_menu_setup
 	call gm_confirm_key    ; RETURN pressed?
-	jr nz,l445dh
+	jr nz,gm_menu_commit
 	jp gm_digit_entry      ; no -> keep taking digits
-l445dh:
+gm_menu_commit:
 	ld a,(0e60bh)
 	ld b,a
 	ld hl,0e604h
@@ -737,23 +737,23 @@ l445dh:
 	ld (hl),a              ; remember that this field was edited
 	ld a,(0e615h)
 	or a
-	jr z,l447eh            ; nothing typed -> just leave the prompt
+	jr z,gm_menu_abort            ; nothing typed -> just leave the prompt
 	ld a,(0e60eh)
 	ld d,a                 ; D = binary value
 	ld a,(0e60fh)          ; A = BCD value
 	bit 0,b
-	jr z,l4483h
+	jr z,gm_menu_commit_lives
 	ld (0e605h),a          ; stage: keep both forms
 	ld a,d
 	ld (0e606h),a
-l447eh:
+gm_menu_abort:
 	xor a
 	ld (0c001h),a          ; back to browsing
 	ret
-l4483h:
+gm_menu_commit_lives:
 	ld (0e607h),a          ; lives
-	jr l447eh
-l4488h:
+	jr gm_menu_abort
+gm_menu_setup:
 	call gm_menu_draw
 	xor a
 	ld hl,0e608h           ; clear the menu scratch (key latches, accumulators)
@@ -841,11 +841,11 @@ add_score:
 	adc a,c                ; += C (high pair)
 	daa
 	ld (hl),a
-	jr nc,l4538h           ; no overflow -> done
+	jr nc,draw_score_hud           ; no overflow -> done
 	ld bc,09999h
 	ld (0c402h),bc         ; unused (no readers); visible score is C405-C407
 	ld (0c403h),bc
-	jr l4538h
+	jr draw_score_hud
 ; --- hud_draw_all (seg0 0x451A) - paint the whole HUD from scratch: the static
 ;     labels, then every counter, meter, frame and icon.
 hud_draw_all:
@@ -859,7 +859,7 @@ hud_draw_all:
 	call hud_weapon_icon
 	call hud_keys_refresh  ; yellow/lockpick lamp, then white-key lamp
 	call hud_bonus_refresh
-l4538h:
+draw_score_hud:                 ; score BCD at (0x38,0) via hud_bcd_draw
 	ld hl,score_hi
 	ld de,03800h
 	ld b,003h
@@ -894,11 +894,11 @@ hud_panel_frames:
 draw_hearts_hud:
 	ld hl,hearts           ; hearts (packed BCD)
 	ld de,0c000h           ; HUD cell for the heart readout
-	jr l457bh
+	jr hud_bcd_1byte
 draw_lives_hud:
 	ld hl,lives           ; lives (packed BCD)
 	ld de,0e400h           ; HUD cell for the lives readout
-l457bh:
+hud_bcd_1byte:                  ; shared hearts/lives: 1 BCD byte
 	ld b,001h              ; 1 byte -> 2 digits
 	jr hud_bcd_draw
 hud_bcd_draw:
@@ -930,24 +930,24 @@ add_hearts:
 	ld a,(hl)
 	add a,b
 	daa                    ; keep the total decimal (BCD)
-	jr nc,l45a5h
+	jr nc,hearts_ok
 	ld a,099h              ; clamp at 99 hearts
-l45a5h:
-	jr l45b0h
+hearts_ok:                      ; after 99 clamp; write + redraw
+	jr hearts_store
 ; spend_hearts (seg0 0x45A7) - subtract B hearts from 0xC417 (BCD), floor at 0.
 spend_hearts:
 	ld hl,hearts
 	ld a,(hl)
 	cp b
-	jr c,l45b4h
+	jr c,hearts_zero
 	sub b
 	daa
-l45b0h:
+hearts_store:                   ; write C417 and redraw HUD
 	ld (hl),a
 	jp draw_hearts_hud
-l45b4h:
+hearts_zero:                    ; clamp spent hearts to 0
 	xor a
-	jr l45b0h
+	jr hearts_store
 ; --- hud_bars_redraw (seg0 0x45B7) - repaint both HUD meters, frame and all.
 ;     health_bar_redraw (0x45C0) does just Simon's; the frame helpers below
 ;     clear the panel and draw its colour-14 border, then the bar is filled in.
@@ -963,12 +963,12 @@ health_bar_redraw:
 enemy_meter_frame:
 	ld hl,03b16h           ; (X,Y) just outside the enemy meter
 	ld bc,04206h           ; 66 x 6 (immediate, not a code address)
-l45cch:
+meter_frame_go:                 ; shared enemy/health panel_frame
 	jp panel_frame           ; clear the panel + draw its border
 health_bar_frame:
 	ld hl,03b0dh           ; (X,Y) just outside the health bar
 	ld bc,04206h           ; 66 x 6
-	jp l45cch
+	jp meter_frame_go
 ; draw_health_bar (seg0 0x45D8) - draw the HEALTH bar from 0xC415 (len = health*2).
 draw_health_bar:
 	ld hl,health           ; Simon health (0..0x20)
@@ -994,11 +994,11 @@ draw_enemy_meter:
 	and 0fch
 	rrca
 	or a
-	jr nz,l4602h
+	jr nz,enemy_meter_fill
 	or c
 	ret z
 	ld a,002h
-l4602h:
+enemy_meter_fill:               ; HMMV the enemy bar
 	ld b,a
 	ld c,004h
 	ld d,000h
@@ -1010,12 +1010,12 @@ restore_health:
 	ld a,(hl)
 	add a,b                ; add restore amount
 	cp 021h
-	jr c,l461bh
+	jr c,health_store
 	ld a,020h              ; clamp to full (0x20)
 	sub (hl)
 	ld b,a
 	ld a,020h
-l461bh:
+health_store:                   ; write C415 and redraw bar
 	ld (hl),a
 	jp health_bar_redraw
 ; restore_enemy_meter (seg0 0x461F) - 0xC418 += B, clamped to 0x80.
@@ -1024,12 +1024,12 @@ restore_enemy_meter:
 	ld a,(hl)
 	add a,b
 	cp 081h
-	jr c,l462eh
+	jr c,enemy_meter_store
 	ld a,080h              ; clamp to full (0x80)
 	sub (hl)
 	ld b,a
 	ld a,080h
-l462eh:
+enemy_meter_store:              ; write C418 and redraw meter
 	ld (hl),a
 	jp enemy_meter_redraw
 ; damage_health (seg0 0x4632) - subtract from HEALTH: 0xC415 -= B, floored at 0.
@@ -1037,9 +1037,9 @@ damage_health:
 	ld hl,health           ; Simon health
 	ld a,(hl)
 	cp b
-	jr nc,l463ah
+	jr nc,health_dmg_go
 	ld b,a                 ; can't drop below 0: clamp damage to current HP
-l463ah:
+health_dmg_go:                  ; subtract B (clamped) and redraw
 	ld a,b
 	or a
 	ret z
@@ -1054,9 +1054,9 @@ damage_enemy:
 	ld hl,enemy_meter
 	ld a,(hl)
 	cp b
-	jr nc,l464bh
+	jr nc,enemy_dmg_go
 	ld b,a
-l464bh:
+enemy_dmg_go:                   ; subtract B (clamped) and redraw
 	ld a,b
 	or a
 	ret z
@@ -1080,10 +1080,10 @@ vram_read:                     ; VRAM HL -> CPU DE (INIR); BC = count
 	ld a,(00006h)          ; VDP data port
 	ld c,a
 	ex af,af'
-l466dh:
+vram_read_page:                 ; INIR one page; DEC A
 	inir
 	dec a
-	jr nz,l466dh
+	jr nz,vram_read_page
 	ex de,hl
 	ret
 vram_otir_count:               ; after ex de,hl: A=pages, B=remainder from BC
@@ -1095,18 +1095,20 @@ vram_otir_count:               ; after ex de,hl: A=pages, B=remainder from BC
 	ret z
 	inc a
 	ret
+; vram_write - CPU RAM -> VRAM via OTIR.  Callers pass HL=src, DE=VRAM dest,
+;     BC=count.  Splits into B full 256-byte pages plus C remainder.
 vram_write:
-	ex de,hl
-	call vdp_set_write
-	call vram_otir_count
+	ex de,hl                ; HL = VRAM dest, DE = src
+	call vdp_set_write      ; point VDP write at HL
+	call vram_otir_count    ; A = pages, B = remainder
 	ex af,af'
-	ld a,(00007h)
-	ld c,a
+	ld a,(00007h)           ; VDP data port (0x98)
+	ld c,a                  ; OTIR port
 	ex af,af'
-l4689h:
-	otir
-	dec a
-	jr nz,l4689h
+vram_write_page:                ; OTIR one page; DEC A
+	otir                    ; 256 bytes (or B leftover)
+	dec a                   ; next page
+	jr nz,vram_write_page   ; until pages done
 	ret
 vram_fill:                     ; fill VRAM HL with A; BC = count (B pages, C rem)
 	push de
@@ -1115,17 +1117,17 @@ vram_fill:                     ; fill VRAM HL with A; BC = count (B pages, C rem
 	ld d,c
 	ld a,c
 	or a
-	jr z,l469ah
+	jr z,vram_fill_pages
 	inc b
-l469ah:
+vram_fill_pages:                ; inc B when remainder C is nonzero
 	ld a,(00007h)
 	ld c,a
 	pop af
-l469fh:
+vram_fill_byte:                 ; OUT fill byte; DJNZ pages
 	out (c),a
 	dec d
-	jr nz,l469fh
-	djnz l469fh
+	jr nz,vram_fill_byte
+	djnz vram_fill_byte
 	pop de
 	ret
 vram_poke:                     ; write A to VRAM HL (one byte)
@@ -1145,22 +1147,22 @@ vram_poke:                     ; write A to VRAM HL (one byte)
 vdp_set_write:
 	push bc
 	ld a,(00007h)           ; c = VDP addr/ctrl port (0x99)
-	inc a
-	ld c,a
-	ld a,h
+	inc a                   ; 0x99
+	ld c,a                  ; ctrl port
+	ld a,h                  ; VRAM dest high
 	rlca                    ; A14-A16 = (H >> 6)
 	rlca
-	and 003h
+	and 003h                ; R14 = A16-A14
 	di
-	out (c),a
-	ld a,08eh
-	out (c),a
-	ld a,l
-	out (c),a
-	ld a,h
-	and 03fh
-	or 040h
-	out (c),a
+	out (c),a               ; R14 data = A16-A14
+	ld a,08eh               ; select R14
+	out (c),a               ; commit R14
+	ld a,l                  ; address low
+	out (c),a               ; VRAM pointer lo
+	ld a,h                  ; address high
+	and 03fh                ; A13-A8
+	or 040h                 ; write mode (bit6)
+	out (c),a               ; VRAM pointer hi
 	pop bc
 	ei
 	ret
@@ -1209,29 +1211,29 @@ rle_dec:
 	call vdp_set_write          ; point VDP at dest VRAM address (HL)
 	ld a,(00007h)           ; c = VDP data port (0x98)
 	ld c,a
-l46ffh:
+rle_loop:
 	ld a,(de)               ; fetch next control byte
-	and a
+	and a                   ; 0x00?
 	ret z                   ; 0x00 -> done
-	inc de
-	ld b,a
+	inc de                  ; consume control
+	ld b,a                  ; keep full byte
 	and 07fh                ; test bit7...
 	cp b                    ; bit7 clear (b <= 0x7F) -> RUN
-	jr z,l4713h
+	jr z,rle_run            ; repeat next byte B times
 	and a                   ; b == 0x80 -> set new dest address
-	jr z,rle_dec_addr
+	jr z,rle_dec_addr       ; 0x80 lo hi
 	ex de,hl                ; else LITERAL: copy (b & 0x7F) bytes
-	ld b,a
+	ld b,a                  ; OTIR count
 	otir                    ; stream b bytes -> VRAM data port
-	ex de,hl
-	jr l46ffh
-l4713h:
+	ex de,hl                ; DE = stream again
+	jr rle_loop             ; next command
+rle_run:
 	ld a,(de)               ; RUN: fetch the byte to repeat...
 	inc de
-l4715h:
+rle_fill:
 	out (c),a               ; ...write it b times to VRAM
-	djnz l4715h
-	jr l46ffh
+	djnz rle_fill
+	jr rle_loop
 ; ---------------------------------------------------------------------------
 ;  gfx_script_run (seg0 0x471B) - interpret a per-room gfx script (HL).
 ;  Cmd 0xFF ends; 0 = gfx_script_rle (src word, VRAM dest word);
@@ -1244,15 +1246,15 @@ gfx_script_run:
 	ret z
 	dec a
 	or a
-	jr z,l472bh
+	jr z,gfx_script_rle_go
 	dec a
-	jr z,l4730h
+	jr z,gfx_script_convert_go
 	call gfx_script_copy
 	jr gfx_script_run
-l472bh:
+gfx_script_rle_go:
 	call gfx_script_rle
 	jr gfx_script_run
-l4730h:
+gfx_script_convert_go:
 	call gfx_script_convert
 	jr gfx_script_run
 gfx_script_rle:
@@ -1270,39 +1272,41 @@ gfx_script_rle:
 	call rle_dec
 	pop hl
 	ret
+; gfx_script_convert - script cmd 1: copy A tiles of 1bpp from VRAM (word),
+;     expand to 4bpp, write to dest VRAM (word).  Count * 32 = source bytes.
 gfx_script_convert:
-	ld e,(hl)
+	ld e,(hl)               ; VRAM source lo
 	inc hl
-	ld d,(hl)
+	ld d,(hl)               ; VRAM source hi
 	inc hl
-	ld a,(hl)
+	ld a,(hl)               ; tile count
 	inc hl
 	push hl
-	ld l,a
-	ld h,000h
+	ld l,a                  ; HL = count
+	ld h,000h               ; 16-bit count
 	add hl,hl
 	add hl,hl
 	add hl,hl
 	add hl,hl
-	add hl,hl
-	ld c,l
-	ld b,h
-	ex de,hl
+	add hl,hl               ; HL = count * 32
+	ld c,l                  ; BC = byte count
+	ld b,h                  ; for vram_read
+	ex de,hl                ; HL = VRAM source
 	push bc
 	push af
-	ld de,0e800h
-	call vram_read
+	ld de,0e800h            ; CPU scratch
+	call vram_read          ; copy 1bpp out of VRAM
 	pop af
-	call gfx_1bpp_expand
+	call gfx_1bpp_expand    ; 1bpp -> 4bpp near 0xEC00
 	pop bc
 	pop hl
-	ld e,(hl)
+	ld e,(hl)               ; VRAM dest lo
 	inc hl
-	ld d,(hl)
+	ld d,(hl)               ; VRAM dest hi
 	inc hl
 	push hl
-	ld hl,0ec00h
-	call vram_write
+	ld hl,0ec00h            ; expanded 4bpp
+	call vram_write         ; upload to dest
 	pop hl
 	ret
 gfx_script_copy:
@@ -1328,135 +1332,140 @@ gfx_1bpp_expand:
 	ld hl,0e800h
 	ld de,0ec10h
 	ld c,a
-l478dh:
+gfx_1bpp_plane:                 ; expand one 1bpp plane pair
 	call gfx_1bpp_row
 	ld a,0e0h
 	add a,e
 	ld e,a
-	jr c,l4797h
+	jr c,gfx_1bpp_plane_lo
 	dec d
-l4797h:
+gfx_1bpp_plane_lo:              ; second plane after DE wrap
 	call gfx_1bpp_row
 	ld a,020h
 	call ADD_DE_A
 	dec c
-	jp nz,l478dh
+	jp nz,gfx_1bpp_plane
 	ret
 gfx_1bpp_row:
 	ld b,010h
-l47a6h:
+gfx_1bpp_byte:                  ; one source byte -> dest
 	ld a,(hl)
 	inc hl
 	exx
 	ld c,a
 	ld a,001h
-l47ach:
+gfx_1bpp_shift:                 ; rotate until MSB set
 	rr c
 	rla
-	jp nc,l47ach
+	jp nc,gfx_1bpp_shift
 	exx
 	ld (de),a
 	inc de
-	djnz l47a6h
+	djnz gfx_1bpp_byte
 	ret
 video_clear_page:
 	call sat_vram_hide
 	ld bc,00000h
-	jr l47c6h
+	jr video_fill_go
+; video_reset - hide SAT, HMMV-fill page 0 (256 x 212, colour 0), screen on.
 video_reset:
-	call sat_vram_hide
-	ld bc,000d4h
-l47c6h:
+	call sat_vram_hide      ; Y=0xE0 on SAT + sprites_hide
+	ld bc,000d4h            ; NX=256, NY=212 (SCREEN 5)
+video_fill_go:                  ; shared: screen off, fill, screen on
 	push bc
-	call vdp_screen_off
+	call vdp_screen_off     ; RG1 bit6 clear (blank)
 	pop bc
-	call vdp_fill_origin
+	call vdp_fill_origin    ; HMMV from (0,0) page 0
 vdp_screen_on:
-	ld a,(0f3e0h)
-	or 040h
-	ld b,a
-	ld c,001h
-	call WRTVDP
-	jr vdp_sprites_on
+	ld a,(0f3e0h)           ; RG1 shadow (RG1SAV)
+	or 040h                 ; set screen-enable
+	ld b,a                  ; WRTVDP data
+	ld c,001h               ; R1
+	call WRTVDP             ; screen on
+	jr vdp_sprites_on       ; clear SPD in R8
+; vdp_screen_off - blank the display (RG1 bit6) then disable sprites (R8 SPD).
 vdp_screen_off:
-	ld a,(0f3e0h)
-	and 0bfh
-	ld b,a
-	ld c,001h
-	call WRTVDP
-	jr vdp_sprites_off
+	ld a,(0f3e0h)           ; RG1 shadow
+	and 0bfh                ; clear screen-enable
+	ld b,a                  ; WRTVDP data
+	ld c,001h               ; R1
+	call WRTVDP             ; screen off
+	jr vdp_sprites_off      ; set SPD in R8
 vdp_fill_origin:
-	ld hl,00000h
-	xor a
-	ld d,a
-	call vdp_hmmv
-	ld b,000h
-	ld c,017h
-	jp WRTVDP
+	ld hl,00000h            ; DX=0, DY=0
+	xor a                   ; fill byte 0
+	ld d,a                  ; VRAM page 0
+	call vdp_hmmv           ; fill rectangle in BC
+	ld b,000h               ; R23 = 0
+	ld c,017h               ; vertical offset
+	jp WRTVDP               ; reset display Y
+; sat_vram_hide - write Y=0xE0 over 128 SAT bytes at VRAM 0xF600, then sprites_hide.
 sat_vram_hide:
-	ld hl,0f600h
-	ld a,0e0h
-	ld bc,00080h
-	call vram_fill
-	jp sprites_hide
+	ld hl,0f600h            ; SAT in VRAM
+	ld a,0e0h               ; hide-sprite Y
+	ld bc,00080h            ; 128 bytes
+	call vram_fill          ; fill SAT
+	jp sprites_hide         ; CPU SAT shadow too
+; vdp_sprites_off - set R8 bit1 (SPD) so the VDP does not draw sprites.
 vdp_sprites_off:
-	ld a,(0ffe7h)
-	or 002h
-	ld b,a
-	ld c,008h
-	jp WRTVDP
+	ld a,(0ffe7h)           ; R8 shadow
+	or 002h                 ; SPD = 1 (sprites off)
+	ld b,a                  ; WRTVDP data
+	ld c,008h               ; R8
+	jp WRTVDP               ; commit
+; vdp_sprites_on - clear R8 bit1 (SPD) so sprites draw.
 vdp_sprites_on:
-	ld a,(0ffe7h)
-	and 0fdh
-	ld b,a
-	ld c,008h
-	jp WRTVDP
+	ld a,(0ffe7h)           ; R8 shadow
+	and 0fdh                ; SPD = 0 (sprites on)
+	ld b,a                  ; WRTVDP data
+	ld c,008h               ; R8
+	jp WRTVDP               ; commit
 ; --- palette_set - write one MSX2 palette entry.  A = index 0-15, D = 0rrr0bbb,
 ;     E = 00000ggg (3-bit R/B then G).  Programs R16 then ports 0x9A; also
 ;     shadows the pair at VRAM 0xF680+A*2.
 palette_set:
 	push bc
 	push hl
-	ld b,a
-	ld a,(00007h)
-	inc a
-	ld c,a
+	ld b,a                  ; index 0-15
+	ld a,(00007h)           ; VDP port base
+	inc a                   ; 0x99
+	ld c,a                  ; ctrl port
 	di
 	out (c),b               ; palette index -> R16
-	ld a,090h
-	out (c),a
+	ld a,090h               ; select R16
+	out (c),a               ; commit R16
 	inc c                   ; C = palette data port 0x9A
-	out (c),d
-	push af
-	pop af
-	out (c),e
-	dec c
-	ld hl,0f680h
-	ld a,b
-	add a,a
-	add a,l
-	ld l,a
-	call vdp_set_write
-	dec c
-	out (c),d
-	out (c),e
+	out (c),d               ; RB
+	push af                 ; wait 2 cycles for 0x9A
+	pop af                  ; V9938 palette write delay
+	out (c),e               ; G
+	dec c                   ; back to ctrl port 0x99
+	ld hl,0f680h            ; VRAM palette shadow
+	ld a,b                  ; index
+	add a,a                 ; * 2 (RB,G pair)
+	add a,l                 ; 0xF680 + index*2
+	ld l,a                  ; shadow dest
+	call vdp_set_write      ; point VDP at shadow
+	dec c                   ; data port 0x98
+	out (c),d               ; shadow RB
+	out (c),e               ; shadow G
 	pop hl
 	pop bc
 	ei
 	ret
 ; --- palette_apply - apply a palette table: records (index, rb, g)+ , 0xFF-terminated.
 palette_apply:
-	ld a,(hl)
+	ld a,(hl)               ; index, or 0xFF terminator
 	inc hl
-	inc a
-	ret z
-	dec a
-	ld d,(hl)
+	inc a                   ; 0xFF -> 0
+	ret z                   ; end of table
+	dec a                   ; restore index
+	ld d,(hl)               ; 0rrr0bbb
 	inc hl
-	ld e,(hl)
+	ld e,(hl)               ; 00000ggg
 	inc hl
-	call palette_set
-	jr palette_apply
+	call palette_set        ; program that entry
+	jr palette_apply        ; next record
 ; --- vdp_cmd_wait (seg0 0x4853) - spin until the VDP command engine is idle.
 ;     Polls S#2 bit0 (CE, "command executing"); every command helper below
 ;     calls this first so it can safely reload the command registers.
@@ -1570,23 +1579,23 @@ vdp_line_v:
 ;     edges first, then the bottom at Y+height-1 and the right at X+width-1.
 ;     Draws the HUD bar frames (health_bar_frame) and the message-panel border.
 vdp_box:
-	ld b,e
+	ld b,e                  ; NY = height
 	call vdp_line_v_save   ; left edge, height tall
-	ld b,d
+	ld b,d                  ; NX = width
 	call vdp_line_h_save   ; top edge, width wide
 	push hl
-	ld a,l
-	dec a
+	ld a,l                  ; top Y
+	dec a                   ; height-1
 	add a,e
 	ld l,a                 ; Y += height-1
-	ld b,d
+	ld b,d                  ; width
 	call vdp_line_h_save   ; bottom edge
 	pop hl
-	ld a,h
-	dec a
+	ld a,h                  ; left X
+	dec a                   ; width-1
 	add a,d
 	ld h,a                 ; X += width-1
-	ld b,e
+	ld b,e                  ; height
 	jp vdp_line_v_save     ; right edge
 ; --- vdp_line_v_save / vdp_line_h_save (0x48FD / 0x4907) - the LINE helpers
 ;     with HL/DE/BC preserved, so vdp_box keeps its parameters across all four
@@ -1617,18 +1626,18 @@ vdp_line_h_save:
 ;     clears in video_init.
 vdp_hmmv:
 	ex af,af'              ; keep the fill byte
-	call vdp_cmd_wait
+	call vdp_cmd_wait      ; CE must be clear
 	push bc
-	ld a,(00007h)
-	inc a
-	ld c,a
-	ld a,024h
+	ld a,(00007h)          ; VDP port base
+	inc a                  ; 0x99 = register port
+	ld c,a                 ; ctrl port
+	ld a,024h              ; R17 = 36 (DX)
 	di
 	out (c),a              ; R17 = 36 (DX), auto-increment on
-	ld a,091h
-	out (c),a
+	ld a,091h              ; R17 write, auto-inc
+	out (c),a              ; commit R17
 	inc c
-	inc c
+	inc c                  ; 0x9B = indirect data
 	out (c),h              ; R36 DX = X
 	xor a
 	out (c),a              ; R37
@@ -1637,68 +1646,68 @@ vdp_hmmv:
 	pop hl                 ; H = width, L = height
 	out (c),h              ; R40 NX = width
 	cp h                   ; width 0 means 256 px...
-	jr nz,l4936h
+	jr nz,hmmv_nx_hi
 	inc a                  ; ...so carry it in the NX high bit
-l4936h:
+hmmv_nx_hi:                     ; R41: NX high (1 if width 0 = 256)
 	out (c),a              ; R41
 	xor a
 	out (c),l              ; R42 NY = height
 	cp l                   ; height 0 means 256 px
-	jr nz,l493fh
-	inc a
-l493fh:
+	jr nz,hmmv_ny_hi
+	inc a                  ; NY high bit
+hmmv_ny_hi:                     ; R43: NY high (1 if height 0 = 256)
 	out (c),a              ; R43
-	ex af,af'
+	ex af,af'              ; fill byte
 	out (c),a              ; R44 CLR = fill byte
 	xor a
 	out (c),a              ; R45 ARG = 0
-	ld a,0c0h
+	ld a,0c0h              ; HMMV
 	out (c),a              ; R46 CMR = HMMV
 	ei
 	ret
 ; vdp_hmmm (seg0 0x494D): V9938 HMMM. HL=(SX,SY), DE=(DX,DY), BC=(NX,NY).
 ; A bits 1-0 = source page, bits 3-2 = dest page. ARG=0 (no X/Y flip).
 vdp_hmmm:
-	ex af,af'
-	call vdp_cmd_wait
+	ex af,af'               ; keep page bits
+	call vdp_cmd_wait       ; CE must be clear
 	push bc
-	ld a,(00007h)
-	inc a
-	ld c,a
-	ld a,020h
+	ld a,(00007h)           ; VDP port base
+	inc a                   ; 0x99 = register port
+	ld c,a                  ; ctrl port
+	ld a,020h               ; R17 = 32 (SX)
 	di
-	out (c),a
-	ld a,091h
-	out (c),a
+	out (c),a               ; indirect start
+	ld a,091h               ; R17, auto-increment on
+	out (c),a               ; commit R17
 	inc c
-	inc c
-	out (c),h
-	xor a
-	out (c),a
-	out (c),l
+	inc c                   ; 0x9B = indirect data
+	out (c),h               ; R32 SX = X
+	xor a                   ; high bytes 0
+	out (c),a               ; R33 SX high
+	out (c),l               ; R34 SY = Y
 	ex af,af'
-	ld l,a
-	and 003h
-	out (c),a
-	out (c),d
-	xor a
-	out (c),a
-	out (c),e
-	ld a,l
-	rra
-	rra
-	and 003h
-	out (c),a
-	pop hl
-	out (c),h
-	xor a
-	out (c),a
-	out (c),l
-	out (c),a
-	out (c),a
-	out (c),a
-	ld a,0d0h
-	out (c),a
+	ld l,a                  ; page bits
+	and 003h                ; source page
+	out (c),a               ; R35 SY high
+	out (c),d               ; R36 DX
+	xor a                   ; DX high = 0
+	out (c),a               ; R37
+	out (c),e               ; R38 DY
+	ld a,l                  ; page bits again
+	rra                     ; shift dest page down
+	rra                     ; bits 3-2 -> 1-0
+	and 003h                ; dest page
+	out (c),a               ; R39 DY high
+	pop hl                  ; H = NX, L = NY
+	out (c),h               ; R40 NX
+	xor a                   ; NX/NY high + CLR/ARG
+	out (c),a               ; R41 NX high
+	out (c),l               ; R42 NY
+	out (c),a               ; R43 NY high
+	out (c),a               ; R44 CLR unused
+	out (c),a               ; R45 ARG = 0 (no flip)
+	ld a,0d0h               ; HMMM
+	out (c),a               ; R46 CMR
 	ei
 	ret
 ; --- vdp_hmmc (seg0 0x4991) - V9938 HMMC: push CPU bytes into a VRAM rectangle.
@@ -1747,18 +1756,18 @@ vdp_hmmc:
 	out (c),a
 	inc c
 	inc c
-l49d1h:
+hmmc_feed:                      ; wait TR, OUT next CPU byte
 	ld a,002h
 	call vdp_status_read   ; S#2
 	rra                    ; CE clear -> transfer done
 	ret nc
 	add a,a
 	add a,a                ; carry = TR (S#2 bit7): VDP wants a byte
-	jr nc,l49d1h
+	jr nc,hmmc_feed
 	ld a,(hl)
 	inc hl
 	out (c),a              ; feed the next byte through CLR
-	jr l49d1h
+	jr hmmc_feed
 ; vdp_lmmm (seg0 0x49E2): V9938 LMMM (colour-0 skip). Same HL/DE/BC as vdp_hmmm.
 ; A is packed page + logic bits (0x48 = page-1 -> page-0, used for Dracula torso).
 vdp_lmmm:
@@ -1817,9 +1826,9 @@ vdp_lmmm:
 ;     credits_font / credits_font_az, and logo_font_load (0x5316) for
 ;     logo_font / logo_font_ink2 / logo_font_ink3.
 glyph_blit_run:
-	call glyph_blit
-	call blit_advance_x
-	djnz glyph_blit_run
+	call glyph_blit         ; one 8x8 glyph at (D,E)
+	call blit_advance_x     ; X += 8, wrap to next row
+	djnz glyph_blit_run     ; B glyphs
 	ret
 ; --- glyph_blit (seg0 0x4A37) - expand one 1bpp glyph to 4bpp and blit it.
 ;     D = X, E = Y, C = ink.  SCREEN 5 has no pattern table, so the glyph is
@@ -1855,7 +1864,7 @@ glyph_blit:
 vram_blit_tile8:
 	push de
 	ld b,008h              ; 8 pixel rows
-l4a5bh:
+blit8_row:                      ; one 8px row (4 bytes) + 0x80 stride
 	push bc
 	ld bc,00004h           ; 4 bytes = 8 pixels at 4bpp
 	call vram_write
@@ -1864,7 +1873,7 @@ l4a5bh:
 	add hl,bc
 	ex de,hl
 	pop bc
-	djnz l4a5bh
+	djnz blit8_row
 	pop de
 	ret
 ; --- vram_blit_tile_run (seg0 0x4A6D) - blit B consecutive 8x8 tiles, laying
@@ -1873,26 +1882,26 @@ l4a5bh:
 ;     This is the tile-atlas upload (dest 0x8004+, 32 tiles per row).
 vram_blit_tile_run:
 	push bc
-	call vram_blit_tile8
-	ld a,004h
-	add a,e                ; next tile to the right
-	cp 080h
-	jr nz,l4a7dh
-	ld a,004h
-	add a,d                ; wrapped: down one tile row (8 scanlines)
-	ld d,a
-	xor a
-l4a7dh:
-	ld e,a
+	call vram_blit_tile8    ; one 8x8 tile at DE
+	ld a,004h               ; 8px = 4 bytes at 4bpp
+	add a,e                 ; next tile to the right
+	cp 080h                 ; end of 256px scanline?
+	jr nz,blit8_wrap        ; still on this row
+	ld a,004h               ; down 8 scanlines
+	add a,d                 ; wrapped: down one tile row (8 scanlines)
+	ld d,a                  ; new dest high
+	xor a                   ; E = 0 (left edge)
+blit8_wrap:                     ; store E after 0x80 wrap
+	ld e,a                  ; dest X/low
 	pop bc
-	djnz vram_blit_tile_run
+	djnz vram_blit_tile_run ; B tiles
 	ret
 ; --- vram_blit_tile16 (seg0 0x4A82) - the same for one 16x16 4bpp tile
 ;     (16 rows of 8 bytes), and vram_blit_tile16_run for a run of them.
 vram_blit_tile16:
 	push de
 	ld b,010h              ; 16 pixel rows
-l4a85h:
+blit16_row:                     ; one 16px row (8 bytes) + 0x80 stride
 	push bc
 	ld bc,00008h           ; 8 bytes = 16 pixels at 4bpp
 	call vram_write
@@ -1901,24 +1910,25 @@ l4a85h:
 	add hl,bc
 	ex de,hl
 	pop bc
-	djnz l4a85h
+	djnz blit16_row
 	pop de
 	ret
+; vram_blit_tile16_run - blit B consecutive 16x16 4bpp tiles left to right.
 vram_blit_tile16_run:
 	push bc
-	call vram_blit_tile16
-	ld a,008h
-	add a,e                ; next tile to the right
-	cp 080h
-	jr nz,l4aa7h
-	ld a,008h
-	add a,d                ; wrapped: down one tile row
-	ld d,a
-	xor a
-l4aa7h:
-	ld e,a
+	call vram_blit_tile16   ; one 16x16 tile at DE
+	ld a,008h               ; 16px = 8 bytes at 4bpp
+	add a,e                 ; next tile to the right
+	cp 080h                 ; end of 256px scanline?
+	jr nz,blit16_wrap       ; still on this row
+	ld a,008h               ; down 16 scanlines
+	add a,d                 ; wrapped: next tile row
+	ld d,a                  ; new dest high
+	xor a                   ; E = 0 (left edge)
+blit16_wrap:                    ; store E after 0x80 wrap
+	ld e,a                  ; dest X/low
 	pop bc
-	djnz vram_blit_tile16_run
+	djnz vram_blit_tile16_run ; B tiles
 	ret
 ; --- glyph_expand_4bpp (seg0 0x4AAC) - expand an 8x8 1bpp glyph at HL into the
 ;     32-byte 4bpp scratch tile at 0xC110.  C is the ink colour; a 0 bit becomes
@@ -1927,43 +1937,45 @@ l4aa7h:
 glyph_expand_4bpp:
 	ld b,008h              ; 8 rows
 	ld de,0c110h           ; 4bpp scratch tile
-l4ab1h:
+glyph_row:
 	push bc
 	push hl
 	ex de,hl
 	ld a,(de)
 	ld d,a                 ; D = this row's 8 source bits
 	ld b,004h              ; 4 dest bytes = 8 pixels
-l4ab8h:
+glyph_hi:
 	ld a,c                 ; ink for a set bit...
 	rl d
-	jr c,l4abeh
+	jr c,glyph_ink
 	xor a                  ; ...colour 0 for a clear bit
-l4abeh:
+glyph_ink:
 	rld                    ; push the pixel into the high nibble
 	ld a,c
 	rl d
-	jr c,l4ac6h
+	jr c,glyph_lo
 	xor a
-l4ac6h:
+glyph_lo:
 	rld                    ; and the low nibble
 	inc hl
-	djnz l4ab8h
+	djnz glyph_hi
 	ex de,hl
 	pop hl
 	inc hl
 	pop bc
-	djnz l4ab1h
+	djnz glyph_row
 	ret
+; hud_string_draw - stream at HL: (X,Y) then glyphs.  0xFF ends, 0xFE restarts
+;     at a new (X,Y).  C=0xFF keeps glyph ids; hud_string_masked blanks them.
 hud_string_draw:
-	ld c,0ffh
-	jr l4ad8h
+	ld c,0ffh               ; keep glyph ids
+	jr hud_string_at        ; shared stream reader
 hud_string_masked:
-	ld c,000h
-l4ad8h:
-	ld d,(hl)
+	ld c,000h               ; AND 0 -> blank glyphs
+hud_string_at:
+	ld d,(hl)               ; start X
 	inc hl
-	ld e,(hl)
+	ld e,(hl)               ; start Y
 	inc hl
 hud_string_glyphs:
 	ld a,(hl)              ; 0xFF end; 0xFE new (D,E); else glyph. C masks A
@@ -1974,25 +1986,27 @@ hud_string_glyphs:
 	inc b
 	jr z,hud_string_draw
 	and c
-	call hud_glyph_blit
-	ld a,d
-	add a,008h
-	ld d,a
-	jr hud_string_glyphs
+	call hud_glyph_blit     ; draw this glyph at (D,E)
+	ld a,d                  ; X
+	add a,008h              ; next cell
+	ld d,a                  ; X += 8
+	jr hud_string_glyphs    ; next stream byte
+; hud_glyph_blit - HMMM one 8x8 HUD glyph.  A = id (0 = blank).  Atlas SY is
+;     bumped by 0x38 to the font band; source page 1, dest (D,E).
 hud_glyph_blit:
 	push bc
 	push hl
 	push de
-	or a
-	ld h,a
-	jr z,l4afah
-	call tile_atlas_pos
-	add a,038h
-l4afah:
-	ld l,a
-	ld bc,00808h
-	ld a,001h
-	call vdp_hmmm
+	or a                    ; id 0 = blank cell
+	ld h,a                  ; blank path: SX = 0
+	jr z,hud_glyph_blank    ; skip atlas lookup
+	call tile_atlas_pos     ; HL = (SX,SY) in atlas
+	add a,038h              ; font band: SY += 0x38
+hud_glyph_blank:
+	ld l,a                  ; SY (0 if blank)
+	ld bc,00808h            ; 8x8
+	ld a,001h               ; src page 1
+	call vdp_hmmm           ; copy to (D,E)
 	pop de
 	pop hl
 	pop bc
@@ -2060,13 +2074,13 @@ tile_atlas_pos:
 ;     wrapping to the next row of cells (D = X, E = Y).  Shared by
 ;     glyph_blit_run and the HUD tile runs.
 blit_advance_x:
-	ld a,d
-	add a,008h
-	ld d,a
-	ret nz                 ; wrapped past X=255 -> down one cell row
-	ld a,e
-	add a,008h
-	ld e,a
+	ld a,d                  ; X
+	add a,008h              ; one 8px cell right
+	ld d,a                  ; store X
+	ret nz                  ; still on this row
+	ld a,e                  ; wrapped past X=255
+	add a,008h              ; down one cell row
+	ld e,a                  ; store Y
 	ret
 ; --- video_init - video subsystem init.  Selects SCREEN 5 (VDP mode G4:
 ;     256x212, 16 colours, 4 bits/pixel bitmap).  This is why the graphics
@@ -2096,8 +2110,8 @@ video_init:
 	call vdp_hmmv
 	call vdp_cmd_wait
 	ld b,004h
-	ld hl,l4b9ch
-l4b89h:
+	ld hl,vdp_init_regs
+vdp_init_loop:
 	push bc
 	ld c,(hl)
 	inc hl
@@ -2107,18 +2121,19 @@ l4b89h:
 	call WRTVDP
 	pop hl
 	pop bc
-	djnz l4b89h
+	djnz vdp_init_loop
 	call sat_vram_hide
 	jp vdp_screen_on
-l4b9ch:
-	ld bc,00562h
-	rst 28h
-	ld b,01fh
-	dec bc
-	ld bc,0023ah
-	ret nz
+vdp_init_regs:
+	defb 001h,062h         ; R1
+	defb 005h,0efh         ; R5 SAT
+	defb 006h,01fh         ; R6 pattern gen
+	defb 00bh,001h         ; R11 SAT high
+; play_input (0x4BA4): IRQ.  C002 bit6 clear (attract) -> scripted buttons.
+play_input:
+	ld a,(0c002h)
 	and 040h
-	jp z,l4e35h
+	jp z,attract_input
 	call read_fkeys
 	ld hl,0c00ch
 	call input_edge
@@ -2275,7 +2290,7 @@ title_build:
 	call palette_hud_load
 	ld b,003h
 	ld de,06606h
-l4d5fh:
+title_pal_step:                 ; fade palette 0x0F three times
 	ld a,00fh
 	call palette_set
 	dec e
@@ -2284,12 +2299,12 @@ l4d5fh:
 	sub 022h
 	ld d,a
 	ld hl,00800h
-l4d6dh:
+title_delay:                    ; busy-wait between palette steps
 	dec hl
 	ld a,h
 	or l
-	jr nz,l4d6dh
-	djnz l4d5fh
+	jr nz,title_delay
+	djnz title_pal_step
 	ld b,000h
 	ld c,007h
 	call WRTVDP
@@ -2370,26 +2385,26 @@ attract_tick:
 	ret z
 	call conn_lookup_paged
 	jp play_screen_redraw
-l4e35h:
+attract_input:
 	ld hl,0cf3ah
 	dec (hl)
-	jr z,l4e4dh
-l4e3bh:
+	jr z,attract_input_next
+attract_input_apply:
 	ld a,(0cf3bh)
 	cp 0ffh
-	jr z,l4e48h
+	jr z,attract_input_end
 	ld hl,btn_held
 	jp input_edge_play
-l4e48h:
+attract_input_end:
 	xor a
 	ld (stay_in_play),a
 	ret
-l4e4dh:
+attract_input_next:
 	inc hl
 	inc hl
 	ld c,(hl)
 	inc (hl)
-	ld de,l4e64h
+	ld de,attract_input_tbl
 	ld l,c
 	ld h,000h
 	add hl,hl
@@ -2399,52 +2414,35 @@ l4e4dh:
 	inc hl
 	ld a,(hl)
 	ld (0cf3bh),a
-	jr l4e3bh
-l4e64h:
-	ld d,000h
-	dec hl
-	ex af,af'
-	rlca
-	jr l4e82h
-	ex af,af'
-	ex af,af'
-	jr l4ec4h
-	ex af,af'
-	inc b
-	nop
-	djnz $+6
-	add hl,bc
-	nop
-	ld b,c
-	ld hl,02922h
-	rlca
-	add hl,sp
-	dec h
-	add hl,hl
-	ld hl,(00408h)
-	add hl,hl
-l4e82h:
-	ld c,l
-	ex af,af'
-	rrca
-	nop
-	ld a,(de)
-	inc b
-	add hl,bc
-	inc d
-	rrca
-	inc b
-	rlca
-	nop
-	ld e,(hl)
-	ex af,af'
-	ld c,000h
-	inc d
-	inc b
-	rrca
-	nop
-	ld c,h
-	ld hl,0ff01h
+	jr attract_input_apply
+attract_input_tbl:             ; (frames, sample); sample 0xFF ends the demo
+	defb 016h,000h
+	defb 02bh,008h         ; RIGHT
+	defb 007h,018h
+	defb 017h,008h
+	defb 008h,018h
+	defb 055h,008h
+	defb 004h,000h
+	defb 010h,004h         ; LEFT
+	defb 009h,000h
+	defb 041h,021h
+	defb 022h,029h
+	defb 007h,039h
+	defb 025h,029h
+	defb 02ah,008h
+	defb 004h,029h
+	defb 04dh,008h
+	defb 00fh,000h
+	defb 01ah,004h
+	defb 009h,014h
+	defb 00fh,004h
+	defb 007h,000h
+	defb 05eh,008h
+	defb 00eh,000h
+	defb 014h,004h
+	defb 00fh,000h
+	defb 04ch,021h
+	defb 001h,0ffh
 ; intro_actors_frame (seg0 0x4E9A): intro C800 tick + SAT + pattern blit.
 ; Called from state_intro while Simon walks up to the castle.
 intro_actors_frame:
@@ -2467,7 +2465,6 @@ intro_sky_go:
 	ld (ix+008h),a
 	ld (ix+007h),a
 	ld de,0ffe0h
-l4ec4h:
 	jp actor_set_xvel
 ; intro_spawn_sky_ab (seg0 0x4EC7): sky_a at (0x90,0x38) and sky_b at (0x30,0x68).
 intro_spawn_sky_ab:
@@ -2481,10 +2478,10 @@ intro_sky_ab_init:
 	ld hl,0ffe0h
 	ld de,00000h
 	bit 0,(ix+000h)
-	jr z,l4ee9h
+	jr z,intro_sky_ab_vel
 	ld hl,00020h
 	ld de,0fff0h
-l4ee9h:
+intro_sky_ab_vel:               ; Y/X vel after type-bit0 flip
 	call actor_set_yvel
 	ex de,hl
 	call actor_set_xvel
@@ -2545,9 +2542,9 @@ intro_simon_stride:
 	ld a,(ix+014h)
 	add a,090h
 	ld (ix+014h),a
-	jr nc,l4f74h
+	jr nc,intro_simon_pose
 	inc (ix+013h)
-l4f74h:
+intro_simon_pose:               ; pose from stride tbl[ix+13]
 	ld a,(ix+013h)
 	rra
 	rra
@@ -2579,22 +2576,22 @@ playfield_draw:
 	ld hl,0d140h
 	ld de,00020h
 	ld b,016h
-l4fa0h:
+playfield_row:                  ; one of 22 tile rows
 	push bc
 	ld b,020h
-l4fa3h:
+playfield_tile:                 ; one of 32 tiles in the row
 	ld a,(hl)
 	call tile_blit
 	inc hl
 	ld a,d
 	add a,008h
 	ld d,a
-	djnz l4fa3h
+	djnz playfield_tile
 	pop bc
 	ld a,e
 	add a,008h
 	ld e,a
-	djnz l4fa0h
+	djnz playfield_row
 	ret
 ; --- room_map_build (0x4fb6) - expand a room's metatiles into the 0xD100 map -
 ;  In: HL = dest (0xD100), B = world row (0xD000), C = column (0xD001).
@@ -2631,7 +2628,7 @@ room_map_build:
 	ld a,(flag_intro_map)
 	ld hl,mtile_stream_intro
 	and a
-	jr nz,l4ff7h
+	jr nz,map_stream
 	ld a,(0c5d8h)
 	ld hl,mtile_rowbase
 	call ADD_HL_A
@@ -2647,13 +2644,13 @@ room_map_build:
 	inc hl
 	ld d,(hl)
 	ex de,hl
-l4ff7h:
+map_stream:
 	ld de,(0c5d5h)
 	ld a,006h
-l4ffdh:
+map_row:
 	ex af,af'
 	ld b,008h
-l5000h:
+map_cell:
 	ld a,(hl)
 	push de
 	exx
@@ -2661,7 +2658,7 @@ l5000h:
 	ld a,(flag_intro_map)
 	and a
 	ld bc,mtile_def_intro
-	jr nz,l501ah
+	jr nz,map_defs
 	ld a,(0c5d8h)
 	add a,a
 	ld hl,mtile_defbase
@@ -2669,7 +2666,7 @@ l5000h:
 	ld c,(hl)
 	inc hl
 	ld b,(hl)
-l501ah:
+map_defs:
 	pop af
 	ld h,000h
 	ld l,a
@@ -2711,14 +2708,14 @@ l501ah:
 	inc e
 	inc e
 	inc de
-	djnz l5000h
+	djnz map_cell
 	ex de,hl
 	ld bc,00060h
 	add hl,bc
 	ex de,hl
 	ex af,af'
 	dec a
-	jp nz,l4ffdh
+	jp nz,map_row
 	di
 	push hl
 	ld hl,0f0f1h
@@ -2769,93 +2766,93 @@ play_sound:
 	push bc
 	push af
 	di
-	ld a,00eh
-	ld (08000h),a
-	ld (0f0f2h),a
+	ld a,00eh               ; sound banks
+	ld (08000h),a           ; page 2a = bank 0x0E
+	ld (0f0f2h),a           ; shadow
 	ei
 	di
-	ld a,00fh
-	ld (0a000h),a
-	ld (0f0f3h),a
+	ld a,00fh               ; bank 0x0F
+	ld (0a000h),a           ; page 2b
+	ld (0f0f3h),a           ; shadow
 	ei
 	pop af
 	di
-	or a
-	jp z,play_sound_stop
-	cp sound_fb
-	jp nc,play_sound_special
-	or a
-	jp p,play_sound_sfx
-	ld de,0c01ch
-	ld hl,sound_ch_template
-	ld bc,00014h
-	ldir
-	ld hl,sound_ch_template
-	ld bc,00014h
-	ldir
-	ld hl,sound_ch_template
-	ld bc,00014h
-	ldir
-	and 07fh
-	rlca
-	ld e,a
-	rlca
-	add a,e
-	ld hl,music_ptr
-	add a,l
-	ld l,a
-	jr nc,l50f6h
-	inc h
-l50f6h:
+	or a                    ; id 0 = stop
+	jp z,play_sound_stop    ; halt + restore pages
+	cp sound_fb             ; 0xFB..0xFF overlays/fade
+	jp nc,play_sound_special ; FB/FC/FD/FE/FF
+	or a                    ; bit7 clear?
+	jp p,play_sound_sfx     ; 1..0x7F = sfx
+	ld de,0c01ch            ; music ch A block
+	ld hl,sound_ch_template ; 20-byte channel init
+	ld bc,00014h            ; one channel
+	ldir                    ; copy onto A
+	ld hl,sound_ch_template ; same template
+	ld bc,00014h            ; one channel
+	ldir                    ; copy onto B
+	ld hl,sound_ch_template ; same template
+	ld bc,00014h            ; one channel
+	ldir                    ; copy onto C
+	and 07fh                ; music index 0..0x0F
+	rlca                    ; index * 2
+	ld e,a                  ; stash *2
+	rlca                    ; index * 4
+	add a,e                 ; index * 6 (3 words)
+	ld hl,music_ptr         ; phrase-ptr table
+	add a,l                 ; HL -> record
+	ld l,a                  ; low byte
+	jr nc,music_ptr_ok      ; no page wrap
+	inc h                   ; HL wrapped
+music_ptr_ok:                   ; after HL wrap; load phrase ptrs
 	ld e,(hl)
 	inc hl
-	ld d,(hl)
+	ld d,(hl)               ; ch A phrase ptr
 	inc hl
-	ld (0c01ch),de
-	ld e,(hl)
+	ld (0c01ch),de          ; channel A stream
+	ld e,(hl)               ; ch B lo
 	inc hl
-	ld d,(hl)
+	ld d,(hl)               ; ch B hi
 	inc hl
-	ld (0c030h),de
-	ld e,(hl)
+	ld (0c030h),de          ; channel B stream
+	ld e,(hl)               ; ch C lo
 	inc hl
-	ld d,(hl)
-	ld (0c044h),de
-	ld hl,sound_ch_a
-	ld (0c010h),hl
-	ld hl,sound_ch_b
-	ld (0c012h),hl
-	ld hl,sound_ch_c
-	ld (0c014h),hl
-	xor a
-	ld (0c096h),a
-	ld hl,sound_nop
-	ld (0c016h),hl
-	ld a,(0c098h)
-	and 0fdh
-	ld (0c098h),a
+	ld d,(hl)               ; ch C hi
+	ld (0c044h),de          ; channel C stream
+	ld hl,sound_ch_a        ; tick: music A
+	ld (0c010h),hl          ; slot 0
+	ld hl,sound_ch_b        ; tick: music B
+	ld (0c012h),hl          ; slot 1
+	ld hl,sound_ch_c        ; tick: music C
+	ld (0c014h),hl          ; slot 2
+	xor a                   ; no sfx id
+	ld (0c096h),a           ; sfx priority/id
+	ld hl,sound_nop         ; no sfx tick
+	ld (0c016h),hl          ; sfx slot
+	ld a,(0c098h)           ; overlay flags
+	and 0fdh                ; clear FB overlay bit
+	ld (0c098h),a           ; keep FD bit
 play_sound_clear:
-	xor a
-	ld (0c0a5h),a
-	ld (0c0a6h),a
-	ld (0c0a8h),a
-	ld a,007h
-	ld (0c0a7h),a
+	xor a                   ; clear fade/lock
+	ld (0c0a5h),a           ; fade timer
+	ld (0c0a6h),a           ; fade shadow
+	ld (0c0a8h),a           ; sfx lock
+	ld a,007h               ; bits 0-2 = music A/B/C live
+	ld (0c0a7h),a           ; channel-live mask
 play_sound_exit:
 	di
 	push hl
-	ld hl,0f0f1h
-	ld a,001h
-	ld (entity_tbl_end),a
-	ld (hl),a
-	inc a
-	ld (08000h),a
+	ld hl,0f0f1h            ; page shadows
+	ld a,001h               ; play banks 1/2/3
+	ld (entity_tbl_end),a   ; page 1b = bank 1
+	ld (hl),a               ; shadow 0xF0F1
+	inc a                   ; bank 2
+	ld (08000h),a           ; page 2a
 	inc hl
-	ld (hl),a
-	inc a
-	ld (0a000h),a
+	ld (hl),a               ; shadow 0xF0F2
+	inc a                   ; bank 3
+	ld (0a000h),a           ; page 2b
 	inc hl
-	ld (hl),a
+	ld (hl),a               ; shadow 0xF0F3
 	pop hl
 	ei
 	pop bc
@@ -2878,49 +2875,49 @@ sound_ch_template:
 	nop
 	nop
 play_sound_sfx:
-	ld c,a
-	ld a,(0c0a8h)
-	or a
-	jp nz,play_sound_exit
-	ld a,(0c096h)
-	cp c
-	jp z,play_sound_sfx_go
-	jp nc,play_sound_exit
+	ld c,a                  ; requested sfx id
+	ld a,(0c0a8h)           ; sfx lock
+	or a                    ; locked?
+	jp nz,play_sound_exit   ; reject
+	ld a,(0c096h)           ; current sfx id
+	cp c                    ; current id vs new
+	jp z,play_sound_sfx_go  ; retrigger same id
+	jp nc,play_sound_exit   ; current >= new: keep current
 play_sound_sfx_go:
-	ld a,c
-	ld (0c096h),a
-	ld de,0c058h
-	ld hl,sound_ch_template
-	ld bc,00014h
-	ldir
-	rlca
-	ld hl,sfx_ptr
-	add a,l
-	ld l,a
-	jr nc,l519bh
-	inc h
-l519bh:
-	ld e,(hl)
+	ld a,c                  ; new id
+	ld (0c096h),a           ; current sfx
+	ld de,0c058h            ; sfx channel block
+	ld hl,sound_ch_template ; 20-byte init
+	ld bc,00014h            ; one channel
+	ldir                    ; copy onto C058
+	rlca                    ; id * 2
+	ld hl,sfx_ptr           ; word table
+	add a,l                 ; HL -> ptr
+	ld l,a                  ; low byte
+	jr nc,sfx_ptr_ok        ; no wrap
+	inc h                   ; HL wrapped
+sfx_ptr_ok:                     ; after HL wrap; load sfx stream
+	ld e,(hl)               ; stream lo
 	inc hl
-	ld d,(hl)
-	ld (0c064h),de
-	ld hl,sound_sfx
-	ld (0c016h),hl
-	jp play_sound_exit
+	ld d,(hl)               ; stream hi
+	ld (0c064h),de          ; sfx phrase ptr
+	ld hl,sound_sfx         ; sfx tick
+	ld (0c016h),hl          ; arm sfx slot
+	jp play_sound_exit      ; restore play banks
 play_sound_stop:
-	call sound_halt
-	jp play_sound_exit
+	call sound_halt         ; silence PSG
+	jp play_sound_exit      ; restore play banks
 play_sound_special:
-	jp z,play_sound_fb
-	cp sound_fc
-	jp z,play_sound_fc
-	cp sound_fd
-	jp z,play_sound_fd
-	cp sound_fe
-	jp z,play_sound_fe
-	ld a,03ah
-	ld (0c0a5h),a
-	jp play_sound_exit
+	jp z,play_sound_fb      ; 0xFB overlay
+	cp sound_fc             ; 0xFC restore FB
+	jp z,play_sound_fc      ; restore FB overlay
+	cp sound_fd             ; 0xFD overlay
+	jp z,play_sound_fd      ; start FD overlay
+	cp sound_fe             ; 0xFE restore FD
+	jp z,play_sound_fe      ; restore FD overlay
+	ld a,03ah               ; 0xFF: fade length
+	ld (0c0a5h),a           ; fade timer
+	jp play_sound_exit      ; restore play banks
 play_sound_fd:
 	ld a,(0c098h)
 	or 001h
@@ -3000,13 +2997,13 @@ play_sound_fb:
 	ld (0c0a1h),a
 	ld a,(0c096h)
 	or a
-	jp nz,l5297h
+	jp nz,snd_fb_mix
 	ld a,0bfh
-	jp l529ch
-l5297h:
+	jp snd_fb_write
+snd_fb_mix:                     ; OR mixer 0x1B onto C097
 	ld a,(0c097h)
 	or 01bh
-l529ch:
+snd_fb_write:                   ; stash mixer; snapshot PSG
 	ld (0c097h),a
 	xor a
 	call RDPSG
@@ -3033,7 +3030,7 @@ play_sound_fc:
 	ld a,(0c096h)
 	or a
 	ld a,(0c0a1h)
-	jp z,l52f0h
+	jp z,snd_fc_write
 	ld b,a
 	ld a,(0c097h)
 	or 0dbh
@@ -3042,7 +3039,7 @@ play_sound_fc:
 	ld a,(0c097h)
 	and 024h
 	or b
-l52f0h:
+snd_fc_write:                   ; restore mixer C097; write PSG
 	ld (0c097h),a
 	ld a,(0c0a2h)
 	ld e,a
@@ -3118,18 +3115,18 @@ page_sound_banks:
 ;     like 0xA319 read after this call therefore live in segment 13.
 page_map_banks:
 	di
-	ld hl,0f0f1h
-	ld a,00bh               ; seg 11 -> page 1b (0x6000)
-	ld (entity_tbl_end),a
-	ld (hl),a
-	inc l
-	inc a
-	ld (08000h),a
-	ld (hl),a
-	inc l
-	inc a
-	ld (0a000h),a
-	ld (hl),a
+	ld hl,0f0f1h            ; page shadows
+	ld a,00bh               ; bank 11 -> page 1b (0x6000)
+	ld (entity_tbl_end),a   ; mapper 0x6000
+	ld (hl),a               ; shadow 0xF0F1
+	inc l                   ; 0xF0F2
+	inc a                   ; bank 12
+	ld (08000h),a           ; page 2a
+	ld (hl),a               ; shadow
+	inc l                   ; 0xF0F3
+	inc a                   ; bank 13
+	ld (0a000h),a           ; page 2b
+	ld (hl),a               ; shadow
 	ei
 	ret
 ; --- page_title_banks - page in the front-end/title graphics bank set: seg 9 @ 0x8000
@@ -3137,14 +3134,14 @@ page_map_banks:
 ;     like 0xA0EA read after this call live in segment 10.
 page_title_banks:
 	di
-	ld hl,0f0f2h
-	ld a,009h               ; seg 9 -> page 2a (0x8000)
-	ld (08000h),a
-	ld (hl),a
-	inc l
-	inc a
-	ld (0a000h),a
-	ld (hl),a
+	ld hl,0f0f2h            ; shadows for 0x8000/0xA000
+	ld a,009h               ; bank 9 -> page 2a (0x8000)
+	ld (08000h),a           ; mapper
+	ld (hl),a               ; shadow 0xF0F2
+	inc l                   ; 0xF0F3
+	inc a                   ; bank 10
+	ld (0a000h),a           ; page 2b
+	ld (hl),a               ; shadow
 	ei
 	ret
 page_tileset_late:
@@ -3224,7 +3221,7 @@ door_blit_tiles:
 	ld de,(door_y)         ; E = door Y (0xC5AD), D = door X (0xC5AE)
 	ld hl,door_tile_ptr
 	ld b,006h              ; 6 stacked 8x8 tiles
-l540eh:
+door_blit_tile:                 ; one of 6 stacked 8x8 door tiles
 	push bc
 	push de
 	push hl
@@ -3243,7 +3240,7 @@ l540eh:
 	add a,008h             ; next tile 8px down (Y)
 	ld e,a
 	pop bc
-	djnz l540eh
+	djnz door_blit_tile
 	ret
 ; --- door graphic (0x5428-0x5493) -------------------------------------------
 ;  door_blit_tiles (0x5403) walks door_tile_ptr as 6 words, HMMC'ing each 8x8
@@ -3303,7 +3300,7 @@ hud_cache_load:
 	call vdp_hmmc
 	ld de,08074h           ; bar+spike unit tiled x4 -> X=128..159, Y=116
 	ld b,004h
-l54c0h:
+hud_spike_copy:                 ; tile spike graphic x4 on page 1
 	push bc
 	push de
 	ld hl,spike
@@ -3315,7 +3312,7 @@ l54c0h:
 	ld a,d
 	add a,008h
 	ld d,a
-	djnz l54c0h
+	djnz hud_spike_copy
 	call page_tileset_banks         ; seg 6 @ 0xA000 for the next copy
 	ld hl,hud_weapon_key_tiles  ; bonus 0x17-0x1E: keys, chest, weapons, holy
 	ld de,0b030h           ; VRAM page 1 Y=0x60 X=96
@@ -3337,7 +3334,7 @@ vendor_cache_load:
 	ld ix,vendor_recolor_tbl
 	ld de,stage           ; VRAM page 1 Y=0xA0 X=0
 	ld b,005h
-l5500h:
+vendor_cache_slot:              ; one of 5 recolored 32x32s
 	push bc
 	push de
 	call vendor_recolor_copy
@@ -3347,7 +3344,7 @@ l5500h:
 	call ADD_DE_A          ; next variant 32px to the right
 	pop bc
 	inc ix
-	djnz l5500h
+	djnz vendor_cache_slot
 	ret
 ; vendor_recolor_copy (0x5514): 256 bytes vendor_tiles -> 0xE800, swapping
 ; each 0xF nibble for (ix+0)&0xF; then 32 zero bytes at 0xE900 (empty tile).
@@ -3356,7 +3353,7 @@ vendor_recolor_copy:
 	ld de,0e800h
 	ld hl,vendor_tiles
 	ld b,000h              ; 256 bytes
-l551dh:
+vendor_recolor_pix:
 	push bc
 	ld a,(hl)
 	inc hl
@@ -3367,9 +3364,9 @@ l551dh:
 	rrca
 	and 00fh
 	cp 00fh
-	jr nz,l552eh
+	jr nz,vendor_recolor_hi
 	and (ix+000h)
-l552eh:
+vendor_recolor_hi:
 	add a,a
 	add a,a
 	add a,a
@@ -3378,14 +3375,14 @@ l552eh:
 	ld a,b
 	and 00fh
 	cp 00fh
-	jr nz,l553dh
+	jr nz,vendor_recolor_lo
 	and (ix+000h)
-l553dh:
+vendor_recolor_lo:
 	or c
 	ld (de),a
 	inc de
 	pop bc
-	djnz l551dh
+	djnz vendor_recolor_pix
 	xor a
 	ld (de),a
 	ld h,d
@@ -3399,11 +3396,11 @@ l553dh:
 vendor_blit_32:
 	ld hl,vendor_tile_ptr
 	ld b,004h
-l5554h:
+vendor_blit_row:                ; one of 4 tile rows
 	push bc
 	push de
 	ld b,004h
-l5558h:
+vendor_blit_tile:               ; one of 4 tiles in the row
 	push bc
 	push hl
 	ld a,(hl)
@@ -3417,13 +3414,13 @@ l5558h:
 	inc hl
 	inc hl
 	pop bc
-	djnz l5558h
+	djnz vendor_blit_tile
 	pop de
 	ld a,d
 	add a,004h
 	ld d,a
 	pop bc
-	djnz l5554h
+	djnz vendor_blit_row
 	ret
 ; vendor_tile_ptr (0x5575): 4x4 source words in the 0xE800 scratch (row-major).
 ; 0xE900 is the zero tile; 0xE800+n*0x20 are vendor_tiles 0..7.  Empty top
@@ -3446,9 +3443,9 @@ load_weapon_sprites:
 	call page_title_banks          ; page seg 9/10 (front-end gfx)
 	ld a,(weapon_id)
 	cp 005h
-	jr z,l55dbh
+	jr z,weapon_cvt_done
 	dec a
-	jr z,l55dbh            ; chain whip: Simon's own cell, not this table
+	jr z,weapon_cvt_done            ; chain whip: Simon's own cell, not this table
 	dec a
 	add a,a                 ; word[C416-2]
 	ld hl,weapon_sprite_ptr
@@ -3460,20 +3457,20 @@ load_weapon_sprites:
 	call rle_dec
 	ld a,(weapon_id)
 	cp equip_cross
-	jr z,l55cfh
+	jr z,weapon_cvt_boom
 	cp equip_axe
-	jr z,l55cfh
+	jr z,weapon_cvt_boom
 	cp equip_knife
-	jr nz,l55dbh
+	jr nz,weapon_cvt_done
 	ld hl,weapon_cvt_knife
 	call gfx_script_convert
-	jr l55dbh
-l55cfh:
+	jr weapon_cvt_done
+weapon_cvt_boom:                ; axe/cross: two gfx_script_convert
 	ld hl,weapon_cvt_boomerang
 	call gfx_script_convert
 	ld hl,weapon_cvt_boomerang2
 	call gfx_script_convert
-l55dbh:
+weapon_cvt_done:                ; restore play banks
 	jp page_play_banks            ; restore default game banks
 weapon_sprite_ptr:             ; (seg0 0x55DE) word[C416-2] -> seg10 RLE
 	defw weapon_knife      ; 2 knife
@@ -3495,14 +3492,14 @@ load_vdoor_sprites:
 	call page_play_banks
 	ld hl,0d600h
 	ld bc,00808h
-l5608h:
+vdoor_sat_cell:                 ; one of 8 door SAT records
 	ld de,door_y           ; door pixel Y,X (same order as VDP SAT: Y then X)
 	ld a,b
 	cp 005h
 	ld a,(de)              ; A = door Y (0xC5AD)
-	jr nc,l5613h
+	jr nc,vdoor_sat_y
 	add a,010h
-l5613h:
+vdoor_sat_y:                    ; SAT Y = door Y, +0x10 if B<5
 	dec a
 	ld (hl),a              ; SAT Y
 	inc hl
@@ -3518,7 +3515,7 @@ l5613h:
 	inc c
 	inc hl
 	inc hl
-	djnz l5608h
+	djnz vdoor_sat_cell
 	ld hl,0d400h
 	ld c,00ch
 	call sat_color_fill
@@ -3536,13 +3533,13 @@ sat_color_fill:
 	ld a,040h
 	call ADD_DE_A
 	ld b,010h
-l564bh:
+sat_color_byte:                 ; write C to HL and HL+0x40
 	ld a,c
 	ld (hl),a
 	ld (de),a
 	inc hl
 	inc de
-	djnz l564bh
+	djnz sat_color_byte
 	ret
 ; ---------------------------------------------------------------------------
 ;  load_stage_tileset (seg0 0x5653) - page tileset banks and blit 0xBF 8x8
@@ -3660,10 +3657,10 @@ stage_palette_load:
 ;     from hud_fixed_palette (seg10 0xBF88).  Stage palettes (stage_palette_ptr)
 ;     never overwrite these.
 palette_hud_load:
-	call page_title_banks
-	ld hl,hud_fixed_palette
-	call palette_apply
-	jp page_play_banks
+	call page_title_banks   ; palette lives in bank 10
+	ld hl,hud_fixed_palette ; 8 fixed HUD colours
+	call palette_apply      ; write them
+	jp page_play_banks      ; restore 1/2/3
 ; intro_palette_load (seg0 0x573A) - HUD-fixed colours, then intro_palette
 ;  (0xBFA1) over indices 4-13 (including 8 and 12).  Night/garden colours;
 ;  title_extra_palette is the wrong table for these tiles.
@@ -3717,7 +3714,7 @@ room_gfx_load:
 	ld hl,room_gfx_ptr      ; word[stage-1] -> {script, pal}
 	ld a,(stage)
 	or a
-	jr z,l57b8h
+	jr z,room_gfx_done
 	dec a
 	add a,a
 	call ADD_HL_A
@@ -3742,13 +3739,15 @@ room_gfx_load:
 	ld h,(hl)
 	ld l,a
 	call palette_apply
-l57b8h:
+room_gfx_done:
 	jp page_play_banks
+frontend_gfx_load:
 	call page_title_banks
 	ld hl,gfx_script_9fed
-l57c1h:
+frontend_gfx_run:
 	call gfx_script_run
 	jp page_play_banks
+boss_orb_gfx_load:
 	call page_title_banks
 	ld hl,0fa00h
 	ld de,gfx_rle_b0aa
@@ -3756,9 +3755,9 @@ l57c1h:
 	ld a,(stage)
 	sub 003h
 	ld hl,0a01ah
-	jr z,l57e0h
+	jr z,boss_orb_pal
 	ld hl,0a021h
-l57e0h:
+boss_orb_pal:
 	call palette_apply
 	jp page_play_banks
 ; dracula_body_load (seg0 0x57E6) - event-6 figure Dracula 32x32 frames.
@@ -3788,40 +3787,40 @@ dracula_body_load:
 ; dracula_body_vram (0x5816): 32 rows x 16 bytes (32px 4bpp) from 0xE800
 ; to VRAM DE (SCREEN 5 linear: 0xC000 = page-1 Y=0x80 X=0).
 dracula_body_vram:
-	ld b,020h
-	ld hl,0e800h
-l581bh:
+	ld b,020h               ; 32 rows
+	ld hl,0e800h            ; unpacked body in RAM
+body_vram_row:                  ; one of 32 body rows to VRAM
 	push bc
 	push de
 	push hl
-	ld bc,00010h
-	call vram_write
+	ld bc,00010h            ; 16 bytes = 32px at 4bpp
+	call vram_write         ; one scanline to DE
 	pop hl
 	pop de
 	pop bc
-	ld a,010h
-	call ADD_HL_A
-	ld a,080h
-	call ADD_DE_A
-	djnz l581bh
+	ld a,010h               ; next source row
+	call ADD_HL_A           ; HL += 16
+	ld a,080h               ; SCREEN 5 stride
+	call ADD_DE_A           ; DE += 128
+	djnz body_vram_row      ; 32 rows
 	ret
 ; dracula_body_unpack (0x5834): 32 rows into 0xE800.  First byte N is the
 ; count of leading 0s; then copy (12-N) payload bytes; then 4 trailing 0s.
 dracula_body_unpack:
 	ld b,020h
 	ld de,0e800h
-l5839h:
+body_row:
 	push bc
 	ld a,(hl)
 	and a
-	jr z,l5844h
+	jr z,body_copy
 	ld b,a
 	xor a
-l5840h:
+body_zeros:
 	ld (de),a
 	inc de
-	djnz l5840h
-l5844h:
+	djnz body_zeros
+body_copy:
 	ld a,00ch
 	sub (hl)
 	inc hl
@@ -3830,12 +3829,12 @@ l5844h:
 	ldir
 	xor a
 	ld b,004h
-l5850h:
+body_pad:
 	ld (de),a
 	inc de
-	djnz l5850h
+	djnz body_pad
 	pop bc
-	djnz l5839h
+	djnz body_row
 	ret
 ; dracula_body_hflip (0x5858): H-mirror the 32x32 at 0xE800 in place
 ; (nibble-swap via nibble_hflip, also used to H-mirror portrait 16x16s).
@@ -3843,7 +3842,7 @@ dracula_body_hflip:
 	ld hl,0e800h
 	ld de,0e80fh
 	ld c,020h
-l5860h:
+body_hflip_row:                 ; one of 32 rows nibble-swap
 	ld b,008h
 	call nibble_hflip
 	ld a,008h
@@ -3851,7 +3850,7 @@ l5860h:
 	ld a,018h
 	call ADD_DE_A
 	dec c
-	jr nz,l5860h
+	jr nz,body_hflip_row
 	ret
 nibble_hflip:
 	ex af,af'
@@ -3950,7 +3949,7 @@ tile8_hflip:
 	ld hl,0e800h
 	ld de,0e803h
 	ld c,008h
-l5921h:
+tile8_hflip_row:                ; one of 8 rows nibble-swap
 	ld b,002h
 	call nibble_hflip
 	inc hl
@@ -3958,7 +3957,7 @@ l5921h:
 	ld a,006h
 	call ADD_DE_A
 	dec c
-	jr nz,l5921h
+	jr nz,tile8_hflip_row
 	ret
 dracula_portrait_vflip:
 	ld hl,08048h
@@ -4000,7 +3999,7 @@ tile8_vflip_blit:
 	push de
 	ld de,0e818h
 	ld b,008h
-l5976h:
+tile8_vflip_row:                ; read one row, dest E -= 8
 	push bc
 	ld bc,00004h
 	call vram_read
@@ -4010,7 +4009,7 @@ l5976h:
 	ld a,080h
 	call ADD_HL_A
 	pop bc
-	djnz l5976h
+	djnz tile8_vflip_row
 	pop de
 	ld hl,0e800h
 	ld b,001h
@@ -4024,7 +4023,7 @@ dracula_portrait_parts_mirror:
 	ld b,004h
 	ld hl,dracula_portrait_parts_hi
 	ld de,0d040h
-l59a5h:
+portrait_hflip_cell:            ; hflip one 16x16 mouth tile
 	push bc
 	push de
 	push hl
@@ -4037,14 +4036,14 @@ l59a5h:
 	add a,008h
 	and 07fh
 	ld e,a
-	jr nz,l59bfh
+	jr nz,portrait_hflip_next
 	ld a,d
 	add a,008h
 	and 0f8h
 	ld d,a
-l59bfh:
+portrait_hflip_next:            ; next cell; wrap X then Y
 	pop bc
-	djnz l59a5h
+	djnz portrait_hflip_cell
 	ret
 tile16_hflip_blit:
 	push de
@@ -4060,7 +4059,7 @@ tile16_hflip:
 	ld hl,0e800h
 	ld de,0e807h
 	ld c,010h
-l59e0h:
+tile16_hflip_row:               ; one of 16 rows nibble-swap
 	ld b,004h
 	call nibble_hflip
 	ld a,004h
@@ -4068,7 +4067,7 @@ l59e0h:
 	ld a,00ch
 	call ADD_DE_A
 	dec c
-	jr nz,l59e0h
+	jr nz,tile16_hflip_row
 	ret
 ; ---------------------------------------------------------------------------
 ;  dracula_portrait_palette (seg0 0x59F3) - event-6 palette.  HUD-fixed
@@ -4143,33 +4142,33 @@ scenery_unpack:                ; 0x5A63
 	call page_sound_banks         ; page seg14/15
 	call scenery_list_lookup
 	ld de,0e000h           ; dest: 16 room slots of 0x18 bytes per stage
-l5a6ch:
+scenery_unpack_stage:
 	push de                ; save stage base
-l5a6dh:
+scenery_unpack_room:
 	push de                ; save room base
-l5a6eh:
+scenery_unpack_item:
 	ld a,(hl)
 	or a
-	jr z,l5a9ah            ; 0x00 = end hub
+	jr z,scenery_unpack_done            ; 0x00 = end hub
 	inc a
-	jr z,l5a8eh            ; 0xFF = next stage
+	jr z,scenery_unpack_next_stage            ; 0xFF = next stage
 	inc a
-	jr z,l5a85h            ; 0xFE = next room
+	jr z,scenery_unpack_next_room            ; 0xFE = next room
 	ldi                    ; copy pos
 	ld a,(hl)
 	ldi                    ; copy attr
 	cp 07fh
-	jr nz,l5a83h
+	jr nz,scenery_unpack_next
 	ldi                    ; attr 0x7F: copy reveal byte
-l5a83h:
-	jr l5a6eh
-l5a85h:
+scenery_unpack_next:
+	jr scenery_unpack_item
+scenery_unpack_next_room:
 	pop de
 	ld a,018h              ; next 24-byte room slot
 	call ADD_DE_A
 	inc hl
-	jr l5a6dh
-l5a8eh:
+	jr scenery_unpack_room
+scenery_unpack_next_stage:
 	pop de
 	pop de
 	push hl
@@ -4178,8 +4177,8 @@ l5a8eh:
 	ex de,hl
 	pop hl
 	inc hl
-	jr l5a6ch
-l5a9ah:
+	jr scenery_unpack_stage
+scenery_unpack_done:
 	pop de
 	pop de
 	jp page_play_banks           ; restore banks
@@ -4207,7 +4206,7 @@ scenery_vendor_index:
 	pop de
 	ld hl,0e000h           ; walk unpacked scenery, one 0x18-byte room per iter
 	ld b,030h
-l5acah:
+scenery_vendor_room:            ; compact vendors for one room
 	push bc
 	push hl
 	push de
@@ -4220,22 +4219,22 @@ l5acah:
 	ld c,018h
 	add hl,bc
 	pop bc
-	djnz l5acah
+	djnz scenery_vendor_room
 	ret
 ; scenery_vendors_compact (seg0 0x5ADE): one 24-byte E000 room -> up to 2
 ; vendor offer ids in DE00. Attr bits7-6=11, or 0x7F covering walls.
 scenery_vendors_compact:
 	ld bc,00802h
-l5ae1h:
+vendors_try:
 	inc hl
 	ld a,(hl)
 	and 0e0h
 	cp 060h
-	jr z,l5b07h
-l5ae9h:
+	jr z,vendors_cover
+vendors_offer:
 	and 0c0h
 	cp 0c0h
-	jr nz,l5b03h
+	jr nz,vendors_next
 	ld a,(hl)
 	push bc
 	push hl
@@ -4250,18 +4249,18 @@ l5ae9h:
 	pop bc
 	dec c
 	ret z
-l5b03h:
+vendors_next:
 	inc hl
-	djnz l5ae1h
+	djnz vendors_try
 	ret
-l5b07h:
+vendors_cover:
 	ld a,(hl)
 	and 01fh
 	cp 01fh
-	jr nz,l5b03h
+	jr nz,vendors_next
 	inc hl
 	ld a,(hl)
-	jr l5ae9h
+	jr vendors_offer
 ; vendor_offer_id (seg0 0x5B12) - vendor attr bits5-2 -> bonus id.
 ; Walked by the 0xDE00 compact (scenery_vendor_index). Trailing zeros unused.
 vendor_offer_id:
@@ -4286,19 +4285,19 @@ scenery_room_load:
 	ld de,scenery_slots
 scenery_slots_fill:            ; (0x5B28) caller DE = dest (C470 play / EB00 map)
 	ld b,008h
-l5b2ah:
+scenery_slot_try:
 	ld a,(hl)
 	inc hl
 	or a
-	jr z,l5b83h
+	jr z,scenery_slot_skip
 	push bc
 	push hl
 	push de
 	ld a,(hl)
 	and 0e0h
-	jr z,l5b8fh
+	jr z,scenery_slot_floor
 	bit 7,(hl)
-	jr nz,l5bach           ; chest / vendor (0x7F has bit7 clear -> wall)
+	jr nz,scenery_slot_chest           ; chest / vendor (0x7F has bit7 clear -> wall)
 	dec hl
 	ld a,001h
 	ld (de),a              ; +00 = 1 (first tick stamps tiles)
@@ -4323,12 +4322,12 @@ l5b2ah:
 	rlca
 	and 007h               ; attr bits7-5
 	dec a
-	jr nz,l5b61h           ; 001 -> 0 (candle); 010 -> 1; 011 -> 2
+	jr nz,scenery_slot_kind           ; 001 -> 0 (candle); 010 -> 1; 011 -> 2
 	ld a,(stage)
 	or a
-	jr z,l5b61h            ; courtyard candle: kind 1
+	jr z,scenery_slot_kind            ; courtyard candle: kind 1
 	ld a,0ffh              ; castle candle: kind 0
-l5b61h:
+scenery_slot_kind:
 	inc a
 	ld (de),a              ; +04 kind: 0/1 candle, 2 = 16x16, 3 = 32x32
 	inc e
@@ -4349,33 +4348,33 @@ l5b61h:
 	inc e
 	ex af,af'
 	cp 01fh
-	jr nz,l5b7ch
+	jr nz,scenery_slot_advance
 	inc hl
 	ldi                    ; +09 reveal byte (attr 0x7F)
-l5b7ch:
+scenery_slot_advance:
 	pop de
 	ld a,e
 	add a,010h
 	ld e,a
 	pop hl
 	pop bc
-l5b83h:
+scenery_slot_skip:
 	ld a,(hl)
 	inc hl
 	and 01fh
 	cp 01fh
-	jr nz,l5b8ch
+	jr nz,scenery_slot_djnz
 	inc hl
-l5b8ch:
-	djnz l5b2ah
+scenery_slot_djnz:
+	djnz scenery_slot_try
 	ret
-l5b8fh:
+scenery_slot_floor:
 	ld a,(0cf38h)
 	and a
-	jr nz,l5b7ch
+	jr nz,scenery_slot_advance
 	call scenery_item_xy
-	call 08a04h
-	jr l5b7ch
+	call white_key_spawn
+	jr scenery_slot_advance
 scenery_item_xy:
 	dec l
 	push hl
@@ -4389,16 +4388,16 @@ scenery_item_xy:
 	ld b,a
 	pop hl
 	ret
-l5bach:
+scenery_slot_chest:
 	ld a,(0cf38h)
 	and a
-	jr nz,l5b7ch
+	jr nz,scenery_slot_advance
 	bit 6,(hl)
-	jr nz,l5bbeh
+	jr nz,scenery_slot_vendor
 	call scenery_item_xy
-	call 08a1ah
-	jr l5b7ch
-l5bbeh:
+	call pickup_spawn_chest
+	jr scenery_slot_advance
+scenery_slot_vendor:
 	push hl
 	pop ix
 	call scenery_item_xy
@@ -4411,8 +4410,8 @@ l5bbeh:
 	ld a,c
 	and 003h
 	ld c,a
-	call 09180h
-	jr l5b7ch
+	call vendor_spawn
+	jr scenery_slot_advance
 ; scenery_room_ptr (seg0 0x5BD6) - HL -> this room's 24-byte slot in 0xE000.
 ; Stage 0 is slot 0; else scenery_stage_ofs[D000-1]<<4 + D001*24.
 scenery_room_ptr:
@@ -4424,7 +4423,7 @@ scenery_room_ptr_a:            ; (0x5BD9) A already = room index
 	ld de,00000h
 	ld a,(stage)
 	or a
-	jr z,l5bf5h
+	jr z,scenery_ptr_base
 	dec a
 	ld hl,scenery_stage_ofs
 	call ADD_HL_A
@@ -4435,7 +4434,7 @@ scenery_room_ptr_a:            ; (0x5BD9) A already = room index
 	add hl,hl
 	add hl,hl
 	ex de,hl
-l5bf5h:
+scenery_ptr_base:               ; E000 + stage ofs + room*0x18
 	ld hl,0e000h
 	add hl,de
 	ex de,hl
@@ -4489,14 +4488,14 @@ play_tick:
 	ld a,(0cf38h)
 	and a
 	ret nz
-l5c41h:
+play_tick_live:
 	ld a,(0c002h)
-l5c44h:
+play_tick_c002:
 	and 040h
-	jr z,l5c63h
+	jr z,play_tick_frame
 	ld a,(0c00bh)
 	rra
-	jr nc,l5c63h
+	jr nc,play_tick_frame
 	ld a,(cell_event)
 	cp evt_dracula
 	call z,dracula_blit_torso
@@ -4505,7 +4504,7 @@ l5c44h:
 	call load_simon_sprites
 	ld a,sound_fd              ; pause BGM
 	jp play_sound
-l5c63h:
+play_tick_frame:
 	call load_simon_sprites
 	call player_tick
 	call simon_sat_build
@@ -4541,37 +4540,37 @@ l5c63h:
 game_master_detect:
 	ld bc,00400h
 	ld hl,0fcc1h
-l5c9fh:
+gm_slot:
 	push bc
 	push hl
 	ld a,(hl)
 	bit 7,a                ; slot expanded?
-	jr nz,l5cbah           ; yes -> check its subslots
+	jr nz,gm_expanded           ; yes -> check its subslots
 	call gm_sig_cmp
-l5ca9h:
+gm_slot_done:
 	pop hl
 	pop bc
-	jr c,l5cb4h
+	jr c,gm_found
 	inc hl
 	inc c
-	djnz l5c9fh
+	djnz gm_slot
 	xor a
-	jr l5cb6h
-l5cb4h:
+	jr gm_store
+gm_found:
 	ld a,0ffh              ; signature found -> Game Master present
-l5cb6h:
+gm_store:
 	ld (0e600h),a
 	ret
-l5cbah:
+gm_expanded:
 	call gm_scan_expanded
-	jr l5ca9h
+	jr gm_slot_done
 ; gm_scan_expanded (0x5CBF) - slot is expanded: try all 4 subslots.
 gm_scan_expanded:
 	and 080h
 	or c
 	ld c,a
 	ld b,004h
-l5cc5h:
+gm_subslot:
 	push bc
 	call gm_sig_cmp
 	pop bc
@@ -4579,7 +4578,7 @@ l5cc5h:
 	ld a,c
 	add a,004h             ; next subslot
 	ld c,a
-	djnz l5cc5h
+	djnz gm_subslot
 	and a
 	ret
 ; gm_sig_cmp (0x5CD3) - RDSLT 6 bytes at 0x7FFA in slot C vs game_master_sig.
@@ -4588,9 +4587,9 @@ gm_sig_cmp:
 	ld de,game_master_sig
 	ld hl,07ffah
 	ld b,006h
-l5cdbh:
+gm_sig_loop:
 	push bc
-l5cdch:
+gm_sig_rdslt:
 	push de
 	ld a,c
 	call RDSLT
@@ -4599,13 +4598,13 @@ l5cdch:
 	ex de,hl
 	cp (hl)
 	ex de,hl
-	jr nz,l5ceeh
+	jr nz,gm_sig_miss
 	inc hl
 	inc de
-	djnz l5cdbh
+	djnz gm_sig_loop
 	scf
 	ret
-l5ceeh:
+gm_sig_miss:
 	and a
 	ret
 game_master_sig:               ; RC-735 ROM tail at CPU 0x7FFA (confirmed)
@@ -4664,7 +4663,7 @@ gm_prompt_stage:
 	call gm_prompt_draw
 	ld hl,0e605h           ; entered stage (BCD)
 	ld de,0b0b8h           ; digits butt up against the "=" at x=0xB0
-l5d74h:
+gm_bcd_draw:                    ; 1 BCD byte at DE (stage/player)
 	ld b,001h
 	jp hud_bcd_draw              ; print B bytes as 2 BCD digits each
 ; "STAGE NUMBER=" - the font's "?" slot (0x2F) is an equals sign, not a question
@@ -4679,7 +4678,7 @@ gm_prompt_player:
 	call gm_prompt_draw
 	ld hl,0e607h           ; entered lives count (BCD)
 	ld de,0b8b8h
-	jr l5d74h
+	jr gm_bcd_draw
 ; gm_prompt_draw (0x5D97) - clear the prompt strip, then print the caption.
 gm_prompt_draw:
 	push hl
@@ -4708,12 +4707,12 @@ gm_digit_entry:
 	ld b,008h
 	ld a,l
 	call gm_bit_to_digit
-	jr c,l5dd1h
+	jr c,gm_digit_store
 	ld a,h
 	ld b,002h
 	call gm_bit_to_digit
 	ret nc                 ; nothing in either row -> ignore
-l5dd1h:
+gm_digit_store:                 ; RLD into E60F, reprint, to binary
 	ld hl,0e615h
 	ld (hl),0ffh           ; mark "a value was typed"
 	ld hl,0e60fh
@@ -4801,18 +4800,18 @@ gm_confirm_key:
 gm_apply_values:
 	rra
 	push af
-	jr nc,l5e67h
+	jr nc,gm_apply_lives
 	ld a,(0e606h)
 	cp 013h                ; stage < 19?
-	jr c,l5e44h
+	jr c,gm_apply_stage
 	xor a                  ; out of range -> stage 0
-l5e44h:
+gm_apply_stage:
 	ld (stage),a
 	ld a,(0e605h)
 	cp 019h
-	jr c,l5e4fh
+	jr c,gm_apply_bcd
 	xor a
-l5e4fh:
+gm_apply_bcd:
 	ld (hud_stage),a          ; displayed STAGE number
 	ld hl,gm_stage_hub_tbl
 	ld a,(stage)
@@ -4823,7 +4822,7 @@ l5e4fh:
 	ld (room),a          ; room = 0
 	inc a
 	ld (replay_bgm),a          ; force the stage BGM to (re)start
-l5e67h:
+gm_apply_lives:
 	pop af
 	rra
 	ret nc
@@ -4841,21 +4840,21 @@ gm_stage_hub_tbl:
 gm_menu_move:
 	rra
 	ld a,001h
-	jr nc,l5e8bh
+	jr nc,gm_menu_delta
 	ld a,0ffh              ; other direction -> -1
-l5e8bh:
+gm_menu_delta:                  ; A = +1 or -1
 	ld b,a
 	ld hl,0e60bh           ; current item index
 	add a,(hl)
 	and 003h
 	cp 003h                ; 3 -> wrapped past an end
-	jr nz,l5e9dh
+	jr nz,gm_menu_apply
 	ld a,b
 	add a,a
 	ld a,002h              ; wrap to the last item...
-	jr c,l5e9dh
+	jr c,gm_menu_apply
 	xor a                  ; ...or the first
-l5e9dh:
+gm_menu_apply:                  ; erase old arrow, store, redraw
 	push af
 	push hl
 	ld a,(hl)
@@ -4958,58 +4957,58 @@ room_spawner:
 ; counting 0x10->0, then the slot frees back to 0).
 ; Returns with the new slot initialised and its per-type handler dispatched.
 spawn_actor:
-	xor a
-	ld b,a
+	xor a                   ; A/B extras = 0
+	ld b,a                  ; fall into spawn_actor_ab
 spawn_actor_ab:                    ; (seg0 0x5F26) keep A/B -> CFFA/CFFB
-	ld (0cffah),a
-	ld a,b
-	ld (0cffbh),a
-	xor a
-	ld (0cf31h),a          ; spawn-succeeded flag = 0 (set to 1 once a slot is taken)
-	ld a,c
-	ld (0cff0h),a          ; stash requested type id
-	ld (0cff1h),de         ; stash spawn position word
-	ld hl,actor_slots           ; scan the actor slot table...
-	ld b,007h              ; ...7 slots...
-	xor a
-	ld de,00080h           ; ...stride 0x80
-l5f42h:
+	ld (0cffah),a           ; extra A
+	ld a,b                  ; extra B
+	ld (0cffbh),a           ; stash
+	xor a                   ; not yet spawned
+	ld (0cf31h),a           ; spawn-succeeded flag = 0 (set to 1 once a slot is taken)
+	ld a,c                  ; type id
+	ld (0cff0h),a           ; stash requested type id
+	ld (0cff1h),de          ; stash spawn position word
+	ld hl,actor_slots       ; scan the actor slot table...
+	ld b,007h               ; ...7 slots...
+	xor a                   ; free-slot sentinel
+	ld de,00080h            ; ...stride 0x80
+spawn_scan:
 	cp (hl)                ; slot+0 == 0 -> free slot found
-	jr z,l5f49h
-	add hl,de
-	djnz l5f42h
+	jr z,spawn_found       ; take it
+	add hl,de              ; next slot
+	djnz spawn_scan        ; 7 slots
 	ret                    ; no free slot: give up
-l5f49h:
+spawn_found:
 	push hl
-	pop ix
-	ld (0cff3h),hl
-	ld a,(0cff0h)
+	pop ix                 ; IX = slot
+	ld (0cff3h),hl         ; stash slot base
+	ld a,(0cff0h)          ; type id
 	ld hl,0605eh           ; actor_spr_count-1 (type 1 at 0x605F)
-	call ADD_HL_A
-	ld a,(hl)
+	call ADD_HL_A          ; HL -> count for this type
+	ld a,(hl)              ; SAT sprite count
 	ld (ix+020h),a         ; SAT sprite count
-	ld c,a
-	and a
-	jr z,spawn_actor_init
-	ld de,00000h
-	ld hl,0d638h
-	ld b,00eh
-l5f68h:
-	ld a,(hl)
-	cp 0e0h
-	jr nz,l5f76h
-	ld (hl),0e1h
+	ld c,a                 ; remaining to claim
+	and a                  ; 0 sprites?
+	jr z,spawn_actor_init  ; skip SAT hunt
+	ld de,00000h           ; D = SAT index, E = cell
+	ld hl,0d638h           ; CPU SAT
+	ld b,00eh              ; scan 14 entries
+spawn_sat_hunt:
+	ld a,(hl)              ; Y
+	cp 0e0h                ; hidden?
+	jr nz,spawn_sat_next   ; in use
+	ld (hl),0e1h           ; claim (not 0xE0)
 	call actor_sat_assign  ; cell E gets SAT index D
-	inc e
-	dec c
-	jr z,spawn_actor_init
-l5f76h:
+	inc e                  ; next cell
+	dec c                  ; one fewer needed
+	jr z,spawn_actor_init  ; all claimed
+spawn_sat_next:
 	inc d
 	inc l
 	inc l
 	inc l
 	inc l
-	djnz l5f68h
+	djnz spawn_sat_hunt
 	ret
 ; spawn_actor_init (seg0 0x5F7E) - initialise the chosen slot (HL/IX -> slot+0).
 spawn_actor_init:
@@ -5145,14 +5144,14 @@ actor_sat_patterns:
 	ld a,005h
 	add a,l
 	ld l,a                 ; HL -> first cell colour (+0x25)
-l6045h:
+sat_pat_cell:                   ; one SAT cell colour/attr from DE
 	ld a,(de)
 	inc de
 	ld (hl),a              ; cell+4 = colour/attr
 	ld a,l
 	add a,005h
 	ld l,a
-	djnz l6045h
+	djnz sat_pat_cell
 	ret
 ; actor_sat_assign (seg1 0x604F) - store hardware SAT index D at cell E
 ;  (offset +0x21 + E*5 of the slot at 0xCFF3).  Spawn/shot_alloc claim a
@@ -5436,20 +5435,20 @@ object_list_load:
 ;  0x00 = end of row (jump DE to the next 0x10 boundary), 0xFF = end of stream.
 object_list_unpack:
 	ld (0cff0h),de         ; remember the row's base address
-l618ch:
+obj_unpack_byte:                ; next (id,attr); 0xFF end, 0x00 row
 	ld a,(hl)              ; next source byte
 	inc hl
 	inc a                  ; 0xFF ?
 	ret z                  ;   -> end of stream
 	dec a                  ; 0x00 ?
-	jr z,l619bh            ;   -> end of row
+	jr z,obj_unpack_row            ;   -> end of row
 	ld (de),a              ; slot+0 = id
 	inc de
 	ldi                    ; slot+1 = next source byte (attr); HL++, DE++
 	inc de                 ; skip slot+2, slot+3
 	inc de
-	jr l618ch
-l619bh:
+	jr obj_unpack_byte
+obj_unpack_row:                 ; advance dest to next 0x10-byte row
 	ld de,(0cff0h)         ; back to row base ...
 	ld a,e
 	add a,010h             ; ... + 0x10 = next row
@@ -5468,7 +5467,7 @@ object_list_clear:
 	ld hl,0db00h
 	ld c,001h              ; running slot index
 	ld b,0c0h              ; 0xC0 slots
-l61b7h:
+obj_clear_slot:                 ; zero id; slot+3 = running index
 	ld (hl),000h           ; slot+0 = 0 (empty)
 	inc hl
 	inc hl
@@ -5476,7 +5475,7 @@ l61b7h:
 	ld (hl),c              ; slot+3 = index
 	inc c
 	inc hl
-	djnz l61b7h
+	djnz obj_clear_slot
 	ret
 ; --- object_list_spawn - spawn actors from the visible room's object list ---------------
 ;  Walks 4 slots of the 0xDB00 list at the current room and, for each live
@@ -5541,7 +5540,7 @@ object_list_spawn_next:
 ; --- konami_logo_draw (0x6209) - set up the Konami logo screen ---------------
 ;  Boot front-end step, run from seg0's state machine.  Blits logo_font
 ;  (seg13 1bpp, inks 1/2/3) then draws the Konami logo (orange/red/grey) as a
-;  tile layout (l6243h + l6296h via tile_string_draw) and sets
+;  tile layout (logo_pal_tbl + logo_layout via tile_string_draw) and sets
 ;  the VDP backdrop to white (R7 = 0x0F).  Then seeds the 3-byte block that the
 ;  per-frame stepper konami_logo_step (0x6253) uses to wipe the logo in:
 ;     0xC420 = 0x3C frame divider (advance the wipe every other frame)
@@ -5550,7 +5549,7 @@ object_list_spawn_next:
 konami_logo_draw:
 	call vdp_screen_off
 	call palette_hud_load   ; 8 fixed HUD/sprite colours
-	ld hl,l6243h            ; HL -> parameter table l6243h
+	ld hl,logo_pal_tbl
 	call palette_apply      ; apply the table at HL
 	ld b,00fh               ; value 0x0F ...
 	ld c,007h               ; ... into VDP register 7 (backdrop colour = white)
@@ -5562,7 +5561,7 @@ konami_logo_draw:
 	call vdp_hmmv             ; seg0 VDP fill (clears the logo area to white)
 	call logo_font_load     ; blit seg13 logo_font onto page 0 at Y=0
 	ld de,04040h            ; screen position for the logo tiles
-	ld hl,l6296h            ; HL -> logo tile-layout stream
+	ld hl,logo_layout
 	call tile_string_draw          ; paint the logo via the tile-string interpreter
 	call vdp_screen_on
 	ld hl,simon_action            ; seed the 3-byte wipe-state block:
@@ -5572,19 +5571,13 @@ konami_logo_draw:
 	inc hl
 	ld (hl),000h            ;   0xC422 = 0     done flag (clear)
 	ret
-l6243h:
-	nop
-	nop
-	nop
-	ld bc,00370h
-	ld (bc),a
-	ld h,b
-	ld bc,04403h
-	inc b
-	rrca
-	ld (hl),a
-	rlca
-	rst 38h
+logo_pal_tbl:                  ; (index,rb,g); 0xFF-terminated
+	defb 000h,000h,000h
+	defb 001h,070h,003h
+	defb 002h,060h,001h
+	defb 003h,044h,004h
+	defb 00fh,077h,007h
+	defb 0ffh
 
 ; --- konami_logo_step (0x6253) - wipe the logo in by one row ----------------
 ;  Seg0 calls this each frame while the logo state waits, then reads 0xC422
@@ -5600,11 +5593,11 @@ konami_logo_step:
 	ret nz
 	inc hl                 ; HL -> 0xC421 rows-remaining counter
 	dec (hl)               ; reveal one more row
-	jr nz,l6265h           ; more rows left -> draw the next band
+	jr nz,logo_wipe_blit           ; more rows left -> draw the next band
 	ld a,001h              ; last row done ...
 	ld (simon_whip),a          ; ... raise the done flag seg0 polls (0xC422 = 1)
 	ret
-l6265h:
+logo_wipe_blit:
 	ld a,031h              ; rows revealed so far = 0x31 - rows_remaining
 	sub (hl)
 	ld c,a                 ; C = revealed row count (band height so far)
@@ -5619,17 +5612,17 @@ l6265h:
 ;     0xFF = end of stream
 ;     0xFE = move to next row (D += following byte, E += 8)
 ;     else = draw the tile in the byte via 0x4B36 / 0x4B56
-;  Used by konami_logo_draw to paint the logo layout (tile data at l6296h).
+;  Used by konami_logo_draw to paint the logo layout (logo_layout).
 tile_string_draw:
 	push de                ; save the current row's start position
-l6277h:
+tile_str_byte:
 	ld a,(hl)              ; fetch next stream byte
 	inc hl
 	ld c,a                 ; keep a copy (tile id for the draw path)
 	inc a                  ; was it 0xFF?
-	jr z,l6294h            ;   0xFF -> end of stream
+	jr z,tile_str_end            ;   0xFF -> end of stream
 	inc a                  ; was it 0xFE?
-	jr nz,l628bh           ;   neither -> draw this tile
+	jr nz,tile_str_tile           ;   neither -> draw this tile
 	pop de                 ; 0xFE: back to the saved row start
 	ld a,(hl)              ; read the row's D delta
 	inc hl
@@ -5639,59 +5632,21 @@ l6277h:
 	add a,e
 	ld e,a
 	jr tile_string_draw           ; re-save the new row start and continue
-l628bh:
+tile_str_tile:
 	ld a,c                 ; A = tile id
 	call tile_blit_page1            ; seg0: place tile A at DE
 	call blit_advance_x            ; seg0: advance DE to the next cell
-	jr l6277h
-l6294h:
+	jr tile_str_byte
+tile_str_end:
 	pop de                 ; drop the saved row start
 	ret
-l6296h:
-	ld bc,00302h
-	cp 0f8h
-	inc b
-	dec b
-	ld b,007h
-	cp 0f0h
-	ex af,af'
-	add hl,bc
-	ld a,(bc)
-	dec bc
-	ld c,00fh
-	djnz l62bah
-	dec de
-	inc e
-	dec e
-	ld e,01fh
-	jr nz,l62d1h
-	ld (02423h),hl
-	dec h
-	ld h,0feh
-	nop
-	inc c
-	ld (bc),a
-	dec c
-l62bah:
-	ld (de),a
-	inc de
-	inc d
-	dec d
-	daa
-	jr z,l62eah
-	ld hl,(02c2bh)
-	dec l
-	ld l,02fh
-	jr nc,$+51
-	ld (03433h),a
-	cp 010h
-	ld d,019h
-	rla
-l62d1h:
-	cp 0f8h
-	jr $+27
-	ld a,(de)
-	rst 38h
+logo_layout:                   ; tile-string: 0xFE row (D+=n, E+=8), 0xFF end
+	defb 001h,002h,003h,0feh,0f8h,004h,005h,006h,007h
+	defb 0feh,0f0h,008h,009h,00ah,00bh,00eh,00fh,010h,011h
+	defb 01bh,01ch,01dh,01eh,01fh,020h,021h,022h,023h,024h,025h,026h
+	defb 0feh,000h,00ch,002h,00dh,012h,013h,014h,015h
+	defb 027h,028h,029h,02ah,02bh,02ch,02dh,02eh,02fh,030h,031h,032h,033h,034h
+	defb 0feh,010h,016h,019h,017h,0feh,0f8h,018h,019h,01ah,0ffh
 ; --- play_hud_reset (seg1 0x62D7) - full HP/meter, HUD caches, shared sprites
 ;  health=0x20, enemy_meter=0x80, inv_reset_life, hud_cache_load,
 ;  load_shared_sprites, then hud_font_load.  Death respawn, intro-to-play, and
@@ -5699,12 +5654,13 @@ l62d1h:
 play_hud_reset:
 	ld a,020h
 	ld (health),a          ; Simon health = full (0x20)
+play_hud_meter:                ; play_hud_reset without rewriting health
 	ld a,080h
 	ld (enemy_meter),a          ; enemy/boss energy meter = full (0x80)
 	call inv_reset_life
 	call hud_cache_load
 	call load_shared_sprites
-l62eah:
+play_hud_font:
 	jp hud_font_load
 
 ; --- play_screen_build (seg1 0x62ED) - build a gameplay cell -----------------
@@ -5845,7 +5801,6 @@ simon_block_clear:
 	ld (hl),000h           ; 0xC420 = 0
 	ld bc,0004fh           ; propagate 0 across 0x4F more bytes
 	ldir
-l63cbh:
 	ret
 ; --- sprites_hide - hide all hardware sprites ----------------------------------
 ;  The sprite attribute table shadow lives at 0xD600 (4 bytes/sprite: Y,X,pat,
@@ -5854,13 +5809,13 @@ l63cbh:
 sprites_hide:
 	ld hl,0d600h           ; HL -> sprite attribute shadow (Y of sprite 0)
 	ld b,020h              ; 32 sprites
-l63d1h:
+sprites_hide_loop:              ; Y=0xE0 for each of 32 SAT slots
 	ld (hl),0e0h           ; Y = 0xE0 -> off-screen
 	inc l                  ; step to next sprite's Y (stride 4)
 	inc l
 	inc l
 	inc l
-	djnz l63d1h
+	djnz sprites_hide_loop
 	ret
 ; --- intro_scene_build (seg1 0x63DA) - intro walk-up: tiles, palette, sprites
 ;  Seeds Simon at (0x80,0x80), loads intro_tiles + intro_palette + intro_simon
@@ -5875,9 +5830,9 @@ intro_scene_build:
 	call intro_palette_load
 	call load_intro_sprites
 	call sprites_hide         ; hide all hardware sprites
-l63f1h:
+intro_spawn_sky_go:             ; spawn intro sky, then sky_a/b + Simon
 	call intro_spawn_sky
-l63f4h:
+intro_spawn_rest:               ; sky_a/b + Simon, then draw the room
 	call intro_spawn_sky_ab
 	call intro_spawn_simon
 	call vdp_screen_off
@@ -5959,12 +5914,12 @@ actor_sat_build:
 	inc l
 	ld a,(de)              ; first stream byte
 	cp 080h
-	jr z,l64aah            ; 0x80 -> offset list l64d4h
+	jr z,actor_sat_use_80  ; 0x80 -> actor_sat_ofs_80
 	cp 081h
-	jr z,l64a4h            ; 0x81 -> offset list l64dch
+	jr z,actor_sat_use_81  ; 0x81 -> actor_sat_ofs_81
 	cp 082h
-	jr z,l649eh            ; 0x82 -> offset list l64e0h
-l647dh:
+	jr z,actor_sat_use_82  ; 0x82 -> actor_sat_ofs_82
+actor_sat_explicit:
 	ld a,(de)
 	inc de
 	add a,(ix+003h)        ; Y = shape dy + pixel Y
@@ -5975,35 +5930,35 @@ l647dh:
 	ld (hl),a
 	inc de
 	inc l
-l648bh:
+actor_sat_pat:
 	ld a,(de)
 	ld (hl),a
-l648dh:
+actor_sat_next:
 	inc de
 	inc l
 	inc l
 	inc l
-	djnz l647dh
+	djnz actor_sat_explicit
 	di
 	ld a,003h
 	ld (0a000h),a
 	ld (0f0f3h),a
 	ei
 	ret
-l649eh:
+actor_sat_use_82:
 	exx
-	ld hl,l64e0h
-	jr l64aeh
-l64a4h:
+	ld hl,actor_sat_ofs_82
+	jr actor_sat_ofs_prep
+actor_sat_use_81:
 	exx
-	ld hl,l64dch
-	jr l64aeh
-l64aah:
+	ld hl,actor_sat_ofs_81
+	jr actor_sat_ofs_prep
+actor_sat_use_80:
 	exx
-	ld hl,l64d4h
-l64aeh:
+	ld hl,actor_sat_ofs_80
+actor_sat_ofs_prep:
 	exx
-l64afh:
+actor_sat_ofs_loop:
 	exx
 	ld a,(hl)
 	inc hl
@@ -6024,40 +5979,22 @@ l64afh:
 	inc l
 	inc l
 	inc l
-	djnz l64afh
+	djnz actor_sat_ofs_loop
 	di
 	ld a,003h
 	ld (0a000h),a
 	ld (0f0f3h),a
 	ei
 	ret
-l64d4h:
-	ret po
-	ret m
-	ret po
-	ret m
-	ret p
-	ret m
-	ret p
-	ret m
-l64dch:                        ; 0x81: two cells at (dy,dx)=(-15,-8); hang/fly 16x16
-	pop af
-	ret m
-	pop af
-	ret m
-l64e0h:
-	pop de
-	ret m
-	pop de
-	ret m
-	pop hl
-	ret m
-	pop hl
-	ret m
-	pop af
-	ret m
-	pop af
-	ret m
+actor_sat_ofs_80:              ; 0x80: 4 cells, (dy,dx)=(-32,-8) then (-16,-8)
+	defb 0e0h,0f8h,0e0h,0f8h
+	defb 0f0h,0f8h,0f0h,0f8h
+actor_sat_ofs_81:              ; 0x81: 2 cells, (dy,dx)=(-15,-8); hang/fly 16x16
+	defb 0f1h,0f8h,0f1h,0f8h
+actor_sat_ofs_82:              ; 0x82: 6 cells, dy -47/-31/-15, dx -8
+	defb 0d1h,0f8h,0d1h,0f8h
+	defb 0e1h,0f8h,0e1h,0f8h
+	defb 0f1h,0f8h,0f1h,0f8h
 
 ; --- shot_sat_emit (0x64EC) / c800_sat_emit (0x64F3) -------------------------
 ;  Two entry points over the two actor arrays (stride 0x80 per actor):
@@ -6066,11 +6003,11 @@ l64e0h:
 shot_sat_emit:
 	ld hl,shot_slots           ; 8 shots from 0xD700
 	ld b,008h
-	jr l64f8h
+	jr sat_emit_loop
 c800_sat_emit:
 	ld hl,actor_slots           ; 7 actors from 0xC800
 	ld b,007h
-l64f8h:
+sat_emit_loop:
 	push bc
 	push hl
 	ld a,(hl)              ; slot occupied?
@@ -6080,7 +6017,7 @@ l64f8h:
 	pop bc
 	ld de,00080h
 	add hl,de              ; next actor (0x80 apart)
-	djnz l64f8h
+	djnz sat_emit_loop
 	ret
 ; --- actor_sat_emit (seg1 0x6508) - one actor's SAT block -> 0xD638 shadow --
 ;  HL -> actor slot.  Reads the sprite count from the 0x20-offset sub-block,
@@ -6094,7 +6031,7 @@ actor_sat_emit:
 	and a
 	ret z                  ; none
 	inc l
-l650fh:
+actor_sat_cell:
 	push bc
 	ld a,(hl)              ; sprite id
 	ld b,a
@@ -6110,7 +6047,7 @@ l650fh:
 	ldi                    ; pattern
 	ld a,(hl)              ; colour byte
 	and a
-	jr nz,l652fh           ; 0 = hide this sprite
+	jr nz,actor_sat_colour           ; 0 = hide this sprite
 	dec e
 	dec e
 	dec e                  ; DE -> SAT Y
@@ -6119,7 +6056,7 @@ l650fh:
 	inc e
 	inc e
 	inc e
-l652fh:
+actor_sat_colour:
 	ex de,hl
 	ld hl,06a70h           ; (0x6A70 + id*8)*2 = 0xD4E0 + id*16 SAT colour
 	ld a,b
@@ -6133,24 +6070,24 @@ l652fh:
 	ex de,hl               ; DE -> colour run, HL -> colour byte
 	ld a,(hl)
 	ld b,010h
-l6540h:
+actor_sat_colour_fill:
 	ld (de),a              ; 16 identical colour bytes
 	inc e
-	djnz l6540h
+	djnz actor_sat_colour_fill
 	pop bc
 	inc l                  ; next sprite in the sub-block
-	djnz l650fh
+	djnz actor_sat_cell
 	ret
 ; --- lookup_word_tbl - DE = ((word*)DE)[A] ----------------------------------
 ;  Generic word-table lookup: DE points at a table of little-endian words, A is
 ;  the index; returns the selected word in DE.  HL is clobbered.
 lookup_word_tbl:
-	ld l,a
-	ld h,000h
+	ld l,a                  ; HL = index
+	ld h,000h               ; 16-bit
 	add hl,hl               ; HL = A*2
 	add hl,de               ; HL -> &table[A]
 	ld e,(hl)               ; DE = table[A] (lo)
-	inc hl
+	inc hl                  ; high byte
 	ld d,(hl)               ;      (hi)
 	ret
 ; --- frame_vram_refresh (seg1 0x6552) - re-upload animated patterns ---------
@@ -6181,14 +6118,14 @@ frame_vram_refresh:
 	ld a,(0c00fh)
 	ld d,010h              ; 16 rows
 	ld h,0d6h              ; source high byte (0xD6xx pattern shadow)
-l6584h:
+pattern_vram_row:               ; 8 bytes from D6xx to F600
 	ld b,008h              ; 8 bytes per row
 	ld l,a
 	otir                   ; stream 8 bytes -> VDP data port
 	add a,048h
 	and 078h               ; next source slice (phase-stepped)
 	dec d
-	jr nz,l6584h
+	jr nz,pattern_vram_row
 	ret
 ; --- pattern_phase_upload - upload the phase-selected pattern block to VRAM 0xF400 ------
 pattern_phase_upload:
@@ -6197,7 +6134,7 @@ pattern_phase_upload:
 	ld a,(0c00fh)
 	ld d,010h              ; 16 rows
 	add a,a
-l659dh:
+pattern_phase_row:              ; 32 bytes from 0x6A00 phase table
 	ld h,06ah              ; source table base 0x6A00 (this seg)
 	ld l,a
 	add hl,hl              ; HL = 0x6A00 + phase*... (row source)
@@ -6205,7 +6142,7 @@ l659dh:
 	otir                   ; stream to VDP data port
 	add a,090h
 	dec d
-	jr nz,l659dh
+	jr nz,pattern_phase_row
 	ret
 ; --- pattern_shadow_blit - plain blit: copy the 0xD400 shadow (0x280 bytes) to VRAM 0xF400
 pattern_shadow_blit:
@@ -6226,7 +6163,7 @@ event_dracula:
 	defw event_dracula_wait    ; 1  wait CE16, re-run dracula_blit_torso
 	defw event_dracula_chunks  ; 2  dracula_spawn_chunks; CE02 = 0x78
 	defw event_dracula_quiet   ; 3  wait CE02 and C800==0, play_sound 0
-	defw event_dracula_theme   ; 4  BGM 0x88, bar=0x80, falls into l662dh
+	defw event_dracula_theme   ; 4  BGM 0x88, bar=0x80, falls into dracula_theme_spawn
 	defw event_dracula_rise    ; 5  dracula_face_open until CE36==2
 	defw event_dracula_fork    ; 6  branch on CE15
 	defw event_dracula_drop    ; 7  dracula_face_close; BGM 0x8D, timer 0xB4
@@ -6262,9 +6199,9 @@ event_dracula_quiet:
 	ld hl,event_timer
 	ld a,(hl)
 	and a
-	jr z,l6611h
+	jr z,dracula_quiet_tick
 	dec a                  ; tick the timer down (not below 0)
-l6611h:
+dracula_quiet_tick:             ; store CE02; wait slot0 empty
 	ld (hl),a
 	ret nz                 ; timer still running -> stay
 	ld a,(actor_slots)
@@ -6279,12 +6216,12 @@ event_dracula_theme:
 	ld a,080h
 	ld (enemy_meter),a
 	call draw_enemy_meter
-l662dh:
+dracula_theme_spawn:            ; open eyes, spawn type 0x17, gfx
 	call dracula_blit_eyes_open
 	ld c,017h              ; type 0x17: no SAT, tick_nop, +50000
 	ld de,08049h           ; X=0x80, Y=0x49
 	call spawn_actor
-	call 057bbh
+	call frontend_gfx_load
 	xor a
 	ld (0ce36h),a          ; reset the pair of progress counters
 	ld (0ce37h),a
@@ -6302,12 +6239,12 @@ event_dracula_rise:
 event_dracula_fork:
 	ld a,(boss_dead)
 	and a
-	jr nz,l666eh
+	jr nz,dracula_fork_dead
 	call credits_palette_ramp         ; 0xCE15 == 0 path
 	call dracula_ce35_tick
 	call dracula_eyes_blink
 	jp event_dracula_spawn_bat
-l666eh:
+dracula_fork_dead:              ; boss_dead: close eyes, cull, next
 	call dracula_blit_eyes_closed            ; 0xCE15 != 0 path
 	call credits_palette_clear
 	call actors_kill_all
@@ -6397,9 +6334,9 @@ credits_finish:
 	ld a,(hl)
 	inc a
 	cp 003h
-	jr nc,l6712h           ; cap the difficulty tier at 3
+	jr nc,credits_r23           ; cap the difficulty tier at 3
 	ld (hl),a              ; 0xD012 = min(tier+1, 3)
-l6712h:
+credits_r23:                    ; VDP R23=0 after D012 cap
 	ld b,000h
 	ld c,017h              ; VDP R23 = 0 (undo credits v-scroll)
 	jp WRTVDP
@@ -6526,9 +6463,9 @@ credits_palette_ramp:
 	ld a,(hl)
 	inc a
 	cp 013h
-	jr c,l67f5h
+	jr c,credits_ramp_idx
 	xor a
-l67f5h:
+credits_ramp_idx:               ; CE39 wrap 0..0x12 then palette 6
 	ld (hl),a
 	ld hl,credits_ramp_tbl
 	call ADD_HL_A
@@ -6582,7 +6519,7 @@ event_vscroll:
 ; around (CE0F, Y=0x98) after figure Dracula dies. shape_dracula_chunk; tick is ret.
 dracula_spawn_chunks:
 	ld b,006h
-l6858h:
+chunk_spawn_one:                ; one chunk at CE0F jitter, Y=0x98+
 	push bc
 	ld c,actor_dracula_chunk
 	ld a,r
@@ -6598,7 +6535,7 @@ l6858h:
 	ld e,a
 	call spawn_actor
 	pop bc
-	djnz l6858h
+	djnz chunk_spawn_one
 dracula_chunk_go:              ; type 0x2E tick: integrate only
 	ret
 ; dracula_ce35_tick (seg1 0x6875): wall-portrait face state. DISPATCH_A on CE35:
@@ -6808,24 +6745,24 @@ dracula_palette_fade:
 	call ADD_HL_A
 	ld a,(hl)
 	and 0f0h
-	jr z,l6a2bh
+	jr z,dracula_fade_rb
 	sub 010h
-l6a2bh:
+dracula_fade_rb:                ; RB nibble after clamp
 	ld d,a
 	ld a,(hl)
 	and 00fh
-	jr z,l6a32h
+	jr z,dracula_fade_r
 	dec a
-l6a32h:
+dracula_fade_r:                 ; R nibble after clamp
 	or d
 	ld (hl),a
 	ld d,a
 	inc hl
 	ld a,(hl)
 	and a
-	jr z,l6a3bh
+	jr z,dracula_fade_g
 	dec a
-l6a3bh:
+dracula_fade_g:                 ; G byte after clamp
 	ld (hl),a
 	inc hl
 	ld e,a
@@ -6881,37 +6818,37 @@ dracula_bat_go:                ; (0x6AA3)
 	call nz,actor_add_yvel
 	ld a,(ix+001h)
 	call DISPATCH_A
-	defw l6abeh            ; 0  wait 8, robe 0xA5
-	defw l6aceh            ; 1  wait 8, head open 0xA6 / closed 0xA7
-	defw l6ae6h            ; 2  wait 0x18
-	defw l6af2h            ; 3  hanging_bat fly (one rra)
+	defw dracula_bat_robe            ; 0  wait 8, robe 0xA5
+	defw dracula_bat_head            ; 1  wait 8, head open 0xA6 / closed 0xA7
+	defw dracula_bat_wait            ; 2  wait 0x18
+	defw dracula_bat_fly            ; 3  hanging_bat fly (one rra)
 	defw hanging_bat_pose         ; 4  keep flying
-l6abeh:
+dracula_bat_robe:
 	dec (ix+00ch)
 	ret nz
 	ld (ix+00bh),pose_dracula_robe_1      ; pose_dracula_robe_1
 	ld (ix+00ch),008h
 	inc (ix+001h)
 	ret
-l6aceh:
+dracula_bat_head:
 	dec (ix+00ch)
 	ret nz
 	bit 7,(ix+00ah)        ; Xvel sign
 	ld a,0a6h              ; shape_dracula_head_open
-	jr nz,l6adbh
+	jr nz,dracula_bat_head_store
 	inc a                  ; shape_dracula_head_closed
-l6adbh:
+dracula_bat_head_store:
 	ld (ix+00bh),a
 	ld (ix+00ch),008h
 	inc (ix+001h)
 	ret
-l6ae6h:
+dracula_bat_wait:
 	dec (ix+00ch)
 	ret nz
 	ld (ix+00ch),018h
 	inc (ix+001h)
 	ret
-l6af2h:
+dracula_bat_fly:
 	ld a,(ix+011h)
 	call hanging_bat_pose
 	dec (ix+00ch)
@@ -6927,29 +6864,29 @@ hanging_bat_pose:                  ; (seg1 0x6B00) trampoline: one-rra flap (dra
 player_tick:
 	ld a,(orb_got)          ; boss-orb collected: freeze controls
 	and a
-	jr z,l6b13h
+	jr z,player_tick_go
 	xor a
 	ld (btn_held),a          ; held
 	ld (btn_edge),a          ; new-press
-l6b13h:
+player_tick_go:
 	call door_interact
 	call simon_action_tick
 	ld a,(door_state)
 	cp 002h
-	jr z,l6b2bh
+	jr z,player_skip_attack
 	cp 003h
-	jr z,l6b2bh
+	jr z,player_skip_attack
 	cp 005h
-	jr z,l6b2bh
+	jr z,player_skip_attack
 	call simon_attack_tick
-l6b2bh:
+player_skip_attack:
 	call room_edge_detect
 	call timers_tick
 	call gem_timer_tick
 	call hourglass_timer_tick
 	call boss_flash_delay_tick
 	call backdrop_flash_tick
-	jp l761fh
+	jp simon_shield_frames
 ; simon_action_tick (seg1 0x6B40) - Simon's per-frame action-state machine.
 ; 0xC420 = action state; DISPATCH_A jumps through simon_action_tbl.
 ;   0 simon_grounded   walk / idle (whipping does NOT change 0xC420)
@@ -6975,17 +6912,17 @@ simon_action_tbl:
 	defw simon_portal_wait     ; 7  act_portal
 simon_grounded:                ; 0 (0x6B59)
 	call simon_floor_test
-	jr c,l6b64h
+	jr c,grounded_ok
 	ld a,(simon_on_plat)
 	and a
-	jr z,l6bach
-l6b64h:
+	jr z,grounded_fall
+grounded_ok:
 	ld a,(door_state)
 	cp 004h
-	jr z,l6b6eh
+	jr z,grounded_door
 	cp 002h
 	ret nc
-l6b6eh:
+grounded_door:
 	ld a,(simon_on_plat)
 	and a
 	call nz,platform_carry_simon
@@ -6998,7 +6935,7 @@ l6b6eh:
 	ld a,(btn_held)          ; held: 0=UP 1=DOWN 2=LEFT 3=RIGHT
 	rra
 	jr c,simon_try_stairs_up            ; UP -> maybe mount stairs
-l6b8ah:
+grounded_walk:
 	rra
 	jp c,simon_try_stairs_down            ; DOWN held -> crouch (or down-stairs)
 	rra
@@ -7017,7 +6954,7 @@ l6b8ah:
 	xor a
 	ld (simon_jump_dir),a
 	ret
-l6bach:
+grounded_fall:
 	ld a,act_fall
 	ld (simon_action),a
 	xor a
@@ -7030,9 +6967,9 @@ l6bach:
 platform_carry_simon:
 	dec a
 	ld a,007h
-	jr nz,l6bbch
+	jr nz,plat_carry_slot
 	xor a                  ; slot 1 -> offset 0, slot 2 -> offset 7
-l6bbch:
+plat_carry_slot:
 	ld hl,platform_slots
 	call ADD_HL_A
 	inc hl
@@ -7041,16 +6978,16 @@ l6bbch:
 	ld a,(hl)
 	rla
 	ld d,000h
-	jr c,l6bd3h            ; negative step -> travelling left
+	jr c,plat_carry_left            ; negative step -> travelling left
 	call simon_wall_right         ; wall to the right?
 	ret c
 	ld d,001h
-	jr l6bd9h
-l6bd3h:
+	jr plat_carry_x
+plat_carry_left:
 	call simon_wall_left         ; wall to the left?
 	ret c
 	ld d,0ffh
-l6bd9h:
+plat_carry_x:
 	ld a,(simon_x)
 	add a,d
 	ld (simon_x),a          ; Simon X += travel direction
@@ -7059,37 +6996,37 @@ simon_try_stairs_up:                        ; UP while grounded: try stairs
 	ex af,af'
 	call stair_probe_up_right
 	ld bc,00001h
-	jr z,l6bf5h
+	jr z,simon_stair_enter
 	call stair_probe_up_left
 	ld bc,00101h
-	jr z,l6bf5h
+	jr z,simon_stair_enter
 	ex af,af'
-	jr l6b8ah
-l6bf5h:
+	jr grounded_walk
+simon_stair_enter:
 	ld a,act_stairs
 	ld (simon_action),a
 	ld a,c
-	ld (0c435h),a
+	ld (simon_stair_held),a
 	ld a,b
 	ld (simon_jump_dir),a
 	rra
 	ld a,(simon_x)
-	jr nc,l6c0ah
+	jr nc,simon_stair_snap_x
 	add a,008h
-l6c0ah:
+simon_stair_snap_x:
 	and 0f8h
 	ld (simon_x),a
 	xor a
-	ld (0c424h),a
+	ld (simon_y16),a
 	ld (simon_x16),a
 	ret
 simon_try_stairs_down:
 	call stair_probe_down_right
 	ld bc,00002h
-	jr z,l6bf5h
+	jr z,simon_stair_enter
 	call stair_probe_down_left
 	ld bc,00102h
-	jr z,l6bf5h
+	jr z,simon_stair_enter
 	ld a,act_crouch
 	ld (simon_action),a
 	ld de,00006h
@@ -7100,38 +7037,38 @@ simon_walk_left:               ; (0x6C36) face left (0xC42C=1), try -X
 	ld (simon_facing),a          ; facing = left
 	ld a,(permit_left)          ; left exit permit
 	inc a
-	jr nz,l6c47h
+	jr nz,walk_left_ok
 	ld a,(simon_x)
 	cp 010h
 	ret c
-l6c47h:
+walk_left_ok:                   ; permit or X>=0x10: probe -X
 	call simon_wall_left
 	ret c
 	ld a,(bonus_flags)
 	and 008h               ; boots (id 12): faster walk
 	ld bc,0fe00h
-	jr z,l6c58h
+	jr z,walk_left_vel
 	ld bc,0fd80h
-l6c58h:
-	jr l6c7ah
+walk_left_vel:                  ; BC = -0x200 or boots -0x280
+	jr walk_apply
 simon_walk_right:              ; (0x6C5A) face right (0xC42C=0), try +X
 	xor a
 	ld (simon_facing),a          ; facing = right
 	ld a,(permit_right)          ; right exit permit
 	inc a
-	jr nz,l6c6ah
+	jr nz,walk_right_ok
 	ld a,(simon_x)
 	cp 0f0h
 	ret nc
-l6c6ah:
+walk_right_ok:                  ; permit or X<0xF0: probe +X
 	call simon_wall_right
 	ret c
 	ld a,(bonus_flags)
 	and 008h               ; boots (id 12): faster walk
 	ld bc,00200h
-	jr z,l6c7ah
+	jr z,walk_apply
 	ld c,080h
-l6c7ah:
+walk_apply:                     ; shared: door overlap then add X
 	push bc
 	ld a,(simon_y)
 	ld b,a
@@ -7166,12 +7103,12 @@ simon_step_walk_frames:        ; (0x6CAB)
 	rra
 	rra
 	ld de,00101h
-	jr c,l6cbfh
+	jr c,walk_frames_set
 	rra
 	ld de,00000h
-	jr c,l6cbfh
+	jr c,walk_frames_set
 	ld de,00202h
-l6cbfh:
+walk_frames_set:                ; C42E/C42F += DE from frame ctr
 	ld hl,(simon_legs)
 	add hl,de
 	ld (simon_legs),hl
@@ -7179,24 +7116,24 @@ l6cbfh:
 simon_jump_tick:               ; 1 (0x6CC7) simon_jump_dir: 0 aim, 1 up, 2 left, 3 right
 	ld a,(simon_jump_dir)
 	call DISPATCH_A
-	defw l6cd5h
+	defw jump_aim          ; C421=0: pick dir from pad
 	defw simon_jump_arc
 	defw simon_jump_left
 	defw simon_jump_right
-l6cd5h:
+jump_aim:                       ; C421=0: pick up/left/right from pad
 	ld b,001h
 	ld a,(btn_held)
 	and 00ch
-	jr z,l6ce9h
+	jr z,jump_aim_set
 	rra
 	rra
 	cp 003h
-	jr nc,l6ce9h
+	jr nc,jump_aim_set
 	rra
 	inc b
-	jr c,l6ce9h
+	jr c,jump_aim_set
 	inc b
-l6ce9h:
+jump_aim_set:                   ; store C421
 	ld hl,simon_jump_dir
 	ld (hl),b
 	ret
@@ -7205,24 +7142,24 @@ simon_jump_arc:                ; (0x6CEE) advance 0xC428 through jump_y_delta
 	and 010h               ; wings (id 13): taller jump table
 	ld bc,jump_y_delta+1
 	ld d,013h
-	jr z,l6cffh
+	jr z,jump_wings
 	ld bc,jump_y_delta
 	ld d,015h
-l6cffh:
+jump_wings:                     ; table + length after wings check
 	ld hl,simon_arc
 	push hl
 	call simon_jump_y_step
 	pop hl
 	ld a,(simon_whip)
 	and a
-	jr nz,l6d1ah
+	jr nz,jump_air
 	ld d,000h
 	ld e,006h
 	ld (simon_legs),de
 	push hl
 	call simon_mirror_frames
 	pop hl
-l6d1ah:
+jump_air:                       ; late arc: land sfx + floor test
 	ld a,(hl)
 	cp 009h
 	ret c
@@ -7237,17 +7174,17 @@ l6d1ah:
 	call nc,simon_land_sfx_arm
 	pop hl
 	call simon_floor_test
-	jr c,l6d37h
+	jr c,jump_floor
 	ld a,(simon_on_plat)
 	and a
 	ret z
-l6d37h:
+jump_floor:                     ; on floor/plat: land (sfx if CFF0)
 	ld a,(0cff0h)
 	and a
-	jr z,l6d42h
+	jr z,simon_land
 	ld a,sfx_land
 	call play_sound
-l6d42h:
+simon_land:
 	ld hl,simon_y
 	ld a,(hl)
 	and 0f8h
@@ -7261,9 +7198,9 @@ simon_jump_y_step:
 	inc (hl)
 	ld a,(hl)
 	cp d
-	jr c,l6d5ah
+	jr c,jump_y_clamp
 	ld a,d
-l6d5ah:
+jump_y_clamp:                   ; index = min(arc, D)-1 into table
 	dec a
 	ld h,b
 	ld l,c
@@ -7296,16 +7233,16 @@ simon_land_sfx_arm:
 	ld e,a
 	pop af
 	dec a
-	jr z,l6d91h            ; C420==2: +X
+	jr z,land_nudge_pos            ; C420==2: +X
 	dec a
 	ld a,e
 	neg
 	ld d,0ffh
 	ld e,a
-	jr l6d93h
-l6d91h:
+	jr land_nudge_x
+land_nudge_pos:                 ; C420==2: +X nudge
 	ld d,000h
-l6d93h:
+land_nudge_x:                   ; C426 += DE
 	ld hl,(simon_x16)
 	add hl,de
 	ld (simon_x16),hl
@@ -7315,10 +7252,10 @@ jump_y_delta:                  ; (0x6D9B) signed dY per jump phase (21 bytes)
 	defb 000h,000h,001h,002h,003h,004h,005h,005h,006h,006h,006h
 simon_crouch:                  ; 2 (0x6DB0)
 	call spot_proximity    ; carry = overlapping armed spot pad
-	jr nc,l6dcfh           ; off-pad -> normal crouch
+	jr nc,crouch_hold           ; off-pad -> normal crouch
 	ld a,(btn_edge)
 	and 020h               ; UP new-press (same bit as jump)
-	jr z,l6dcfh            ; still holding DOWN only
+	jr z,crouch_hold            ; still holding DOWN only
 	ld a,act_portal
 	ld (simon_action),a          ; portal wind-up
 	xor a
@@ -7327,7 +7264,7 @@ simon_crouch:                  ; 2 (0x6DB0)
 	ld (simon_invuln),a          ; flash/wait timer
 	ld a,sfx_portal
 	jp play_sound          ; sfx 0x15 (flash)
-l6dcfh:
+crouch_hold:                    ; not portal: plat carry, DOWN to stay
 	ld a,(simon_on_plat)
 	and a
 	call nz,platform_carry_simon
@@ -7338,45 +7275,45 @@ l6dcfh:
 	rra
 	rra
 	ret c                  ; DOWN still held -> stay crouched
-	jp l6efch
+	jp simon_stand
 simon_stairs:                  ; 3 (0x6DE4)
 	ld a,(simon_whip)
 	and a
 	ret nz
-	ld a,(0c435h)
+	ld a,(simon_stair_held)
 	and a
-	jr nz,l6df2h
+	jr nz,simon_stair_dir
 	ld a,(btn_held)
-l6df2h:
+simon_stair_dir:
 	ld b,a
 	ld de,00100h
 	ld a,(simon_jump_dir)
 	and a
 	ld a,b
-	jr nz,l6e0eh
+	jr nz,simon_stair_slash
 	rra
-	jp c,l6ec3h
+	jp c,simon_stair_up_left
 	rra
-	jp c,l6e1bh
+	jp c,simon_stair_down_right
 	rra
-	jp c,l6ec3h
+	jp c,simon_stair_up_left
 	rra
-	jp c,l6e1bh
+	jp c,simon_stair_down_right
 	ret
-l6e0eh:
+simon_stair_slash:
 	rra
-	jr c,l6e8bh
+	jr c,simon_stair_up_right
 	rra
-	jr c,l6e52h
+	jr c,simon_stair_down_left
 	rra
-	jr c,l6e52h
+	jr c,simon_stair_down_left
 	rra
-	jr c,l6e8bh
+	jr c,simon_stair_up_right
 	ret
-l6e1bh:
-	ld hl,(0c424h)
+simon_stair_down_right:
+	ld hl,(simon_y16)
 	add hl,de
-	ld (0c424h),hl
+	ld (simon_y16),hl
 	ld hl,(simon_x16)
 	add hl,de
 	ld (simon_x16),hl
@@ -7385,27 +7322,27 @@ l6e1bh:
 	ld de,00103h
 	ld (simon_legs),de
 	call simon_stair_frames_down
-	ld hl,0c42bh
+	ld hl,simon_stair_step
 	inc (hl)
 	ld a,(hl)
 	ld b,a
 	and 007h
 	ld a,008h
-	jr nz,l6e44h
+	jr nz,simon_stair_dr_held
 	xor a
-l6e44h:
-	ld (0c435h),a
+simon_stair_dr_held:
+	ld (simon_stair_held),a
 	ld a,b
 	cp 008h
 	ret c
 	call simon_floor_test
 	ret nc
-	jp l6efch
-l6e52h:
+	jp simon_stand
+simon_stair_down_left:
 	or a
-	ld hl,(0c424h)
+	ld hl,(simon_y16)
 	add hl,de
-	ld (0c424h),hl
+	ld (simon_y16),hl
 	ld hl,(simon_x16)
 	sbc hl,de
 	ld (simon_x16),hl
@@ -7414,27 +7351,27 @@ l6e52h:
 	ld de,0100dh
 	ld (simon_legs),de
 	call simon_stair_frames_down
-	ld hl,0c42bh
+	ld hl,simon_stair_step
 	inc (hl)
 	ld a,(hl)
 	ld b,a
 	and 007h
 	ld a,004h
-	jr nz,l6e7eh
+	jr nz,simon_stair_dl_held
 	xor a
-l6e7eh:
-	ld (0c435h),a
+simon_stair_dl_held:
+	ld (simon_stair_held),a
 	ld a,b
 	cp 008h
 	ret c
 	call simon_floor_test
 	ret nc
-	jr l6efch
-l6e8bh:
+	jr simon_stand
+simon_stair_up_right:
 	or a
-	ld hl,(0c424h)
+	ld hl,(simon_y16)
 	sbc hl,de
-	ld (0c424h),hl
+	ld (simon_y16),hl
 	ld hl,(simon_x16)
 	add hl,de
 	ld (simon_x16),hl
@@ -7443,27 +7380,27 @@ l6e8bh:
 	ld de,00103h
 	ld (simon_legs),de
 	call simon_stair_frames_up
-	ld hl,0c42bh
+	ld hl,simon_stair_step
 	inc (hl)
 	ld a,(hl)
 	ld b,a
 	and 007h
 	ld a,008h
-	jr nz,l6eb6h
+	jr nz,simon_stair_ur_held
 	xor a
-l6eb6h:
-	ld (0c435h),a
+simon_stair_ur_held:
+	ld (simon_stair_held),a
 	ld a,b
 	cp 008h
 	ret c
 	call simon_land_test
 	ret nc
-	jr l6efch
-l6ec3h:
+	jr simon_stand
+simon_stair_up_left:
 	or a
-	ld hl,(0c424h)
+	ld hl,(simon_y16)
 	sbc hl,de
-	ld (0c424h),hl
+	ld (simon_y16),hl
 	or a
 	ld hl,(simon_x16)
 	sbc hl,de
@@ -7473,33 +7410,33 @@ l6ec3h:
 	ld de,0100dh
 	ld (simon_legs),de
 	call simon_stair_frames_up
-	ld hl,0c42bh
+	ld hl,simon_stair_step
 	inc (hl)
 	ld a,(hl)
 	ld b,a
 	and 007h
 	ld a,004h
-	jr nz,l6ef1h
+	jr nz,simon_stair_ul_held
 	xor a
-l6ef1h:
-	ld (0c435h),a
+simon_stair_ul_held:
+	ld (simon_stair_held),a
 	ld a,b
 	cp 008h
 	ret c
 	call simon_land_test
 	ret nc
-l6efch:
+simon_stand:
 	ld de,00000h
 	ld (simon_legs),de
 	xor a
-	ld (0c435h),a
-	ld (0c42bh),a
+	ld (simon_stair_held),a
+	ld (simon_stair_step),a
 	call simon_mirror_frames
-	jp l6d42h
-; simon_stair_frames_down (seg1 0x6F10): descending.  bit2 of C42B picks
-; +1 legs or +1 torso (B=1-C, C=0/1).
+	jp simon_land
+; simon_stair_frames_down (seg1 0x6F10): descending.  bit2 of
+; simon_stair_step picks +1 legs or +1 torso (B=1-C, C=0/1).
 simon_stair_frames_down:
-	ld a,(0c42bh)
+	ld a,(simon_stair_step)
 	rra
 	rra
 	and 001h
@@ -7517,7 +7454,7 @@ simon_stair_frames_down:
 ; simon_stair_frames_up (seg1 0x6F2B): ascending.  Same C; B=C+1 so legs
 ; step 1 or 2.
 simon_stair_frames_up:
-	ld a,(0c42bh)
+	ld a,(simon_stair_step)
 	rra
 	rra
 	and 001h
@@ -7534,9 +7471,9 @@ simon_stair_frames_up:
 simon_fall:                    ; 4 (0x6F44)
 	ld a,(simon_on_plat)
 	and a
-	jr nz,l6f71h
+	jr nz,fall_snap
 	call simon_floor_test
-	jr c,l6f71h
+	jr c,fall_snap
 	ld de,00000h
 	ld (simon_legs),de
 	call simon_mirror_frames
@@ -7544,16 +7481,16 @@ simon_fall:                    ; 4 (0x6F44)
 	ld a,(hl)
 	inc (hl)
 	cp 003h
-	jr c,l6f63h
+	jr c,fall_dy
 	dec (hl)
-l6f63h:
-	ld hl,l6f88h
+fall_dy:                        ; Y += fall_y_delta[arc]
+	ld hl,fall_y_delta
 	call ADD_HL_A
 	ld a,(simon_y)
 	add a,(hl)
 	ld (simon_y),a
 	ret
-l6f71h:
+fall_snap:                      ; land: snap Y, clear arc, sfx 7
 	ld a,(simon_y)
 	and 0f8h
 	ld (simon_y),a
@@ -7563,7 +7500,7 @@ l6f71h:
 	ld (simon_jump_dir),a
 	ld a,sfx_land
 	jp play_sound
-l6f88h:
+fall_y_delta:
 	defb 002h,004h,006h,006h   ; fall dY
 simon_hurt:                    ; 5 (0x6F8C)
 	ld a,(simon_hurt_step)
@@ -7572,14 +7509,14 @@ simon_hurt:                    ; 5 (0x6F8C)
 	defw simon_hurt_left
 	defw simon_hurt_right
 	defw simon_hurt_slide
-simon_hurt_init:                ; (0x6F9A) sfx, i-frames; stairs if C42B, else knock
+simon_hurt_init:                ; (0x6F9A) sfx, i-frames; stairs if stair_step, else knock
 	ld a,(0c002h)
 	and 040h
 	ld a,sfx_simon_hurt
 	call nz,play_sound
 	ld a,05ah
 	ld (simon_invuln),a    ; 78 frames blink
-	ld a,(0c42bh)
+	ld a,(simon_stair_step)
 	and a
 	jp z,simon_hurt_knock
 	ld a,(health)
@@ -7626,9 +7563,9 @@ simon_hurt_land:                ; (0x6FF9)
 	ld a,(health)
 	and a
 	ld a,004h              ; alive: short slide
-	jr nz,l7010h
+	jr nz,hurt_knock_store
 	ld a,010h              ; dead: long slide
-l7010h:
+hurt_knock_store:               ; C42A = 4 alive / 0x10 dead
 	ld (simon_knockback),a
 	ld de,(simon_legs)
 	inc d
@@ -7684,11 +7621,10 @@ simon_dying_enter:              ; (0x706A) act_dying; jump_dir reused as phase 0
 	ld (simon_legs),bc
 	jp simon_mirror_frames
 ; Signed dY (22 bytes).  Hurt knockback uses this via simon_jump_y_step;
-; holy_water_tick doubles each entry for the vial's arc.  l7090h is also a
-; VRAM dest (0x7090) in the HUD blits above — keep the label at this address.
+; holy_water_tick doubles each entry for the vial's arc.  HUD blits that
+; land at VRAM 0x7090 use a hex immediate, not this label.
 arc_dy_tbl:                    ; (0x7084) signed dY[22]; knockback + holy-water arc
 	defb 0fdh,0fdh,0feh,0feh,0feh,0ffh,0ffh,0ffh,0ffh,000h,000h,000h
-l7090h:
 	defb 000h,001h,001h,001h,001h,002h,002h,002h,003h,003h
 simon_dying:                    ; 6 (0x709A) jump_dir = dying phase (not jump)
 	ld a,(simon_jump_dir)
@@ -7872,17 +7808,17 @@ projectile_alloc:
 	dec b                  ; axe/cross: one slot
 projectile_alloc_go:            ; (0x71CF)
 	ld ix,0c450h
-l71d3h:
+proj_alloc_slot:                ; free C450/C460 -> state 1
 	ld a,(ix+001h)         ; type; 0 = free
 	and a
-	jr nz,l71dfh
+	jr nz,proj_alloc_next
 	ld a,001h
 	ld (ix+000h),a         ; waiting for projectile_arm
 	ret
-l71dfh:
+proj_alloc_next:                ; next 0x10-byte slot
 	ld de,00010h
 	add ix,de
-	djnz l71d3h
+	djnz proj_alloc_slot
 	ret
 ; whip_tick (0x71E7): if 0xC422 (whip phase) is 1..4, dispatch the anim.
 ; Phase 0 = idle (ret).  0xC420>=4 (fall/hurt/dying) suppresses whipping.
@@ -7906,9 +7842,9 @@ whip_phase_1:                   ; (0x7201)
 	jr z,simon_torso_from_weapon
 	cp act_crouch
 	ld a,000h              ; stand
-	jr nz,l7210h
+	jr nz,whip_legs_set
 	ld a,006h              ; crouch legs
-l7210h:
+whip_legs_set:                  ; legs 0 stand / 6 crouch
 	ld (simon_legs),a
 simon_torso_from_weapon:        ; (0x7213) leather 6 / chain 9 / thrown 0x0C
 	ld a,(swing_weapon)
@@ -7917,9 +7853,9 @@ simon_torso_from_weapon:        ; (0x7213) leather 6 / chain 9 / thrown 0x0C
 	ld a,(swing_weapon)
 	dec a                  ; flags: chain (1) -> Z
 	ld a,006h              ; leather
-	jr nz,l7224h
+	jr nz,torso_store
 	ld a,009h              ; chain
-l7224h:
+torso_store:                    ; leather 6 / chain 9 then mirror
 	ld (simon_torso),a
 	call simon_mirror_frames
 	ld a,sfx_whip
@@ -7981,10 +7917,10 @@ projectile_arm:                 ; (0x728D) phase 4: copy swing_weapon into waiti
 	call simon_attack_end
 	ld ix,0c450h
 	ld b,002h
-l7299h:
+proj_arm_slot:                  ; waiting state 1: copy swing_weapon
 	ld a,(ix+000h)
 	dec a                  ; waiting state was 1
-	jr nz,l72b1h
+	jr nz,proj_arm_next
 	ld a,018h
 	ld (ix+006h),a         ; pattern
 	ld a,(simon_facing)
@@ -7992,10 +7928,10 @@ l7299h:
 	ld a,(swing_weapon)
 	ld (ix+001h),a         ; type = latched weapon
 	ret
-l72b1h:
+proj_arm_next:                  ; next 0x10-byte slot
 	ld de,00010h
 	add ix,de
-	djnz l7299h
+	djnz proj_arm_slot
 	ret
 ; C450 / C460 projectile slots (stride 0x10): +0 state, +1 type (C416 or 5),
 ; +2 velY, +3 velX, +4 Y, +5 X, +6 pattern, +7 phase, +8 facing.
@@ -8033,10 +7969,10 @@ cross_tick:                    ; (0x72E5) C416=4, bonus 0x1D; vel ±5, SAT 0x0F/
 	ld (ix+006h),a
 	ld a,c
 	and 007h
-	jr nz,l72ffh
+	jr nz,cross_state
 	ld a,sfx_cross_fly
 	call play_sound
-l72ffh:
+cross_state:                    ; DISPATCH throw/out/back/catch
 	ld a,(ix+000h)
 	dec a
 	call DISPATCH_A
@@ -8049,9 +7985,9 @@ boomerang_throw:               ; (0x730E) copy Simon pos; velX ±3 (axe) / ±5 (
 	cp act_crouch
 	ld a,(simon_y)
 	ld b,0f0h
-	jr nz,l731ch
+	jr nz,boom_throw_y
 	ld b,0f6h
-l731ch:
+boom_throw_y:                   ; Y = Simon Y + (stand -16 / crouch -10)
 	add a,b
 	ld (ix+004h),a
 	xor a
@@ -8059,42 +7995,42 @@ l731ch:
 	ld a,(ix+001h)
 	cp 003h
 	ld b,003h
-	jr z,l732fh
+	jr z,boom_spd
 	ld b,005h
-l732fh:
+boom_spd:                       ; speed 3 axe / 5 cross
 	ld a,(ix+008h)
 	and a
 	ld a,b
-	jr z,l7338h
+	jr z,boom_xvel
 	neg
-l7338h:
+boom_xvel:                      ; store velX (neg if facing left)
 	ld (ix+003h),a
 	ld a,(simon_x)
 	ld (ix+005h),a
-	jp l7356h
+	jp boom_turn
 boomerang_out:                 ; (0x7344) 24 frames or screen-edge, then turn
 	ld a,(ix+005h)
 	sub 00ah
 	cp 0ech
-	jr nc,l7360h
+	jr nc,boom_edge
 	inc (ix+007h)
 	ld a,(ix+007h)
 	cp 018h
 	ret c
-l7356h:
+boom_turn:
 	inc (ix+000h)
 	ld (ix+007h),000h
 	jp actors_rearm_hittable
-l7360h:
+boom_edge:
 	inc (ix+000h)
-l7363h:
+boom_flip:
 	inc (ix+000h)
 	ld a,(ix+008h)
 	and a
 	ld a,005h
-	jr nz,l7370h
+	jr nz,boom_dx
 	ld a,0fbh
-l7370h:
+boom_dx:
 	ld (ix+003h),a
 	ld (ix+007h),000h
 	jp actors_rearm_hittable
@@ -8104,19 +8040,19 @@ boomerang_back:                ; (0x737A) decelerate, reverse; overlap Simon = c
 	ld a,(ix+005h)
 	sub 00ah
 	cp 0ech
-	jr nc,l7363h
+	jr nc,boom_flip
 	inc (ix+007h)
 	ld a,(ix+007h)
 	cp 017h
-	jp nc,l7356h
+	jp nc,boom_turn
 	rra
 	ret nc
 	ld a,(ix+008h)
 	and a
-	jr nz,l73a0h
+	jr nz,boom_accel
 	dec (ix+003h)
 	ret
-l73a0h:
+boom_accel:                     ; facing left: INC velX
 	inc (ix+003h)
 	ret
 boomerang_catch:               ; (0x73A4) overlap Simon -> despawn (keep C416)
@@ -8139,9 +8075,9 @@ holy_water_tick:
 	cp act_crouch
 	ld a,(simon_y)
 	ld b,0f0h
-	jr nz,l73c3h
+	jr nz,holy_throw_y
 	ld b,0f6h
-l73c3h:
+holy_throw_y:                   ; Y = Simon Y + crouch offset
 	add a,b
 	ld (ix+004h),a
 	xor a
@@ -8149,14 +8085,14 @@ l73c3h:
 	ld a,(ix+008h)
 	and a
 	ld a,002h
-	jr z,l73d5h
+	jr z,holy_throw_xvel
 	ld a,0feh
-l73d5h:
+holy_throw_xvel:                ; velX +2 / -2
 	ld (ix+003h),a
 	ld a,(simon_x)
 	ld (ix+005h),a
 	ld (ix+006h),038h
-	jp l7356h
+	jp boom_turn
 holy_water_arc:                ; (0x73E5) Y += 2*arc_dy_tbl[ix+7]; land -> flame
 	ld a,(ix+007h)
 	ld hl,arc_dy_tbl
@@ -8169,9 +8105,9 @@ holy_water_arc:                ; (0x73E5) Y += 2*arc_dy_tbl[ix+7]; land -> flame
 	inc (ix+007h)
 	ld a,(ix+007h)
 	cp 016h
-	jr c,l7404h
+	jr c,holy_arc_floor
 	dec (ix+007h)
-l7404h:
+holy_arc_floor:                 ; map_solid_pair; land -> flame
 	ld d,(ix+005h)
 	ld e,(ix+004h)
 	call map_solid_pair
@@ -8187,10 +8123,10 @@ holy_water_flame:              ; (0x7420) 0x18 frames burning on the floor, then
 	ld a,(0c003h)
 	and 004h
 	ld a,0f4h
-	jr z,l742eh
+	jr z,holy_flame_pat
 	call actors_rearm_hittable
 	ld a,0f8h
-l742eh:
+holy_flame_pat:                 ; pattern F4/F8; 24 frames then clear
 	ld (ix+006h),a
 	inc (ix+007h)
 	ld a,(ix+007h)
@@ -8205,9 +8141,9 @@ knife_tick:                    ; (0x743D) C416=2, bonus 0x1B; straight ±5, 1 or
 	cp act_crouch
 	ld a,(simon_y)
 	ld b,0f0h
-	jr nz,l7450h
+	jr nz,knife_throw_y
 	ld b,0f6h
-l7450h:
+knife_throw_y:                  ; Y = Simon Y + crouch offset
 	add a,b
 	ld (ix+004h),a
 	xor a
@@ -8216,10 +8152,10 @@ l7450h:
 	and a
 	ld a,005h
 	ld b,020h
-	jr z,l7466h
+	jr z,knife_throw_xvel
 	ld a,0fbh
 	ld b,018h
-l7466h:
+knife_throw_xvel:               ; velX +5 / -5; pattern 0x20 / 0x18
 	ld (ix+003h),a
 	ld (ix+006h),b
 	ld a,(simon_x)
@@ -8239,10 +8175,10 @@ axe_tick:                      ; (0x747A) C416=3, bonus 0x1C; vel ±3, smaller t
 	ld (ix+006h),a
 	ld a,c
 	and 007h
-	jr nz,l7493h
+	jr nz,axe_state
 	ld a,sfx_axe_fly
 	call play_sound
-l7493h:
+axe_state:                      ; DISPATCH throw/out/back/catch
 	ld hl,0c433h
 	ld a,(hl)
 	sub 002h
@@ -8301,14 +8237,14 @@ projectile_clear_hl:
 	ld a,l
 	cp 050h                ; C450 vs C460
 	ld a,0e0h              ; hide SAT Y
-	jr nz,l750eh
+	jr nz,proj_hide_c460
 	ld (0d618h),a          ; C450 SAT pair
 	ld (0d61ch),a
-	jr l7514h
-l750eh:
+	jr proj_hide_pat
+proj_hide_c460:                 ; hide C460 SAT pair Y=0xE0
 	ld (0d620h),a          ; C460 SAT pair
 	ld (0d624h),a
-l7514h:
+proj_hide_pat:                  ; slot+4 = hide Y
 	inc l
 	inc l
 	inc l
@@ -8340,9 +8276,9 @@ projectile_sat:                ; (0x753C) C450/C460 -> SAT D618/D620 + colour
 	ld a,l
 	cp 050h                ; C450 vs C460
 	ld hl,0d618h           ; C450 SAT pair (two 16x16 cells)
-	jr z,l754fh
+	jr z,proj_sat_dest
 	ld hl,0d620h           ; C460 SAT pair
-l754fh:
+proj_sat_dest:                  ; write Y/X/pat pair at HL
 	ld a,(ix+004h)         ; Y
 	sub 010h               ; SAT Y = Y - 16
 	ld (hl),a
@@ -8371,9 +8307,9 @@ l754fh:
 	ld a,l
 	cp 050h                ; C450 colour at D460, C460 at D480
 	ld hl,0d460h
-	jr z,l7585h
+	jr z,proj_sat_col
 	ld hl,0d480h
-l7585h:
+proj_sat_col:                   ; colour run at D460 or D480
 	ld a,(ix+001h)         ; projectile type
 	cp 004h                ; cross?
 	jr nz,projectile_sat_ink ; not cross -> 0x02/0x4C (holy-water flame below)
@@ -8403,13 +8339,13 @@ projectile_sat_ink:            ; (0x759C) knife/axe/holy: 0x02/0x4C; flame = 8
 	ld hl,0d480h           ; C460 colour (vial lives in C460)
 	ld de,0d490h
 	ld b,010h
-l75beh:
+flame_sat_col:                  ; holy flame: colour 8, pair 0
 	ld (hl),008h           ; red
 	xor a
 	ld (de),a              ; clear the paired colour run
 	inc hl
 	inc de
-	djnz l75beh
+	djnz flame_sat_col
 	ret
 ; Per-frame countdown bank: decrement each of these timers toward 0 (clamped).
 ;   rosary_timer - enemy-spawn suppression (rosary / weapon-pickup grace); while nonzero
@@ -8435,7 +8371,7 @@ boss_flash_delay_tick:         ; C445; on 0 arm backdrop flash C43E=0x18
 	dec (hl)
 	ret nz
 	ld a,018h
-	ld (0c43eh),a
+	ld (backdrop_flash),a
 	ret
 gem_timer_tick:                ; C43A invis; sfx 0x17 (gem warn) at 16 frames left
 	ld hl,blue_gem
@@ -8460,57 +8396,58 @@ hourglass_timer_tick:          ; hourglass_timer; on 0: res D010.0, restore BGM 
 	ld a,sound_fc
 	jp play_sound
 backdrop_flash_tick:           ; C43E: CHGCLR 0x0E/0 (white cross / boss-kill flash)
-	ld hl,0c43eh
+	ld hl,backdrop_flash
 	ld a,(hl)
 	and a
 	ret z
 	dec (hl)
 	and 002h
 	ld a,00eh
-	jr nz,l7619h
+	jr nz,flash_set
 	xor a
-l7619h:
+flash_set:
 	ld (0f3ebh),a
 	jp CHGCLR
-l761fh:
+; simon_shield_frames (0x761F): C701 bits4-5 (red/yellow shield) remap walk cells.
+simon_shield_frames:
 	ld a,(simon_whip)
 	and a
-	jr nz,l7655h
+	jr nz,shield_whip
 	ld a,(0c701h)
 	and 030h
 	ret z
 	ld hl,simon_legs
 	ld a,(hl)
 	cp 014h
-	jr nc,l7636h
+	jr nc,shield_torso
 	add a,014h
 	ld (hl),a
-l7636h:
+shield_torso:
 	inc hl
 	ld a,(hl)
 	ld b,01eh
 	and a
-	jr z,l7653h
+	jr z,shield_store
 	inc b
 	dec a
-	jr z,l7653h
+	jr z,shield_store
 	inc b
 	dec a
-	jr z,l7653h
+	jr z,shield_store
 	ld a,(hl)
 	ld b,021h
 	sub 00fh
-	jr z,l7653h
+	jr z,shield_store
 	inc b
 	dec a
-	jr z,l7653h
+	jr z,shield_store
 	inc b
 	dec a
 	ret nz
-l7653h:
+shield_store:
 	ld (hl),b
 	ret
-l7655h:
+shield_whip:
 	ld a,(simon_action)
 	cp act_stairs
 	ret nz
@@ -8524,23 +8461,23 @@ l7655h:
 ; simon_mirror_frames (0x7666): if facing left (0xC42C!=0), add 0x0A/0x0F to
 ; the walk/torso frame pair at 0xC42E/0xC42F so the left-facing cells are used.
 simon_mirror_frames:
-	ld a,(simon_facing)
-	and a
-	ret z
-	ld hl,(simon_legs)
-	ld a,l
-	cp 00ah
-	jr nc,l7676h
-	add a,00ah
-	ld l,a
-l7676h:
-	ld a,h
-	cp 00fh
-	jr nc,l767eh
-	add a,00fh
-	ld h,a
-l767eh:
-	ld (simon_legs),hl
+	ld a,(simon_facing)     ; 0 right, 1 left
+	and a                   ; facing right?
+	ret z                   ; right-facing cells already in C42E/F
+	ld hl,(simon_legs)      ; legs + torso frames
+	ld a,l                  ; legs cell
+	cp 00ah                 ; already a left-facing legs cell?
+	jr nc,mirror_legs_ok    ; yes
+	add a,00ah              ; right cell + 0x0A = left
+	ld l,a                  ; mirrored legs
+mirror_legs_ok:                 ; legs already mirrored or +0x0A done
+	ld a,h                  ; torso cell
+	cp 00fh                 ; already a left-facing torso cell?
+	jr nc,mirror_store      ; yes
+	add a,00fh              ; right cell + 0x0F = left
+	ld h,a                  ; mirrored torso
+mirror_store:                   ; store C42E/C42F
+	ld (simon_legs),hl      ; write legs + torso
 	ret
 ; room_edge_detect (seg1 0x7682): per-frame room-EDGE / stair detector.  Compares
 ; Simon's Y (0xC425) and X (0xC427) against the screen bounds and, when he steps
@@ -8560,10 +8497,10 @@ room_edge_detect:
 	ld a,(simon_action)
 	cp act_stairs                ; on stairs?
 	ld a,(de)              ; A = Y
-	jr nz,l769dh
+	jr nz,edge_check
 	cp 030h
 	jr c,room_edge_up            ; on stairs & near top -> up exit
-l769dh:
+edge_check:                     ; not stairs-top: test bottom/L/R
 	cp 0e1h
 	jr nc,room_edge_down           ; past bottom -> down exit
 	ld a,(bc)              ; A = X
@@ -8581,9 +8518,9 @@ room_edge_up:                        ; top edge (climbing off the top of a stair
 	ld a,(simon_facing)
 	and a
 	ld d,0f0h
-	jr z,l76bdh
+	jr z,edge_up_nudge
 	ld d,010h
-l76bdh:
+edge_up_nudge:                  ; nudge X toward stair landing
 	ld a,(bc)
 	add a,d                ; nudge X toward the stair landing
 	ld (bc),a
@@ -8618,17 +8555,17 @@ room_edge_down_go:                        ; room below exists -> down transition
 	ld (de),a              ; wrap Y to top of the new (lower) room
 	ld a,(simon_action)
 	cp act_stairs
-	jr nz,l7706h
+	jr nz,edge_down_dir
 	ld a,(simon_facing)
 	and a
 	ld d,0f0h
-	jr z,l7703h
+	jr z,edge_down_nudge
 	ld d,010h
-l7703h:
+edge_down_nudge:                ; stairs: nudge X toward landing
 	ld a,(bc)
 	add a,d
 	ld (bc),a
-l7706h:
+edge_down_dir:                  ; pending dir = down
 	ld (hl),dir_down
 	ret
 room_edge_left:                        ; left edge
@@ -8679,11 +8616,11 @@ door_try_open:
 	ld hl,0c701h           ; inventory byte
 	ld a,(stage)
 	and a
-	jr z,l774ah            ; stage 0 (courtyard): open freely, no key needed
+	jr z,door_spend_key            ; stage 0 (courtyard): open freely, no key needed
 	ld a,(hl)
 	rra                    ; white key = bit 0 -> carry
 	ret nc                 ; no white key -> door stays shut
-l774ah:
+door_spend_key:                 ; clear C701 bit0 (court skips the test)
 	res 0,(hl)             ; spend the white key (clear bit 0)
 	call hud_white_key_icon ; HUD: white-key lamp off (C701 bit0 now clear)
 	xor a
@@ -8697,16 +8634,16 @@ l774ah:
 	call ADD_DE_A
 	ld a,(de)
 	and a
-	jr z,l776fh
+	jr z,door_quiet
 	ld a,sound_fade
 	call play_sound
-l776fh:
+door_quiet:                     ; no BGM fade this stage
 	ld a,(hl)
 	cp 005h
-	jr z,l7779h
+	jr z,door_sfx_portal
 	ld a,sfx_door
 	jp play_sound
-l7779h:
+door_sfx_portal:                ; C5AC==5: portal sfx else door sfx
 	ld a,sfx_portal
 	jp play_sound
 ; stage_bgm_change (seg1 0x777E): byte[stage 0..18].  1 = BGM changes
@@ -8735,20 +8672,20 @@ door_open_walk:
 	ld a,(simon_facing)
 	and a
 	ld bc,00080h
-	jr z,l77b4h
+	jr z,door_walk_x
 	ld bc,0ff80h
-l77b4h:
+door_walk_x:                    ; add facing vel; step walk frames
 	call simon_add_x
 	call simon_step_walk_frames
 	ld a,(door_state)
 	cp 005h
-	jr z,l77cbh
+	jr z,door_walk_vdoor
 	ld a,(simon_x)
 	sub 008h
 	cp 0f0h
 	ret c
 	jr door_open_exit
-l77cbh:
+door_walk_vdoor:                ; vertical door: wait until X in window
 	ld a,(door_x)          ; door X
 	add a,008h
 	ld b,a
@@ -8767,19 +8704,19 @@ door_open_exit:                ; (seg1 0x77D8)
 	ld de,simon_x           ; de -> Simon X / heading byte
 	ld a,(de)
 	rla                    ; carry = heading bit7 (set -> moving right)
-	jr c,l77ebh            ; right edge -> use the right permit
+	jr c,door_exit_right            ; right edge -> use the right permit
 	ld a,(hl)              ; left permit (0xC41E)
 	inc a
 	jr z,set_stage_boundary ; 0xFF = blocked edge -> STAGE EXIT
 	ld bc,003f6h           ; b=dir_left; c=0xF6 X-wrap to right side
-	jr l77f3h
-l77ebh:
+	jr door_exit_wrap
+door_exit_right:                ; heading right: C41F permit
 	inc hl                 ; hl -> right exit permit (0xC41F)
 	ld a,(hl)
 	inc a
 	jr z,set_stage_boundary ; 0xFF = blocked edge -> STAGE EXIT
 	ld bc,0040ah           ; b=dir_right; c=0x0A X-wrap to left side
-l77f3h:
+door_exit_wrap:                 ; store dir + wrap X; pick boss BGM
 	ld a,b
 	ld (exit_dir),a          ; pending-exit dir (dir_up..dir_right)
 	ld a,c
@@ -8787,9 +8724,9 @@ l77f3h:
 	ld a,(stage)
 	cp 012h                ; stage 18 (Dracula wrap uses the other track)
 	ld a,bgm_boss
-	jr nz,l7804h
+	jr nz,door_exit_bgm
 	ld a,bgm_boss_dracula
-l7804h:
+door_exit_bgm:                  ; play boss / Dracula boss BGM
 	jp play_sound              ; intra-stage key-door wrap: start boss BGM
 ; set_stage_boundary (seg1 0x7807): walking a BLOCKED left/right edge after the
 ; door is open.  0xC408 is later seen by the frame dispatcher (seg0 0x424xh)
@@ -8803,30 +8740,30 @@ door_idle:
 ; actors_kill_all (seg1 0x780D): C800 via actor_cull (no drops) + D700 via
 ; shot_death_flame. White cross / boss kill.
 actors_kill_all:
-	ld ix,actor_slots
-	ld b,007h
-l7813h:
-	ld a,(ix+000h)
-	and a
+	ld ix,actor_slots       ; 7 enemy slots
+	ld b,007h               ; count
+cull_actors:                    ; actor_cull each live C800
+	ld a,(ix+000h)          ; type
+	and a                   ; live?
 	push bc
 	push ix
-	call nz,actor_cull
+	call nz,actor_cull      ; kill, no drop
 	pop ix
 	pop bc
-	ld de,00080h
-	add ix,de
-	djnz l7813h
-	ld ix,shot_slots
-	ld b,008h
-l782dh:
-	ld a,(ix+000h)
-	and a
+	ld de,00080h            ; next slot
+	add ix,de               ; stride
+	djnz cull_actors        ; 7 slots
+	ld ix,shot_slots        ; 8 shot slots
+	ld b,008h               ; count
+cull_shots:                     ; shot_death_flame each live D700
+	ld a,(ix+000h)          ; type
+	and a                   ; live?
 	push bc
-	call nz,shot_death_flame
+	call nz,shot_death_flame ; free + flame
 	pop bc
-	ld de,00080h
-	add ix,de
-	djnz l782dh
+	ld de,00080h            ; next slot
+	add ix,de               ; stride
+	djnz cull_shots         ; 8 slots
 	ret
 ; simon_sat_build (seg1 0x783E): emit Simon's hardware-sprite SAT from
 ; 0xC42E/0xC42F via simon_sat_cell0/1.  Hides unused slots (Y=0xE0);
@@ -8835,23 +8772,23 @@ simon_sat_build:
 	call simon_sat_colour
 	ld a,(door_state)
 	cp 005h
-	jr z,l785fh
+	jr z,sat_cell0
 	ld de,0d610h
 	ld a,(weapon_id)
 	cp equip_knife
 	ld b,004h
-	jr c,l7856h
+	jr c,sat_hide_n
 	ld b,002h
-l7856h:
+sat_hide_n:
 	ld a,0e0h
-l7858h:
+sat_hide_loop:
 	ld (de),a
 	inc de
 	inc de
 	inc de
 	inc de
-	djnz l7858h
-l785fh:
+	djnz sat_hide_loop
+sat_cell0:
 	ld a,(simon_legs)
 	add a,a
 	ld hl,simon_sat_cell0
@@ -8864,9 +8801,9 @@ l785fh:
 	ld a,(door_state)
 	cp 005h
 	ld de,0d600h
-	jr nz,l787ch
+	jr nz,sat_cell0_de
 	ld de,0d620h
-l787ch:
+sat_cell0_de:
 	ld b,(hl)
 	inc hl
 	call simon_sat_emit
@@ -8882,9 +8819,9 @@ l787ch:
 	ld a,(door_state)
 	cp 005h
 	ld de,0d608h
-	jr nz,l789eh
+	jr nz,sat_cell1_de
 	ld de,0d628h
-l789eh:
+sat_cell1_de:
 	ld b,(hl)
 	inc hl
 ; simon_sat_emit (seg1 0x78A0): one SAT record (count already in B, HL at
@@ -8897,40 +8834,40 @@ simon_sat_emit:
 	ld b,a
 	ld a,(simon_legs)
 	cp 006h
-	jr z,l78b9h
+	jr z,simon_sat_crouch
 	cp 010h
-	jr z,l78b9h
+	jr z,simon_sat_crouch
 	cp 01ah
-	jr z,l78b9h
+	jr z,simon_sat_crouch
 	cp 024h
-	jr nz,l78d3h
-l78b9h:
+	jr nz,simon_sat_invuln
+simon_sat_crouch:
 	ld a,(simon_action)
 	dec a
-	jr nz,l78cah
+	jr nz,simon_sat_crouch_low
 	ld a,c
 	cp 002h
-	jr nc,l78d3h
+	jr nc,simon_sat_invuln
 	ld a,b
 	sub 006h
 	ld b,a
-	jr l78d3h
-l78cah:
+	jr simon_sat_invuln
+simon_sat_crouch_low:
 	ld a,c
 	cp 002h
-	jr c,l78d3h
+	jr c,simon_sat_invuln
 	ld a,b
 	add a,006h
 	ld b,a
-l78d3h:
+simon_sat_invuln:
 	ld a,(simon_invuln)
 	and a
-	jr z,l78e2h
+	jr z,simon_sat_y
 	ld a,(0c003h)
 	and 002h
-	jr z,l78e2h
+	jr z,simon_sat_y
 	ld b,0e0h              ; i-frame blink: hide this sprite
-l78e2h:
+simon_sat_y:
 	ld a,b
 	pop bc
 	sub 002h
@@ -8942,23 +8879,23 @@ l78e2h:
 	ld a,(simon_x)
 	ld c,a
 	rl b
-	jr nc,l78fdh
+	jr nc,simon_sat_x_fwd
 	rr b
 	ld a,b
 	neg
 	ld b,a
 	ld a,c
 	sub b
-	jr l78feh
-l78fdh:
+	jr simon_sat_x_store
+simon_sat_x_fwd:
 	add a,(hl)
-l78feh:
-	jr nc,l7905h
+simon_sat_x_store:
+	jr nc,simon_sat_x_ok
 	dec de
 	ld a,0e0h
 	ld (de),a
 	inc de
-l7905h:
+simon_sat_x_ok:
 	ld (de),a
 	pop bc
 	inc hl
@@ -8979,41 +8916,41 @@ simon_sat_colour:
 	ld a,(weapon_id)
 	cp equip_knife
 	ld b,080h
-	jr c,l791eh
+	jr c,sat_col_n
 	ld b,040h
-l791eh:
+sat_col_n:
 	ld a,(door_state)
 	cp 005h
 	ld hl,0d400h
-	jr nz,l792bh
+	jr nz,sat_col_loop
 	ld hl,0d480h
-l792bh:
+sat_col_loop:
 	ld a,(blue_gem)
 	and a
-	jr z,l7939h
+	jr z,sat_col_ring
 	ld a,(0c003h)
 	rra
 	ld a,00eh              ; blue gem (id 8): flash sprite white
-	jr c,l7951h
-l7939h:
+	jr c,sat_col_write
+sat_col_ring:
 	ld a,(sapphire_ring)
 	and a
-	jr z,l7947h
+	jr z,sat_col_def
 	ld a,(0c003h)
 	rra
 	ld a,008h              ; sapphire ring (id 9): flash sprite red
-	jr c,l7951h
-l7947h:
+	jr c,sat_col_write
+sat_col_def:
 	ld a,b
 	dec a
 	and 010h
 	ld a,001h
-	jr nz,l7951h
+	jr nz,sat_col_write
 	ld a,042h
-l7951h:
+sat_col_write:
 	ld (hl),a
 	inc hl
-	djnz l792bh
+	djnz sat_col_loop
 	ret
 ; stage_bgm_play (seg1 0x7956): queue this stage's BGM.  Stage 0 always
 ; plays; otherwise stage_bgm_change[stage-1] must be nonzero.  0xC40D
@@ -9021,17 +8958,17 @@ l7951h:
 stage_bgm_play:
 	ld a,(replay_bgm)          ; force replay (death -> state_stage_bridge)
 	and a
-	jr nz,l796ch
+	jr nz,stage_bgm_go
 	ld a,(stage)
 	and a
-	jr z,l796ch            ; courtyard always starts 0x80
+	jr z,stage_bgm_go            ; courtyard always starts 0x80
 	dec a
 	ld hl,stage_bgm_change
 	call ADD_HL_A
 	ld a,(hl)
 	and a
 	ret z                  ; same track as previous stage
-l796ch:
+stage_bgm_go:                   ; play_sound stage_bgm_tbl[stage]
 	ld a,(stage)
 	ld hl,stage_bgm_tbl
 	call ADD_HL_A
@@ -9292,10 +9229,10 @@ title_sat_init:
 	ld hl,title_sat_tmpl
 	ld b,00bh
 	ld a,0fch
-l7b00h:
+title_sat_pair:
 	push bc
 	ld b,002h
-l7b03h:
+title_sat_cell:
 	push bc
 	ld bc,00002h
 	ldir
@@ -9306,26 +9243,26 @@ l7b03h:
 	ld (de),a
 	inc de
 	inc de
-	djnz l7b03h
+	djnz title_sat_cell
 	inc hl
 	inc hl
 	pop bc
-	djnz l7b00h
+	djnz title_sat_pair
 	ld hl,0d400h
 	ld c,00bh
-l7b1dh:
+title_sat_ink:
 	ld b,010h
-l7b1fh:
+title_sat_red:
 	ld (hl),008h
 	inc hl
-	djnz l7b1fh
+	djnz title_sat_red
 	ld b,010h
-l7b26h:
+title_sat_blue:
 	ld (hl),002h
 	inc hl
-	djnz l7b26h
+	djnz title_sat_blue
 	dec c
-	jr nz,l7b1dh
+	jr nz,title_sat_ink
 	ld a,002h
 	ld de,00000h
 	call palette_set
@@ -9334,29 +9271,29 @@ l7b26h:
 ; start pos.  0xFF=end, 0xFE=next row (next byte added to D, E+=8), else tile id.
 tile_layout_draw:
 	push de
-l7b3ah:
-	ld a,(hl)
+layout_byte:
+	ld a,(hl)               ; tile id, 0xFE row, or 0xFF end
 	inc hl
-	ld c,a
-	inc a
-	jr z,l7b57h
-	inc a
-	jr nz,l7b4eh
+	ld c,a                  ; keep id
+	inc a                   ; 0xFF -> 0
+	jr z,layout_end         ; end of stream
+	inc a                   ; 0xFE -> 0
+	jr nz,layout_tile       ; plain tile id
 	pop de
-	ld a,(hl)
+	ld a,(hl)               ; X delta for next row
 	inc hl
-	add a,d
-	ld d,a
-	ld a,008h
-	add a,e
-	ld e,a
-	jr tile_layout_draw
-l7b4eh:
-	ld a,c
-	call tile_blit_skip0
-	call blit_advance_x
-	jr l7b3ah
-l7b57h:
+	add a,d                 ; new X
+	ld d,a                  ; store
+	ld a,008h               ; one cell down
+	add a,e                 ; Y += 8
+	ld e,a                  ; store
+	jr tile_layout_draw     ; push new origin, next byte
+layout_tile:
+	ld a,c                  ; tile id
+	call tile_blit_skip0    ; blit unless id 0
+	call blit_advance_x     ; next cell right
+	jr layout_byte          ; next stream byte
+layout_end:
 	pop de
 	ret
 ; title_sat_tmpl (seg1 0x7B59): 11 (Y,X) pairs copied into the SAT shadow.
@@ -9389,28 +9326,28 @@ simon_ceiling_test:            ; carry if (SimonX, SimonY-0x2C) is solid (no jum
 	call map_cell_at
 	jp tile_is_solid
 simon_floor_test:              ; grounded: map_solid_pair at feet; Y>=0xD0 = pit
-	ld a,(simon_y)
-	ld e,a
-	cp 0d0h
-	jr c,l7b99h
-	or a
+	ld a,(simon_y)          ; feet Y
+	ld e,a                  ; for map_cell_at
+	cp 0d0h                 ; below the floor line?
+	jr c,floor_pair         ; still on the map
+	or a                    ; Y>=0xD0: clear carry (not solid / pit)
 	ret
-l7b99h:
-	ld a,(simon_x)
-	add a,005h
-	ld d,a
+floor_pair:                     ; Y<0xD0: map_solid_pair at X+5
+	ld a,(simon_x)          ; pixel X
+	add a,005h              ; inside Simon, not the left edge
+	ld d,a                  ; probe X
 ; map_solid_pair (seg1 0x7B9F): carry if the tile at (D,E) or (D-10,E) is solid.
 ; Enemy floor test (feet + 10px toward the other side).
 map_solid_pair:
-	call map_cell_at
-	call tile_is_solid
-	ret c
-	ld a,d
-	sub 00ah
-	ld d,a
+	call map_cell_at        ; tile at (D,E)
+	call tile_is_solid      ; carry = blocking
+	ret c                   ; first sample hit
+	ld a,d                  ; second sample 10px left
+	sub 00ah                ; D -= 10
+	ld d,a                  ; other foot
 map_solid_at:                  ; (0x7BAA) carry if tile at (D,E) is solid
-	call map_cell_at
-	jp tile_is_solid
+	call map_cell_at        ; tile at (D,E)
+	jp tile_is_solid        ; carry = blocking
 ; simon_wall_right (seg1 0x7BB0): probe +X from Simon Y/X (BC=0x0802, A=0).
 simon_wall_right:
 	ld a,(simon_y)
@@ -9419,54 +9356,54 @@ simon_wall_right:
 	ld d,a
 	ld bc,00802h
 	xor a
-	jr l7bc7h
+	jr wall_right_go
 actor_wall_right:              ; (0x7BBE) BC=0x1004 A=2; enemy-sized +X
 	ld bc,01004h
 	ld a,002h
-	jr l7bc7h
+	jr wall_right_go
 ; probe_wall_right (0x7BC5): A=1, BC from caller (often 0x0808). +X samples.
 probe_wall_right:
-	ld a,001h
-l7bc7h:
-	ld (0cff0h),a
-	ld a,e
-	sub c
-	ld e,a
-	ld a,d
-	add a,b
-	ld d,a
-	call map_cell_at
-	call tile_is_solid
-	ret c
-	ld a,e
-	sub 008h
-	ld e,a
-	call map_cell_at
-	call tile_is_solid
-	ret c
-	ld a,(0cff0h)
-	cp 002h
-	ret z
-	ld a,e
-	sub 008h
-	ld e,a
-	call map_cell_at
-	call tile_is_solid
-	ret c
-	ld a,(0cff0h)
-	and a
-	jr nz,l7c02h
-	ld a,(simon_action)
-	cp act_crouch
-	jr nz,l7c02h
-	xor a
+	ld a,001h               ; probe mode (3+ samples, BC from caller)
+wall_right_go:                  ; shared +X samples (simon/actor/probe)
+	ld (0cff0h),a           ; 0=Simon 1=probe 2=actor
+	ld a,e                  ; Y
+	sub c                   ; Y -= C (head offset)
+	ld e,a                  ; first sample Y
+	ld a,d                  ; X
+	add a,b                 ; X += B (right edge)
+	ld d,a                  ; first sample X
+	call map_cell_at        ; sample 1
+	call tile_is_solid      ; carry = hit
+	ret c                   ; blocked
+	ld a,e                  ; up one cell
+	sub 008h                ; Y -= 8
+	ld e,a                  ; sample 2 Y
+	call map_cell_at        ; sample 2
+	call tile_is_solid      ; carry = hit
+	ret c                   ; blocked
+	ld a,(0cff0h)           ; mode
+	cp 002h                 ; actor (2 samples only)?
+	ret z                   ; enemy-sized: done
+	ld a,e                  ; up one cell
+	sub 008h                ; Y -= 8
+	ld e,a                  ; sample 3 Y
+	call map_cell_at        ; sample 3
+	call tile_is_solid      ; carry = hit
+	ret c                   ; blocked
+	ld a,(0cff0h)           ; mode
+	and a                   ; Simon (0)?
+	jr nz,wall_right_extra  ; probe: always 4th
+	ld a,(simon_action)     ; crouching?
+	cp act_crouch           ; skip head sample
+	jr nz,wall_right_extra  ; standing: 4th sample
+	xor a                   ; clear carry (not blocked)
 	ret
-l7c02h:
-	ld a,e
-	sub 008h
-	ld e,a
-	call map_cell_at
-	jp tile_is_solid
+wall_right_extra:               ; 4th sample unless Simon crouch
+	ld a,e                  ; up one cell
+	sub 008h                ; Y -= 8
+	ld e,a                  ; sample 4 Y
+	call map_cell_at        ; sample 4
+	jp tile_is_solid        ; carry = hit
 ; simon_wall_left (seg1 0x7C0C): probe -X from Simon Y/X (BC=0x0802, A=0).
 simon_wall_left:
 	ld a,(simon_y)
@@ -9475,53 +9412,53 @@ simon_wall_left:
 	ld d,a
 	ld bc,00802h
 	xor a
-	jr l7c23h
+	jr wall_left_go
 actor_wall_left:               ; (0x7C1A) BC=0x1004 A=2; enemy-sized -X
 	ld bc,01004h
 	ld a,002h
-	jr l7c23h
+	jr wall_left_go
 ; probe_wall_left (0x7C21): A=1, BC from caller (often 0x0808). -X samples.
 probe_wall_left:
-	ld a,001h
-l7c23h:
-	ld (0cff0h),a
-	ld a,e
-	sub c
-	ld e,a
-	ld a,d
-	sub b
-	ld d,a
-	call map_cell_at
-	call tile_is_solid
-	ret c
-	ld a,e
-	sub 008h
-	ld e,a
-	call map_cell_at
-	call tile_is_solid
-	ret c
-	ld a,(0cff0h)
-	cp 002h
-	ret z
-	ld a,e
-	sub 008h
-	ld e,a
-	call map_cell_at
-	call tile_is_solid
-	ret c
-	ld a,(0cff0h)
-	and a
-	jr nz,l7c5eh
-	ld a,(simon_action)
-	cp act_crouch
-	jr nz,l7c5eh
-	xor a
+	ld a,001h               ; probe mode (3+ samples, BC from caller)
+wall_left_go:                   ; shared -X samples (simon/actor/probe)
+	ld (0cff0h),a           ; 0=Simon 1=probe 2=actor
+	ld a,e                  ; Y
+	sub c                   ; Y -= C (head offset)
+	ld e,a                  ; first sample Y
+	ld a,d                  ; X
+	sub b                   ; X -= B (left edge)
+	ld d,a                  ; first sample X
+	call map_cell_at        ; sample 1
+	call tile_is_solid      ; carry = hit
+	ret c                   ; blocked
+	ld a,e                  ; up one cell
+	sub 008h                ; Y -= 8
+	ld e,a                  ; sample 2 Y
+	call map_cell_at        ; sample 2
+	call tile_is_solid      ; carry = hit
+	ret c                   ; blocked
+	ld a,(0cff0h)           ; mode
+	cp 002h                 ; actor (2 samples only)?
+	ret z                   ; enemy-sized: done
+	ld a,e                  ; up one cell
+	sub 008h                ; Y -= 8
+	ld e,a                  ; sample 3 Y
+	call map_cell_at        ; sample 3
+	call tile_is_solid      ; carry = hit
+	ret c                   ; blocked
+	ld a,(0cff0h)           ; mode
+	and a                   ; Simon (0)?
+	jr nz,wall_left_extra   ; probe: always 4th
+	ld a,(simon_action)     ; crouching?
+	cp act_crouch           ; skip head sample
+	jr nz,wall_left_extra   ; standing: 4th sample
+	xor a                   ; clear carry (not blocked)
 	ret
-l7c5eh:
-	ld a,e
-	sub 008h
-	ld e,a
-	call map_cell_at
+wall_left_extra:                ; 4th sample unless Simon crouch
+	ld a,e                  ; up one cell
+	sub 008h                ; Y -= 8
+	ld e,a                  ; sample 4 Y
+	call map_cell_at        ; sample 4
 ; --- tile_is_solid - classify a room tile id as blocking ---------------------
 ;  In:  A = tile id from map_cell_at (0 outside the 0xD100..0xD3FF window).
 ;  Out: carry set = solid (Simon's feet/head are blocked here).
@@ -9530,16 +9467,16 @@ l7c5eh:
 ;  Stage 1 (row 1) threshold = 4, so only the floor/platform surface ids 01..04
 ;  block Simon - the thick wall/brick metatiles (ids 0x2c+) are visual only.
 tile_is_solid:
-	ld c,a
-	ld a,(cell_event)          ; current cell event code
-	cp evt_dracula
-	jr z,tile_is_solid_evt6            ; event-6 cells use a fixed threshold of 6
-	ld a,(stage)          ; A = world row
-	ld hl,row_solid_thresh
-	call ADD_HL_A          ; HL -> threshold for this row
-	ld a,c
-	dec a
-	cp (hl)                ; carry = (id-1) < threshold -> solid
+	ld c,a                  ; keep tile id
+	ld a,(cell_event)       ; current cell event code
+	cp evt_dracula          ; event 6 (s18r9)
+	jr z,tile_is_solid_evt6 ; event-6 cells use a fixed threshold of 6
+	ld a,(stage)            ; A = world row
+	ld hl,row_solid_thresh  ; per-row threshold
+	call ADD_HL_A           ; HL -> threshold for this row
+	ld a,c                  ; tile id
+	dec a                   ; id-1
+	cp (hl)                 ; carry = (id-1) < threshold -> solid
 	ret
 tile_is_solid_evt6:            ; (0x7C7A) event-6 (s18r9): solid iff (id-1) < 6
 	ld a,c
@@ -9552,14 +9489,14 @@ row_solid_thresh:
 	defb 002h,004h,004h,004h,004h,004h,004h,004h,004h,004h
 	defb 009h,009h,009h,004h,004h,004h,009h,009h,008h
 ; stair_probe_down_right (seg1 0x7C92): DOWN from ground. Tile 0x04; snap X +8.
-; Event 6 skips (returns NZ). Z = boarded; C435/C421 get 2 / 0.
+; Event 6 skips (returns NZ). Z = boarded; stair_held/jump_dir get 2 / 0.
 stair_probe_down_right:
 	ld a,(cell_event)
 	cp evt_dracula
-	jr nz,l7c9bh
+	jr nz,stair_dr_go
 	and a
 	ret
-l7c9bh:
+stair_dr_go:                    ; not event-6: probe tile 0x04
 	ld bc,simon_y
 	ld a,(bc)
 	ld e,a
@@ -9585,10 +9522,10 @@ l7c9bh:
 stair_probe_down_left:
 	ld a,(cell_event)
 	cp evt_dracula
-	jr nz,l7cc3h
+	jr nz,stair_dl_go
 	and a
 	ret
-l7cc3h:
+stair_dl_go:                    ; not event-6: probe tile 0x03
 	ld bc,simon_y
 	ld a,(bc)
 	ld e,a
@@ -9611,14 +9548,14 @@ l7cc3h:
 	xor a
 	ret
 ; stair_probe_up_right (seg1 0x7CE2): UP from ground. Tile 0x0D; snap X +8.
-; Event 6 skips. Z = boarded; C435/C421 get 1 / 0.
+; Event 6 skips. Z = boarded; stair_held/jump_dir get 1 / 0.
 stair_probe_up_right:
 	ld a,(cell_event)
 	cp evt_dracula
-	jr nz,l7cebh
+	jr nz,stair_ur_go
 	and a
 	ret
-l7cebh:
+stair_ur_go:                    ; not event-6: probe tile 0x0D
 	ld bc,simon_y
 	ld a,(bc)
 	sub 008h
@@ -9645,10 +9582,10 @@ l7cebh:
 stair_probe_up_left:
 	ld a,(cell_event)
 	cp evt_dracula
-	jr nz,l7d15h
+	jr nz,stair_ul_go
 	and a
 	ret
-l7d15h:
+stair_ul_go:                    ; not event-6: probe tile 0x0C
 	ld bc,simon_y
 	ld a,(bc)
 	sub 008h
@@ -9680,48 +9617,48 @@ l7d15h:
 ;  expanded from ROM metatiles by seg0 room_map_build; callers pair this with
 ;  tile_is_solid to test terrain.
 map_cell_at:
-	ld a,e
-	sub 010h               ; drop the 0x10px top margin
-	and 0f8h               ; align to 8px cell
+	ld a,e                  ; Y pixel
+	sub 010h                ; drop the 0x10px top margin
+	and 0f8h                ; align to 8px cell
 	rrca
 	rrca
-	rrca                   ; A = (Y-0x10)/8 = tile row
+	rrca                    ; A = (Y-0x10)/8 = tile row
 	add a,a
 	add a,a
-	add a,a
-	ld h,000h
-	ld l,a
+	add a,a                 ; row * 8
+	ld h,000h               ; HL = row*8
+	ld l,a                  ; row * 8
 	add hl,hl
-	add hl,hl
-	ld a,d
-	and 0f8h
+	add hl,hl               ; row * 32 (map width)
+	ld a,d                  ; X pixel
+	and 0f8h                ; align to 8px cell
 	rrca
 	rrca
-	rrca
-	call ADD_HL_A
+	rrca                    ; A = X/8 = tile column
+	call ADD_HL_A           ; HL = row*32 + col
 	push de
-	ld de,0d100h
-	add hl,de
-	ld a,(hl)
-	ld e,a
-	ld a,h
-	cp 0d4h
-	ld a,000h
-	jr nc,l7d5eh
-	ld a,e
-l7d5eh:
-	ld e,a
-	ld a,h
-	ld a,0d4h
-	inc a
-	cp h
-	jr nc,l7d6ch
+	ld de,0d100h            ; room name table
+	add hl,de               ; cell address
+	ld a,(hl)               ; tile id
+	ld e,a                  ; stash
+	ld a,h                  ; past 0xD3FF?
+	cp 0d4h                 ; H >= 0xD4 is below the map
+	ld a,000h               ; outside -> tile 0
+	jr nc,map_cell_clamp    ; clamped
+	ld a,e                  ; in-window tile
+map_cell_clamp:                 ; A = tile, or 0 if H>=0xD4
+	ld e,a                  ; keep candidate
+	ld a,h                  ; address high
+	ld a,0d4h               ; second bound
+	inc a                   ; 0xD5
+	cp h                    ; H > 0xD5?
+	jr nc,map_cell_ok       ; H <= 0xD5
 	cp 000h
-	ld a,000h
-	jr c,l7d6dh
-l7d6ch:
-	ld a,e
-l7d6dh:
+	ld a,000h               ; tile 0
+	jr c,map_cell_ret
+map_cell_ok:                    ; return tile in A
+	ld a,e                  ; tile id
+map_cell_ret:                   ; pop DE, ret
 	pop de
 	ret
 ; combat_tick (seg1 0x7D6F): per-frame hits.  Skipped while a room-exit is
@@ -9738,14 +9675,14 @@ combat_tick:
 	call hurt_simon_spikes
 	ld a,(weapon_id)
 	cp equip_knife
-	jr nc,l7d92h           ; C416>=2: projectile weapons
+	jr nc,combat_thrown           ; C416>=2: projectile weapons
 	call whip_hit_actors         ; whip vs C800 actors (phase 3)
 	call whip_hit_shots
 	call whip_hit_candles
-	jr l7d95h
-l7d92h:
+	jr combat_tail
+combat_thrown:                  ; C416>=2: pad instead of whip scans
 	call combat_busy_wait         ; pad: no whip scans this frame
-l7d95h:
+combat_tail:                    ; projectile / vendor / hourglass / shield
 	call projectile_hit_actors
 	call proj_hit_shots
 	call proj_hit_candles
@@ -9759,15 +9696,15 @@ l7d95h:
 ; before projectile_arm).
 combat_busy_wait:
 	ld b,064h
-l7da9h:
+combat_busy_outer:              ; 100x inner empty loop
 	push bc
 	ld b,004h
-l7dach:
+combat_busy_inner:              ; 4x push/pop
 	push bc
 	pop bc
-	djnz l7dach
+	djnz combat_busy_inner
 	pop bc
-	djnz l7da9h
+	djnz combat_busy_outer
 	ret
 whip_hit_actors:                ; (0x7DB4) whip phase 3 vs C800 (+0E bit0)
 	ld a,(simon_whip)
@@ -9775,21 +9712,21 @@ whip_hit_actors:                ; (0x7DB4) whip phase 3 vs C800 (+0E bit0)
 	ret nz
 	ld ix,actor_slots
 	ld b,007h
-l7dc0h:
+whip_actor_slot:                ; one C800 vs whip
 	ld a,(ix+000h)         ; type; 0 = free
 	and a
-	jr z,l7dd3h
+	jr z,whip_actor_next
 	ld a,(ix+00eh)
 	rra                    ; bit0 = hittable
-	jr nc,l7dd3h
+	jr nc,whip_actor_next
 	push bc
 	call actor_vs_whip
 	pop bc
 	jr c,whip_hit_apply
-l7dd3h:
+whip_actor_next:                ; next 0x80-byte slot
 	ld de,00080h
 	add ix,de
-	djnz l7dc0h
+	djnz whip_actor_slot
 	ret
 whip_hit_apply:                 ; (0x7DDB) overlap: sfx, drop hittable, fodder vs meter
 	ld a,sfx_hit
@@ -9802,9 +9739,9 @@ whip_hit_apply:                 ; (0x7DDB) overlap: sfx, drop hittable, fodder v
 whip_hit_fodder:                ; (0x7DED) ix+0D: leather 1, other weapons 2
 	ld a,(weapon_id)
 	and a                  ; leather?
-	jr z,l7df6h            ; skip the extra dec
+	jr z,whip_hp_dec            ; skip the extra dec
 	dec (ix+00dh)
-l7df6h:
+whip_hp_dec:                    ; always -1 HP; leather skips extra
 	dec (ix+00dh)
 	jr z,whip_kill_fodder  ; HP hit 0
 	ld a,(ix+00dh)
@@ -9861,13 +9798,13 @@ hpbar_dmg_lookup:               ; (0x7E43) B = table[type-0x11]
 	ld b,(hl)
 	ld a,c
 	cp 017h                ; 7th HP-bar slot (no actor_* name)
-	jr nz,l7e5dh
+	jr nz,hpbar_dmg_go
 	ld a,(weapon_id)
 	cp equip_knife
-	jr c,l7e5dh            ; leather/chain: full table byte
+	jr c,hpbar_dmg_go            ; leather/chain: full table byte
 	srl b                  ; type 0x17 + knife/axe/cross: /4
 	srl b
-l7e5dh:
+hpbar_dmg_go:                   ; jp damage_enemy with B
 	jp damage_enemy        ; 0xC418 -= B
 hpbar_dmg_weak:                ; (0x7E60) leather/knife vs types 0x11..0x17
 	defb 004h,008h,008h,004h,004h,004h,010h
@@ -9889,18 +9826,18 @@ actors_vs_simon:                ; (0x7E6E) C800 vs Simon
 actors_vs_simon_scan:           ; (0x7E84)
 	ld ix,actor_slots
 	ld b,007h
-l7e8ah:
+actor_simon_slot:               ; one C800 vs Simon
 	ld a,(ix+000h)
 	and a
-	jr z,l7ee3h
+	jr z,actor_simon_next
 	ld a,(ix+00eh)
 	rra
 	rra                    ; bit1 = can touch Simon (spawn writes 7)
-	jr nc,l7ee3h
+	jr nc,actor_simon_next
 	push bc
 	call actor_vs_simon
 	pop bc
-	jr nc,l7ee3h
+	jr nc,actor_simon_next
 	ld a,(ix+000h)
 	cp actor_pickup
 	jp z,actor_kill        ; heart already on the floor
@@ -9928,15 +9865,15 @@ simon_contact_hurt:             ; (0x7EC8) arm act_hurt; Xvel sign -> hurt_facin
 	ld a,(ix+00ah)         ; actor X vel
 	rla
 	ld a,001h              ; rightward vel -> facing 1
-	jr nc,l7eddh
+	jr nc,hurt_face_store
 	xor a                  ; leftward vel -> facing 0
-l7eddh:
+hurt_face_store:                ; hurt_facing from actor Xvel sign
 	ld (hurt_facing),a
 	jp hurt_simon_contact
-l7ee3h:
+actor_simon_next:               ; next C800; DJNZ actor_simon_slot
 	ld de,00080h
 	add ix,de
-	djnz l7e8ah
+	djnz actor_simon_slot
 	ret
 shots_vs_simon:                 ; (0x7EEB) D700 vs Simon
 	ld a,(sapphire_ring)
@@ -9954,15 +9891,15 @@ shots_vs_simon:                 ; (0x7EEB) D700 vs Simon
 shots_vs_simon_scan:            ; (0x7F01)
 	ld ix,shot_slots
 	ld b,008h
-l7f07h:
+shot_simon_slot:
 	push bc
 	ld a,(ix+000h)
 	and a
-	jr z,l7f47h
+	jr z,shot_simon_next
 	cp 00ch                ; death flame (shot_death_flame type 12)
-	jr z,l7f47h
+	jr z,shot_simon_next
 	call shot_vs_simon
-	jr nc,l7f47h
+	jr nc,shot_simon_next
 	call actor_free
 	pop bc
 	ld a,(sapphire_ring)
@@ -9976,22 +9913,22 @@ l7f07h:
 	ld a,(ix+00ah)
 	rla
 	ld a,001h
-	jr nc,l7f37h
+	jr nc,shot_simon_left
 	xor a
-l7f37h:
+shot_simon_left:
 	ld (hurt_facing),a
 	ld a,(ix+000h)
 	cp 009h                ; axe shot (shot_kind_type[16])
 	ld b,001h
-	jr nz,l7f44h
+	jr nz,shot_simon_dmg
 	inc b                  ; axe: 2 HP
-l7f44h:
+shot_simon_dmg:
 	jp damage_health
-l7f47h:
+shot_simon_next:
 	pop bc
 	ld de,00080h
 	add ix,de
-	djnz l7f07h
+	djnz shot_simon_slot
 	ret
 whip_hit_shots:
 	ld a,(simon_whip)
@@ -9999,24 +9936,24 @@ whip_hit_shots:
 	ret nz
 	ld ix,shot_slots
 	ld b,008h
-l7f5ch:
+whip_shot_slot:                 ; one D700 vs whip
 	push bc
 	ld a,(ix+000h)
 	and a
-	jr z,l7f77h
+	jr z,whip_shot_next
 	cp 00ch                ; death flame: ignore
-	jr z,l7f77h
+	jr z,whip_shot_next
 	call shot_vs_whip
-	jr nc,l7f77h
+	jr nc,whip_shot_next
 	ld a,sfx_hit
 	call play_sound
 	call add_score_100
 	call shot_death_flame
-l7f77h:
+whip_shot_next:                 ; next 0x80-byte slot
 	pop bc
 	ld de,00080h
 	add ix,de
-	djnz l7f5ch
+	djnz whip_shot_slot
 	ret
 proj_hit_shots:
 	ld a,(0c450h)
@@ -10026,16 +9963,16 @@ proj_hit_shots:
 	ret z
 	ld ix,shot_slots
 	ld b,008h
-l7f8fh:
+proj_shot_slot:                 ; one D700 vs projectile
 	ld a,(ix+000h)
 	and a
-	jr z,l7fb6h
+	jr z,proj_shot_next
 	cp 00ch                ; death flame: ignore
-	jr z,l7fb6h
+	jr z,proj_shot_next
 	push bc
 	call shot_vs_proj
 	pop bc
-	jr nc,l7fb6h
+	jr nc,proj_shot_next
 	ld a,sfx_hit
 	call play_sound
 	ld a,(iy+001h)
@@ -10045,10 +9982,10 @@ l7f8fh:
 	call z,projectile_clear_hl
 	call add_score_100
 	jp shot_death_flame
-l7fb6h:
+proj_shot_next:                 ; next 0x80-byte slot
 	ld de,00080h
 	add ix,de
-	djnz l7f8fh
+	djnz proj_shot_slot
 	ret
 whip_hit_candles:
 	ld a,(simon_whip)
@@ -10056,16 +9993,16 @@ whip_hit_candles:
 	ret nz
 	ld hl,scenery_slots
 	ld b,008h
-l7fc9h:
+whip_candle_slot:               ; one C470 vs whip
 	ld a,(hl)
 	and a
-	jr z,l7fe2h
+	jr z,whip_candle_next
 	push hl
 	push bc
 	call candle_vs_whip
 	pop bc
 	pop hl
-	jr nc,l7fe2h
+	jr nc,whip_candle_next
 	inc l
 	inc l
 	inc l
@@ -10075,11 +10012,11 @@ l7fc9h:
 	dec l
 	ld a,sfx_hit
 	call play_sound
-l7fe2h:
+whip_candle_next:               ; next 0x10-byte slot
 	ld a,010h
 	add a,l
 	ld l,a
-	djnz l7fc9h
+	djnz whip_candle_slot
 	ret
 pickups_vs_simon:
 	ld a,(simon_whip)
@@ -10112,14 +10049,14 @@ pickups_vs_simon:
 	inc l
 	ld a,(hl)
 	cp 01bh
-l800ch:
-	jr nz,l801ch
+pickup_knife_hide:              ; bonus 0x1B: hide C450 SAT pair
+	jr nz,pickup_simon_next
 	ld a,0e0h
 	ld (0d618h),a
 	ld (0d61ch),a
 	ld (0d620h),a
 	ld (0d624h),a
-l801ch:
+pickup_simon_next:              ; next 0x10-byte pickup slot
 	pop hl
 	pop bc
 	ld a,010h
@@ -10135,21 +10072,21 @@ projectile_hit_actors:          ; (0x8025) C450/C460 vs C800 if +0E bit0
 	ret z                  ; no live projectile
 	ld ix,actor_slots
 	ld b,007h
-l8034h:
+proj_actor_slot:                ; one C800 vs projectile
 	ld a,(ix+000h)         ; type; 0 = free
 	and a
-	jr z,l8047h
+	jr z,proj_actor_next
 	ld a,(ix+00eh)
 	rra                    ; bit0 = hittable
-	jr nc,l8047h
+	jr nc,proj_actor_next
 	push bc
 	call actor_vs_proj
 	pop bc
 	jr c,projectile_hit_apply
-l8047h:
+proj_actor_next:                ; next 0x80-byte slot
 	ld de,00080h
 	add ix,de
-	djnz l8034h
+	djnz proj_actor_slot
 	ret
 fodder_dmg_tbl:                 ; (0x804F) knife/axe/cross/holy vs fodder
 	defb 001h,004h,002h,002h  ; fodder dmg: knife/axe/cross/holy (iy+1)-2
@@ -10202,31 +10139,31 @@ projectile_meter_empty:         ; (0x80A8) bar empty: boss_killed, then after_hi
 proj_hit_candles:              ; (0x80AD) C450/C460 vs C470 candles/blocks
 	ld ix,scenery_slots
 	ld b,008h
-l80b3h:
+candle_scan:                    ; one C470 vs projectile
 	ld a,(ix+000h)
 	and a
-	jr z,l80dbh
+	jr z,candle_next
 	push bc
 	call candle_vs_proj
 	pop bc
-	jr nc,l80dbh
+	jr nc,candle_next
 	inc (ix+003h)
 	ld a,(ix+004h)
 	ld (0c433h),a
 	ld a,(iy+001h)
 	dec a
 	dec a
-	jr nz,l80d6h
+	jr nz,candle_sfx
 	push iy
 	pop hl
 	call z,projectile_clear_hl
-l80d6h:
+candle_sfx:                     ; hit sfx (knife already despawned)
 	ld a,sfx_hit
 	jp play_sound
-l80dbh:
+candle_next:                    ; next 0x10-byte slot
 	ld de,00010h
 	add ix,de
-	djnz l80b3h
+	djnz candle_scan
 	ret
 vendors_vs_attack:             ; (0x80E3) both C5B5/C5C5 slots vs whip/proj
 	ld hl,0c5b5h
@@ -10269,12 +10206,12 @@ vendor_struck:                  ; (0x8119) +3 hit counter
 hourglass_vs_attack:           ; (0x8122) C500 hourglass/tipped vs whip/proj
 	ld hl,pickup_slots
 	ld b,008h
-l8127h:
+hourglass_slot:                 ; one C500 vs whip/proj if hourglass
 	push bc
 	push hl
 	ld a,(hl)
 	rla
-	jr nc,l816ah           ; inactive
+	jr nc,hourglass_next           ; inactive
 	push hl
 	ld a,004h
 	add a,l
@@ -10284,7 +10221,7 @@ l8127h:
 	cp item_hourglass
 	jr z,hourglass_hit_test
 	cp item_tipped_hourglass
-	jr nz,l816ah
+	jr nz,hourglass_next
 hourglass_hit_test:             ; (0x813C)
 	ld a,(weapon_id)
 	cp equip_knife
@@ -10300,7 +10237,7 @@ hourglass_try_proj:             ; (0x8151) any projectile; always consumed
 	push hl
 	call obj_vs_proj_hi
 	pop hl
-	jr nc,l816ah
+	jr nc,hourglass_next
 	push hl
 	push iy
 	pop hl
@@ -10313,13 +10250,13 @@ hourglass_struck:               ; (0x8160) +3=2 -> pickup_idle / hourglass_tip
 	ld (hl),002h
 	ld a,sfx_hit
 	call play_sound
-l816ah:
+hourglass_next:                 ; next 0x10-byte pickup slot
 	pop hl
 	pop bc
 	ld a,010h
 	add a,l
 	ld l,a
-	djnz l8127h
+	djnz hourglass_slot
 	ret
 ; --- hurt_simon_contact (seg2 0x8173) - Simon TAKES contact damage from actor IX -
 ; Base damage B = the ODD byte of this actor type's actor_value_tbl entry (the even byte is
@@ -10735,9 +10672,9 @@ overlap_simon:                 ; (0x8481) DE=actor XY, HL=box; vs Simon C427/C42
 	ld l,a
 	ld a,(simon_x)
 	sub d
-	jr nc,l848dh
+	jr nc,overlap_simon_dx
 	neg
-l848dh:
+overlap_simon_dx:               ; abs dx vs box width L
 	cp l
 	ret nc
 	ld c,h
@@ -10777,9 +10714,9 @@ overlap_whip_w:                 ; (0x84B8)
 	ret
 overlap_whip_x:                 ; (0x84C1) abs(tip X - actor X)
 	sub d
-	jr nc,l84c6h
+	jr nc,overlap_whip_dx
 	neg
-l84c6h:
+overlap_whip_dx:                ; abs tip-X vs actor X
 	cp l
 	ret nc
 	ld a,(simon_action)
@@ -10827,9 +10764,9 @@ proj_slot_overlap:              ; (0x8507)
 	ld l,a
 	ld a,(iy+005h)
 	sub d
-	jr nc,l8513h
+	jr nc,proj_slot_dx
 	neg
-l8513h:
+proj_slot_dx:                   ; abs projectile X vs box
 	cp l
 	ret nc
 	ld a,(iy+001h)
@@ -10864,7 +10801,7 @@ platform_stand_scan:            ; (0x8538)
 	ld hl,platform_slots
 	ld de,00000h           ; D = slot 2 result, E = slot 1 result
 	ld b,002h
-l8540h:
+platform_scan_slot:             ; one of two C598 platform slots
 	ld a,(hl)
 	and a
 	push hl
@@ -10874,7 +10811,7 @@ l8540h:
 	pop hl
 	ld a,007h
 	call ADD_HL_A          ; next slot (stride 7)
-	djnz l8540h
+	djnz platform_scan_slot
 	ld a,d
 	or e
 	ld (simon_on_plat),a          ; 0 = airborne/ground, else the slot id
@@ -10971,14 +10908,14 @@ hurt_simon_spikes:
 	ret nz
 	ld hl,spike_slots           ; 3 spike-bar slots
 	ld b,003h
-l85c2h:
+spike_slot:                     ; one C580 spike bar vs Simon
 	ld a,(hl)
 	and a
-	jr z,l85ddh
+	jr z,spike_next
 	push hl
 	call spike_bar_overlap ; overlap test vs Simon
 	pop hl
-	jr nc,l85ddh           ; no hit -> next slot
+	jr nc,spike_next           ; no hit -> next slot
 	ld a,act_hurt
 	ld (simon_action),a          ; hurt/knockback state
 	ld a,(hl)
@@ -10988,10 +10925,10 @@ l85c2h:
 	ld b,010h              ; descending (bit 0 set) = 16
 spike_dmg_apply:                ; (0x85DA)
 	jp damage_health       ; 0xC415 -= B
-l85ddh:
+spike_next:                     ; next 8-byte spike slot
 	ld a,008h
 	call ADD_HL_A
-	djnz l85c2h
+	djnz spike_slot
 	ret
 ; spike_bar_overlap (0x85E5) - carry if Simon's feet overlap this bar's 32x8 box.
 ; HL -> slot; uses +1 Y and +2 X.  Y test is Simon Y - 0x1C vs the bar row.
@@ -11043,29 +10980,29 @@ yellow_shield_tick:
 	ret z
 	ld ix,shot_slots
 	ld b,008h
-l8623h:
+yshield_slot:                   ; one D700 vs yellow shield
 	push bc
 	ld a,(ix+000h)
 	and a
-	jr z,l8649h
+	jr z,yshield_next
 	cp 00ch
-	jr z,l8649h
+	jr z,yshield_next
 	call shot_vs_shield
-	jr nc,l8649h
+	jr nc,yshield_next
 	call shot_death_flame
 	ld a,sfx_shield_block
 	call play_sound
 	ld hl,0c441h
 	dec (hl)
-	jr nz,l8649h
+	jr nz,yshield_next
 	ld hl,0c701h
 	res 5,(hl)             ; charges gone -> drop yellow shield
 	call hud_bonus_refresh
-l8649h:
+yshield_next:                   ; next 0x80-byte slot
 	pop bc
 	ld de,00080h
 	add ix,de
-	djnz l8623h
+	djnz yshield_slot
 	ret
 overlap_shield:                ; (0x8652) yellow shield: Simon X ±8 by facing
 	ld a,004h
@@ -11081,9 +11018,9 @@ shield_off_x:                   ; (0x8660)
 	ld a,(simon_x)
 	add a,b
 	sub d
-	jr nc,l866ah
+	jr nc,shield_dx
 	neg
-l866ah:
+shield_dx:                      ; abs (SimonX+facing) vs shot X
 	cp l
 	ret nc
 	ld c,h
@@ -11104,7 +11041,7 @@ l866ah:
 brazier_tick_all:
 	ld bc,00800h            ; B = 8 slots, C = 0 (slot index)
 	ld hl,scenery_slots            ; HL -> scenery object block
-l867eh:
+brazier_slot:                   ; tick one live C470 slot
 	push bc
 	push hl
 	push hl
@@ -11119,7 +11056,7 @@ l867eh:
 	ld a,l
 	add a,010h              ; HL += 0x10 (next slot)
 	ld l,a
-	djnz l867eh
+	djnz brazier_slot
 	ret
 
 ; ---------------------------------------------------------------------------
@@ -11223,12 +11160,12 @@ candle_outlines_if:
 candle_outlines:
 	ld bc,00800h
 	ld hl,scenery_slots
-l8719h:
+candle_outline_slot:            ; white box if state==2
 	push bc
 	push hl
 	ld a,(hl)
 	cp 002h
-	jr nz,l8737h
+	jr nz,candle_outline_next
 	inc l
 	ld e,(hl)
 	inc l
@@ -11237,21 +11174,21 @@ l8719h:
 	inc l
 	ld a,(hl)
 	cp 002h
-	jr c,l8737h
+	jr c,candle_outline_next
 	ex de,hl
 	ld de,01010h           ; kind 2: 16x16
 	jr z,candle_outline_box
 	ld de,02020h           ; kind 3: 32x32
 candle_outline_box:             ; (0x8734)
 	call vdp_box_white
-l8737h:
+candle_outline_next:            ; next 0x10-byte scenery slot
 	pop hl
 	pop bc
 	inc c
 	ld a,l
 	add a,010h
 	ld l,a
-	djnz l8719h
+	djnz candle_outline_slot
 	ret
 ; block_save_under (seg2 0x8741) - copy the nametable under this C470 slot
 ; into E480 (2x2, kind!=3) or E4A0 (4x4, kind 3), indexed by slot C.
@@ -11302,12 +11239,12 @@ tiles_blit_vram:
 	push bc
 	push de
 	ld b,c
-l8786h:
+tiles_blit_cell:                ; one tile_blit then advance X
 	ld a,(hl)
 	inc hl
 	call tile_blit
 	call blit_advance_x
-	djnz l8786h
+	djnz tiles_blit_cell
 	pop de
 	ld a,e
 	add a,008h
@@ -12296,7 +12233,7 @@ bonus_white_cross:             ; id 5 (0x8DC2): despawn on-screen actors
 	pop ix
 	call vendor_force_hit
 	ld a,018h
-	ld (0c43eh),a          ; backdrop flash
+	ld (backdrop_flash),a          ; backdrop flash
 	ld a,sfx_white_cross
 	ret
 bonus_blue_gem:                ; id 8 (0x8DD4): invis; sprite flash white
@@ -12425,7 +12362,7 @@ lose_weapon:                   ; (0x8E9A) C416=0 leather; refresh HUD (missed ca
 	jp hud_weapon_icon
 hud_weapon_icon:                     ; HUD equipped-weapon icon from C416
 	ld a,(weapon_id)
-	ld de,0800ch           ; HUD dest (80, 0x0C); not the bank-2 code at l800ch
+	ld de,0800ch           ; HUD dest (80, 0x0C); not the bank-2 code at pickup_knife_hide
 	or a
 	jp z,hud_leather_icon  ; 0 = leather (not in the bonus sheet)
 	add a,019h             ; C416 1..4 -> bonus ids 0x1A..0x1D
@@ -12464,25 +12401,25 @@ hud_chest_key_icon:
 hud_chest_key_id:                  ; (seg2 0x8EEB)
 	jr hud_bonus_tile
 hud_bonus_refresh:
-	call hud_bonus_clear
-	ld a,(0c701h)
-	ld c,a
-	ld b,005h              ; bits 7..3: map, hourglass, Y shield, R shield, holy
-	xor a
+	call hud_bonus_clear    ; blank the 64x16 icon strip
+	ld a,(0c701h)           ; bonus-icon bits
+	ld c,a                  ; rotate out from bit7
+	ld b,005h               ; bits 7..3: map, hourglass, Y shield, R shield, holy
+	xor a                   ; icon index 0
 hud_bonus_scan:
-	rl c
-	call c,hud_bonus_icon
-	inc a
-	djnz hud_bonus_scan
+	rl c                    ; next bit into carry
+	call c,hud_bonus_icon   ; draw if set
+	inc a                   ; next icon slot
+	djnz hud_bonus_scan     ; 5 bits
 	ret
 	ld c,b
 	ld b,005h
 	xor a
-l8f04h:
+hud_bonus_first:                ; unreachable: first set bit -> icon
 	rl c
 	jr c,hud_bonus_icon
 	inc a
-	djnz l8f04h
+	djnz hud_bonus_first
 	ret
 hud_bonus_icon:
 	push af
@@ -13625,12 +13562,12 @@ minimap_driver:
 	and a
 	ret z                  ; none left -> ignore
 	dec (hl)               ; spend one use
-	jr nz,l9589h
+	jr nz,minimap_open
 	ld hl,0c701h           ; last use spent...
 	res 7,(hl)             ; ...clear the map-held flag
 	call hud_bonus_refresh
-l9589h:
-	call 04805h            ; switch to the map screen (VDP page/setup)
+minimap_open:                   ; sprites off, fill, sfx, build map
+	call vdp_sprites_off   ; SPD; map screen then fills page 0
 	ld hl,00020h
 	ld bc,000b4h
 	xor a
@@ -13671,7 +13608,7 @@ map_state_idle:                    ; state 2 (displayed): F2 again closes the ma
 minimap_build:
 	xor a
 	ld (0cffdh),a          ; room index = 0
-l95dbh:
+minimap_room:                   ; build/pack/blit one room cell
 	call minimap_room_build
 	call minimap_room_pos         ; look up + set this room's minimap cell position
 	call minimap_pack
@@ -13685,7 +13622,7 @@ l95dbh:
 	call ADD_HL_A
 	ld a,c
 	cp (hl)
-	jr nz,l95dbh           ; loop until all rooms drawn
+	jr nz,minimap_room           ; loop until all rooms drawn
 	ret
 ; minimap_room_count (seg2 0x95FD): rooms per stage 0..18.
 minimap_room_count:
@@ -13706,21 +13643,21 @@ minimap_room_build:
 	ld a,(room)
 	ld hl,0cffdh
 	cp (hl)
-	jr nz,l963bh
+	jr nz,minimap_play_slots
 	ld ix,scenery_slots
-l963bh:
+minimap_play_slots:             ; this room: use live C470 else EB00
 	ld b,008h
-l963dh:
+minimap_slot:                   ; stamp kind-3 blocks
 	ld a,(ix+000h)
 	and a
-	jr z,l964bh
+	jr z,minimap_next
 	ld a,(ix+004h)
 	cp 003h
 	call z,minimap_stamp_block
-l964bh:
+minimap_next:                   ; next 0x10-byte scenery slot
 	ld de,00010h
 	add ix,de
-	djnz l963dh
+	djnz minimap_slot
 	ret
 minimap_stamp_block:
 	ld a,(ix+001h)
@@ -13740,7 +13677,7 @@ minimap_stamp_block:
 	add a,0e8h
 	ld h,a
 	ld c,004h
-l966fh:
+stamp_row:                      ; four 1s then +0x1D; 4 rows
 	ld a,001h
 	ld (hl),a
 	inc hl
@@ -13752,7 +13689,7 @@ l966fh:
 	ld a,01dh
 	call ADD_HL_A
 	dec c
-	jr nz,l966fh
+	jr nz,stamp_row
 	ret
 ; --- minimap_room_pos - MINIMAP ROOM POSITION LOOKUP.  This is the authoritative room
 ;     geography: rooms are placed on the F2 map at HAND-AUTHORED cells, not derived
@@ -13769,298 +13706,139 @@ minimap_room_pos:
 	ld a,(0cffdh)          ; room index
 	call ADD_DE_A
 	ld a,(de)              ; a = room's position code
-	ld de,0975eh           ; minimap_coord_tbl
+	ld de,minimap_coord_tbl
 	call lookup_word_tbl   ; de = packed (X,Y) screen coord for that code
 	ld (0cff2h),de         ; store as this room's minimap draw position
 	ret
-; minimap_stage_ptr: word[stage] -> per-room position-code array (see minimap_room_pos).
-; z80dasm shows the following as instructions; it is DATA and never executed.
+; minimap_stage_ptr: word[stage] -> per-room position-code array
+; (see minimap_room_pos).  Authored F2 geography, not the conn graph.
 minimap_stage_ptr:
-	jp nz,0c596h
-	sub (hl)
-	call 0d396h
-	sub (hl)
-	exx
-	sub (hl)
-	rst 18h
-	sub (hl)
-	push hl
-	sub (hl)
-	ex de,hl
-	sub (hl)
-	call p,0fc96h
-	sub (hl)
-	dec b
-	sub a
-	ld c,097h
-	inc d
-	sub a
-	jr nz,$-103
-	inc l
-	sub a
-	inc (hl)
-	sub a
-	ld a,097h
-	ld c,b
-	sub a
-	ld d,h
-	sub a
-	dec c
-	ld c,00fh
-	dec c
-	ld c,00fh
-	djnz l96d1h
-	ex af,af'
-	add hl,bc
-	ld a,(bc)
-	ld c,00fh
-	ex af,af'
-	add hl,bc
-l96d1h:
-	inc d
-	dec d
-	rlca
-	ex af,af'
-	add hl,bc
-	ld a,(bc)
-	dec c
-	ld c,00dh
-	ld c,00fh
-	rlca
-	ex af,af'
-	add hl,bc
-	rrca
-	ld c,00dh
-	add hl,bc
-	ex af,af'
-	rlca
-	rrca
-l96e6h:
-	ld c,00dh
-	add hl,bc
-	ex af,af'
-	rlca
-	dec d
-	inc d
-	inc de
-	rrca
-	ld c,00dh
-	add hl,bc
-	ex af,af'
-	rlca
-	inc c
-	dec c
-	ld c,00fh
-	djnz l9702h
-	add hl,bc
-	ld a,(bc)
-	inc c
-	dec c
-	ld c,00fh
-	djnz $+19
-l9702h:
-	dec bc
-	ld d,017h
-	inc c
-	dec c
-	ld c,00fh
-	djnz l971ch
-	rlca
-	ex af,af'
-	dec bc
-	inc c
-	dec c
-	ld c,00fh
-	djnz $+19
-	rlca
-	ex af,af'
-	add hl,bc
-	dec c
-	ld c,00fh
-	djnz l9730h
-l971ch:
-	dec d
-l971dh:
-	add hl,de
-	ld a,(de)
-	dec de
-	rlca
-	ex af,af'
-	add hl,bc
-	ld bc,00302h
-	inc b
-	rrca
-	inc d
-	dec d
-l972ah:
-	ld d,01ch
-	djnz l973dh
-	ld c,00ah
-l9730h:
-	add hl,bc
-	ex af,af'
-	rlca
-	ld b,015h
-	inc d
-	rrca
-	ld c,009h
-	ex af,af'
-	inc b
-	inc bc
-	ld (bc),a
-l973dh:
-	ld bc,00a0bh
-	add hl,bc
-	ex af,af'
-	rlca
-	ld b,011h
-	djnz l9756h
-	ld c,016h
-	dec d
-	inc d
-	djnz l975ch
-	ld c,008h
-	rlca
-	ld b,002h
-	ld bc,01c00h
-	dec de
-l9756h:
-	ld a,(de)
-	inc d
-	rrca
-	ld c,009h
-	inc bc
-l975ch:
-	ld (bc),a
-	ld bc,02038h
-	jr c,$+66
-	jr c,l97c4h
-	jr c,l96e6h
-	jr c,$-94
-	jr c,l972ah
-	ld c,l
-	jr nz,$+79
-	ld b,b
-	ld c,l
-	ld h,b
-	ld c,l
-	add a,b
-	ld c,l
-	and b
-	ld c,l
-	ret nz
-	ld h,d
-	jr nz,$+100
-	ld b,b
-	ld h,d
-	ld h,b
-	ld h,d
-	add a,b
-	ld h,d
-	and b
-	ld h,d
-	ret nz
-	ld (hl),a
-	jr nz,l97fch
-	ld b,b
-	ld (hl),a
-	ld h,b
-	ld (hl),a
-	add a,b
-	ld (hl),a
-	and b
-	ld (hl),a
-	ret nz
-	adc a,h
-	jr nz,l971dh
-	ld b,b
-	adc a,h
-	ld h,b
-	adc a,h
-	add a,b
-	adc a,h
-	and b
-	adc a,h
-	ret nz
+	defw minimap_pos_s00, minimap_pos_s01, minimap_pos_s02, minimap_pos_s03, minimap_pos_s04
+	defw minimap_pos_s05, minimap_pos_s06, minimap_pos_s07, minimap_pos_s08, minimap_pos_s09
+	defw minimap_pos_s10, minimap_pos_s11, minimap_pos_s12, minimap_pos_s13, minimap_pos_s14
+	defw minimap_pos_s15, minimap_pos_s16, minimap_pos_s17, minimap_pos_s18
+minimap_pos_s00:
+	defb 00dh,00eh,00fh
+minimap_pos_s01:
+	defb 00dh,00eh,00fh,010h,007h,008h,009h,00ah
+minimap_pos_s02:
+	defb 00eh,00fh,008h,009h,014h,015h
+minimap_pos_s03:
+	defb 007h,008h,009h,00ah,00dh,00eh
+minimap_pos_s04:
+	defb 00dh,00eh,00fh,007h,008h,009h
+minimap_pos_s05:
+	defb 00fh,00eh,00dh,009h,008h,007h
+minimap_pos_s06:
+	defb 00fh,00eh,00dh,009h,008h,007h
+minimap_pos_s07:
+	defb 015h,014h,013h,00fh,00eh,00dh,009h,008h,007h
+minimap_pos_s08:
+	defb 00ch,00dh,00eh,00fh,010h,008h,009h,00ah
+minimap_pos_s09:
+	defb 00ch,00dh,00eh,00fh,010h,011h,00bh,016h,017h
+minimap_pos_s10:
+	defb 00ch,00dh,00eh,00fh,010h,011h,007h,008h,00bh
+minimap_pos_s11:
+	defb 00ch,00dh,00eh,00fh,010h,011h
+minimap_pos_s12:
+	defb 007h,008h,009h,00dh,00eh,00fh,010h,014h,015h,019h,01ah,01bh
+minimap_pos_s13:
+	defb 007h,008h,009h,001h,002h,003h,004h,00fh,014h,015h,016h,01ch
+minimap_pos_s14:
+	defb 010h,00fh,00eh,00ah,009h,008h,007h,006h
+minimap_pos_s15:
+	defb 015h,014h,00fh,00eh,009h,008h,004h,003h,002h,001h
+minimap_pos_s16:
+	defb 00bh,00ah,009h,008h,007h,006h,011h,010h,00fh,00eh
+minimap_pos_s17:
+	defb 016h,015h,014h,010h,00fh,00eh,008h,007h,006h,002h,001h,000h
+minimap_pos_s18:
+	defb 01ch,01bh,01ah,014h,00fh,00eh,009h,003h,002h,001h
+; packed (X,Y): lo=Y 0x38+0x15*row, hi=X 0x20+0x20*col (6x5).
+minimap_coord_tbl:
+	defw 02038h,04038h,06038h,08038h,0a038h,0c038h  ; row 0
+	defw 0204dh,0404dh,0604dh,0804dh,0a04dh,0c04dh  ; row 1
+	defw 02062h,04062h,06062h,08062h,0a062h,0c062h  ; row 2
+	defw 02077h,04077h,06077h,08077h,0a077h,0c077h  ; row 3
+	defw 0208ch,0408ch,0608ch,0808ch,0a08ch,0c08ch  ; row 4
 minimap_pack:
 	ld de,0e840h
 	ld hl,0eb00h
 	ld bc,002c0h
-l97a3h:
+minimap_pack_loop:
 	call minimap_tile_class
 	call minimap_plot_nibble
 	bit 0,c
-	jr z,l97aeh
+	jr z,minimap_pack_next
 	inc hl
-l97aeh:
+minimap_pack_next:
 	inc de
 	dec bc
 	ld a,c
 	or b
-	jr nz,l97a3h
+	jr nz,minimap_pack_loop
 	ret
 minimap_tile_class:
 	ld a,(de)
 	exx
 	cp 00eh
-	jr nc,l97d7h           ; id >= 0x0E: air / high scenery, skip
+	jr nc,minimap_class_skip           ; id >= 0x0E: air / high scenery, skip
 	ld hl,minimap_class_tbl
 	ld e,a
 	ld d,000h
 	add hl,de
 	ld a,(hl)
 	ld c,a
-l97c4h:
+minimap_class_dispatch:
 	dec a
-	jp m,l97d7h            ; class 0: skip
-	jr z,l97dah            ; class 1: paint 0x0E
+	jp m,minimap_class_skip            ; class 0: skip
+	jr z,minimap_class_white            ; class 1: paint 0x0E
 	dec a
-	jr z,l97deh            ; class 2: paint 0x0E (same colour as 1)
+	jr z,minimap_class_white2            ; class 2: paint 0x0E (same colour as 1)
 	ld a,(hub)          ; class 3/4: hub-gated
 	cp 005h
-	jr z,l97e9h            ; hub 5 (s16-18): 3 and 4
+	jr z,minimap_class_hub5            ; hub 5 (s16-18): 3 and 4
 	and a
-	jr z,l97e2h            ; hub 0 (s0-3): class 3 only
-l97d7h:
+	jr z,minimap_class_hub0            ; hub 0 (s0-3): class 3 only
+minimap_class_skip:
 	xor a
 	exx
 	ret
-l97dah:
+minimap_class_white:
 	ld a,00eh              ; white (MSX colour 14)
 	exx
 	ret
-l97deh:
+minimap_class_white2:
 	ld a,00eh
 	exx
 	ret
-l97e2h:
+minimap_class_hub0:
 	ld a,c
 	cp 003h
-	jr z,l97dah            ; hub 0: also paint tile 0x09
-	jr l97d7h
-l97e9h:
+	jr z,minimap_class_white            ; hub 0: also paint tile 0x09
+	jr minimap_class_skip
+minimap_class_hub5:
 	ld a,c
 	sub 003h
-	jr z,l97dah            ; hub 5: class 3 (0x09)
+	jr z,minimap_class_white            ; hub 5: class 3 (0x09)
 	dec a
-	jr z,l97dah            ; hub 5: class 4 (0x05-0x08; structural there)
-	jr l97d7h
+	jr z,minimap_class_white            ; hub 5: class 4 (0x05-0x08; structural there)
+	jr minimap_class_skip
 ; minimap_class_tbl (seg2 0x97F3): tile id 0..0x0D -> paint class for F2.
 ; 0 skip; 1/2 always white (same colour; 1 vs 2 unused); 3 = 0x09 on hub 0
 ; and 5; 4 = 0x05-0x08 on hub 5 only.  Not tile_is_solid; s18r9 has no extra
 ; override (hub 5 paints 01-0D, including the decorative columns).
 minimap_class_tbl:
 	defb 000h,001h,001h,002h,002h,004h,004h,004h  ; 00 skip, 01-02, 03-04, 05-08
-	defb 004h
-l97fch:                        ; 0x97FC: also a fake-code jr target in minimap_coord_tbl
-	defb 003h,001h,001h,002h,002h  ; 09, 0A-0B, 0C-0D
+	defb 004h,003h,001h,001h,002h,002h  ; 08, 09, 0A-0B, 0C-0D
 minimap_plot_nibble:
 	bit 0,c
-	jr z,l9808h
+	jr z,minimap_plot_hi
 	or (hl)
 	ld (hl),a
 	ret
-l9808h:
+minimap_plot_hi:
 	add a,a
 	add a,a
 	add a,a
@@ -14164,31 +13942,31 @@ actors_tick:                       ; (seg2 0x98EC) room_spawner + C800 if D010==
 c800_tick:                         ; (seg2 0x98F3) tick all 7 C800 actor slots
 	ld ix,actor_slots
 	ld b,007h
-l98f9h:
+c800_slot:                      ; one C800: freeze? tick+integrate
 	ld a,(ix+000h)
 	and a
-	jr z,l990fh
+	jr z,c800_next
 	push bc
 	call actor_freeze_check
-	jr c,l990bh
+	jr c,c800_cull
 	call actor_type_tick
 	call actor_integrate
-l990bh:
+c800_cull:                      ; offscreen cull even if frozen
 	call actor_cull_offscreen
 	pop bc
-l990fh:
+c800_next:                      ; next 0x80-byte slot
 	ld de,00080h
 	add ix,de
-	djnz l98f9h
+	djnz c800_slot
 	ret
 shot_sat_build:                    ; (seg2 0x9917) shot shape streams -> actor SAT
 	ld ix,shot_slots
 	ld b,008h
-	jr l9925h
+	jr sat_build_loop
 c800_sat_build:                    ; (seg2 0x991F) C800 shape streams -> actor SAT
 	ld ix,actor_slots
 	ld b,007h
-l9925h:
+sat_build_loop:                 ; shared C800/D700 SAT emit loop
 	push bc
 	ld a,(ix+000h)
 	and a
@@ -14196,7 +13974,7 @@ l9925h:
 	ld de,00080h
 	add ix,de
 	pop bc
-	djnz l9925h
+	djnz sat_build_loop
 	ret
 ; actor_freeze_check (seg2 0x9936) - C if this actor should skip type tick
 ;  and integrate: D010 bit 0 is set during Simon's whip, and +7E != 0
@@ -14278,9 +14056,9 @@ actors_rearm_hittable:         ; (0x99A6) if actor +0E bit2, set bit0 (C800 then
 	ld b,008h
 hittable_rearm_scan:               ; +0E bit2 -> set bit0; B slots, stride DE
 	bit 2,(hl)
-	jr z,l99bch
+	jr z,hittable_next
 	set 0,(hl)
-l99bch:
+hittable_next:                  ; next slot, stride DE
 	add hl,de
 	djnz hittable_rearm_scan
 	ret
@@ -14329,31 +14107,31 @@ actor_cull_offscreen:
 ;  hide every hardware sprite it claimed (SAT sub-block at slot|0x20: count
 ;  then 5-byte cells; each cell+0 is a D638 index, written Y=0xE0).
 actor_free:
-	xor a
-	ld (ix+000h),a
-	ld (ix+00eh),a
+	xor a                   ; free
+	ld (ix+000h),a          ; type = 0
+	ld (ix+00eh),a          ; clear +0x0E
 	push ix
-	pop hl
-	set 5,l
-	ld c,(hl)
-	ld a,c
-	and a
-	ret z
-	inc l
-l9a0eh:
-	ld a,(hl)
-	ld de,0d638h
-	add a,a
-	add a,a
-	add a,e
-	ld e,a
-	ld a,0e0h
-	ld (de),a
-	ld a,l
-	add a,005h
-	ld l,a
-	dec c
-	jr nz,l9a0eh
+	pop hl                  ; HL = slot
+	set 5,l                 ; HL -> SAT sub-block (slot|0x20)
+	ld c,(hl)               ; sprite count
+	ld a,c                  ; zero?
+	and a                   ; no sprites claimed
+	ret z                   ; nothing to hide
+	inc l                   ; first 5-byte SAT cell
+actor_hide_sat:                 ; Y=0xE0 for each claimed SAT cell
+	ld a,(hl)               ; D638 index
+	ld de,0d638h            ; CPU SAT table
+	add a,a                 ; index * 4
+	add a,a                 ; 4 bytes/entry
+	add a,e                 ; DE -> entry
+	ld e,a                  ; Y byte
+	ld a,0e0h               ; hide-sprite Y
+	ld (de),a               ; write Y
+	ld a,l                  ; next cell
+	add a,005h              ; +5
+	ld l,a                  ; next SAT cell
+	dec c                   ; count
+	jr nz,actor_hide_sat    ; all claimed sprites
 	ret
 shot_death_flame:
 	call actor_free
@@ -14371,10 +14149,10 @@ shot_death_flame:
 	ret
 actor_cull:                    ; (0x9A41) CFFF=1: free, skip random drops
 	ld a,001h
-	jr l9a46h
+	jr actor_kill_flag
 actor_kill:                    ; (0x9A45) CFFF=0: free and maybe drop
 	xor a
-l9a46h:
+actor_kill_flag:                ; store CFFF then actor_kill_go
 	ld (0cfffh),a
 	push ix
 	call actor_kill_go
@@ -14402,47 +14180,47 @@ actor_kill_special:
 	ld a,(ix+000h)
 	ld (0cff0h),a
 	cp actor_orb
-	jp z,l9a94h
+	jp z,kill_orb
 	cp actor_pickup
-	jr z,l9a9eh
+	jr z,kill_pickup
 	cp actor_reward
-	jr z,l9a99h
+	jr z,kill_reward
 	cp actor_dracula
-	jp z,l9aaah
+	jp z,kill_dracula
 	cp actor_red_skeleton
-	jr z,l9ab0h
+	jr z,kill_red_skel
 	cp actor_igor
-	jr z,l9abah
+	jr z,kill_igor
 	xor a
 	ret
-l9a94h:
+kill_orb:
 	call actor_free
 	scf
 	ret
-l9a99h:
+kill_reward:
 	ld a,(ix+01fh)
-	jr l9aa0h
-l9a9eh:
+	jr kill_collect
+kill_pickup:
 	ld a,001h
-l9aa0h:
+kill_collect:
 	push af
 	call actor_free
 	pop af
 	call collect_bonus      ; type 0x24 heart touched in mid-air -> +1 heart
 	scf
 	ret
-l9aaah:
+kill_dracula:
 	ld (ix+001h),008h
 	scf
 	ret
-l9ab0h:
+kill_red_skel:
 	ld a,(0cfffh)
 	and a
 	ret nz
-	call 0b04fh
+	call red_skel_reform
 	scf
 	ret
-l9abah:
+kill_igor:
 	ld a,(boss_clear)
 	and a
 	ret nz
@@ -14456,51 +14234,51 @@ kill_drop_roll:
 	ret nz
 	ld a,(0cff0h)
 	cp 00eh
-	jr z,l9afah
+	jr z,drop_flames
 	ld a,(0cfffh)
 	and a
 	ret nz
 	ld a,(ix+01fh)
 	ld c,a
 	and a
-	jp nz,l9b1ah
+	jp nz,kill_drop_spawn
 	ld hl,0cf40h
 	inc (hl)
 	ld a,(hl)
 	and 01fh
 	ld c,013h
-	jp z,l9b1ah
+	jp z,kill_drop_spawn
 	ld a,r
 	and 03fh
 	ld c,002h
-	jr z,l9b1ah
+	jr z,kill_drop_spawn
 	and 003h
 	ret nz
 	ld b,001h
 	ret
-l9afah:
+drop_flames:
 	ld e,(ix+003h)
 	ld d,(ix+005h)
 	ld b,004h
-l9b02h:
+drop_flame:
 	push bc
 	push de
 	ld b,001h
 	ld a,(0cfffh)
 	and a
-	jr z,l9b0dh
+	jr z,drop_flame_go
 	dec b
-l9b0dh:
+drop_flame_go:
 	call flame_spawn
 	pop de
 	pop bc
 	ld a,d
 	add a,010h
 	ld d,a
-	djnz l9b02h
+	djnz drop_flame
 	scf
 	ret
-l9b1ah:
+kill_drop_spawn:
 	push bc
 	call kill_drop_pos
 	ld c,actor_reward
@@ -14547,9 +14325,9 @@ flame_tick:
 	ld a,(ix+00ch)          ; A = lifetime timer
 	and 004h                ; bit 2 -> flicker phase
 	ld c,pose_flame_0               ; flame frame 0x85
-	jr z,l9b88h
+	jr z,flame_pose
 	inc c                   ; ...or 0x86 (the flicker/undulation)
-l9b88h:
+flame_pose:                     ; pose 0x85/86; timer then pickup
 	ld (ix+00bh),c          ; +0x0B anim frame = flame sprite
 	dec (ix+00ch)           ; lifetime timer--
 	ret nz                  ; keep burning until it hits 0
@@ -14586,7 +14364,7 @@ actor_reward_init:
 	ret
 actor_pickup_go:
 	call actor_floor_test
-	jr c,l9c0ah
+	jr c,pickup_on_floor
 	inc (ix+00ch)
 	ld e,(ix+010h)
 	ld d,(ix+011h)
@@ -14601,11 +14379,11 @@ actor_pickup_go:
 	ld (ix+010h),e
 	ld (ix+011h),d
 	ret
-l9c0ah:
+pickup_on_floor:                ; landed: free actor, B=1 drop
 	call actor_free
 	ld b,001h
 	ld hl,00410h
-l9c12h:
+actor_drop_xy:                  ; spawn XY from actor pos; jp drop_spawn
 	ld a,(ix+003h)
 	sub l
 	and 0f8h
@@ -14627,7 +14405,7 @@ actor_reward_go:
 	ld (ix+025h),a
 	ld a,(ix+001h)
 	and a
-	jr nz,l9c4dh
+	jr nz,reward_fall
 	dec (ix+00ch)
 	ret nz
 	inc (ix+001h)
@@ -14635,14 +14413,14 @@ actor_reward_go:
 	call actor_set_xvel
 	ld de,00800h
 	jp actor_set_yvel
-l9c4dh:
+reward_fall:                    ; physics on, floor -> drop_spawn
 	ld (ix+006h),001h
 	call actor_floor_test
 	ret nc
 	call actor_free
 	ld b,(ix+01fh)
 	ld hl,00810h
-	jr l9c12h
+	jr actor_drop_xy
 reward_sat_col:                    ; (seg2 0x9C60) SAT colour cycle for actor_reward
 	defb 008h,001h,00eh,001h
 actor_floor_test:                  ; (seg2 0x9C64) map_solid_pair at actor (Y,X)
@@ -14656,10 +14434,10 @@ merman_splash_init:
 	ld c,pose_merman_splash
 	ld a,(stage)
 	cp 00ah
-	jr nz,l9c80h
+	jr nz,merman_splash_pose
 	ld c,pose_merman_splash_s10
 	ld (ix+025h),00bh
-l9c80h:
+merman_splash_pose:
 	ld (ix+00bh),c
 	ld (ix+00ch),01eh
 	ld (ix+006h),001h
@@ -14670,10 +14448,10 @@ l9c80h:
 	ld hl,0fb00h
 	ld de,00100h
 	rra
-	jr c,l9ca3h
+	jr c,merman_splash_vel
 	ld de,0ff00h
 	ld hl,0fa00h
-l9ca3h:
+merman_splash_vel:
 	call actor_set_xvel
 	ex de,hl
 	jp actor_set_yvel
@@ -14686,14 +14464,14 @@ spawn_rate_reset:
 	ld hl,spawn_slot_zombie
 	ld de,spawn_rate_init_tbl
 	ld b,007h
-l9cb8h:
+spawn_rate_slot:                ; copy init byte + zero pair
 	ld a,(de)
 	ld (hl),a
 	inc de
 	inc l
 	ld (hl),000h
 	inc l
-	djnz l9cb8h
+	djnz spawn_rate_slot
 	ret
 spawn_rate_init_tbl:
 	defb 004h,004h,004h,008h,008h,008h,008h,008h
@@ -14718,9 +14496,9 @@ spawn_rate_gate:
 	ld c,a
 	ld a,(de)
 	sub c
-	jr nc,l9ce9h
+	jr nc,spawn_rate_store
 	xor a
-l9ce9h:
+spawn_rate_store:               ; counter = max(1, tbl-diff)
 	inc a
 	ld (hl),a
 	xor a
@@ -14749,47 +14527,47 @@ spawn_pick_pos:
 	ld hl,(stage)         ; L = stage (0xD000), H = room (0xD001)
 	ld a,l
 	dec a
-	jr z,l9d2fh            ; stage 1
+	jr z,spawn_pos_s1            ; stage 1
 	dec a
-	jr z,l9d22h
+	jr z,spawn_pos_s2
 	dec a
-	jr z,l9d1eh
+	jr z,spawn_pos_s3
 	cp 008h
-	jr z,l9d1ah
-	jr l9d33h
-l9d1ah:
+	jr z,spawn_pos_s11
+	jr spawn_pos_default
+spawn_pos_s11:
 	ld e,0b0h
-	jr l9d24h
-l9d1eh:
+	jr spawn_pos_x_zombie
+spawn_pos_s3:
 	ld e,0c0h
-	jr l9d24h
-l9d22h:
+	jr spawn_pos_x_zombie
+spawn_pos_s2:
 	ld e,0a0h
-l9d24h:
+spawn_pos_x_zombie:
 	ld d,0f0h
 	ld a,(spawn_slot_zombie+1)
 	bit 1,a
 	ret z
 	ld d,010h
 	ret
-l9d2fh:
+spawn_pos_s1:
 	ld a,h
 	dec a
-	jr z,l9d3fh
-l9d33h:
+	jr z,spawn_pos_s1r1
+spawn_pos_default:
 	ld e,0c0h
-l9d35h:
+spawn_pos_x_facing:
 	ld d,0f0h
 	ld a,(simon_facing)
 	and a
 	ret z
 	ld d,010h
 	ret
-l9d3fh:
+spawn_pos_s1r1:
 	ld e,0c0h
 	ld a,c
 	cp 088h
-	jr nc,l9d35h
+	jr nc,spawn_pos_x_facing
 	ld de,0f060h
 	ret
 spawn_rate_zombie:                        ; zombie spawn-rate thresholds (8 bytes)
@@ -14821,9 +14599,9 @@ merman_spawn:
 	ld a,d
 	ld d,020h
 	cp 080h
-	jr c,l9d89h
+	jr c,merman_spawn_x_adj
 	ld d,0e0h
-l9d89h:
+merman_spawn_x_adj:
 	add a,d
 	ld d,a
 	jp spawn_actor
@@ -14844,9 +14622,9 @@ flyer_spawn:                   ; bats / ghosts / medusa heads: edge X, Y=SimonY-
 	ld a,(hl)
 	rr a
 	ld d,0f0h              ; X = right edge
-	jr c,l9db6h
+	jr c,flyer_spawn_x
 	ld d,010h              ; X = left edge
-l9db6h:
+flyer_spawn_x:
 	call spawn_edge_gate
 	ld a,(simon_y)
 	sub 008h
@@ -14875,17 +14653,17 @@ roc_generator:                 ; (0x9DEE) bit6, actor_roc
 	ret nz
 	ld a,(simon_x)
 	cp 0c0h
-	jr c,l9e05h
+	jr c,roc_spawn_pos
 	ld a,001h
 	ld (spawn_slot_roc),a          ; Simon already on the right -> don't spawn
 	ret
-l9e05h:
+roc_spawn_pos:
 	ld de,0e030h           ; X=0xE0 Y=0x30
 	ld a,(spawn_slot_roc+1)
 	rra
-	jr c,l9e10h
+	jr c,roc_spawn_y
 	ld e,040h              ; or Y=0x40
-l9e10h:
+roc_spawn_y:
 	ld c,actor_roc
 	jp spawn_actor
 spawn_rate_skull_cannon:                        ; skull-cannon spawn-rate thresholds
@@ -14897,47 +14675,47 @@ spawn_rate_skull_cannon:                        ; skull-cannon spawn-rate thresh
 spawn_edge_gate:
 	ld a,(simon_x)
 	cp 0c0h
-	jr nc,l9e30h
+	jr nc,spawn_edge_right
 	cp 040h
-	jr c,l9e29h
+	jr c,spawn_edge_left
 	ret
-l9e29h:
+spawn_edge_left:
 	ld a,d
 	cp 040h
 	ret nc
 	ld d,0f0h
-l9e2fh:
+spawn_edge_ok:
 	ret
-l9e30h:
+spawn_edge_right:
 	ld a,d
-l9e31h:
+spawn_edge_right_d:
 	cp 0c0h
-l9e33h:
+spawn_edge_right_ccf:
 	ccf
 	ret nc
-l9e35h:
+spawn_edge_right_x:
 	ld d,010h
 	ret
 shot_tick:                         ; (seg2 0x9E38) 8 shot slots at 0xD700
 	ld ix,shot_slots
 	ld b,008h
-l9e3eh:
+shot_tick_slot:
 	ld a,(ix+000h)
 	and a
-	jr z,l9e57h
+	jr z,shot_tick_next
 	push bc
 	call actor_freeze_check
-	jr c,l9e50h
+	jr c,shot_tick_sat
 	call shot_type_tick
 	call actor_integrate
-l9e50h:
+shot_tick_sat:
 	call actor_sat_build
 	call actor_cull_offscreen
 	pop bc
-l9e57h:
+shot_tick_next:
 	ld de,00080h
 	add ix,de
-	djnz l9e3eh
+	djnz shot_tick_slot
 	ret
 shot_type_tick:                ; (seg2 0x9E5F) shot per-type tick (type-1)
 	ld a,(ix+000h)
@@ -14965,13 +14743,13 @@ medusa_snake:             ; (0x9E7F) poses 0x27-0x2A, facing
 	inc (ix+00ch)
 	bit 1,(ix+00ch)
 	ld a,027h
-	jr z,l9e8bh
+	jr z,medusa_snake_x
 	inc a
-l9e8bh:
+medusa_snake_x:
 	bit 7,(ix+00ah)
-	jr nz,l9e93h
+	jr nz,medusa_snake_store
 	add a,002h
-l9e93h:
+medusa_snake_store:
 	ld (ix+00bh),a
 	ret
 mummy_bandage:            ; (0x9E97) seek stored Y (ix+10/11), poses 0x39/0x3A
@@ -14986,16 +14764,16 @@ mummy_bandage:            ; (0x9E97) seek stored Y (ix+10/11), poses 0x39/0x3A
 	inc (ix+00ch)
 	and 004h
 	ld c,pose_mummy_bandage_0
-	jr z,l9eb7h
+	jr z,mummy_bandage_pose
 	inc c
-l9eb7h:
+mummy_bandage_pose:
 	ld (ix+00bh),c
 	ld de,00030h
 	ld a,(ix+003h)
 	cp (ix+011h)
-	jr c,l9ec8h
+	jr c,mummy_bandage_yvel
 	ld de,0ffd0h
-l9ec8h:
+mummy_bandage_yvel:
 	jp actor_add_yvel
 shot_nop:
 	ret
@@ -15009,16 +14787,16 @@ shot_axe:                      ; (0x9ECC) poses 0x63-0x66; homing on thrower CFF
 	ld (ix+00bh),a
 	bit 7,(ix+010h)
 	ld de,00018h
-	jr nz,l9ee7h
+	jr nz,axe_home_dx
 	ld de,0ffe8h
-l9ee7h:
+axe_home_dx:                    ; add +0x18 / -0x18 Xvel
 	call actor_add_xvel
 	ld a,(ix+013h)
 	and a
-	jr z,l9ef4h
+	jr z,axe_seek
 	dec (ix+013h)
 	ret
-l9ef4h:
+axe_seek:                       ; timer 0: seek thrower Y, then free
 	ld l,(ix+011h)
 	ld h,(ix+012h)
 	ld a,(hl)
@@ -15040,9 +14818,9 @@ shot_bone:
 	ld a,(ix+00ch)
 	inc a
 	cp 00ch                ; 12-step timer -> 4 poses x 3 frames
-	jr c,l9f17h
+	jr c,bone_timer
 	xor a
-l9f17h:
+bone_timer:                     ; wrap 0..0xB; pose 0x4B-4E
 	ld (ix+00ch),a
 	rra
 	rra
@@ -15060,7 +14838,7 @@ shot_sickle:                   ; (0x9F29) poses 0x7D-0x80; windup then fly 0x1E
 	ld (ix+00bh),a
 	ld a,(ix+001h)
 	dec a
-	jr z,l9f53h
+	jr z,sickle_fly
 	dec (ix+00ch)
 	ret nz
 	ld a,040h
@@ -15071,7 +14849,7 @@ shot_sickle:                   ; (0x9F29) poses 0x7D-0x80; windup then fly 0x1E
 	ld (ix+00ch),01eh
 	inc (ix+001h)
 	ret
-l9f53h:
+sickle_fly:                     ; state 1: countdown then hover
 	dec (ix+00ch)
 	ret nz
 	ld de,00000h
@@ -15104,24 +14882,24 @@ shot_alloc:                    ; (seg2 0x9F8A) find a free shot slot and arm it
 	ld a,(0cff9h)
 	cp 0ffh
 	ld c,00ch              ; kind 0xFF -> shot type 12 (flame_tick)
-	jr z,l9f9ah
+	jr z,shot_alloc_type
 	ld hl,shot_kind_type   ; kind -> shot type; [11]=4 bone, [16]=9 axe
 	call ADD_HL_A
 	ld c,(hl)
-l9f9ah:
+shot_alloc_type:
 	ld a,c
 	ld (0cff0h),a
 	ld hl,shot_slots
 	ld b,008h
 	xor a
 	ld de,00080h
-l9fa7h:
+shot_alloc_scan:
 	cp (hl)
-	jr z,l9faeh
+	jr z,shot_alloc_found
 	add hl,de
-	djnz l9fa7h
+	djnz shot_alloc_scan
 	ret
-l9faeh:
+shot_alloc_found:
 	push hl
 	pop ix
 	ld (0cff3h),hl
@@ -15134,26 +14912,26 @@ l9faeh:
 	ld b,008h
 	ld a,(0ce03h)          ; NZ would scan 2 SAT slots; no writer, always 0
 	and a
-	jr z,l9fd1h
+	jr z,shot_sat_hunt
 	ld b,002h
-l9fd1h:
+shot_sat_hunt:
 	ld a,(hl)
 	cp 0e0h
-	jr nz,l9fdfh
+	jr nz,shot_sat_next
 	ld (hl),0e1h
 	call actor_sat_assign
 	inc e
 	dec c
-	jr z,l9fe7h
-l9fdfh:
+	jr z,shot_alloc_fill
+shot_sat_next:
 	dec d
 	dec l
 	dec l
 	dec l
 	dec l
-	djnz l9fd1h
+	djnz shot_sat_hunt
 	ret
-l9fe7h:
+shot_alloc_fill:
 	ld hl,(0cff3h)
 	ld a,(0cff0h)
 	ld (hl),a
@@ -15198,14 +14976,14 @@ l9fe7h:
 	ld a,005h
 	add a,l
 	ld l,a
-la028h:
+shot_colour_copy:
 	ld a,(de)
 	ld (hl),a
 	inc de
 	ld a,l
 	add a,005h
 	ld l,a
-	djnz la028h
+	djnz shot_colour_copy
 	ld hl,(0cff3h)
 	ld a,(ix+000h)
 	dec a
@@ -15262,47 +15040,47 @@ shot_sat_ptr:                  ; (0xA0C4) word[type] SAT colours. 1-3,5,10 = fir
 ; fills CFF0-CFF9.  aim_at_simon_xy (0xA0EE) keeps A as speed.
 ; aim_at_simon_spd (0xA0F4) takes speed in A and Y/X already in E/D.
 aim_at_simon:
-	ld a,080h
+	ld a,080h               ; base speed
 aim_at_simon_xy:               ; (0xA0EE) A = speed; E/D from actor Y/X
-	ld e,(ix+003h)
-	ld d,(ix+005h)
+	ld e,(ix+003h)          ; actor Y
+	ld d,(ix+005h)          ; actor X
 aim_at_simon_spd:
-	ld c,a
-	ld a,(0d012h)
+	ld c,a                  ; speed
+	ld a,(0d012h)           ; difficulty tier 0..3
 	add a,a
 	add a,a
-	add a,a
-	add a,c
-	ld (0cff0h),a
-	call aim_octant
-	ld a,(0cff8h)
-	ld e,a
-	ld d,000h
-	ld a,e
-	sub 03fh
-	neg
-	ld hl,aim_scale_tbl
+	add a,a                 ; tier * 8
+	add a,c                 ; speed + 8*tier
+	ld (0cff0h),a           ; scale factor
+	call aim_octant         ; signs + octant index
+	ld a,(0cff8h)           ; octant lut index
+	ld e,a                  ; DE = index
+	ld d,000h               ; 16-bit
+	ld a,e                  ; complement around 0x3F
+	sub 03fh                ; 0x3F - index
+	neg                     ; for the other axis lut
+	ld hl,aim_scale_tbl     ; sin/cos-ish 0..0x3F
 	push hl
-	add hl,de
-	ld c,(hl)
+	add hl,de               ; one axis
+	ld c,(hl)               ; scale 1
 	pop hl
-	ld e,a
-	add hl,de
-	ld a,(hl)
-	ld (0cff7h),a
-	ld e,c
-	call aim_scale
-	ld a,(0cff1h)
-	and a
-	call nz,neg_de
-	ld (0cff3h),de
-	ld a,(0cff7h)
-	ld e,a
-	call aim_scale
-	ld a,(0cff2h)
-	and a
-	call nz,neg_de
-	ld hl,(0cff3h)
+	ld e,a                  ; other index
+	add hl,de               ; other axis
+	ld a,(hl)               ; scale 2
+	ld (0cff7h),a           ; stash axis 2
+	ld e,c                  ; axis 1 lut
+	call aim_scale          ; DE = speed * lut / 32
+	ld a,(0cff1h)           ; Y sign from octant
+	and a                   ; toward +Y?
+	call nz,neg_de          ; flip Yvel
+	ld (0cff3h),de          ; Yvel
+	ld a,(0cff7h)           ; axis 2 lut
+	ld e,a                  ; for aim_scale
+	call aim_scale          ; DE = X component
+	ld a,(0cff2h)           ; X sign from octant
+	and a                   ; toward +X?
+	call nz,neg_de          ; flip Xvel
+	ld hl,(0cff3h)          ; HL = Yvel, DE = Xvel
 	ret
 ; aim_octant (seg3 0xA13B): from actor (E=Y, D=X) vs Simon, fill CFF1/2
 ; (Y/X signs), CFF8 = aim_octant_tbl[quantized dy,dx], CFF9 = facing byte.
@@ -15311,10 +15089,10 @@ aim_octant:
 	ld (hl),000h
 	ld a,(simon_y)
 	sub e
-	jr nc,la149h
+	jr nc,aim_dy
 	neg
 	inc (hl)
-la149h:
+aim_dy:
 	inc hl
 	ld (hl),000h
 	rra
@@ -15323,10 +15101,10 @@ la149h:
 	ld e,a
 	ld a,(simon_x)
 	sub d
-	jr nc,la15ah
+	jr nc,aim_dx
 	neg
 	inc (hl)
-la15ah:
+aim_dx:
 	rra
 	rra
 	rra
@@ -15343,25 +15121,25 @@ la15ah:
 	ld a,h
 	ld b,000h
 	and a
-	jr z,la178h
+	jr z,aim_flip
 	ld b,080h
-la178h:
+aim_flip:
 	cp l
 	ld a,c
-	jr z,la17eh
+	jr z,aim_signed
 	neg
-la17eh:
+aim_signed:
 	add a,b
 	ld (0cff9h),a
 	ret
 neg_de:                        ; (0xA183) DE = -DE (two's complement)
-	ld a,d
-	cpl
-	ld d,a
-	ld a,e
-	cpl
-	ld e,a
-	inc de
+	ld a,d                  ; high
+	cpl                     ; invert
+	ld d,a                  ; D = ~D
+	ld a,e                  ; low
+	cpl                     ; invert
+	ld e,a                  ; E = ~E
+	inc de                  ; +1 -> two's complement
 	ret
 ; aim_scale (seg3 0xA18B): DE = CFF0 * E / 32 (speed * lut / 32).
 aim_scale:
@@ -15384,12 +15162,12 @@ MUL_H_E:
 	ld b,008h
 	ld l,000h
 	ld d,l
-la1a2h:
+mul_shift:                      ; shift HL; if carry add DE
 	add hl,hl
-	jr nc,la1a6h
+	jr nc,mul_skip
 	add hl,de
-la1a6h:
-	djnz la1a2h
+mul_skip:                       ; no add this bit
+	djnz mul_shift
 	ret
 aim_octant_tbl:                ; (0xA1A9) 8x8 atan; index = (dy>>2)&0x38 | (dx>>5)&7
 	defb 020h,008h,004h,003h,002h,002h,001h,001h
@@ -15439,21 +15217,21 @@ skull_pile_idle:
 skull_pile_windup:
 	ld a,04ch
 	bit 0,(ix+011h)
-	jr z,la264h
+	jr z,skull_pile_sat_a
 	ld a,048h
-la264h:
+skull_pile_sat_a:
 	call skull_pile_sat_pat
 	dec (ix+011h)
 	ret nz
 	ld (ix+013h),012h
 	inc (ix+001h)
-la272h:
+skull_pile_shoot:
 	ld hl,00000h
 	ld de,0fc00h
 	bit 0,(ix+00bh)
-	jr z,la281h
+	jr z,skull_pile_shot_vel
 	ld de,00400h
-la281h:
+skull_pile_shot_vel:
 	ld a,(ix+003h)
 	sub 014h
 	ld c,a
@@ -15473,30 +15251,30 @@ skull_pile_recover:
 	dec (ix+013h)
 	ret nz
 	ld (ix+001h),000h
-	jr la272h
+	jr skull_pile_shoot
 	ld a,04ch
 ; skull_pile_face (seg3 0xA2AF): pose 5/4 from Simon X; 7/6 in s9r4.
 skull_pile_face:
 	ld b,005h
 	ld a,(stage)
 	cp 009h
-	jr nz,la2c1h
+	jr nz,skull_pile_face_id
 	ld a,(room)
 	cp 004h
-	jr nz,la2c1h
+	jr nz,skull_pile_face_id
 	ld b,007h
-la2c1h:
+skull_pile_face_id:
 	ld a,(simon_x)
 	cp (ix+005h)
-	jr nc,la2cah
+	jr nc,skull_pile_face_store
 	dec b
-la2cah:
+skull_pile_face_store:
 	ld (ix+00bh),b
 	ret
 ; enemy_placed_merman_init (seg3 0xA2CE) - object-list id 0x21 (stage 10).
 ; Play-confirmed: red mermen already standing on the platform; they do not
 ; jump out of the water. Skips the type-0x20 splash pair that generator
-; mermen spawn, arms ix+1B, jumps into the walk at la36dh. Same per-frame
+; mermen spawn, arms ix+1B, jumps into the walk at merman_land. Same per-frame
 ; tick as types 2/3 (`actor_type_tick` -> 0xA317). Type bit0 set so it spits like
 ; type 3; HP/SAT match type 3 (2 HP, 0x612F).
 enemy_placed_merman_init:
@@ -15507,7 +15285,7 @@ enemy_placed_merman_init:
 	ld (ix+010h),002h
 	ld (ix+019h),a
 	ld (ix+015h),001h
-	jp la36dh
+	jp merman_land
 ; enemy_merman_tick (seg3 0xA2E7) - actor_merman_green (1 HP, closed mouth) and
 ; actor_merman_red (2 HP, open-mouth spit). Shared walk/pounce; type 3 (bit 0 of
 ; the type id) counts down ix+10 then enters state 2 and fires shot_spawn kind 2
@@ -15542,9 +15320,9 @@ merman_go:
 	jp z,merman_spit
 merman_fall:
 	bit 0,(ix+018h)
-	jr nz,la32eh
+	jr nz,merman_fall_grav
 	call merman_pick_frame
-la32eh:
+merman_fall_grav:
 	ld de,00000h
 	call actor_set_xvel
 	ld de,00080h
@@ -15554,13 +15332,13 @@ la32eh:
 	ld d,(ix+005h)
 	ld e,(ix+003h)
 	bit 0,(ix+012h)
-	jr z,la34fh
+	jr z,merman_fall_probe
 	ld a,d
 	add a,008h
 	ld d,a
-la34fh:
+merman_fall_probe:
 	call map_solid_pair
-	jr nc,la387h
+	jr nc,merman_drown
 	ld a,sfx_land
 	call play_sound_alive
 	ld a,(ix+003h)
@@ -15572,7 +15350,7 @@ la34fh:
 	sub 030h
 	neg
 	ld (ix+010h),a
-la36dh:
+merman_land:
 	ld (ix+011h),010h
 	ld (ix+014h),000h
 	ld (ix+015h),001h
@@ -15580,13 +15358,13 @@ la36dh:
 	ld (ix+013h),008h
 	ld de,00000h
 	jp actor_set_yvel
-la387h:
+merman_drown:
 	ld a,(ix+003h)
 	cp 0c0h
 	ret c
 	ld a,sfx_water_in
 	call play_sound_alive
-	call 099fdh
+	call actor_free
 	ld e,(ix+003h)
 	ld d,(ix+005h)
 	ld c,actor_merman_splash
@@ -15597,9 +15375,9 @@ la387h:
 	jp spawn_actor
 merman_walk:                    ; state 1: walk
 	bit 0,(ix+01bh)
-	jr z,la3d2h
+	jr z,merman_walk_go
 	bit 0,(ix+01ch)
-	jr nz,la3d2h            ; already latched this attack
+	jr nz,merman_walk_go            ; already latched this attack
 	ld (ix+00bh),pose_merman_red_walk_r0       ; open-mouth pose (type 3)
 	ld a,(simon_y)           ; Simon Y
 	ld b,a
@@ -15613,53 +15391,53 @@ merman_walk:                    ; state 1: walk
 	ret c                   ; Simon below it
 	ld (ix+006h),001h
 	ld (ix+01ch),001h       ; Y overlapped: arm the spit
-la3d2h:
+merman_walk_go:
 	bit 0,(ix+000h)         ; type 3 has bit 0 set; type 2 does not
-	jr z,la3e5h             ; green: just walk
+	jr z,merman_walk_step             ; green: just walk
 	dec (ix+010h)
-	jr nz,la3e5h
+	jr nz,merman_walk_step
 	inc (ix+001h)           ; -> state 2 spit
 	ld (ix+011h),018h
 	ret
-la3e5h:
+merman_walk_step:
 	dec (ix+015h)
-	jr nz,la40ah
+	jr nz,merman_walk_anim
 	call merman_walk_period
 	ld (ix+012h),000h
 	ld de,0fe80h
 	ld a,(simon_x)
 	cp (ix+005h)
-	jr c,la403h
+	jr c,merman_walk_right
 	ld (ix+012h),001h
 	ld de,00180h
-la403h:
+merman_walk_right:
 	call actor_set_xvel
 	ld (ix+013h),001h
-la40ah:
-	ld hl,la459h
+merman_walk_anim:
+	ld hl,merman_walk_l
 	bit 0,(ix+012h)
-	jr z,la416h
-	ld hl,la45dh
-la416h:
+	jr z,merman_walk_hl
+	ld hl,merman_walk_r
+merman_walk_hl:
 	dec (ix+013h)
-	jr nz,la436h
+	jr nz,merman_walk_floor
 	ld (ix+013h),008h
 	inc (ix+014h)
 	ld a,(ix+014h)
 	and 001h
 	bit 0,(ix+000h)         ; type 3 uses frames +2 (open mouth)
-	jr z,la42fh
+	jr z,merman_walk_frame
 	add a,002h
-la42fh:
+merman_walk_frame:
 	call ADD_HL_A
 	ld a,(hl)
 	ld (ix+00bh),a
-la436h:
+merman_walk_floor:
 	ld a,(ix+005h)
 	bit 7,(ix+00ah)
-	jr nz,la441h
+	jr nz,merman_walk_floor_x
 	add a,008h
-la441h:
+merman_walk_floor_x:
 	ld d,a
 	ld e,(ix+003h)
 	call map_solid_pair
@@ -15669,62 +15447,62 @@ la441h:
 	dec (ix+001h)
 	ld (ix+018h),001h
 	ret
-la459h:
+merman_walk_l:
 	defb 008h,009h,00fh,010h ; type2/type3 walk, facing 0
-la45dh:
+merman_walk_r:
 	defb 00bh,00ch,012h,013h ; facing 1
 merman_spit:                    ; state 2: open-mouth spit
 	ld (ix+006h),000h       ; hide the body while the shot plays
 	dec (ix+011h)
-	jr z,la48dh
+	jr z,merman_spit_done
 	ld a,(ix+011h)
 	cp 008h
-	jr z,la499h             ; mid-timer: fire
-	ld hl,la4b6h
+	jr z,merman_spit_fire             ; mid-timer: fire
+	ld hl,merman_spit_tbl
 	cp 010h
-	jr c,la489h
+	jr c,merman_spit_frame2
 	ld c,000h
-la47ah:
+merman_spit_pose:
 	bit 0,(ix+012h)
-	jr z,la481h
+	jr z,merman_spit_idx
 	inc c
-la481h:
+merman_spit_idx:
 	ld b,000h
 	add hl,bc
 	ld a,(hl)
 	ld (ix+00bh),a
 	ret
-la489h:
+merman_spit_frame2:
 	ld c,002h
-	jr la47ah
-la48dh:
+	jr merman_spit_pose
+merman_spit_done:
 	dec (ix+001h)
 	ld (ix+010h),030h
 	ld (ix+006h),001h
 	ret
-la499h:
+merman_spit_fire:
 	ld hl,00000h
 	ld de,00300h            ; spit X vel right
 	bit 7,(ix+00ah)
-	jr z,la4a8h
+	jr z,merman_spit_vel
 	ld de,0fd00h            ; or left
-la4a8h:
+merman_spit_vel:
 	ld a,(ix+003h)
 	sub 014h                ; from the mouth (Y-0x14)
 	ld c,a
 	ld b,(ix+005h)
 	ld a,002h               ; shot_spawn kind 2 -> type 1 (fireball)
 	jp shot_spawn
-la4b6h:
+merman_spit_tbl:
 	defb 00fh,012h,011h,014h ; spit anim frames
 merman_pick_frame:              ; (0xA4BA)
 	ld b,pose_merman_green_walk_r0               ; type 2 closed-mouth
 	ld c,pose_merman_green_walk_l0
 	bit 0,(ix+000h)
-	jr z,la4c8h
+	jr z,merman_pick_store
 	ld b,pose_merman_red_walk_r0               ; type 3 open-mouth
 	ld c,pose_merman_red_walk_l0
-la4c8h:
+merman_pick_store:
 	ld (ix+00bh),b
 	ld a,(simon_x)
 	cp (ix+005h)
@@ -15735,9 +15513,9 @@ la4c8h:
 merman_walk_period:
 	ld hl,merman_period_long
 	bit 0,(ix+019h)
-	jr nz,la4e2h
+	jr nz,merman_period_use
 	ld hl,merman_period_short
-la4e2h:
+merman_period_use:
 	ld a,(ix+01dh)
 	and 003h
 	call ADD_HL_A
@@ -15767,27 +15545,27 @@ enemy_ghost_head_tick:
 	ld a,(ix+005h)
 	cp 080h
 	ld de,00280h           ; +X if spawned on the left
-	jr c,la51fh
+	jr c,ghost_head_xvel
 	ld de,0fd80h           ; -X if spawned on the right
-la51fh:
+ghost_head_xvel:
 	jp actor_set_xvel_speedup
 enemy_ghost_head_go:
 	ld c,pose_ghost_head_l0
 	ld a,(stage)
 	cp 015h
-	jr nz,la52dh
+	jr nz,ghost_head_anim
 	ld c,pose_ghost_head_l1
-la52dh:
+ghost_head_anim:
 	inc (ix+00ch)
 	bit 2,(ix+00ch)
-	jr z,la537h
+	jr z,ghost_head_frame
 	inc c
-la537h:
+ghost_head_frame:
 	bit 7,(ix+00ah)
-	jr nz,la53fh
+	jr nz,ghost_head_pose
 	inc c
 	inc c
-la53fh:
+ghost_head_pose:
 	ld (ix+00bh),c
 	ld de,00040h
 	ld a,(ix+003h)
@@ -15805,30 +15583,30 @@ la53fh:
 ;  only with a terminal fall speed (gravity).  Falls through to actor_set_yvel.
 ; ---------------------------------------------------------------------------
 actor_add_yvel:
-	ld l,(ix+007h)
-	ld h,(ix+008h)
+	ld l,(ix+007h)          ; current Yvel lo
+	ld h,(ix+008h)          ; current Yvel hi
 	add hl,de               ; Yvel += DE
-	ex de,hl
-	ld a,d
-	and a
+	ex de,hl                ; DE = new Yvel
+	ld a,d                  ; high byte
+	and a                   ; sign
 	jp m,actor_set_yvel     ; negative -> store as-is
-	cp 008h
+	cp 008h                 ; >= 0x0800?
 	jr c,actor_set_yvel     ; < 0x0800 -> store
 	ld de,007ffh            ; clamp to terminal fall speed
 actor_set_yvel:
 	ld (ix+007h),e          ; +0x07/+0x08 = Y velocity
-	ld (ix+008h),d
+	ld (ix+008h),d          ; pixel/frac high
 	ret
 
 ; actor_add_xvel (0xA56B): Xvel += DE.  Falls through to actor_set_xvel.
 actor_add_xvel:
-	ld l,(ix+009h)
-	ld h,(ix+00ah)
+	ld l,(ix+009h)          ; current Xvel lo
+	ld h,(ix+00ah)          ; current Xvel hi
 	add hl,de               ; Xvel += DE
-	ex de,hl
+	ex de,hl                ; DE = new Xvel
 actor_set_xvel:
 	ld (ix+009h),e          ; +0x09/+0x0A = X velocity
-	ld (ix+00ah),d
+	ld (ix+00ah),d          ; high
 	ret
 ; enemy_pikeman_tick (seg3 0xA57A) - type 06 walking spear knight. Turns at
 ; ledges/walls; walks toward Simon when Y overlaps (±8 via simon_y_overlap). 4 HP,
@@ -15844,84 +15622,78 @@ enemy_pikeman_tick:
 	ld (ix+00bh),pose_pikeman_walk_l0
 	ld (ix+00ch),060h
 	ret
-enemy_pikeman_go:
+enemy_pikeman_go:              ; (0xA599) floor/wall probes, chase on Y overlap
 	dec (ix+00ch)
-	ld a,014h
+	ld a,014h               ; floor probe X+0x14 if walking right
 	bit 7,(ix+00ah)
-	jr z,la5a6h
-	ld a,0f8h
-la5a6h:
+	jr z,pikeman_floor_x
+	ld a,0f8h               ; X-8 if walking left
+pikeman_floor_x:
 	add a,(ix+005h)
 	ld d,a
 	ld e,(ix+003h)
 	call map_solid_pair
-	jr nc,la613h
+	jr nc,pikeman_turn
 	ld d,(ix+005h)
 	ld bc,00808h
 	bit 7,(ix+00ah)
-	jr nz,la5c3h
+	jr nz,pikeman_wall_left
 	call probe_wall_right
-	jr la5c6h
-la5c3h:
+	jr pikeman_after_wall
+pikeman_wall_left:
 	call probe_wall_left
-la5c6h:
-	jr c,la613h
+pikeman_after_wall:
+	jr c,pikeman_turn
 	ld a,(ix+005h)
 	cp 0f0h
-	jr c,la5d7h
+	jr c,pikeman_not_right_edge
 	bit 7,(ix+00ah)
-	jr z,la613h
-	jr la5e3h
-la5d7h:
+	jr z,pikeman_turn
+	jr pikeman_maybe_chase
+pikeman_not_right_edge:
 	cp 00fh
-	jp nc,la5e3h
+	jp nc,pikeman_maybe_chase
 	bit 7,(ix+00ah)
-	jp nz,la613h
-la5e3h:
+	jp nz,pikeman_turn
+pikeman_maybe_chase:
 	call simon_y_overlap
-	jr nc,la605h
+	jr nc,pikeman_no_overlap
 	bit 0,(ix+011h)
-	jr nz,la609h
+	jr nz,pikeman_timer
 	ld de,00160h
 	ld a,(simon_x)
 	cp (ix+005h)
-	jr nc,la5fch
+	jr nc,pikeman_set_xvel
 	ld de,0fea0h
-la5fch:
+pikeman_set_xvel:
 	call actor_set_xvel_speedup
 	ld (ix+011h),001h
-	jr la616h
-la605h:
+	jr pikeman_anim
+pikeman_no_overlap:
 	ld (ix+011h),000h
-la609h:
+pikeman_timer:
 	ld a,(ix+00ch)
 	and a
-	jr nz,la616h
+	jr nz,pikeman_anim
 	ld (ix+00ch),060h
-la613h:
+pikeman_turn:
 	call actor_flip_xvel
-la616h:
+pikeman_anim:
 	inc (ix+010h)
 	ld a,(ix+010h)
 	rra
 	rra
 	and 003h
-	ld hl,la62eh
+	ld hl,pikeman_walk_tbl
 	bit 7,(ix+00ah)
-	jr nz,la62bh
+	jr nz,pikeman_pose_idx
 	add a,004h
-la62bh:
+pikeman_pose_idx:
 	ld c,a
 	jr actor_set_pose
-la62eh:
-	ld d,b
-	ld d,c
-	ld d,d
-	ld d,c
-	ld d,e
-	ld d,h
-	ld d,l
-	ld d,h
+pikeman_walk_tbl:              ; (0xA62E) 0x50-52 left, 0x53-55 right
+	defb pose_pikeman_walk_l0, pose_pikeman_walk_l1, pose_pikeman_walk_l2, pose_pikeman_walk_l1
+	defb pose_pikeman_walk_r0, pose_pikeman_walk_r1, pose_pikeman_walk_r2, pose_pikeman_walk_r1
 ; actor_set_pose (seg3 0xA636): ix+0B = (HL)[C].
 actor_set_pose:
 	ld b,000h
@@ -15957,8 +15729,8 @@ actor_flip_xvel:                   ; (seg3 0xA649) negate X velocity
 ;  speed ramp, not background scrolling.)
 ; ---------------------------------------------------------------------------
 actor_set_xvel_speedup:
-	ld a,d
-	or e
+	ld a,d                  ; requested Xvel
+	or e                    ; zero?
 	jp z,actor_set_xvel     ; zero velocity: just store
 	push hl
 	ex de,hl                ; HL = requested X velocity
@@ -15968,14 +15740,14 @@ actor_set_xvel_speedup:
 	add a,a
 	add a,a
 	add a,a                 ; A = tier * 32
-	ld d,000h
-	ld e,a
-	bit 7,h
-	call nz,neg_de       ; negate the bias when moving left
+	ld d,000h               ; DE = bias
+	ld e,a                  ; tier * 32
+	bit 7,h                 ; moving left?
+	call nz,neg_de          ; negate the bias when moving left
 	add hl,de               ; add the speed bias in the travel direction
-	ex de,hl
+	ex de,hl                ; DE = sped-up Xvel
 	pop hl
-	jp actor_set_xvel
+	jp actor_set_xvel       ; store +09/+0A
 ; enemy_raven_tick (seg3 0xA677) - type 12. Flies, damps Yvel to 0 (hover),
 ; then a new arc or a strafe when Simon's Y is within 0x18. Distinct from
 ; type 8's sine bob. Shape 0x89. 1 HP, 100 pts.
@@ -16009,9 +15781,9 @@ raven_coast:
 	call raven_flap
 	ld a,0e0h
 	bit 7,(ix+008h)
-	jr z,la6bdh
+	jr z,raven_coast_yvel
 	ld a,020h
-la6bdh:
+raven_coast_yvel:
 	ld h,(ix+008h)
 	ld l,(ix+007h)
 	call ADD_HL_A_SIGNED       ; Yvel += signed step (coast to 0)
@@ -16047,10 +15819,10 @@ raven_strafe_init:
 	ld (ix+009h),000h
 	ld a,(simon_x)
 	cp (ix+005h)
-	jr nc,la71dh
+	jr nc,raven_strafe_zero_y
 	ld (ix+00ah),0fdh
 	ld (ix+009h),000h
-la71dh:
+raven_strafe_zero_y:
 	ld (ix+008h),000h
 	ld (ix+007h),000h
 	inc (ix+001h)
@@ -16061,9 +15833,9 @@ raven_strafe:
 	ret c
 	call raven_flap
 	dec (ix+010h)
-	jr z,la763h
+	jr z,raven_strafe_reaim
 	bit 7,(ix+00ah)
-	jr z,la752h
+	jr z,raven_strafe_right
 	ld (ix+011h),000h
 	ld a,(simon_x)
 	sub 008h
@@ -16071,7 +15843,7 @@ raven_strafe:
 	ret c
 	inc (ix+001h)
 	ret
-la752h:
+raven_strafe_right:
 	ld (ix+011h),001h
 	ld a,(simon_x)
 	add a,008h
@@ -16079,7 +15851,7 @@ la752h:
 	ret nc
 	inc (ix+001h)
 	ret
-la763h:
+raven_strafe_reaim:
 	call raven_pick_vel
 	ld (ix+001h),001h
 	ret
@@ -16090,10 +15862,10 @@ raven_recover:
 	ld a,0e0h
 	ld e,0feh
 	bit 0,(ix+011h)
-	jr nz,la780h
+	jr nz,raven_recover_step
 	ld a,020h
 	ld e,002h
-la780h:
+raven_recover_step:
 	ld h,(ix+00ah)
 	ld l,(ix+009h)
 	call ADD_HL_A_SIGNED       ; Xvel += signed step (toward ±0x02)
@@ -16112,9 +15884,9 @@ raven_hold:
 raven_flap:
 	ld hl,raven_flap_r
 	bit 7,(ix+00ah)
-	jr z,la7aah
+	jr z,raven_flap_hl
 	ld hl,raven_flap_l
-la7aah:
+raven_flap_hl:
 	inc (ix+012h)
 	ld a,(ix+012h)
 	and 008h
@@ -16136,26 +15908,26 @@ raven_pick_vel:
 	ld hl,00200h
 	ld a,(simon_x)
 	cp (ix+005h)
-	jr c,la7d3h
+	jr c,raven_pick_x
 	ex de,hl
-la7d3h:
+raven_pick_x:
 	ld a,(ix+005h)
 	cp 0c0h
-	jr nc,la7e3h
+	jr nc,raven_pick_right
 	cp 040h
-	jr nc,la7e6h
+	jr nc,raven_pick_xvel
 	ld de,00200h
-	jr la7e6h
-la7e3h:
+	jr raven_pick_xvel
+raven_pick_right:
 	ld de,0fe00h
-la7e6h:
+raven_pick_xvel:
 	call actor_set_xvel
 	ld hl,raven_coast_dy_up
 	ld a,(simon_y)
 	cp (ix+003h)
-	jr c,la7f7h
+	jr c,raven_pick_yidx
 	ld hl,raven_coast_dy_down
-la7f7h:
+raven_pick_yidx:
 	ld a,(ix+018h)
 	and 003h
 	add a,a
@@ -16165,11 +15937,11 @@ la7f7h:
 	ld e,(hl)
 	ld a,(ix+003h)
 	bit 7,d
-	jr z,la812h
+	jr z,raven_pick_y_down
 	cp 040h
 	call c,neg_de
 	jp actor_set_yvel
-la812h:
+raven_pick_y_down:
 	cp 0c0h
 	call nc,neg_de
 	jp actor_set_yvel
@@ -16191,25 +15963,25 @@ ADD_HL_A_SIGNED:
 raven_bounds:
 	ld a,(ix+003h)
 	bit 7,(ix+008h)
-	jr nz,la843h
+	jr nz,raven_bounds_up
 	cp 0c0h
-	jr nc,la859h
-	jr la847h
-la843h:
+	jr nc,raven_bounds_hit
+	jr raven_bounds_x
+raven_bounds_up:
 	cp 020h
-	jr c,la859h
-la847h:
+	jr c,raven_bounds_hit
+raven_bounds_x:
 	ld a,(ix+005h)
 	bit 7,(ix+00ah)
-	jr nz,la856h
+	jr nz,raven_bounds_left
 	cp 0e8h
-	jr nc,la859h
+	jr nc,raven_bounds_hit
 	xor a
 	ret
-la856h:
+raven_bounds_left:
 	cp 010h
 	ret nc
-la859h:
+raven_bounds_hit:
 	ld (ix+01eh),018h
 	ld (ix+001h),002h
 	scf
@@ -16225,9 +15997,9 @@ enemy_dog_tick:
 	ld a,(simon_x)           ; A = Simon X (screen)
 	cp b                    ; Simon at/past the dog?
 	ld a,043h               ; idle frame 0x43 (Simon still far)
-	jr nc,la870h
+	jr nc,dog_init_pose
 	ld a,03fh               ; idle frame 0x3f (Simon near)
-la870h:
+dog_init_pose:
 	ld (ix+00bh),a          ; store animation frame (+0x0B)
 	ld (ix+006h),001h       ; mark actor alive (+0x06 = 1)
 	ld (ix+00ch),000h       ; clear anim/state timer (+0x0C)
@@ -16237,7 +16009,7 @@ la870h:
 enemy_dog_go:
 	ld a,(ix+005h)
 	cp 018h
-	jp c,099fdh
+	jp c,actor_free
 	ld a,(ix+001h)
 	call DISPATCH_A
 	defw dog_idle          ; 0  sit until |Simon X| < 0x40
@@ -16247,10 +16019,10 @@ dog_idle:
 	ld a,(simon_x)
 	sub (ix+005h)
 	ld de,00400h
-	jr nc,la8a8h
+	jr nc,dog_idle_dx
 	neg
 	ld de,0fc00h
-la8a8h:
+dog_idle_dx:
 	cp 040h
 	ret nc
 	call actor_set_xvel
@@ -16267,9 +16039,9 @@ dog_run:
 	ld a,(ix+00ah)
 	bit 7,a
 	ld a,046h
-	jr z,la8d1h
+	jr z,dog_leap_pose
 	ld a,042h
-la8d1h:
+dog_leap_pose:
 	ld (ix+00bh),a
 	ld (ix+001h),002h
 	ret
@@ -16284,9 +16056,9 @@ dog_air:
 	ld a,(simon_x)
 	cp b
 	ld de,00400h
-	jr nc,la8f8h
+	jr nc,dog_land_xvel
 	ld de,0fc00h
-la8f8h:
+dog_land_xvel:
 	call actor_set_xvel
 	ld (ix+00ch),000h
 	ld (ix+001h),001h
@@ -16298,26 +16070,26 @@ dog_run_pose:                  ; (0xA910) 3-frame run from facing
 	ld a,(ix+00ch)
 	inc a
 	cp 00dh
-	jr c,la91ah
+	jr c,dog_run_timer
 	ld a,001h
-la91ah:
+dog_run_timer:
 	ld (ix+00ch),a
 	bit 7,(ix+00ah)
 	ld a,(ix+00ch)
-	jr z,la92ah
+	jr z,dog_run_right
 	ld b,041h
-	jr la92ch
-la92ah:
+	jr dog_run_frame
+dog_run_right:
 	ld b,045h
-la92ch:
+dog_run_frame:
 	cp 004h
-	jr c,la937h
+	jr c,dog_run_store
 	inc b
 	cp 00ah
-	jr c,la937h
+	jr c,dog_run_store
 	dec b
 	dec b
-la937h:
+dog_run_store:
 	ld (ix+00bh),b
 	ret
 
@@ -16333,10 +16105,10 @@ enemy_zombie_tick:
 	cp 080h                 ; left or right half of the screen?
 	ld de,00220h            ; +X velocity (move right)  \ right half
 	ld bc,03d00h            ; anim 0x3d, facing 0        /
-	jr c,la952h
+	jr c,zombie_init_apply
 	ld de,0fde0h            ; -X velocity (move left)   \ left half
 	ld bc,03b01h            ; anim 0x3b, facing 1        /
-la952h:
+zombie_init_apply:
 	ld (ix+011h),e          ; store 16-bit X velocity (+0x11/+0x12)
 	ld (ix+012h),d
 	call actor_set_xvel_speedup
@@ -16347,26 +16119,26 @@ la952h:
 	jp actor_set_yvel            ; chain to shared actor tail
 enemy_zombie_go:
 	dec (ix+00ch)
-	jr nz,la98bh
+	jr nz,zombie_floor
 	ld a,(ix+010h)
 	or a
 	ld bc,03d3eh
-	jr z,la97ch
+	jr z,zombie_anim_pair
 	ld bc,03b3ch
-la97ch:
+zombie_anim_pair:
 	ld a,(ix+00bh)
 	cp b
 	ld a,b
-	jr nz,la984h
+	jr nz,zombie_anim_toggle
 	ld a,c
-la984h:
+zombie_anim_toggle:
 	ld (ix+00bh),a
 	ld (ix+00ch),004h
-la98bh:
+zombie_floor:
 	ld d,(ix+005h)
 	ld e,(ix+003h)
 	call map_solid_pair
-	jr nc,la9b2h
+	jr nc,zombie_fall
 	ld de,00000h
 	call actor_set_yvel
 	ld e,(ix+011h)
@@ -16378,7 +16150,7 @@ actor_snap_y8:                 ; (0xA9A9) Y &= 0xF8
 	and 0f8h
 	ld (ix+003h),a
 	ret
-la9b2h:
+zombie_fall:
 	ld de,00000h
 	call actor_set_xvel
 	ld de,00060h
@@ -16454,7 +16226,7 @@ bone_dragon_spit:
 	ld (ix+024h),070h
 	ld (ix+029h),074h
 	dec (ix+00ch)
-	jr z,laa65h
+	jr z,bone_dragon_spit_done
 	ld a,(ix+00ch)
 	cp 008h
 	ret nz
@@ -16467,28 +16239,28 @@ bone_dragon_spit:
 	ld b,(ix+023h)
 	ld a,00eh
 	jp shot_spawn
-laa65h:
+bone_dragon_spit_done:
 	ld (ix+00ch),01eh
 	ld (ix+001h),001h
 	ret
 bone_dragon_sat_nudge:         ; (0xAA6E) 8 SAT bytes at HL, ±1 toward DE
 	ld b,008h
-laa70h:
+bone_dragon_nudge_loop:
 	ld a,(de)
 	inc de
 	cp (hl)
-	jr z,laa7dh
+	jr z,bone_dragon_nudge_next
 	ld a,001h
-	jr nc,laa7bh
+	jr nc,bone_dragon_nudge_add
 	ld a,0ffh
-laa7bh:
+bone_dragon_nudge_add:
 	add a,(hl)
 	ld (hl),a
-laa7dh:
+bone_dragon_nudge_next:
 	ld a,005h
 	add a,l
 	ld l,a
-	djnz laa70h
+	djnz bone_dragon_nudge_loop
 	ret
 bone_dragon_wiggle_arm:        ; (0xAA84) RNG reload ix+18, then wiggle
 	dec (ix+018h)
@@ -16509,7 +16281,7 @@ bone_dragon_wiggle:            ; (0xAA91) 4 SAT Y pairs from wiggle_ofs
 	pop de
 	set 4,e
 	ld b,004h
-laaa8h:
+bone_dragon_wiggle_loop:
 	ld a,(hl)
 	add a,(ix+01ah)
 	ld (de),a
@@ -16517,7 +16289,7 @@ laaa8h:
 	ld (de),a
 	inc de
 	inc hl
-	djnz laaa8h
+	djnz bone_dragon_wiggle_loop
 	ret
 bone_dragon_wiggle_ofs:        ; (0xAAB4) 8 x 4 SAT Y offsets
 	defb 000h,000h,000h,000h
@@ -16537,12 +16309,12 @@ enemy_bone_dragon_tick:
 	ld a,(ix+005h)
 	ld (ix+01bh),a
 	push ix
-laae6h:
+bone_dragon_sat_seed:
 	pop de
 	set 4,e
-	ld hl,lab25h
+	ld hl,bone_dragon_sat_xofs
 	ld b,004h
-laaeeh:
+bone_dragon_sat_xloop:
 	ld a,(hl)
 	add a,(ix+01bh)
 	ld (de),a
@@ -16550,47 +16322,32 @@ laaeeh:
 	ld (de),a
 	inc de
 	inc hl
-	djnz laaeeh
+	djnz bone_dragon_sat_xloop
 	ld a,00ah
 	add a,e
 	ld e,a
 	ld bc,008ffh
-	ld hl,lab15h
-lab03h:
+	ld hl,bone_dragon_sat_attr
+bone_dragon_sat_cell:
 	ld a,(ix+01ah)
 	ld (de),a
 	inc de
 	ld a,(ix+01bh)
-lab0bh:
+bone_dragon_sat_x:
 	ld (de),a
 	inc de
 	ldi
 	ldi
 	inc e
-	djnz lab03h
+	djnz bone_dragon_sat_cell
 	ret
-lab15h:
-	add a,b
-	ld (bc),a
-	add a,h
-	ld c,h
-	ld a,b
-	ld (bc),a
-	ld a,h
-	ld c,h
-	ld a,b
-	ld (bc),a
-	ld a,h
-	ld c,h
-	ld a,b
-	ld (bc),a
-	ld a,h
-	ld c,h
-lab25h:
-	ret nc
-	ret po
-	ret p
-	nop
+bone_dragon_sat_attr:          ; (0xAB15) 8 x {pat, col}
+	defb 080h,002h, 084h,04ch
+	defb 078h,002h, 07ch,04ch
+	defb 078h,002h, 07ch,04ch
+	defb 078h,002h, 07ch,04ch
+bone_dragon_sat_xofs:          ; (0xAB25) SAT X offsets
+	defb 0d0h,0e0h,0f0h,000h
 ; enemy_dracula_tick (seg3 0xAB29) - type 17. Event 6, stage 18 room 9.
 ; SAT is head + cape (shape 0x56 / 0x58 intro / 0x5B stand). 32x32 body is a
 ; SCREEN 5 blit: dracula_save_bg stashes the playfield under him to page-1
@@ -16626,10 +16383,10 @@ dracula_intro:
 	ld a,(simon_x)
 	sub (ix+005h)
 	ld c,pose_dracula_intro_0
-	jr c,lab7ah
+	jr c,dracula_intro_pose
 	inc c
 	inc c                  ; pose_dracula_intro_0_l
-lab7ah:
+dracula_intro_pose:
 	ld (ix+00bh),c
 	dec (ix+00ch)
 	ret nz
@@ -16692,9 +16449,9 @@ dracula_spawn_fireball:
 	ld a,(simon_x)
 	cp (ix+005h)
 	ld de,00280h
-	jr nc,lac1ah
+	jr nc,dracula_fireball_vel
 	ld de,0fd80h
-lac1ah:
+dracula_fireball_vel:
 	ld a,(ix+003h)
 	sub 018h
 	ld c,a
@@ -16725,9 +16482,9 @@ dracula_teleport:
 	ld hl,dracula_warp_x
 	ld a,(ix+010h)
 	cp 007h
-	jr c,lac69h
+	jr c,dracula_warp_idx
 	ld (ix+010h),0ffh
-lac69h:
+dracula_warp_idx:
 	call ADD_HL_A
 	ld a,(hl)
 	ld (ix+005h),a
@@ -16789,10 +16546,10 @@ dracula_head_init:
 	cp (ix+005h)
 	ld c,pose_dracula_intro_1              ; pose_dracula_intro_1
 	ld de,00300h           ; +X if Simon is left (away)
-	jr c,lad0dh
+	jr c,dracula_head_launch
 	ld de,0fd00h           ; -X
 	ld c,pose_dracula_intro_1_l              ; pose_dracula_intro_1_l
-lad0dh:
+dracula_head_launch:
 	ld (ix+00bh),c
 	call actor_set_xvel
 	ld de,0fd00h           ; launch up
@@ -16823,20 +16580,19 @@ shot_pool_free_loop:
 ; actor_set_pose_facing (0xAD3E): ix+0B = (HL)[C] or (HL)[C+2] if Simon is
 ; to the right of the actor.  Shared by Dracula and the axe knight.
 actor_set_pose_facing:
-	ld a,(simon_x)
-	cp (ix+005h)
-	jp c,actor_set_pose
-	inc c
-lad48h:
-	inc c
-	jp actor_set_pose
+	ld a,(simon_x)          ; Simon X
+	cp (ix+005h)            ; left of actor?
+	jp c,actor_set_pose     ; use (HL)[C] (face left)
+	inc c                   ; Simon is to the right
+	inc c                   ; use (HL)[C+2]
+	jp actor_set_pose       ; ix+0B = table byte
 dracula_sat_color:
 	ld b,008h
 	ld de,00025h
-lad51h:
+dracula_sat_color_loop:
 	ld hl,dracula_sat_cols
 	call dracula_sat_color_from
-	djnz lad51h
+	djnz dracula_sat_color_loop
 	ret
 dracula_sat_cols:
 	defb 002h,048h,002h,048h,002h,048h,002h,048h
@@ -16844,16 +16600,16 @@ dracula_sat_cols:
 dracula_sat_hide:
 	ld b,008h
 	ld e,025h
-	jr lad6ch
+	jr dracula_sat_clear
 ; dracula_sat_hide_body (0xAD68): colour 0 on cells 4-7 (lower cape; idle flicker).
 dracula_sat_hide_body:
 	ld b,004h
 	ld e,039h
-lad6ch:
+dracula_sat_clear:
 	ld c,000h
-lad6eh:
+dracula_sat_clear_cell:
 	call dracula_sat_write_color
-	djnz lad6eh
+	djnz dracula_sat_clear_cell
 	ret
 dracula_sat_color_from:
 	ld a,d
@@ -16900,10 +16656,10 @@ dracula_blit_torso:
 	ld bc,02020h
 	ld a,h
 	cp 080h
-	jr z,ladbeh
+	jr z,dracula_torso_hmmm
 	ld a,048h
 	jp vdp_lmmm
-ladbeh:
+dracula_torso_hmmm:
 	ld a,001h
 	jp vdp_hmmm
 dracula_torso_src:
@@ -16934,15 +16690,15 @@ enemy_axe_knight_tick:
 	ld (ix+010h),000h
 	ld (ix+011h),03ch
 	ret
-enemy_axe_knight_go:
+enemy_axe_knight_go:           ; (0xADFF) bit0=walk, bit1=throw
 	bit 0,(ix+001h)
-	jr nz,lae3dh
+	jr nz,axe_knight_walk
 	ld d,(ix+005h)
 	ld e,(ix+003h)
 	call map_solid_pair
-	jr c,lae13h
-	jp lb345h
-lae13h:
+	jr c,axe_knight_land
+	jp actor_add_yvel_a0
+axe_knight_land:
 	ld a,(ix+003h)
 	and 0f0h
 	ld (ix+003h),a
@@ -16951,74 +16707,74 @@ lae13h:
 	ld (ix+00bh),pose_axe_knight_walk_r0
 	ld a,(simon_x)
 	cp (ix+005h)
-	jr nc,lae34h
+	jr nc,axe_knight_land_xvel
 	ld de,0fec0h
 	ld (ix+00bh),pose_axe_knight_walk_l0
-lae34h:
+axe_knight_land_xvel:
 	call actor_set_xvel_speedup
 	ld de,00000h
 	jp actor_set_yvel
-lae3dh:
+axe_knight_walk:
 	call axe_knight_walk_pose
-	ld a,010h
+	ld a,010h               ; floor probe X+0x10 if walking right
 	bit 7,(ix+00ah)
-	jr z,lae4ah
-	ld a,0f8h
-lae4ah:
+	jr z,axe_knight_floor_x
+	ld a,0f8h               ; X-8 if walking left
+axe_knight_floor_x:
 	add a,(ix+005h)
 	ld d,a
 	ld e,(ix+003h)
 	call map_solid_pair
-	jp nc,laefdh
+	jp nc,axe_knight_air
 	ld d,(ix+005h)
 	ld bc,00808h
 	bit 7,(ix+00ah)
-	jr nz,lae68h
+	jr nz,axe_knight_wall_left
 	call probe_wall_right
-	jr lae6bh
-lae68h:
+	jr axe_knight_after_wall
+axe_knight_wall_left:
 	call probe_wall_left
-lae6bh:
-	jp c,laefdh
+axe_knight_after_wall:
+	jp c,axe_knight_air
 	ld (ix+006h),001h
 	call simon_dx_abs
 	cp 02eh
-	jr nc,lae90h
+	jr nc,axe_knight_range
 	ld de,00140h
 	ld a,(simon_x)
 	cp (ix+005h)
-	jr c,lae87h
+	jr c,axe_knight_flee_xvel
 	ld de,0fec0h
-lae87h:
+axe_knight_flee_xvel:
 	call actor_set_xvel_speedup
 	ld (ix+010h),001h
-	jr laea9h
-lae90h:
+	jr axe_knight_edges
+axe_knight_range:
 	cp 05ch
-	jr c,laea9h
+	jr c,axe_knight_edges
 	ld de,00140h
 	ld a,(simon_x)
 	cp (ix+005h)
-	jr nc,laea2h
+	jr nc,axe_knight_chase_xvel
 	ld de,0fec0h
-laea2h:
+axe_knight_chase_xvel:
 	call actor_set_xvel_speedup
 	ld (ix+010h),000h
-laea9h:
+axe_knight_edges:
 	ld a,(ix+005h)
 	cp 0f0h
 	call nc,actor_halt_if_rightward
 	cp 00fh
 	call c,actor_halt_if_leftward
-laeb6h:
+axe_knight_throw_check:
 	bit 1,(ix+001h)
-	jr nz,laef0h
+	jr nz,axe_knight_throwing
 	call simon_dx_abs
 	cp 02ah
-	jr nc,laee6h
+	jr nc,axe_knight_far_throw
 	bit 0,(ix+010h)
 	ret z
-laec8h:
+axe_knight_throw:
 	set 1,(ix+001h)
 	push ix
 	pop hl
@@ -17027,44 +16783,44 @@ laec8h:
 	ld de,00400h
 	ld a,(simon_x)
 	cp (ix+005h)
-	jr nc,laee3h
+	jr nc,axe_knight_shot_vel
 	ld de,0fc00h
-laee3h:
+axe_knight_shot_vel:
 	jp shot_throw
-laee6h:
+axe_knight_far_throw:
 	cp 060h
 	ret c
 	bit 0,(ix+010h)
 	ret nz
-	jr laec8h
-laef0h:
+	jr axe_knight_throw
+axe_knight_throwing:
 	dec (ix+011h)
 	ret nz
 	ld (ix+011h),03ch
 	res 1,(ix+001h)
 	ret
-laefdh:
+axe_knight_air:
 	ld (ix+006h),000h
 	call simon_dx_abs
 	cp 03eh
-	jr c,laf13h
+	jr c,axe_knight_air_close
 	cp 04ch
-	jr nc,laf19h
+	jr nc,axe_knight_air_far
 	ld (ix+006h),001h
 	jp actor_flip_xvel
-laf13h:
+axe_knight_air_close:
 	ld (ix+010h),001h
-	jr laeb6h
-laf19h:
+	jr axe_knight_throw_check
+axe_knight_air_far:
 	ld (ix+010h),000h
-	jr laeb6h
+	jr axe_knight_throw_check
 axe_knight_walk_pose:          ; (0xAF1F) poses 0x5F-0x62 from frame + facing
 	ld c,000h
 	ld a,(0c003h)
 	and 008h
-	jr z,laf29h
+	jr z,axe_knight_walk_frame
 	inc c
-laf29h:
+axe_knight_walk_frame:
 	ld hl,axe_knight_walk_tbl
 	jp actor_set_pose_facing
 axe_knight_walk_tbl:           ; (0xAF2F) poses 0x5F-0x62
@@ -17080,10 +16836,10 @@ actor_halt_if_leftward:            ; (seg3 0xAF3D) if Xvel < 0, +6 = 0 (left-edg
 	ld (ix+006h),000h
 	ret
 simon_dx_abs:                      ; (seg3 0xAF47) A = |Simon X - actor X|
-	ld a,(simon_x)
-	sub (ix+005h)
-	ret nc
-	neg
+	ld a,(simon_x)          ; Simon X
+	sub (ix+005h)           ; A = Simon - actor
+	ret nc                  ; already positive
+	neg                     ; A = actor - Simon
 	ret
 ; enemy_red_skeleton_tick (seg3 0xAF51) - type 09. Fast walk (0x0220), no
 ; projectile. 2 HP, 200 pts. Stage 13 (SAT 02 45). Same skeleton script as 11.
@@ -17104,16 +16860,16 @@ enemy_red_skeleton_go:
 	defw red_skel_pause    ; 2  4-frame halt, then walk
 red_skel_wake:
 	dec (ix+011h)
-	jr z,laf85h
+	jr z,red_skel_wake_go
 	ld c,pose_red_skel_wait
 	ld a,(ix+011h)
 	cp 00ch
-	jr nc,laf81h
+	jr nc,red_skel_wake_pose
 	dec c
-laf81h:
+red_skel_wake_pose:
 	ld (ix+00bh),c
 	ret
-laf85h:
+red_skel_wake_go:
 	ld (ix+00eh),007h
 	ld a,(ix+025h)
 	ld (ix+02fh),a
@@ -17126,49 +16882,49 @@ laf85h:
 red_skel_face:                 ; (0xAFA2) pose/Xvel toward Simon
 	ld a,(simon_x)
 	sub (ix+005h)
-	jr c,lafb7h
+	jr c,red_skel_face_left
 	ld (ix+012h),000h
 	ld (ix+00bh),pose_red_skel_walk_r0
 	ld de,00220h
-	jr lafc2h
-lafb7h:
+	jr red_skel_face_xvel
+red_skel_face_left:
 	ld (ix+012h),001h
 	ld (ix+00bh),pose_red_skel_walk_l0
 	ld de,0fde0h
-lafc2h:
+red_skel_face_xvel:
 	jp actor_set_xvel_speedup
 red_skel_walk:
 	ld a,(ix+005h)
 	bit 7,(ix+00ah)
 	ld c,010h
-	jr z,lafd2h
+	jr z,red_skel_floor_x
 	ld c,0f0h
-lafd2h:
+red_skel_floor_x:
 	add a,c
 	ld d,a
 	ld e,(ix+003h)
 	call map_solid_pair
-	jr nc,lb004h
+	jr nc,red_skel_turn
 	ld d,(ix+005h)
 	ld e,(ix+003h)
 	ld b,008h
 	ld c,008h
 	ld a,(ix+012h)
 	and a
-	jr nz,laff8h
+	jr nz,red_skel_wall_left
 	ld a,(ix+005h)
 	cp 0f0h
-	jr nc,lb004h
+	jr nc,red_skel_turn
 	call probe_wall_right
-	jr lb002h
-laff8h:
+	jr red_skel_after_wall
+red_skel_wall_left:
 	ld a,(ix+005h)
 	cp 010h
-	jr c,lb004h
+	jr c,red_skel_turn
 	call probe_wall_left
-lb002h:
-	jr nc,lb018h
-lb004h:
+red_skel_after_wall:
+	jr nc,red_skel_anim
+red_skel_turn:
 	ld a,(ix+012h)
 	xor 001h
 	ld (ix+012h),a
@@ -17176,18 +16932,18 @@ lb004h:
 	ld d,(ix+00ah)
 	call neg_de
 	call actor_set_xvel_speedup
-lb018h:
+red_skel_anim:
 	bit 2,(ix+00ch)
 	ld c,pose_red_skel_walk_r0
-	jr z,lb021h
+	jr z,red_skel_anim_l
 	inc c
-lb021h:
+red_skel_anim_l:
 	ld a,(ix+012h)
 	and a
-	jr nz,lb029h
+	jr nz,red_skel_store_pose
 	inc c
 	inc c
-lb029h:
+red_skel_store_pose:
 	ld (ix+00bh),c
 	dec (ix+00ch)
 	ret nz
@@ -17203,6 +16959,7 @@ red_skel_pause:
 	ld (ix+006h),001h
 	dec (ix+001h)
 	ret
+red_skel_reform:
 	ld (ix+011h),040h
 	xor a
 	ld (ix+006h),a
@@ -17219,48 +16976,48 @@ enemy_flying_skull_tick:
 	ld (ix+00ch),001h
 	bit 7,(ix+00ah)
 	ld c,pose_flying_skull_l0
-	jr nz,lb07dh
+	jr nz,flying_skull_init_pose
 	inc c
-lb07dh:
+flying_skull_init_pose:
 	ld (ix+00bh),c
-	jr lb08dh
+	jr flying_skull_home
 enemy_flying_skull_go:
 	call flying_skull_pose
 	dec (ix+00ch)
 	ret nz
 	ld (ix+00ch),010h
-lb08dh:
+flying_skull_home:
 	ld a,(simon_y)
 	ld de,0ff00h
 	inc a
 	cp (ix+003h)
-	jr c,lb0a6h
+	jr c,flying_skull_yvel
 	ld de,00100h
 	sub 018h
 	cp (ix+003h)
-	jr nc,lb0a6h
+	jr nc,flying_skull_yvel
 	ld de,00000h
-lb0a6h:
+flying_skull_yvel:
 	call actor_set_yvel
 	ld de,0fee0h
 	ld hl,simon_x
 	ld a,(ix+005h)
 	sub (hl)
-	jr nc,lb0b8h
+	jr nc,flying_skull_xvel
 	ld de,00120h
-lb0b8h:
+flying_skull_xvel:
 	call actor_set_xvel
 	ret
 flying_skull_pose:             ; (0xB0BC) poses 0x16-0x19 from timer + facing
 	ld a,016h
 	bit 2,(ix+00ch)
-	jr z,lb0c5h
+	jr z,flying_skull_pose_x
 	inc a
-lb0c5h:
+flying_skull_pose_x:
 	bit 7,(ix+00ah)
-	jr nz,lb0cdh
+	jr nz,flying_skull_pose_store
 	add a,002h
-lb0cdh:
+flying_skull_pose_store:
 	ld (ix+00bh),a
 	ret
 ; enemy_hanging_bat_tick (seg3 0xB0D1) - type 04 (generator) and list-id 0x1F.
@@ -17302,11 +17059,11 @@ hanging_bat_hang:
 	ld a,(simon_x)
 	sub (ix+005h)
 	ld de,00180h
-	jr nc,lb12eh
+	jr nc,hanging_bat_hang_close
 	ld de,0fe80h
 	neg
 	ld c,pose_hanging_bat_fly_r0
-lb12eh:
+hanging_bat_hang_close:
 	cp 040h
 	ret nc
 	ld (ix+00bh),c
@@ -17336,9 +17093,9 @@ hanging_bat_flap_slow:             ; (seg3 0xB164) one rra (dracula_bat / hangin
 	and 003h
 	ld hl,hanging_bat_pose_r
 	bit 7,(ix+00ah)
-	jr z,lb176h
+	jr z,hanging_bat_flap_hl
 	ld hl,hanging_bat_pose_l
-lb176h:
+hanging_bat_flap_hl:
 	call ADD_HL_A
 	ld a,(hl)
 	ld (ix+00bh),a
@@ -17352,9 +17109,9 @@ hanging_bat_bob:
 	ld de,00019h
 	ld a,(ix+003h)
 	cp (ix+013h)
-	jr c,lb197h
+	jr c,hanging_bat_bob_yvel
 	ld de,0ffe7h
-lb197h:
+hanging_bat_bob_yvel:
 	jp actor_add_yvel
 ; enemy_roc_tick (seg3 0xB19A) - actor_roc. 6-cell flyer; init reuses
 ; enemy_hunchback_tick (RNG timer + pose 0x67, skipped type-13 hide), then
@@ -17370,9 +17127,9 @@ enemy_roc_tick:
 	ld a,(ix+005h)
 	cp 080h
 	ld b,0fdh
-	jr c,lb1b4h
+	jr c,roc_drop_x
 	ld b,004h
-lb1b4h:
+roc_drop_x:
 	add a,b
 	ld d,a
 	push ix
@@ -17383,11 +17140,11 @@ lb1b4h:
 	ret nz
 	ld a,001h
 	ld (spawn_slot_roc),a
-	jp 099fdh
+	jp actor_free
 enemy_roc_go:
 	call roc_flap
 	bit 0,(ix+001h)
-	jr nz,lb1e5h
+	jr nz,roc_pause
 	call simon_dx_abs
 	cp 038h
 	ret nc
@@ -17395,7 +17152,7 @@ enemy_roc_go:
 	ld (ix+006h),000h
 	inc (ix+001h)
 	ret
-lb1e5h:
+roc_pause:
 	dec (ix+00ch)
 	ret nz
 	ld (ix+006h),001h
@@ -17405,18 +17162,18 @@ roc_flap:                      ; (0xB1EE) poses 0x6D/0x6E/0x8D
 	ld c,000h
 	ld a,(ix+011h)
 	cp 007h
-	jr c,lb210h
+	jr c,roc_flap_idx
 	ld c,001h
 	cp 00dh
-	jr c,lb210h
+	jr c,roc_flap_idx
 	ld c,002h
 	cp 013h
-	jr c,lb210h
+	jr c,roc_flap_idx
 	ld c,001h
 	cp 018h
-	jr c,lb210h
+	jr c,roc_flap_idx
 	ld (ix+011h),000h
-lb210h:
+roc_flap_idx:
 	ld hl,roc_flap_tbl
 	jp actor_set_pose
 roc_flap_tbl:                  ; (0xB216) poses 0x6D, 0x6E, 0x8D (0x8E unused)
@@ -17437,10 +17194,10 @@ enemy_hunchback_tick:
 	ld (ix+00ch),a
 	ld a,(ix+000h)
 	cp 00dh
-	jr nz,lb23bh            ; not type 13 (roc shares this init): skip hide
+	jr nz,hunchback_init_vel            ; not type 13 (roc shares this init): skip hide
 	ld (ix+001h),004h
 	ld (ix+006h),000h
-lb23bh:
+hunchback_init_vel:
 	ld de,0fd80h
 	ld (ix+00bh),pose_hunchback_l0
 	ld (ix+010h),001h
@@ -17464,21 +17221,21 @@ hunchback_wait:
 	inc (ix+001h)
 	ret
 hunchback_drop:
-	call lb345h
+	call actor_add_yvel_a0
 	ld d,(ix+005h)
 	ld e,(ix+003h)
 	call map_solid_pair
-	jr c,lb27dh
-lb27dh:
+	jr c,hunchback_land
+hunchback_land:
 	inc (ix+001h)
-lb280h:
+hunchback_to_crouch:
 	call actor_snap_y8
 	ld (ix+006h),000h
 	ld (ix+00ch),002h
 	ret
 hunchback_crouch:
 	ld c,000h
-	ld hl,lb341h
+	ld hl,hunchback_pose_tbl
 	call actor_set_pose_facing
 	dec (ix+00ch)
 	ret nz
@@ -17486,34 +17243,34 @@ hunchback_crouch:
 	ld de,0fda0h
 	ld a,(ix+003h)
 	cp 050h
-	jr c,lb2aeh
+	jr c,hunchback_jump_dy
 	ld a,r
 	and 003h
-	jr nz,lb2aeh
+	jr nz,hunchback_jump_dy
 	ld de,0f8e0h
-lb2aeh:
+hunchback_jump_dy:
 	call actor_set_yvel
-lb2b1h:
+hunchback_jump_x:
 	ld (ix+006h),001h
 	ld de,00220h
 	ld a,(simon_x)
 	cp (ix+005h)
-	jr nc,lb2c3h
+	jr nc,hunchback_jump_xvel
 	ld de,0fde0h
-lb2c3h:
+hunchback_jump_xvel:
 	call actor_set_xvel
 	ld c,001h
-	ld hl,lb341h
+	ld hl,hunchback_pose_tbl
 	jp actor_set_pose_facing
 hunchback_jump:
-	call lb345h
+	call actor_add_yvel_a0
 	call actor_wall_ahead
 	ld de,00000h
 	call c,actor_flip_xvel
 	ld d,(ix+005h)
 	ld e,(ix+003h)
 	bit 7,(ix+008h)
-	jr z,lb2f4h
+	jr z,hunchback_falling
 	ld a,e
 	sub 010h
 	ld e,a
@@ -17521,14 +17278,14 @@ hunchback_jump:
 	ret nc
 	ld de,00000h
 	jp actor_set_yvel
-lb2f4h:
+hunchback_falling:
 	call map_solid_pair
 	ret nc
 	ld c,000h
-	ld hl,lb341h
+	ld hl,hunchback_pose_tbl
 	call actor_set_pose_facing
 	ld (ix+001h),002h
-	jp lb280h
+	jp hunchback_to_crouch
 actor_wall_ahead:              ; (0xB307) probe wall in Xvel direction
 	ld d,(ix+005h)
 	ld e,(ix+003h)
@@ -17541,24 +17298,21 @@ actor_wall_ahead:              ; (0xB307) probe wall in Xvel direction
 	jp actor_wall_right
 hunchback_hide:
 	ld c,000h
-	ld hl,lb341h
+	ld hl,hunchback_pose_tbl
 	call actor_set_pose_facing
 	call simon_dx_abs
 	cp 03ch
-	jr c,lb334h
+	jr c,hunchback_unhide
 	dec (ix+00ch)
 	ret nz
-lb334h:
+hunchback_unhide:
 	ld de,0ffffh
 	call actor_set_yvel
 	ld (ix+001h),003h
-	jp lb2b1h
-lb341h:
-	ld h,a
-	ld l,b
-	ld l,d
-	ld l,e
-lb345h:
+	jp hunchback_jump_x
+hunchback_pose_tbl:            ; (0xB341) crouch 0x67/0x6A, jump 0x68/0x6B
+	defb pose_hunchback_l0, pose_hunchback_l1, pose_hunchback_r0, pose_hunchback_r1
+actor_add_yvel_a0:             ; (0xB345) Yvel += 0x00A0
 	ld de,000a0h
 	jp actor_add_yvel
 ; enemy_white_skeleton_tick (seg3 0xB34B) - type 11. Kites Simon (walk
@@ -17572,9 +17326,9 @@ enemy_white_skeleton_tick:
 	ld b,(ix+005h)         ; skeleton X
 	cp b
 	ld de,00240h           ; walk right if Simon is to the right
-	jr nc,lb35ah
+	jr nc,white_skel_init_xvel
 	ld de,0fdc0h           ; else left
-lb35ah:
+white_skel_init_xvel:
 	call actor_set_xvel_speedup
 	ld de,00000h            ; Yvel = 0
 	call actor_set_yvel
@@ -17584,14 +17338,14 @@ white_skel_set_pose:           ; (0xB36B) walk frames 0x47/48 (left) or 0x49/4A
 	ld a,(simon_x)
 	cp (ix+005h)
 	ld c,pose_white_skel_walk_l0              ; facing left pair
-	jr c,lb377h
+	jr c,white_skel_pose_anim
 	ld c,pose_white_skel_walk_r0              ; facing right pair
-lb377h:
+white_skel_pose_anim:
 	inc (ix+012h)          ; walk-anim counter
 	bit 3,(ix+012h)
-	jr nz,lb381h
+	jr nz,white_skel_pose_store
 	inc c                  ; alternate the pair every 8 frames
-lb381h:
+white_skel_pose_store:
 	ld (ix+00bh),c         ; pose
 	ret
 white_skel_go:
@@ -17608,67 +17362,67 @@ white_skel_walk:               ; (0xB394)
 	add a,030h
 	sub b
 	cp 060h                ; |skelX+0x30 - SimonX| < 0x60 -> close: walk away
-	jr nc,lb3b0h
+	jr nc,white_skel_mid
 	ld a,(ix+005h)
 	cp b
 	ld de,0fdc0h           ; Simon is to the right -> walk left
-	jr c,lb3cah
+	jr c,white_skel_set_xvel
 	ld de,00240h           ; else walk right
-	jr lb3cah
-lb3b0h:
+	jr white_skel_set_xvel
+white_skel_mid:
 	ld a,(simon_x)
 	ld b,a
 	ld a,(ix+005h)
 	add a,050h
 	sub b
 	cp 0a0h                ; mid range: skip the walk-toward, go to collision
-	jr c,lb3e2h
+	jr c,white_skel_collide
 	ld a,(ix+005h)
 	cp b
 	ld de,00240h           ; far: walk toward Simon
-	jr c,lb3cah
+	jr c,white_skel_set_xvel
 	ld de,0fdc0h
-lb3cah:
+white_skel_set_xvel:
 	call actor_set_xvel_speedup
 	ld a,(ix+012h)
 	and 006h               ; every 8 counts, 2 frames of the cycle
-	jr nz,lb3e2h
+	jr nz,white_skel_collide
 	ld (ix+010h),010h      ; throw windup = 16 frames
 	ld (ix+001h),002h      ; -> state 2
 	ld (ix+006h),000h
-	jr lb43eh
-lb3e2h:
+	jr white_skel_edge
+white_skel_collide:
 	ld e,(ix+003h)         ; wall probe at (X, Y)
 	ld d,(ix+005h)
 	ld bc,0080ch
 	ld a,(ix+00ah)
 	and 080h
-	jr nz,lb3ffh
+	jr nz,white_skel_wall_left
 	call probe_wall_right            ; wall to the right?
-	jr nc,lb40ah
+	jr nc,white_skel_floor
 	ld de,0fdc0h           ; bounce left
 	call actor_set_xvel_speedup
-	jr lb40ah
-lb3ffh:
+	jr white_skel_floor
+white_skel_wall_left:
 	call probe_wall_left            ; wall to the left?
-	jr nc,lb40ah
+	jr nc,white_skel_floor
 	ld de,00240h           ; bounce right
 	call actor_set_xvel
-lb40ah:
+white_skel_floor:
 	ld e,(ix+003h)         ; floor probe a few px ahead of travel
 	ld a,(ix+00ah)
 	or a
 	ld b,004h              ; xvel 0: +4
-	jr z,lb41ch
+	jr z,white_skel_floor_x
 	ld b,009h              ; walking right: +9
-	jp p,lb41ch
+	jp p,white_skel_floor_x
 	ld b,0fch              ; walking left: -4
-lb41ch:
+white_skel_floor_x:
 	ld a,(ix+005h)
 	add a,b
 	ld d,a
 	call map_solid_pair            ; carry = solid floor at (D, E)
-	jr c,lb43eh            ; floor there: stay grounded
+	jr c,white_skel_edge            ; floor there: stay grounded
 	ld de,00240h
 	bit 7,(ix+00ah)
 	call nz,neg_de      ; keep travel direction
@@ -17677,34 +17431,34 @@ lb41ch:
 	call actor_set_yvel
 	ld (ix+001h),001h      ; -> state 1 (air)
 	ret
-lb43eh:
+white_skel_edge:
 	ld a,(ix+005h)         ; screen-edge clamp, else keep current xvel
 	cp 010h
 	ld de,00240h
-	jr c,lb455h
+	jr c,white_skel_keep_xvel
 	cp 0eeh
 	ld de,0fdc0h
-	jr nc,lb455h
+	jr nc,white_skel_keep_xvel
 	ld e,(ix+009h)
 	ld d,(ix+00ah)
-lb455h:
+white_skel_keep_xvel:
 	jp actor_set_xvel_speedup
 white_skel_air:                ; (0xB458)
 	ld bc,0080ch
 	ld e,(ix+003h)
 	ld d,(ix+005h)
 	bit 7,(ix+00ah)
-	jr z,lb46eh
+	jr z,white_skel_air_right
 	call probe_wall_left            ; still facing a wall? stop xvel
-	jr nc,lb479h
-	jr lb473h
-lb46eh:
+	jr nc,white_skel_air_grav
+	jr white_skel_air_stop
+white_skel_air_right:
 	call probe_wall_right
-	jr nc,lb479h
-lb473h:
+	jr nc,white_skel_air_grav
+white_skel_air_stop:
 	ld de,00000h
 	call actor_set_xvel
-lb479h:
+white_skel_air_grav:
 	ld de,00068h           ; gravity
 	call actor_add_yvel
 	bit 7,(ix+008h)
@@ -17713,12 +17467,12 @@ lb479h:
 	ld a,(ix+00ah)
 	bit 7,a
 	ld b,008h              ; landing probe X offset from facing
-	jr nz,lb497h
+	jr nz,white_skel_air_probe
 	ld b,0fdh
 	and a
-	jr nz,lb497h
+	jr nz,white_skel_air_probe
 	ld b,005h
-lb497h:
+white_skel_air_probe:
 	ld a,(ix+005h)
 	add a,b
 	ld d,a
@@ -17736,15 +17490,15 @@ white_skel_throw:              ; (0xB4B0)
 	ld a,r
 	rra                    ; coin-flip throw height
 	ld hl,0fb00h           ; bone Yvel -5 px/frame
-	jr nc,lb4bfh
+	jr nc,white_skel_throw_x
 	ld hl,0f800h           ; or -8 (higher arc)
-lb4bfh:
+white_skel_throw_x:
 	ld a,(simon_x)
 	cp (ix+005h)
 	ld de,00180h           ; bone Xvel toward Simon
-	jr nc,lb4cdh
+	jr nc,white_skel_throw_shot
 	ld de,0fe80h
-lb4cdh:
+white_skel_throw_shot:
 	call shot_throw        ; kind 11 -> shot type 4 (shot_bone)
 	ld (ix+001h),000h      ; back to walk
 	ld (ix+006h),001h
@@ -17781,7 +17535,7 @@ blob_hatch:
 blob_fall:
 	call blob_fall_step
 	ret nc
-	jr lb552h
+	jr blob_to_pause
 blob_pause:
 	ld (ix+006h),000h
 	dec (ix+010h)
@@ -17794,17 +17548,17 @@ blob_hop:
 	ld (ix+006h),001h
 	call blob_set_pose
 	call blob_can_rise
-	jp nc,lb595h
+	jp nc,blob_rise
 	call blob_floor
-	jp nc,lb5f6h
+	jp nc,blob_drop
 	call blob_wall_ahead
 	ld de,00000h
 	call c,actor_set_xvel
 	call blob_at_edge
-	jr c,lb552h
+	jr c,blob_to_pause
 	dec (ix+010h)
 	ret nz
-lb552h:
+blob_to_pause:
 	ld de,00000h
 	call actor_set_yvel
 	call actor_set_xvel
@@ -17820,12 +17574,12 @@ blob_fall_step:                ; (0xB570) wall, floor, gravity; C = landed
 	ld de,00000h
 	call c,actor_set_xvel
 	call blob_floor
-	jr c,lb586h
+	jr c,blob_landed
 	ld de,00040h
 	call actor_add_yvel
 	xor a
 	ret
-lb586h:
+blob_landed:
 	ld a,(ix+003h)
 	and 0f8h
 	ld (ix+003h),a
@@ -17835,7 +17589,7 @@ blob_hatch_wait:               ; (0xB590) dec ix+10; Z when 0
 	dec (ix+010h)
 	ret nz
 	ret
-lb595h:
+blob_rise:
 	ld (ix+001h),001h
 	call blob_chase_x
 	ld de,00200h
@@ -17844,10 +17598,10 @@ lb595h:
 blob_at_edge:                  ; (0xB5A5) C if X at 0x10/0xE8 in travel dir
 	ld a,(ix+005h)
 	bit 7,(ix+00ah)
-	jr z,lb5b1h
+	jr z,blob_edge_right
 	cp 010h
 	ret
-lb5b1h:
+blob_edge_right:
 	cp 0e8h
 	ccf
 	ret
@@ -17870,9 +17624,9 @@ blob_can_rise:                 ; (0xB5C8) NC if Simon >16px above and gap ahead
 	ld d,(ix+005h)
 	ld a,008h
 	bit 7,(ix+00ah)
-	jr z,lb5e2h
+	jr z,blob_rise_x
 	ld a,0f8h
-lb5e2h:
+blob_rise_x:
 	add a,d
 	ld d,a
 	jp map_solid_at
@@ -17883,7 +17637,7 @@ blob_floor:                    ; (0xB5E7) C if falling onto solid at feet
 	ld e,(ix+003h)
 	ld d,(ix+005h)
 	jp map_solid_at
-lb5f6h:
+blob_drop:
 	ld de,00000h
 	call actor_set_xvel
 	ld de,00200h
@@ -17894,13 +17648,13 @@ blob_chase_x:                  ; (0xB607) Xvel ±0x01C0 toward Simon
 	ld a,(simon_x)
 	cp (ix+005h)
 	ld de,001c0h
-	jr nc,lb615h
+	jr nc,blob_chase_xvel
 	ld de,0fe40h
-lb615h:
+blob_chase_xvel:
 	jp actor_set_xvel
 blob_set_pose:
 	ld a,(stage)
-	ld de,lb645h+1
+	ld de,blob_store_pose+1
 	call lookup_word_tbl
 	ld a,(room)
 	srl a
@@ -17908,110 +17662,31 @@ blob_set_pose:
 	call ADD_DE_A
 	pop af
 	ld a,(de)
-	jr c,lb632h
+	jr c,blob_pose_nibble
 	rra
 	rra
 	rra
 	rra
-lb632h:
+blob_pose_nibble:
 	and 00fh
-	ld hl,lb649h
+	ld hl,blob_pose_tbl
 	call ADD_HL_A
 	ld a,(hl)
 	inc (ix+00ch)
 	bit 4,(ix+00ch)
-	jr z,lb645h
+	jr z,blob_store_pose
 	inc a
-lb645h:
+blob_store_pose:
 	ld (ix+00bh),a
 	ret
-lb649h:
-	nop
-	sbc a,e
-	sbc a,l
-	sbc a,a
-	and c
-	ld l,h
-	or (hl)
-	ld l,a
-	or (hl)
-	ld (hl),d
-	or (hl)
-	ld (hl),l
-	or (hl)
-	ld a,d
-	or (hl)
-	ld a,(hl)
-	or (hl)
-	add a,e
-	or (hl)
-	adc a,b
-	or (hl)
-	adc a,e
-	or (hl)
-	sub c
-	or (hl)
-	sub a
-	or (hl)
-	sbc a,e
-	or (hl)
-	and b
-	or (hl)
-	and (hl)
-	or (hl)
-	xor h
-	or (hl)
-	ld (03332h),a
-	inc sp
-	inc sp
-	inc sp
-	ld de,03113h
-	ld b,h
-	ld de,01301h
-	jr nc,lb6aeh
-	ld bc,03113h
-	inc sp
-	inc sp
-	inc b
-	ld de,02000h
-	nop
-	nop
-	inc sp
-	jr nc,lb69dh
-	nop
-	inc b
-	ld b,h
-	ld b,h
-	ld b,h
-	ld b,h
-	ld b,h
-	ld b,h
-	defb 010h,040h         ; was djnz lb6d3h (tile data)
-	nop
-	ld b,c
-	ld de,04414h
-	ld b,c
-	ld b,h
-	ld b,h
-	ld b,h
-	ld b,h
-lb69dh:
-	ld b,h
-	ld b,h
-	ld b,c
-	ld de,01111h
-	ld de,01111h
-	ld de,04444h
-	ld b,b
-	ld b,h
-	inc b
-	ld b,h
-	ld b,h
-lb6aeh:
-	ld b,h
-	ld b,h
-	ld b,h
-	ld b,h
+blob_pose_tbl:                 ; (0xB649) nibble->pose, then packed stage rows
+	defb 000h,09bh,09dh,09fh,0a1h,06ch,0b6h,06fh,0b6h,072h,0b6h,075h,0b6h,07ah,0b6h,07eh
+	defb 0b6h,083h,0b6h,088h,0b6h,08bh,0b6h,091h,0b6h,097h,0b6h,09bh,0b6h,0a0h,0b6h,0a6h
+	defb 0b6h,0ach,0b6h,032h,032h,033h,033h,033h,033h,011h,013h,031h,044h,011h,001h,013h
+	defb 030h,033h,001h,013h,031h,033h,033h,004h,011h,000h,020h,000h,000h,033h,030h,014h
+	defb 000h,004h,044h,044h,044h,044h,044h,044h,010h,040h,000h,041h,011h,014h,044h,041h
+	defb 044h,044h,044h,044h,044h,044h,041h,011h,011h,011h,011h,011h,011h,011h,044h,044h
+	defb 040h,044h,004h,044h,044h,044h,044h,044h,044h
 ; --- room_event_tick (seg3 0xB6B2) - per-frame CE00 room-event dispatcher ----
 ;  CE00==0 -> ret.  Else DISPATCH_A on (CE00-1).  Events 1-5 spawn the
 ;  boss then wait CE15 and arm boss_clear (CE0B).  Event 6 is Dracula's
@@ -18056,7 +17731,7 @@ boss_clear_next:
 	inc (hl)
 	ret
 boss_clear_orb:
-	call 057c7h
+	call boss_orb_gfx_load
 	xor a
 	ld (orb_got),a
 	ld (orb_landed),a
@@ -18096,11 +17771,11 @@ boss_clear_heal:
 	ret c
 	ld a,(health)
 	cp 020h
-	jr nc,lb751h
+	jr nc,boss_heal_full
 	ld a,sfx_boss_heal
 	call play_sound
 	jp heal_simon_1
-lb751h:
+boss_heal_full:                 ; HP already 0x20: arm 60-frame wait
 	ld a,03ch
 	ld (event_timer),a
 	jr boss_clear_next
@@ -18112,10 +17787,10 @@ boss_clear_done:
 	ld (simon_y),a
 	ld hl,0d600h
 	ld b,080h
-lb767h:
+boss_hide_sat:                  ; Y=0xE0 across 0x80 SAT bytes
 	ld (hl),0e0h
 	inc hl
-	djnz lb767h
+	djnz boss_hide_sat
 	xor a
 	ld (boss_clear),a
 	ld (cell_event),a
@@ -18147,10 +17822,10 @@ orb_flash:
 	ld a,(0c003h)
 	and 001h
 	ld c,0ffh
-lb7bbh:
-	jr nz,lb7beh
+orb_blink:                      ; odd frame: C=0xFF else C=0
+	jr nz,orb_sat_on
 	inc c
-lb7beh:
+orb_sat_on:                     ; apply SAT colour, dec timer
 	call orb_apply_sat
 	dec (ix+010h)
 	ret nz
@@ -18163,9 +17838,9 @@ orb_apply_sat:
 	ld a,(stage)
 	ld de,orb_sat_s3
 	sub 003h
-	jr z,lb7dfh
+	jr z,orb_sat_src
 	ld de,orb_sat_rest
-lb7dfh:
+orb_sat_src:                    ; DE = stage-3 or rest colour table
 	ld a,(ix+00bh)
 	sub 08fh
 	ld b,a
@@ -18179,7 +17854,7 @@ lb7dfh:
 	add a,l
 	ld l,a
 	ld b,005h
-lb7f4h:
+orb_sat_cell:                   ; AND C into five SAT colour bytes
 	ld a,(de)
 	inc de
 	and c
@@ -18187,7 +17862,7 @@ lb7f4h:
 	ld a,005h
 	add a,l
 	ld l,a
-	djnz lb7f4h
+	djnz orb_sat_cell
 	ld (hl),000h
 	ret
 ; orb_sat_s3 / orb_sat_rest (seg3 0xB801 / 0xB810): 3 frames x 5 SAT colour
@@ -18270,10 +17945,10 @@ mummy_face:
 	ld (ix+012h),001h
 	ld a,(simon_x)
 	cp (ix+005h)
-	jr c,lb8cah
+	jr c,mummy_face_xvel
 	ld de,00230h
 	ld (ix+012h),000h
-lb8cah:
+mummy_face_xvel:
 	call actor_set_xvel
 	inc (ix+001h)
 	ld (ix+013h),007h
@@ -18281,68 +17956,68 @@ lb8cah:
 mummy_walk:
 	call mummy_walk_anim
 	dec (ix+010h)
-	jr nz,lb937h
+	jr nz,mummy_walk_edge
 	call mummy_set_timer
 	ld (ix+013h),007h
 	inc (ix+017h)
 	bit 0,(ix+017h)
-	jr z,lb8f7h
+	jr z,mummy_walk_toward
 	bit 7,(ix+00ah)
-	jr nz,lb914h
-	jr lb8ffh
-lb8f7h:
+	jr nz,mummy_walk_right
+	jr mummy_walk_left
+mummy_walk_toward:
 	ld a,(simon_x)
 	cp (ix+005h)
-	jr nc,lb914h
-lb8ffh:
+	jr nc,mummy_walk_right
+mummy_walk_left:
 	ld de,0fdd0h
 	call actor_set_xvel
 	ld (ix+012h),001h
 	ld a,(simon_x)
 	cp (ix+005h)
-	jr c,lb929h
+	jr c,mummy_walk_to_spit
 	call mummy_walk_anim
-lb914h:
+mummy_walk_right:
 	ld de,00230h
 	call actor_set_xvel
 	ld (ix+012h),000h
 	ld a,(simon_x)
 	cp (ix+005h)
-	jr nc,lb929h
+	jr nc,mummy_walk_to_spit
 	jp mummy_walk_anim
-lb929h:
+mummy_walk_to_spit:
 	inc (ix+001h)
 	ld (ix+006h),000h
 	ld (ix+011h),030h
 	jp mummy_walk_anim
-lb937h:
+mummy_walk_edge:
 	ld a,(ix+005h)
 	cp 020h
-	jr c,lb941h
+	jr c,mummy_walk_bounce
 	cp 0e1h
 	ret c
-lb941h:
+mummy_walk_bounce:
 	bit 7,(ix+00ah)
 	ld de,00230h
 	call actor_set_xvel
 	ld (ix+012h),000h
 	ld (ix+005h),020h
-	jr nz,lb962h
+	jr nz,mummy_walk_edge_anim
 	ld de,0fdd0h
 	call actor_set_xvel
 	ld (ix+005h),0e0h
 	inc (ix+012h)
-lb962h:
+mummy_walk_edge_anim:
 	call mummy_walk_anim
 	jr mummy_set_timer
 mummy_spit:
 	dec (ix+011h)
-	jr z,lb98ch
+	jr z,mummy_spit_fire
 	ld a,008h
 	bit 0,(ix+011h)
-	jr z,lb976h
+	jr z,mummy_spit_sat
 	ld a,04ch
-lb976h:
+mummy_spit_sat:
 	ld (ix+025h),002h
 	ld (ix+02ah),a
 	ld (ix+02fh),002h
@@ -18350,7 +18025,7 @@ lb976h:
 	ld (ix+039h),002h
 	ld (ix+03eh),a
 	ret
-lb98ch:
+mummy_spit_fire:
 	ld a,(ix+003h)
 	sub 038h
 	ld e,a
@@ -18384,43 +18059,43 @@ mummy_set_timer:
 mummy_timer_tbl:
 	defb 040h,008h,030h,010h,020h,018h,038h,028h
 mummy_walk_anim:
-	ld hl,lba2ah
+	ld hl,mummy_walk_r
 	bit 0,(ix+012h)
-	jr z,lb9e2h
-	ld hl,lba27h
-lb9e2h:
+	jr z,mummy_anim_tick
+	ld hl,mummy_walk_l
+mummy_anim_tick:
 	inc (ix+013h)
 	ld a,(ix+013h)
 	cp 008h
-	jr nz,lba1ch
-lb9ech:
+	jr nz,mummy_anim_store
+mummy_anim_step:
 	ld (ix+013h),000h
 	bit 0,(ix+015h)
-	jr z,lba0ah
+	jr z,mummy_anim_back
 	inc (ix+014h)
 	ld a,(ix+014h)
 	cp 003h
-lb9feh:
-	jr nz,lba1ch
+mummy_anim_fwd_end:
+	jr nz,mummy_anim_store
 	ld (ix+014h),001h
 	ld (ix+015h),000h
-	jr lba1ch
-lba0ah:
+	jr mummy_anim_store
+mummy_anim_back:
 	dec (ix+014h)
 	ld a,(ix+014h)
 	cp 0ffh
-	jr nz,lba1ch
+	jr nz,mummy_anim_store
 	ld (ix+014h),001h
 	ld (ix+015h),001h
-lba1ch:
+mummy_anim_store:
 	ld a,(ix+014h)
 	call ADD_HL_A
 	ld a,(hl)
 	ld (ix+00bh),a
 	ret
-lba27h:
+mummy_walk_l:
 	defb 033h,034h,035h
-lba2ah:
+mummy_walk_r:
 	defb 036h,037h,038h
 ; event_frankenstein (seg3 0xBA2D) - CE00=4, stage 12 room 6. Frank + Igor.
 event_frankenstein:
@@ -18450,7 +18125,7 @@ enemy_frankenstein_tick:
 	ld (ix+006h),001h
 	ld de,00000h
 	call actor_set_xvel
-lba68h:
+frank_init_yvel:
 	jp actor_set_yvel
 enemy_frankenstein_go:
 	ld a,(ix+010h)
@@ -18464,14 +18139,14 @@ frank_chase:
 	ld (ix+00ch),020h
 	ld a,(simon_x)
 	sub (ix+005h)
-	jr nc,lba90h
+	jr nc,frank_chase_right
 	add a,040h
-	jr c,lba90h
+	jr c,frank_chase_right
 	ld de,0fde0h
-	jr lba93h
-lba90h:
+	jr frank_chase_xvel
+frank_chase_right:
 	ld de,00220h
-lba93h:
+frank_chase_xvel:
 	ld (frank_xvel),de
 	call actor_set_xvel
 	inc (ix+001h)
@@ -18485,12 +18160,12 @@ frank_pace:
 frank_clamp_x:
 	ld a,(ix+005h)
 	cp 0e0h
-	jr nc,lbabah
+	jr nc,frank_clamp_left
 	cp 010h
 	ret nc
 	ld de,00220h
 	jp actor_set_xvel
-lbabah:
+frank_clamp_left:
 	ld de,0fde0h
 	jp actor_set_xvel
 frank_walk_anim:
@@ -18534,13 +18209,13 @@ igor_wait:
 	ret c
 	ld a,(igor_jump)
 	and a
-	jr z,lbb1fh
+	jr z,igor_wait_xvel
 	ld (ix+011h),000h
 	ld de,0fa00h
 	call actor_set_yvel
 	inc (ix+001h)
 	ret
-lbb1fh:
+igor_wait_xvel:
 	ld (ix+00bh),pose_hunchback_l0
 	ld de,(frank_xvel)
 	jp actor_set_xvel
@@ -18551,9 +18226,9 @@ igor_air:
 	ld a,(ix+011h)
 	ld c,pose_hunchback_l0
 	cp 004h
-	jr c,lbb3bh
+	jr c,igor_air_pose
 	inc c
-lbb3bh:
+igor_air_pose:
 	call igor_set_pose
 	call igor_try_throw
 	ld de,00060h
@@ -18601,9 +18276,9 @@ igor_land:
 	ld a,(ix+003h)
 	ld de,0f880h
 	cp 080h
-	jr nc,lbbafh
+	jr nc,igor_land_rng
 	ld de,0fa80h
-lbbafh:
+igor_land_rng:
 	ld a,r
 	or 080h
 	ld l,a
@@ -18619,12 +18294,12 @@ lbbafh:
 igor_flash:
 	ld a,(ix+010h)
 	and a
-	jr z,lbbd6h
+	jr z,igor_flash_show
 	dec (ix+010h)
 	ld (ix+006h),000h
 	scf
 	ret
-lbbd6h:
+igor_flash_show:
 	ld (ix+006h),001h
 	ret
 igor_try_throw:
@@ -18639,9 +18314,9 @@ igor_arm_throw:
 igor_set_pose:
 	bit 7,(ix+00ah)
 	ld a,c
-	jr nz,lbbf6h
+	jr nz,igor_pose_store
 	add a,003h
-lbbf6h:
+igor_pose_store:
 	ld (ix+00bh),a
 	ret
 ; event_grim_reaper (seg3 0xBBFA) - CE00=5, stage 15 room 9.
@@ -18705,7 +18380,7 @@ enemy_grim_reaper_go:
 	jr z,grim_fly
 grim_idle:
 	dec (ix+00ch)
-lbc7dh:
+grim_idle_go:
 	ret nz
 	inc (ix+001h)
 	ld (ix+006h),001h
@@ -18728,14 +18403,14 @@ grim_fly:
 	call c,grim_bounce_l
 	ld a,(ix+003h)
 	cp 040h
-	jr nc,lbcc0h
+	jr nc,grim_fly_floor
 	ld e,(ix+007h)
 	ld d,(ix+008h)
 	bit 7,d
-	jr z,lbcc0h
+	jr z,grim_fly_floor
 	call neg_de
 	call actor_set_yvel
-lbcc0h:
+grim_fly_floor:
 	ld e,(ix+003h)
 	ld d,(ix+005h)
 	call map_solid_pair
@@ -18804,16 +18479,16 @@ medusa_bob:
 	dec (ix+014h)
 	ld c,pose_medusa_0
 	bit 3,(ix+014h)
-	jr z,lbd59h
+	jr z,medusa_bob_pose
 	inc c
-lbd59h:
+medusa_bob_pose:
 	ld (ix+00bh),c
 	ld de,00020h
 	ld a,(ix+003h)
 	cp 0a0h
-	jr c,lbd69h
+	jr c,medusa_bob_yvel
 	ld de,0ffe0h
-lbd69h:
+medusa_bob_yvel:
 	add hl,de
 	jp actor_add_yvel
 medusa_cruise:
@@ -18821,15 +18496,15 @@ medusa_cruise:
 	ld a,(ix+005h)
 	sub 010h
 	cp 0e0h
-	jr nc,lbd86h
+	jr nc,medusa_cruise_flip
 	ld a,(simon_x)
 	sub (ix+005h)
-	jr nc,lbd83h
+	jr nc,medusa_cruise_dx
 	neg
-lbd83h:
+medusa_cruise_dx:
 	cp 008h
 	ret nc
-lbd86h:
+medusa_cruise_flip:
 	ld a,(ix+009h)
 	cpl
 	ld e,a
@@ -18846,17 +18521,17 @@ medusa_reverse:
 	dec (ix+013h)
 	ld a,(ix+013h)
 	and a
-	jr nz,lbde4h
+	jr nz,medusa_reverse_bob
 	inc (ix+013h)
 	ld (ix+006h),000h
 	dec (ix+012h)
-	jr nz,lbde3h
+	jr nz,medusa_reverse_ret
 	xor a
 	ld (ix+009h),0f8h
 	ld (ix+00ah),a
 	ld a,(simon_x)
 	cp (ix+005h)
-	jr nc,lbdd3h
+	jr nc,medusa_reverse_done
 	ld a,(ix+009h)
 	cpl
 	ld e,a
@@ -18865,27 +18540,27 @@ medusa_reverse:
 	ld d,a
 	inc de
 	call actor_set_xvel
-lbdd3h:
+medusa_reverse_done:
 	ld (ix+006h),001h
 	ld (ix+001h),000h
 	ld (ix+012h),02fh
 	ld (ix+013h),04fh
-lbde3h:
+medusa_reverse_ret:
 	ret
-lbde4h:
+medusa_reverse_bob:
 	call medusa_bob
 	ld a,(ix+005h)
 	sub 010h
 	cp 0e0h
-	jr nc,lbdfdh
+	jr nc,medusa_reverse_flip
 	ld a,(simon_x)
 	sub (ix+005h)
-	jr nc,lbdfah
+	jr nc,medusa_reverse_dx
 	neg
-lbdfah:
+medusa_reverse_dx:
 	cp 008h
 	ret nc
-lbdfdh:
+medusa_reverse_flip:
 	ld a,(ix+009h)
 	cpl
 	ld e,a
@@ -18943,9 +18618,9 @@ enemy_giant_bat_tick:
 	ld a,(stage)
 	cp 003h
 	ld (ix+013h),03ch
-	jr z,lbe6eh
+	jr z,giant_bat_init_vel
 	ld (ix+013h),001h
-lbe6eh:
+giant_bat_init_vel:
 	ld de,00000h
 	call actor_set_xvel
 	jp actor_set_yvel
@@ -18955,9 +18630,9 @@ enemy_giant_bat_go:
 	ld a,(ix+00ch)
 	and 008h
 	ld a,04eh
-	jr z,lbe87h
+	jr z,giant_bat_pose_store
 	inc a
-lbe87h:
+giant_bat_pose_store:
 	ld (ix+00bh),a
 	ld a,(ix+001h)
 	call DISPATCH_A
@@ -18974,16 +18649,16 @@ giant_bat_aim:
 	ld a,(simon_y)
 	sub 030h
 	ld b,030h
-	jr c,lbeb7h
+	jr c,giant_bat_aim_y
 	ld b,a
-lbeb7h:
+giant_bat_aim_y:
 	ld (ix+011h),b
 	ld a,(ix+014h)
 	and 001h
 	ld a,048h
-	jr z,lbec5h
+	jr z,giant_bat_aim_x
 	neg
-lbec5h:
+giant_bat_aim_x:
 	ld c,a
 	ld a,(simon_x)
 	add a,c
@@ -19012,16 +18687,16 @@ lbec5h:
 giant_bat_swoop:
 	bit 7,(ix+008h)
 	ld a,(ix+003h)
-	jr z,lbf04h
+	jr z,giant_bat_swoop_down
 	cp 030h
-	jr c,lbf30h
-lbf04h:
+	jr c,giant_bat_swoop_stop
+giant_bat_swoop_down:
 	cp 090h
-	jr nc,lbf30h
+	jr nc,giant_bat_swoop_stop
 	ld a,(ix+005h)
 	sub 020h
 	cp 0b0h
-	jr nc,lbf30h
+	jr nc,giant_bat_swoop_stop
 	ld a,(ix+003h)
 	add a,008h
 	sub (ix+011h)
@@ -19031,12 +18706,12 @@ lbf04h:
 	add a,008h
 	sub (ix+012h)
 	cp 010h
-	jr c,lbf30h
+	jr c,giant_bat_swoop_stop
 	ld a,(ix+005h)
 	sub 020h
 	cp 0c0h
 	ret c
-lbf30h:
+giant_bat_swoop_stop:
 	ld de,00000h
 	call actor_set_xvel
 	call actor_set_yvel
@@ -19062,11 +18737,11 @@ giant_bat_spit:
 	ld a,(simon_x)
 	ld b,(ix+005h)
 	cp b
-	jr nc,lbf6fh
+	jr nc,giant_bat_spit_dx
 	ld c,a
 	ld a,b
 	ld b,c
-lbf6fh:
+giant_bat_spit_dx:
 	sub b
 	ld d,a
 	ld e,000h
@@ -19093,14 +18768,14 @@ giant_bat_climb:
 	ld a,(ix+005h)
 	cp 019h
 	ld b,002h
-	jr c,lbfaeh
+	jr c,giant_bat_climb_xvel
 	cp 0e7h
 	ld b,0feh
-	jr c,lbfb5h
-lbfaeh:
+	jr c,giant_bat_climb_up
+giant_bat_climb_xvel:
 	ld (ix+009h),000h
 	ld (ix+00ah),b
-lbfb5h:
+giant_bat_climb_up:
 	bit 7,(ix+008h)
 	ret z
 	ld a,(ix+003h)

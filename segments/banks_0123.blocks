@@ -16,6 +16,10 @@ gm_opt_tbl: start 0x4010 end 0x4028 type bytedata
 main_state_tbl: start 0x4161 end 0x417d type worddata
 ; Title-screen tile-layout streams (0xFF=end, 0xFE=next row).
 title_layout: start 0x4c3f end 0x4d0f type bytedata
+; video_init WRTVDP pairs (R1, R5 SAT, R6, R11).
+vdp_init_regs: start 0x4b9c end 0x4ba4 type bytedata
+; Attract demo (frames, button sample); 0xFF sample ends.
+attract_input_tbl: start 0x4e64 end 0x4e9a type bytedata
 ; Intro Simon walk-cycle poses (0x98,0x99,0x9A,0x99); decoded as sbc a,b/c/d.
 intro_simon_stride_tbl: start 0x4F86 end 0x4F8A type bytedata
 
@@ -80,15 +84,17 @@ actor_hp_tbl: start 0x60e9 end 0x6119 type bytedata
 ; SAT colour/attr init streams pointed at by actor_sat_pat_ptr.
 actor_sat_colors: start 0x6119 end 0x615b type bytedata
 
-; Konami logo tile-layout stream consumed by sub_6276h (0xFE=newline, 0xFF=end).
+; Konami logo palette_apply table (index,rb,g) + 0xFF.
+logo_pal_tbl: start 0x6243 end 0x6253 type bytedata
+; Konami logo tile-layout stream (0xFE=newline, 0xFF=end).
 logo_layout: start 0x6296 end 0x62d7 type bytedata
 ; Per-stage event table for cell_event_set: one byte each (room<<4 | event); 0xFF=none.
 cell_event_tbl: start 0x6376 end 0x6389 type bytedata
 ; Per-stage spawn table for simon_spawn_pos: 2 bytes/stage (Y|facing, X).
 simon_spawn_tbl: start 0x6426 end 0x644c type bytedata
-; Multi-sprite (dx,dy) offset lists selected by the 0x80/0x81/0x82 stream codes
-; in the actor->sprite builder at 0x644c.
-sprite_ofs_64d4: start 0x64d4 end 0x64ec type bytedata
+; Multi-sprite (dy,dx) offset lists selected by the 0x80/0x81/0x82 stream codes
+; in actor_sat_build.
+actor_sat_ofs_80: start 0x64d4 end 0x64ec type bytedata
 ; Inline DISPATCH_A word table for event_dracula (0x65B7); 11 handler pointers.
 evt_dispatch_65bd: start 0x65bd end 0x65d3 type worddata
 ; Inline DISPATCH_A word table for credits_tick (0x66C1); 4 handler pointers.
@@ -116,7 +122,7 @@ fall_y_delta: start 0x6f88 end 0x6f8c type bytedata
 simon_hurt_tbl: start 0x6f92 end 0x6f9a type worddata
 ; Whip-phase DISPATCH_A table (0xC422-1).
 whip_phase_tbl: start 0x71f9 end 0x7201 type worddata
-; Hurt/holy-water signed dY (22 bytes).  l7090h is also a VRAM dest in HUD blits.
+; Hurt/holy-water signed dY (22 bytes).  HUD VRAM dest 0x7090 is a hex immediate.
 hurt_y_delta: start 0x7084 end 0x709a type bytedata
 ; Projectile type DISPATCH_A (ix+1)-2: knife/axe/cross/holy water.
 proj_type_tbl: start 0x72dd end 0x72e5 type worddata
@@ -156,6 +162,11 @@ vendor_de00_ofs: start 0x947A end 0x948C type bytedata
 ; HUD glyph strings for the vendor offer bubble (0xFF-terminated).
 vendor_offer_str0: start 0x948C end 0x9491 type bytedata
 vendor_offer_str1: start 0x9491 end 0x9498 type bytedata
+; Authored F2 room geography: stage pointers, per-room position codes,
+; packed (X,Y) coord words.  As code this is the l96d1h..l975ch blob.
+minimap_stage_ptr: start 0x969c end 0x96c2 type worddata
+minimap_pos_s00: start 0x96c2 end 0x975e type bytedata
+minimap_coord_tbl: start 0x975e end 0x979a type worddata
 ; Tile id 0..0x0D -> minimap class (1/2 always drawn; 3/4 hub-gated).
 minimap_class_tbl: start 0x97F3 end 0x9801 type bytedata
 ; 4x4 4bpp Simon marker on the F2 map.
@@ -196,8 +207,15 @@ raven_flap_r: start 0xA7C0 end 0xA7C4 type bytedata
 raven_coast_dy_up: start 0xA81A end 0xA82A type bytedata
 ; Bone-dragon SAT Y wiggle (8 x 4).
 bone_dragon_wiggle_ofs: start 0xAAB4 end 0xAAD4 type bytedata
+; Pikeman walk poses 0x50-55 (left 50-52, right 53-55).
+pikeman_walk_tbl: start 0xA62E end 0xA636 type bytedata
+; Bone-dragon custom SAT seed.
+bone_dragon_sat_attr: start 0xAB15 end 0xAB25 type bytedata
+bone_dragon_sat_xofs: start 0xAB25 end 0xAB29 type bytedata
 ; Axe-knight walk poses 0x5F-0x62.
 axe_knight_walk_tbl: start 0xAF2F end 0xAF33 type bytedata
+; Hunchback crouch/jump pose pairs (0x67/68 left, 0x6A/6B right).
+hunchback_pose_tbl: start 0xB341 end 0xB345 type bytedata
 ; Roc flap poses 0x6D/0x6E/0x8D.
 roc_flap_tbl: start 0xB216 end 0xB219 type bytedata
 ; Boss-clear orb SAT colours (3 frames x 5 bytes); stage 3 vs everyone else.
@@ -205,3 +223,5 @@ orb_sat_s3: start 0xB801 end 0xB810 type bytedata
 orb_sat_rest: start 0xB810 end 0xB81F type bytedata
 ; Orb spin poses 0x8F/90/91/90.
 orb_frames: start 0xB85A end 0xB85E type bytedata
+; Blob nibble->pose bytes plus packed per-stage rows (was fake code).
+blob_pose_tbl: start 0xb649 end 0xb6b2 type bytedata

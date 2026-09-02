@@ -38,29 +38,33 @@ permit_down:             equ 0xC41D
 permit_left:             equ 0xC41E
 permit_right:            equ 0xC41F
 
-; Simon.  Pixel X is the high byte of the 16-bit value at simon_x16.
-; C424, C42B, C430, C432–C433, C435, C437–C438, C43D–C43F, C441+ stay unnamed.
+; Simon.  Pixel X/Y are the high bytes of simon_x16 / simon_y16.
+; C430, C432–C433, C437–C438, C43D, C43F, C441+ stay unnamed.
 simon_action:            equ 0xC420  ; 0 grounded .. 7 portal wait; logo wipe divider
 simon_jump_dir:          equ 0xC421  ; 0 aim, 1 up, 2 left, 3 right; logo wipe rows
 simon_whip:              equ 0xC422  ; whip phase 0..4; logo wipe-done
 simon_hurt_step:         equ 0xC423  ; simon_hurt DISPATCH_A
+simon_y16:               equ 0xC424  ; 16-bit Y; pixel at simon_y
 simon_y:                 equ 0xC425
 simon_x16:               equ 0xC426
 simon_x:                 equ 0xC427
 simon_arc:               equ 0xC428  ; jump/fall phase
 simon_whip_timer:        equ 0xC429
 simon_knockback:         equ 0xC42A
+simon_stair_step:        equ 0xC42B  ; stair frame; NZ = mid-stair (hurt stays)
 simon_facing:            equ 0xC42C  ; 0 right, 1 left
 simon_invuln:            equ 0xC42D  ; i-frames / portal wind-up
 simon_legs:              equ 0xC42E  ; cell-0 frame; word store also writes torso
 simon_torso:             equ 0xC42F
 bonus_flags:             equ 0xC431  ; bit1 lockpick, bit2 tipped, bit3 boots, bit4 wings, bit6 map
 sapphire_ring:           equ 0xC434  ; bonus 9 timer; touch-kills; SAT flash red
+simon_stair_held:        equ 0xC435  ; stair dir latch (btn bits); 8-frame lock
 swing_weapon:            equ 0xC436  ; weapon_id latched at SPACE (pose + projectile)
 simon_on_plat:           equ 0xC439  ; C598 slot id; 0 = none
 blue_gem:                equ 0xC43A  ; bonus 8 timer; skip contact hits; SAT flash white
 hourglass_timer:         equ 0xC43B  ; bonus 10 freeze duration; sets D010 bit0
 hurt_facing:             equ 0xC43C  ; 0/1 from attacker Xvel; copied to simon_facing
+backdrop_flash:          equ 0xC43E  ; CHGCLR 0x0E/0 ticks (cross / boss kill)
 rosary_timer:            equ 0xC440  ; bonus 6; nonzero -> room_spawner idle
 
 ; World index (not map coordinates).

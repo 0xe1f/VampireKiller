@@ -2,6 +2,7 @@
 #
 #   make            assemble VampireKiller.asm -> VampireKiller.rom
 #   make verify     SHA-1 check against VampireKiller.sha1
+#   make coverage   Shields.io JSON under generated/badges/ (does not edit README)
 #   make segments   drop leftover .bin files (all banks are source)
 #   make gfx        PNG sheets + annotated stage composites
 #   make music      BGM WAVs
@@ -10,8 +11,8 @@
 #   make clean      remove build output
 #
 # Prerequisite: tools/sjasmplus (built from source, gitignored)
-# Workbench (tools/workbench) is required for gfx / music / sfx / segments
-# and for regen — not for assemble or verify.
+# Workbench (tools/workbench) is required for gfx / music / sfx / segments /
+# coverage / regen — not for assemble or verify.
 
 SRC      := VampireKiller.asm
 OUT      := VampireKiller.rom
@@ -19,13 +20,16 @@ SHA1FILE := VampireKiller.sha1
 ASM      ?= tools/sjasmplus --longptr
 SHA1SUM  ?= $(shell command -v sha1sum 2>/dev/null || echo "shasum -a 1")
 
-.PHONY: all verify clean segments gfx music sfx skills
+.PHONY: all verify clean segments gfx music sfx skills coverage
 
 all: $(SRC)
 	$(ASM) $(SRC)
 
 verify: all
 	@$(SHA1SUM) -c $(SHA1FILE)
+
+coverage:
+	python3 tools/workbench/msx/coverage.py --badges generated/badges
 
 clean:
 	rm -f $(OUT)

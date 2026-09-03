@@ -944,10 +944,12 @@ left in `segments/banks_0123.asm`; **2,045** labels named. `blob_pose_tbl` is
 table again (HUD VRAM 0x7090 stays a hex immediate). Far calls now
 `play_hud_meter` / `vdp_sprites_off` / `frontend_gfx_load`.
 Same pass: per-opcode comments at column 32 when the line is confirmed
-(currently ~17% of play instructions). Hottest 50 `call` targets in this
+(currently ~22% of play instructions). Hottest 250 `call` targets in this
 window now have opcode comments plus a purpose header (`ADD_HL_A`,
 `DISPATCH_A`, `play_sound`, `vdp_hmmm`/`vdp_hmmv`, `map_cell_at`,
-`spawn_actor`, actor vel, wall probes, …). Graphics / map / sound leftover
+`spawn_actor`, actor vel, wall probes, hit-class / spawn-rate / SAT
+fill helpers, paging, walk, play_tick / SAT emit / input, vendor / HUD /
+attract / VDP line+fill, blob/igor/medusa helpers, …). Graphics / map / sound leftover
 streams are inventoried in `docs/unused.md` (`gfx/**/unused_*.png`).
 
 Seg0 VDP layer named end to end: the command-engine primitives

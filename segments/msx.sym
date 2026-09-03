@@ -1158,6 +1158,8 @@ hit_class_c800: equ 0x82bf	; type -> class 0..6, B=X C=Y
 hit_class_c800_tbl: equ 0x82d2	; type-1 -> class 1..7
 hit_class_shot: equ 0x8302	; shot type -> class 0..2, B=X C=Y
 hit_class_shot_tbl: equ 0x8314	; shot type-1 -> class 0..2
+obj_xy_20_10: equ 0x83c3	; E=Y+0x20, D=X+0x10 from compact slot HL
+obj_xy_10_8: equ 0x83ce	; E=Y+0x10, D=X+0x08 from compact slot HL
 overlap_simon: equ 0x8481	; DE/HL box vs Simon
 overlap_simon_dx: equ 0x848d	; abs dx vs box width L
 overlap_simon_ht: equ 0x849d	; jump/crouch 0x12 else 0x1A added to H
@@ -1723,6 +1725,8 @@ dracula_sat_color_from: equ 0xad74	; C = (HL+D), then dracula_sat_write_color
 dracula_sat_write_color: equ 0xad79	; write C to ix+E, next cell
 dracula_save_bg: equ 0xad87	; HMMM 32x32 playfield under Dracula to page-1 (0x80,0x80)
 dracula_blit_torso: equ 0xad9a	; LMMM/HMMM 32x32 from page-1 Y=0x80 onto (X-16,0x91)
+dracula_torso_from_shape: equ 0xadb5	; odd ix+0C hide; else pose 0x5A..0x5E -> CE0E
+dracula_torso_select: equ 0xadba	; pose-0x5A into CE0E if 0..4
 enemy_axe_knight_tick: equ 0xade5	; entity type 16 (axe knight)
 enemy_red_skeleton_tick: equ 0xaf51	; entity type 9 (red skeleton, no throw)
 enemy_flying_skull_tick: equ 0xb068	; entity type 7 (flying skull)
@@ -2253,6 +2257,7 @@ mummy_walk_bounce: equ 0xb941
 mummy_walk_edge_anim: equ 0xb962
 mummy_spit_sat: equ 0xb976
 mummy_spit_fire: equ 0xb98c
+mummy_walk_anim: equ 0xb9d6	; 3-frame walk, ping-pong ix+14
 mummy_anim_tick: equ 0xb9e2
 mummy_anim_step: equ 0xb9ec
 mummy_anim_fwd_end: equ 0xb9fe
@@ -2265,10 +2270,14 @@ frank_clamp_left: equ 0xbaba
 igor_wait_xvel: equ 0xbb1f
 igor_air_pose: equ 0xbb3b
 igor_land_rng: equ 0xbbaf
+igor_flash: equ 0xbbc7	; hide while ix+10; SCF to skip tick
 igor_flash_show: equ 0xbbd6
+igor_arm_throw: equ 0xbbe8	; reload ix+12 throw cooldown to 0x30
+igor_set_pose: equ 0xbbed	; pose C, or C+3 if facing right
 igor_pose_store: equ 0xbbf6
 grim_idle_go: equ 0xbc7d
 grim_fly_floor: equ 0xbcc0
+medusa_bob: equ 0xbd4d	; flicker pose; Yvel ±0x0020 around Y=0xA0
 medusa_bob_pose: equ 0xbd59
 medusa_bob_yvel: equ 0xbd69
 medusa_cruise_dx: equ 0xbd83

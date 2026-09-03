@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "label": "named",
+  "message": "0 left",
+  "color": "brightgreen",
+  "cacheSeconds": 300
+}

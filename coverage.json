@@ -1,0 +1,35 @@
+{
+  "rom_bytes": 131072,
+  "labelled_bytes": 131072,
+  "incbin_bytes": 0,
+  "auto_labels": 0,
+  "opcodes": 14630,
+  "commented": 3273,
+  "comment_pct": 22.4,
+  "subs": 561,
+  "subs_doc": 376,
+  "subs_pct": 67.0,
+  "windows": [
+    {
+      "name": "banks_0123",
+      "incbin": 0,
+      "auto": 0,
+      "subs": 546,
+      "subs_doc": 366
+    },
+    {
+      "name": "banks_bcd",
+      "incbin": 0,
+      "auto": 0,
+      "subs": 6,
+      "subs_doc": 5
+    },
+    {
+      "name": "banks_ef",
+      "incbin": 0,
+      "auto": 0,
+      "subs": 9,
+      "subs_doc": 5
+    }
+  ]
+}

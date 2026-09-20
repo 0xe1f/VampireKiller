@@ -90,7 +90,9 @@ scanline). Sprites stay RLE-packed in source (`tools/workbench/konami/rleenc.py`
 and a full-frame sheet per enemy (`gfx/sheet_enemy_zombie_01.png`, …).
 Packed 1bpp sprite asms dump to `gfx/sprites/<stem>.png`.
 Orphan / unused slices: `gfx/sprites/unused_*.png`,
-`gfx/tilesets/unused_tiles.png`, `gfx/unused_poses.png`
+`gfx/tilesets/unused_tiles.png`, `gfx/unused_poses.png`.
+Spawn bitmask rooms: `gfx/spawn_generators.png`.
+Unused 16×16 scenery block: `gfx/unused_block16.png`
 (`docs/unused.md`).
 Each 4bpp tileset asm has a sheet at `gfx/tilesets/<stem>.png`.
 Each palette_apply asm has a sheet at `gfx/palettes/<stem>.png`

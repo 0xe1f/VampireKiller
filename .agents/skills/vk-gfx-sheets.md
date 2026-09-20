@@ -26,7 +26,7 @@ New catalog dumps match those, **not** `simon_rle` / `intro_sky`.
 | `gfx/tilesets/` | `tileset_*`, intro/title, bonus HUD, HUD keys, portrait, `spike_bar`, `dracula_body`, vendor |
 | `gfx/palettes/` | `stage_palettes`, `room_palettes` |
 | `gfx/metatiles/` | `mtile_defs_sNN`, `mtile_def_intro`, `mtile_streams`, `mtile_stream_intro` |
-| `gfx/` | SAT composites (`enemy_sheet.png`, `sheet_enemy_*`), vendor, `stage_sNN.png` (geographic, HUD cropped) |
+| `gfx/` | SAT composites (`enemy_sheet.png`, `sheet_enemy_*`), vendor, `stage_sNN.png` (geographic, HUD cropped), `spawn_generators.png`, `unused_block16.png` |
 
 A new packed sprite / font asm must be added to `ASM_SPRITE_STEMS` /
 `ASM_FONT_STEMS`. Composites are SAT+VRAM, not a single asm.
@@ -101,7 +101,8 @@ Compose metatiles from `_stage_tileset_cells` / `_intro_tileset_cells`.
 Reuse `_paint_plane`, `_dump_sprite_rle_asm`, `_enemy_colour_maps`.
 Hook from `main()` / `dump_asm_sprite_rles` / `dump_unused` /
 `dump_asm_tilesets` / `dump_dracula_body` / `dump_asm_palettes` /
-`dump_asm_metatiles` / `dump_asm_mtile_streams` / `dump_enemy_frames`.
+`dump_asm_metatiles` / `dump_asm_mtile_streams` / `dump_spawn_generators` /
+`dump_unused_block16` / `dump_enemy_frames`.
 
 Enemy SAT sheets replay `gfx_script_convert`. Do not H-flip (or otherwise
 invent) pixels the ROM does not produce — types **14** / **21** have no
@@ -120,6 +121,8 @@ Not 1:1 with an asm. Prefix `unused_`. Inventory: `docs/unused.md`.
 - `gfx/sprites/unused_unid_b50b.png` — raw 64 bytes at 0xB50B as 1bpp planes
 - `gfx/tilesets/unused_tiles.png` — blank portrait gap + complete `0xFF` pad tiles
 - `gfx/unused_poses.png` — SAT composites for never-stored `ix+0B` ids
+- `gfx/spawn_generators.png` — one room per spawn bit 0–6 plus two bit-7-only rooms (`?`)
+- `gfx/unused_block16.png` — s01r2 kind-3 32×32 vs a floor-sitting kind-2 16×16 (`scenery_block16`; packed stream never uses bits 010)
 
 Orphan sprite headers: packed-stream CPU + unpacked plane offset (plane 1
 is not a second ROM stream). Unid headers: real CPU of each 32-byte slice

@@ -54,6 +54,9 @@ All `0xFF` (or one `0x00`) fill to the next 8 KiB boundary. Not a complete atom 
 |------|--------|
 | PSG 2 bytes at 0x8E29 (`1F A8`) | Dummy before `sfx_01`; not a stream. |
 | `music_8f_silence` | Table slot; three pointers at the same dummy. |
-| `spawn_bit7` | Bit in spawn masks; never dispatched. |
+| `spawn_bit7` | Bit in spawn masks; never dispatched. Sheet: `gfx/spawn_generators.png` (bits 0–6 with the generated enemy; two bit-7-only rooms with a `?`). |
+| `scenery_block16` | Attr bits 010 (`block_stamp` kind 2). Engine-ready; the packed stream never uses it. Every breakable wall is 32×32 (011). Sheet: `gfx/unused_block16.png` (s01r2 as shipped vs a floor-sitting 16×16). |
+| Actor types `0x1D` / `0x25` / `0x2B` | `spawn_nop` + `tick_nop`. No object-list id, no pose write, no unique sprite stream. Generic spawn still has SAT-count / colour / HP slots (see game-notes). |
+| Actor type `0x19` | Full `enemy_blob_tick` (same hop as 1A–1C). SAT `02 48` (HUD-fixed 2 + CC 8). `blob_hatch_type` and the object list never emit it. |
 
 `sfx_tbl` / `music_ptr` and the door 8×8 tiles in `banks_0123` are used; they stay next to their consumers on purpose.

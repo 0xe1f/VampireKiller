@@ -22,7 +22,8 @@
   gfx/palettes/<stem>.png  - palette_apply tables (solid 8x8 swatches)
   gfx/metatiles/<stem>.png - 4x4 metatile def tables and 8x6 room streams
   gfx/fonts/<stem>.png     - 1bpp font asms (ASM_FONT_STEMS)
-  gfx/<name>.png           - derived sheets (composites, vendor, unused poses)
+  gfx/<name>.png           - derived sheets (composites, vendor, unused poses,
+                             spawn_generators, unused_block16)
 
 Tileset / metatile / palette cell header is the CPU address. Sprite-asm
 cell header is the VRAM dest. Font cell header is the hex glyph id. One
@@ -466,6 +467,8 @@ def main():
     dump_asm_palettes()
     dump_asm_metatiles(data)
     dump_asm_mtile_streams(data)
+    dump_spawn_generators(data)
+    dump_unused_block16(data)
 
 # First *recognisable* pose (ix+0B) for entity_tbl types 1-22.
 # Type 9's spawn state uses 0x26 (2-cell wait, legs only); the walk frame is 0x21.
@@ -2134,14 +2137,8 @@ def dump_asm_metatiles(data):
         print("%-36s %3d metatiles  %s%s" % (rel, len(cells), labels[0], extra))
 
 
-def dump_asm_mtile_streams(data):
-    """8x6 room streams: one stage per row, cell header = CPU of the stream.
-
-    Atom is the full 256x192 nametable (HUD not cropped).  Scale 1 so a cell
-    is as wide as a scale-8 metatile def.  Empty pads (stages with fewer
-    rooms than the widest) are canvas, unlabeled.  Intro is a 1-cell sheet.
-    """
-    os.makedirs(METATILE_DIR, exist_ok=True)
+def _room_paint_setup(data):
+    """Metatile-index caches + paint_ids for 8x6 room streams."""
     cache = {}
 
     def tiles_for(kind):
@@ -2190,6 +2187,27 @@ def dump_asm_mtile_streams(data):
                 mts.append(_paint_rgb(_EMPTY_MT32, pal))
         return _stitch_metatiles(mts)
 
+    def paint_room(stage, room):
+        rec = _mtile_streams().get((stage, room))
+        if rec is None:
+            return None
+        _, ids = rec
+        pal = vk_playfield_palette(data, stage, room)
+        return paint_ids(_mtile_kind_for_stage(stage), ids, pal, s18_room=room)
+
+    return paint_room, paint_ids, def_tables
+
+
+def dump_asm_mtile_streams(data):
+    """8x6 room streams: one stage per row, cell header = CPU of the stream.
+
+    Atom is the full 256x192 nametable (HUD not cropped).  Scale 1 so a cell
+    is as wide as a scale-8 metatile def.  Empty pads (stages with fewer
+    rooms than the widest) are canvas, unlabeled.  Intro is a 1-cell sheet.
+    """
+    os.makedirs(METATILE_DIR, exist_ok=True)
+    paint_room, paint_ids, def_tables = _room_paint_setup(data)
+
     streams = _mtile_streams()
     leftover = _STREAMS_LEFT
     if streams:
@@ -2198,16 +2216,14 @@ def dump_asm_mtile_streams(data):
         labels = []
         nrooms = 0
         for stage in range(_NSTAGES):
-            pal_kind = _mtile_kind_for_stage(stage)
             for rm in range(ncols):
                 rec = streams.get((stage, rm))
                 if rec is None:
                     cells.append(None)
                     labels.append(None)
                     continue
-                cpu, ids = rec
-                pal = vk_playfield_palette(data, stage, rm)
-                cells.append(paint_ids(pal_kind, ids, pal, s18_room=rm))
+                cpu, _ = rec
+                cells.append(paint_room(stage, rm))
                 labels.append("%04X" % cpu)
                 nrooms += 1
         out = os.path.join(METATILE_DIR, "mtile_streams.png")
@@ -2229,6 +2245,198 @@ def dump_asm_mtile_streams(data):
         extra = "  +%d leftover bytes" % ileft if ileft else ""
         rel = os.path.relpath(out, ROOT)
         print("%-36s %3d rooms      %04X%s" % (rel, 1, cpu, extra))
+
+
+# SCREEN 5 visible height.  8x6 nametable is 192; ground generators spawn at
+# Y=0xC0 / 0xC8, which sits in the extra 20 lines below the metatile stream.
+_SCREEN5_H = 212
+
+# 8x8 1bpp "?"; stamped 2x into a 16x16 SAT-sized placeholder (bit 7 has no
+# actor).  Ink is HUD-fixed 14, same as glyph_blit_run.
+_QMARK_8 = (
+    "01111100",
+    "10000010",
+    "00000010",
+    "00000100",
+    "00001000",
+    "00010000",
+    "00000000",
+    "00010000",
+)
+
+
+def _qmark_sprite(pal):
+    ink = pal[14]
+    grid = [[OFF] * 16 for _ in range(16)]
+    for y, row in enumerate(_QMARK_8):
+        for x, bit in enumerate(row):
+            if bit != "1":
+                continue
+            for dy in range(2):
+                for dx in range(2):
+                    grid[y * 2 + dy][x * 2 + dx] = ink
+    return grid
+
+
+def _stamp_rgb(dst, src, x, y):
+    """Copy non-OFF pixels of src onto dst at (x, y). Clips."""
+    dh, dw = len(dst), len(dst[0])
+    for sy, row in enumerate(src):
+        dy = y + sy
+        if dy < 0 or dy >= dh:
+            continue
+        for sx, px in enumerate(row):
+            if px == OFF:
+                continue
+            dx = x + sx
+            if 0 <= dx < dw:
+                dst[dy][dx] = px
+
+
+def _enemy_overlay(data, typ, vram_cache, shape_id=None):
+    """SAT composite plus bbox origin so spawn (X, Y) is the actor origin."""
+    sid = ENEMY_SHAPE_ID.get(typ) if shape_id is None else shape_id
+    grid = _composite_enemy(data, typ, vram_cache, sid)
+    ncells = data[_cpu_file(1, 0x605E, 0x6000) + typ]
+    if sid is None or not ncells:
+        return grid, 0, 0
+    parts = _parse_shape(data, sid, ncells)
+    if not parts:
+        return grid, 0, 0
+    x0, y0, _, _ = _sat_bbox(typ, parts, sid)
+    return grid, x0, y0
+
+
+def _extend_playfield(room, pal0):
+    """256x192 nametable plus SCREEN 5 leftover, pal[0] fill."""
+    cell = [list(row) for row in room]
+    extra = [pal0] * _STREAM_W
+    for _ in range(_SCREEN5_H - _STREAM_H):
+        cell.append(list(extra))
+    return cell
+
+
+# One exclusive room per generator bit, plus two bit-7-only rooms.
+# (X, Y) is spawn_actor origin (feet / hook).  Last field is an ix+0B pose
+# override; None uses ENEMY_SHAPE_ID.  Zombie Y is 0xB0 so the 32px 0x80
+# SAT sits on the floor tiles (engine spawn 0xC0 puts the legs in them).
+# Generator bats use a fly pose at the right edge; hang 0x1A is
+# placed-bat only.  Ghost Y is 48px above the flyer stand-in.
+_SPAWN_GENERATOR_CELLS = (
+    # bit, label, stage, room, type or None, X, Y, pose or None
+    (0, "BIT0 ZOMBIE S01R0", 1, 0, 1, 0xF0, 0xB0, None),
+    (1, "BIT1 GREEN S02R4", 2, 4, 2, 0x60, 0xC8, None),
+    (2, "BIT2 RED S10R1", 10, 1, 3, 0x60, 0xC8, None),
+    (3, "BIT3 BAT S01R4", 1, 4, 4, 0xF0, 0x50, 0x1B),
+    (4, "BIT4 SKULL S06R0", 6, 0, 7, 0xF0, 0x70, None),
+    (5, "BIT5 GHOST S05R1", 5, 1, 8, 0xF0, 0x40, None),
+    (6, "BIT6 ROC S11R2", 11, 2, 15, 0xE0, 0x30, None),
+    (7, "BIT7 ? S04R0", 4, 0, None, 0x80, 0x70, None),
+    (7, "BIT7 ? S07R0", 7, 0, None, 0x80, 0x70, None),
+)
+
+
+def dump_spawn_generators(data):
+    """Rooms for spawn bits 0-6 (enemy SAT at the hardcoded spawn) and two
+    bit-7-only rooms with a ? placeholder.  gfx/spawn_generators.png."""
+    paint_room, _, _ = _room_paint_setup(data)
+    vram_cache = {}
+    cells, labels = [], []
+    for bit, label, stage, room, typ, sx, sy, pose in _SPAWN_GENERATOR_CELLS:
+        room_grid = paint_room(stage, room)
+        if room_grid is None:
+            continue
+        pal = vk_playfield_palette(data, stage, room)
+        cell = _extend_playfield(room_grid, pal[0])
+        if typ is None:
+            spr, ox, oy = _qmark_sprite(pal), 0, 0
+        else:
+            spr, ox, oy = _enemy_overlay(data, typ, vram_cache, pose)
+        _stamp_rgb(cell, spr, sx + ox, sy + oy)
+        cells.append(cell)
+        labels.append(label)
+    if not cells:
+        return
+    out = os.path.join(GFX, "spawn_generators.png")
+    render_png(out, cells, [OFF], cols=3, labels=labels,
+               size=(_STREAM_W, _SCREEN5_H), scale=1)
+    print("%-28s %d rooms (bits 0-6 + bit7 x2)"
+          % ("spawn_generators.png", len(cells)))
+
+
+# block_tiles_*: leading 2x2 (kind 2) then 4x4 (kind 3). See block_stamp.
+_BLOCK_CASTLE_2 = (0x01, 0x02, 0x0A, 0x0B)
+_BLOCK_CASTLE_4 = (
+    0x01, 0x02, 0x01, 0x02,
+    0x0A, 0x0B, 0x0A, 0x0B,
+    0x01, 0x02, 0x01, 0x02,
+    0x0A, 0x0B, 0x0A, 0x0B,
+)
+_BLOCK_COURT_2 = (0x01, 0x02, 0x09, 0x0B)
+_BLOCK_COURT_4 = (
+    0x01, 0x02, 0x01, 0x02,
+    0x09, 0x0B, 0x0A, 0x09,
+    0x01, 0x02, 0x01, 0x02,
+    0x09, 0x0B, 0x0A, 0x09,
+)
+
+
+def _scenery_nt_xy(cx, cy):
+    """Scenery cell (X lo / Y hi nibbles) -> nametable pixels.
+
+    map_cell_at is ((Y-0x10)>>3, X>>3); Y = cy<<4 so row 0 of the stamp
+    is nametable y = cy*16 - 16 (HUD rows 0-1 stay in the 256x192 stream).
+    """
+    return cx * 16, cy * 16 - 16
+
+
+def _stamp_scenery_block(room, tiles, pal, stage, cx, cy, span):
+    """Blit block_stamp tile ids onto a painted nametable at scenery (cx, cy)."""
+    if span == 16:
+        ids = _BLOCK_COURT_2 if stage == 0 else _BLOCK_CASTLE_2
+        cols = 2
+    else:
+        ids = _BLOCK_COURT_4 if stage == 0 else _BLOCK_CASTLE_4
+        cols = 4
+    x0, y0 = _scenery_nt_xy(cx, cy)
+    for i, tid in enumerate(ids):
+        tr, tc = divmod(i, cols)
+        rgb = _paint_rgb(_nametable_tile(tiles, tid), pal)
+        _stamp_rgb(room, rgb, x0 + tc * 8, y0 + tr * 8)
+
+
+def dump_unused_block16(data):
+    """s01r2 as shipped (kind 3 32x32) and with a floor-sitting kind 2 16x16.
+
+    Attr bits 010 (`block_stamp` kind 2) is implemented; the packed scenery
+    stream never uses it.  gfx/unused_block16.png.
+    """
+    paint_room, _, _ = _room_paint_setup(data)
+    stage, room = 1, 2
+    room_grid = paint_room(stage, room)
+    if room_grid is None:
+        return
+    pal = vk_playfield_palette(data, stage, room)
+    tiles = _stage_tileset_cells(data, stage)
+    cells, labels = [], []
+
+    cell = _extend_playfield(room_grid, pal[0])
+    _stamp_scenery_block(cell, tiles, pal, stage, 8, 10, 32)
+    cells.append(cell)
+    labels.append("KIND3 32x32 S01R2")
+
+    # Same X as the ROM wall; cy=11 sits on the floor (yellow-key row).
+    # Same origin as the 32x32 (8,10) would hang 16px above the bricks.
+    cell = _extend_playfield(room_grid, pal[0])
+    _stamp_scenery_block(cell, tiles, pal, stage, 8, 11, 16)
+    cells.append(cell)
+    labels.append("KIND2 16x16 S01R2")
+
+    out = os.path.join(GFX, "unused_block16.png")
+    render_png(out, cells, [OFF], cols=2, labels=labels,
+               size=(_STREAM_W, _SCREEN5_H), scale=1)
+    print("%-28s %d rooms (kind 3 vs unused kind 2)"
+          % ("unused_block16.png", len(cells)))
 
 
 # palette_apply tables.  One sheet per asm (stage_palettes, room_palettes).

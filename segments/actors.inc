@@ -47,6 +47,8 @@ actor_grim_reaper:       equ 0x16
 
 ; Overflow / special (past entity_tbl)
 actor_igor:              equ 0x18  ; Frankenstein add-on (event 4)
+; 0x19: same enemy_blob_tick as 1A-1C; SAT 02 48. blob_hatch_type never emits it.
+; 0x1D / 0x25 / 0x2B: spawn_nop + tick_nop. No pose, no unique sprite stream.
 actor_blob_blue:         equ 0x1a  ; candle slime hatch; hub 1 (s4-6); SAT 0F 42
 actor_blob_red:          equ 0x1b  ; same tick; hub 3+ (s10+); SAT 08 42
 actor_blob_white:        equ 0x1c  ; same tick; hub 2 (s7-9); SAT 0E 42

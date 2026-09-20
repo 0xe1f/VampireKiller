@@ -5151,11 +5151,12 @@ entity_tbl_end:
 ; Spawn-init overflow of entity_tbl (seg0 0x5FD3). The table is odd-aligned:
 ; type 0x17 reads 0x5FFF (047h) + 0x6000 (06ah) = 0x6A47. Type 0x18 starts
 ; at 0x6001. Do not word-align this block (the first byte is a high-byte
-; leftover). Types 0x1D / 0x25 / 0x2B are spawn_nop (ret at 0x602F).
+; leftover). Types 0x1D / 0x25 / 0x2B are spawn_nop (ret at 0x602F):
+; no pose, no unique sprite stream, not in the object list.
 data_6000_start:
 	defb 06ah              ; type 0x17 hi (lo 047h at 0x5FFF) -> 0x6A47
 	defw igor_tick         ; 0x18 actor_igor
-	defw enemy_blob_tick   ; 0x19 (same tick; not in hatch table)
+	defw enemy_blob_tick   ; 0x19 SAT 02 48; not in hatch table
 	defw enemy_blob_tick   ; 0x1A actor_blob_blue
 	defw enemy_blob_tick   ; 0x1B actor_blob_red
 	defw enemy_blob_tick   ; 0x1C actor_blob_white
@@ -17672,6 +17673,7 @@ white_skel_throw_shot:
 ; Hatched from bonus-21 slime if the pickup is left to land.  2 SAT cells
 ; (shape 0x9B/0x9C anim, pats D0/D8 = spr_blob / spr_blob_cc).  1 HP.
 ; Recolour is the SAT pair: 0F 42 blue, 08 42 red, 0E 42 white (HUD-fixed).
+; Type 0x19 uses 02 48 (same tick; hatch never emits it).
 enemy_blob_tick:
 	call blob_set_pose
 	ld (ix+006h),001h

@@ -3470,19 +3470,19 @@ vendor_tile_ptr:
 ; 0xF=blue (mood up/down).
 vendor_recolor_tbl:
 	defb 003h,008h,002h,00eh,00fh
-; load_weapon_sprites (seg0 0x559A): RLE-decompress the equipped projectile
-; (C416 2=knife / 3=axe / 4=cross) from seg10 into sprite gen 0xF8C0, then
-; gfx_script_convert converts 1bpp quadrants.  Leather/chain (0/1) and 5 skip.
-; Catalogued in gfx/sprites/enemy_sprite_rle.png (weapon_knife / _axe / _cross).
+; load_weapon_sprites (seg0 0x559A): RLE-decompress the latched throwable
+; (swing_weapon 2=knife / 3=axe / 4=cross) from seg10 into sprite gen
+; 0xF8C0, then gfx_script_convert converts 1bpp quadrants.  Called from the
+; throw pose only.  Catalogued in gfx/sprites/enemy_sprite_rle.png.
 load_weapon_sprites:
 	call page_title_banks          ; page seg 9/10 (front-end gfx)
-	ld a,(weapon_id)
+	ld a,(swing_weapon)
 	cp 005h
 	jr z,weapon_cvt_done
 	dec a
 	jr z,weapon_cvt_done            ; chain whip: Simon's own cell, not this table
 	dec a
-	add a,a                 ; word[C416-2]
+	add a,a                 ; word[swing_weapon-2]
 	ld hl,weapon_sprite_ptr
 	call ADD_HL_A
 	ld e,(hl)
@@ -3490,7 +3490,7 @@ load_weapon_sprites:
 	ld d,(hl)               ; DE = RLE stream in seg10
 	ld hl,0f8c0h            ; sprite patterns after Simon's two cells
 	call rle_dec
-	ld a,(weapon_id)
+	ld a,(swing_weapon)
 	cp equip_cross
 	jr z,weapon_cvt_boom
 	cp equip_axe
@@ -7735,6 +7735,7 @@ inv_reset_life:
 	ld (0c701h),a
 	xor a
 	ld (weapon_id),a
+	ld (subweapon),a
 	ld (bonus_flags),a
 	ld (0c432h),a
 	ld (0c441h),a
@@ -7752,23 +7753,27 @@ simon_portal_wait:             ; 7 (0x7102) pad crouch+UP: wait, then warp
 	ld a,dir_portal
 	ld (exit_dir),a          ; conn_from_spot: D001 = C5B4
 	ret
-; simon_attack_tick (0x7114): SPACE starts whip or C416>=2 throw; then whip
-; phase + projectile_tick (C450/C460). Jump+dir is holy water / hourglass.
+; simon_attack_tick (0x7114): SPACE whips; SHIFT or stick-up+fire throws
+; subweapon. Then whip phase + projectile_tick (C450/C460). Jump+dir is
+; holy water / hourglass when neither chord fires.
 simon_attack_tick:
 	call simon_attack_start
 	call whip_tick
 	jp projectile_tick
-; simon_attack_start (seg1 0x711D): SPACE new-press starts whip (or throw if
-; C416>=2). If SPACE is not new, jump+dir uses holy water / hourglass.
+; simon_attack_start: attack_chord picks whip vs throw. NC+Z = air items.
+; NC+NZ = SHIFT with nothing equipped. CY = latch A and start the pose.
 simon_attack_start:
-	ld a,(btn_edge)
-	and 010h               ; SPACE/trig new-press
-	jr z,simon_try_air_item
+	call attack_chord
+	jr c,attack_latch
+	ret nz                 ; SHIFT, no subweapon
+	jr simon_try_air_item
+attack_latch:
 	ld hl,simon_whip
+	ld b,a                 ; keep the id across the busy check
 	ld a,(hl)
 	and a
-	ret nz                 ; already whipping
-	ld a,(weapon_id)
+	ret nz                 ; already whipping or throwing
+	ld a,b
 	ld (swing_weapon),a    ; latch for pose + projectile
 	cp equip_knife
 	jr c,whip_begin        ; leather/chain: no slot
@@ -7932,7 +7937,6 @@ whip_thrown_pose:               ; (0x7231) knife/axe/cross torso 0x0C
 	ld (simon_torso),a
 	call simon_mirror_frames
 	jr whip_phase_next
-	xor a                  ; unreachable
 whip_timer_set:                 ; (0x723F) A = timer, then phase++
 	ld (simon_whip_timer),a
 whip_phase_next:                ; (0x7242)
@@ -8283,10 +8287,10 @@ projectile_clip:
 	sub 0fbh
 	cp 00ah
 	ret nc
-	ld a,(weapon_id)
+	ld a,(ix+001h)         ; axe/cross leaving the X wrap: drop subweapon
 	sub 003h
 	cp equip_knife
-	call c,lose_weapon     ; cross/axe leaving the X wrap zone: lose the weapon
+	call c,lose_weapon     ; knife/holy do not unequip
 projectile_clear:
 	push ix
 	pop hl
@@ -8845,10 +8849,10 @@ simon_sat_build:
 	cp 005h
 	jr z,sat_cell0
 	ld de,0d610h
-	ld a,(weapon_id)
-	cp equip_knife
+	ld a,(0c451h)          ; C450 type: reserve its SAT while a shot is live
+	and a
 	ld b,004h
-	jr c,sat_hide_n
+	jr z,sat_hide_n
 	ld b,002h
 sat_hide_n:
 	ld a,0e0h
@@ -8984,10 +8988,10 @@ simon_sat_x_ok:
 ; bytes; subweapon: 0x40.  Blue gem (C43A) flashes white 0x0E; sapphire
 ; ring (C434) flashes red 0x08; else 0x01 / 0x42 by 16-byte band.
 simon_sat_colour:
-	ld a,(weapon_id)
-	cp equip_knife
+	ld a,(0c451h)          ; C450 live: don't recolour its SAT bytes
+	and a
 	ld b,080h
-	jr c,sat_col_n
+	jr z,sat_col_n
 	ld b,040h
 sat_col_n:
 	ld a,(door_state)
@@ -9734,9 +9738,8 @@ map_cell_ret:                   ; pop DE, ret
 	pop de
 	ret
 ; combat_tick (seg1 0x7D6F): per-frame hits.  Skipped while a room-exit is
-; pending (0xC41B).  Whip (C416<2) runs the three whip-hit scans; knife/axe/
-; cross (C416>=2) skip those and pad with combat_busy_wait instead, then the
-; common projectile/vendor/hourglass/yellow-shield tail.
+; pending (0xC41B).  Whip scans always run (the whip stays equipped).
+; Projectile scans follow, so a throwable in flight is tested too.
 combat_tick:
 	ld a,(exit_dir)
 	and a
@@ -9745,39 +9748,15 @@ combat_tick:
 	call shots_vs_simon
 	call pickups_vs_simon
 	call hurt_simon_spikes
-	ld a,(weapon_id)
-	cp equip_knife
-	jr nc,combat_thrown           ; C416>=2: projectile weapons
 	call whip_hit_actors         ; whip vs C800 actors (phase 3)
 	call whip_hit_shots
 	call whip_hit_candles
-	jr combat_tail
-combat_thrown:                  ; C416>=2: pad instead of whip scans
-	call combat_busy_wait         ; pad: no whip scans this frame
-combat_tail:                    ; projectile / vendor / hourglass / shield
 	call projectile_hit_actors
 	call proj_hit_shots
 	call proj_hit_candles
 	call vendors_vs_attack
 	call hourglass_vs_attack
 	jp yellow_shield_tick
-; combat_busy_wait (seg1 0x7DA7): 100x4 empty push/pop loop (~17k T).
-; Knife/axe/cross skip the whip hit-tests; this burns time so that path is
-; not much cheaper than a whip-hit tick.  No RAM side effects.  Same cost
-; for all three weapons; not the throw windup (that is whip_tick phases 1-3
-; before projectile_arm).
-combat_busy_wait:
-	ld b,064h
-combat_busy_outer:              ; 100x inner empty loop
-	push bc
-	ld b,004h
-combat_busy_inner:              ; 4x push/pop
-	push bc
-	pop bc
-	djnz combat_busy_inner
-	pop bc
-	djnz combat_busy_outer
-	ret
 whip_hit_actors:                ; (0x7DB4) whip phase 3 vs C800 (+0E bit0)
 	ld a,(simon_whip)
 	cp 003h                ; hit frame only
@@ -9849,14 +9828,21 @@ boss_killed:                    ; (0x7E1E) bar empty: flash, sfx, CE15, cull
 ; IX.  Picks a damage byte B from a per-weapon table indexed by (enemy type-0x11),
 ; then jp damage_enemy (0xC418 -= B).  Only the HP-bar enemies (types 0x11..0x17)
 ; take metered damage here; lesser enemies die outright on the hit test.
-;   weapon 0xC416 = 0 (leather whip) or 2 (knife)  -> base table hpbar_dmg_weak
-;   weapon = 1 (chain) / 3 (axe) / 4 (cross)        -> strong table hpbar_dmg_strong (1.5x)
+;   leather whip or knife -> hpbar_dmg_weak
+;   chain / axe / cross   -> hpbar_dmg_strong (1.5x)
+;   Holy water (projectile type 5) uses the whip tier, not its own row.
 ;   Base   (types 0x11..0x17): 04 08 08 04 04 04 10
 ;   Strong (types 0x11..0x17): 06 0C 0C 06 06 06 18
-; Special: vs type 0x17 with weapon >= 2 (knife/axe/cross) the damage is >>2 (/4).
-weapon_hit_damage:              ; (seg1 0x7E33)
-	ld hl,hpbar_dmg_weak    ; leather/knife row
+; Special: vs type 0x17 with knife/axe/cross the damage is >>2 (/4).
+weapon_hit_damage_proj:         ; IY = C450/C460; holy water keeps the whip row
+	ld a,(iy+001h)
+	cp 005h
+	jr nz,weapon_hit_have
+weapon_hit_damage:              ; (seg1 0x7E33) whip: leather/chain in weapon_id
 	ld a,(weapon_id)
+weapon_hit_have:
+	ld d,a                  ; keep the hitting weapon for the 0x17 quarter
+	ld hl,hpbar_dmg_weak    ; leather/knife row
 	and a
 	jr z,hpbar_dmg_lookup   ; leather -> weak table
 	cp equip_knife
@@ -9871,7 +9857,7 @@ hpbar_dmg_lookup:               ; (0x7E43) B = table[type-0x11]
 	ld a,c
 	cp 017h                 ; 7th HP-bar slot (no actor_* name)
 	jr nz,hpbar_dmg_go
-	ld a,(weapon_id)
+	ld a,d                  ; hitting weapon, not whichever is equipped
 	cp equip_knife
 	jr c,hpbar_dmg_go       ; leather/chain: full table byte
 	srl b                   ; type 0x17 + knife/axe/cross: /4
@@ -10198,8 +10184,8 @@ projectile_hit_metered:         ; (0x808F) types 0x11..0x17; giant bat dual-use
 	ld a,(cell_event)
 	and a
 	jr z,projectile_hit_fodder
-projectile_hit_hpbar:           ; (0x809C) 0xC418 -= table[weapon, type-0x11]
-	call weapon_hit_damage
+projectile_hit_hpbar:           ; (0x809C) 0xC418 -= table[shot type, type-0x11]
+	call weapon_hit_damage_proj
 	ld a,(enemy_meter)
 	and a
 	jr z,projectile_meter_empty
@@ -11787,9 +11773,14 @@ drop_own_weapon_heart:
 	cp item_chain_whip
 	ret c                   ; hearts/whips stay
 	ld a,(weapon_id)
-	add a,019h              ; C416 + 0x19 = this subweapon's pickup id
+	add a,019h              ; chain pickup id when the whip is chain
 	cp b
-	ret nz                  ; not the equipped one
+	jr z,drop_own_heart
+	ld a,(subweapon)
+	add a,019h              ; 0 -> 0x19, which is never a weapon drop
+	cp b
+	ret nz
+drop_own_heart:
 	ld b,item_small_heart
 	ret
 ; pickup_slot_alloc (seg2 0x8A3E): first free C500 slot (stride 0x10, 8 slots).
@@ -12271,15 +12262,20 @@ collect_bonus_tbl:             ; (seg2 0x8D45) word[id-1]; id>=0x1A -> collect_w
 	defw bonus_white_key
 	defw bonus_chest
 ; --- weapon pickup (bonus id >= 0x1A) ---------------------------------------
-; index = id - 0x19 -> C416: 0x1A chain (1), 0x1B knife (2), 0x1C axe (3),
-; 0x1D cross (4). Index 5 is holy water (bonus_holy_water / C701 bit3), not a
-; C416 weapon. Otherwise store the new weapon id, run hud_weapon_icon (HUD), then
-; FALL THROUGH into bonus_rosary (brief C440 no-spawn window).
-collect_weapon:                ; (0x8D77) bonus >= 0x1A: C416 = id-0x19 except 0x1E
+; index = id - 0x19.  Chain (1) writes weapon_id.  Knife/axe/cross (2..4)
+; write subweapon.  Index 5 is holy water (C701 bit3).  Then hud_weapon_icon
+; and FALL THROUGH into bonus_rosary (brief C440 no-spawn window).
+collect_weapon:                ; (0x8D77) bonus >= 0x1A, except holy water 0x1E
 	sub item_chest
 	cp item_holy_water - item_chest
 	jr z,bonus_holy_water
-	ld (weapon_id),a          ; set equipped weapon id
+	cp equip_knife
+	jr c,collect_whip      ; chain (1) upgrades the whip
+	ld (subweapon),a
+	jr collect_weapon_hud
+collect_whip:
+	ld (weapon_id),a
+collect_weapon_hud:
 	call hud_weapon_icon
 ; --- bonus_rosary (id 6, 0x8D83) - temporary "no new enemies" power-up ------
 ; Arms rosary_timer: while nonzero, room_spawner (seg0 0x5EBF) bails every
@@ -12458,18 +12454,30 @@ bonus_lockpick:                ; id 18 (0x8E80): C700=3, C701 bit2; drops yellow
 	call hud_chest_key_icon
 	ld a,00fh
 	ret
-lose_weapon:                   ; (0x8E9A) C416=0 leather; refresh HUD (missed catch)
+lose_weapon:                   ; (0x8E9A) clear subweapon; whip tier stays
 	xor a
-	ld (weapon_id),a
+	ld (subweapon),a
 	jp hud_weapon_icon
-; hud_weapon_icon (seg2 0x8EA1): HUD equipped-weapon tile from C416 at (80,0x0C).
-; 0 = leather (page-1 HMMM); 1..4 -> bonus ids 0x1A..0x1D on the bonus sheet.
+; hud_weapon_icon: weapon box at (80, 0x0C).  Subweapon, else chain, else blank.
+; Leather is not drawn here.  Key lamps still use hud_leather_icon.
 hud_weapon_icon:
+	ld a,(subweapon)
+	and a
+	jr nz,hud_weapon_add
 	ld a,(weapon_id)
-	ld de,0800ch            ; HUD dest (80, 0x0C)
-	or a
-	jp z,hud_leather_icon   ; 0 = leather (not in the bonus sheet)
-	add a,019h              ; C416 1..4 -> bonus ids 0x1A..0x1D
+	dec a                   ; chain (1) -> 0
+	jr nz,hud_weapon_blank
+	inc a                   ; restore equip_chain
+hud_weapon_add:
+	add a,019h              ; 1..4 -> bonus ids 0x1A..0x1D
+	ld de,0800ch
+	jp hud_bonus_tile
+hud_weapon_blank:
+	ld hl,0800ch            ; interior of the 18x18 weapon frame
+	ld bc,01010h
+	xor a
+	ld d,a                  ; page 0, colour 0
+	jp vdp_hmmv
 ; hud_bonus_tile (seg2 0x8EAD): bonus id A -> 16x16 HUD tile at DE.
 ; Sheet Y=0x50 for ids 1-16, Y=0x60 for 17+.
 hud_bonus_tile:
@@ -12523,15 +12531,6 @@ hud_bonus_scan:
 	call c,hud_bonus_icon   ; draw if set
 	inc a                   ; next icon slot
 	djnz hud_bonus_scan     ; 5 bits
-	ret
-	ld c,b
-	ld b,005h
-	xor a
-hud_bonus_first:                ; unreachable: first set bit -> icon
-	rl c
-	jr c,hud_bonus_icon
-	inc a
-	djnz hud_bonus_first
 	ret
 hud_bonus_icon:
 	push af
@@ -13609,6 +13608,7 @@ vendor_offer_pending:                        ; no button this frame -> leave off
 	ret
 ; vendor_offer_dismiss (seg2 0x950E): wipe bubble, restore candle outlines.
 vendor_offer_dismiss:
+	call attack_chord      ; latch SHIFT so play doesn't see a fresh edge
 	call vendor_offer_wipe
 	jp candle_outlines_if
 ; vendor_offer_wipe (seg2 0x9514): HMMM 80x32 from (0xB0,0x80) onto C704.
@@ -18970,62 +18970,42 @@ giant_bat_climb_up:
 	ret nc
 	ld (ix+001h),002h
 	jp giant_bat_aim
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
-	rst 38h
+; attack_chord: CY and A = weapon to latch (whip tier or subweapon).
+; NC+Z = no attack (caller tries holy water / hourglass).
+; NC+NZ = SHIFT edge with no subweapon (caller does nothing).
+; Latch is updated before any return, so vendor_offer_dismiss can call this
+; to absorb a held SHIFT.
+attack_chord:
+	ld a,006h              ; keyboard row 6
+	call read_kbd_matrix_bit
+	ld hl,shift_latch
+	ld c,(hl)
+	ld (hl),a              ; previous SHIFT for the next edge
+	xor c
+	and (hl)               ; newly pressed
+	jr z,attack_chord_fire
+	ld a,(subweapon)
+	and a
+	jr nz,attack_chord_carry
+	inc a                  ; NZ, carry still clear (INC preserves it)
+	ret
+attack_chord_fire:
+	ld a,(btn_edge)
+	and 010h               ; SPACE / TRG1
+	ret z
+	ld a,(btn_held)
+	and 021h               ; bit0 stick/kbd up, bit5 kbd up or TRG2
+	dec a                  ; stick up alone -> 0
+	jr nz,attack_chord_whip
+	ld a,(subweapon)
+	and a
+	jr nz,attack_chord_carry
+attack_chord_whip:
+	ld a,(weapon_id)
+attack_chord_carry:
+	scf
+	ret
 
+	ds 0xC000 - $, 0xFF
+    ASSERT entity_tbl_end == 0x6000
     ASSERT $ == 0xC000

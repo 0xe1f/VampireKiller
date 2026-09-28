@@ -1,9 +1,9 @@
 ; ===========================================================================
-;  Equipped weapon id in 0xC416.  Readability only — not emitted.
+;  Whip tier in weapon_id (0xC416): leather or chain.  Knife, axe, and
+;  cross live in subweapon (0xC414).  Readability only — not emitted.
 ;  Named equip_* so they do not collide with thrown-weapon SAT streams
 ;  (weapon_knife / weapon_axe / weapon_cross in data/enemy_sprite_rle.asm).
-;  Whip path is C416 < 2; >= 2 is knife/axe/cross (load_weapon_sprites).
-;  Holy water is item_holy_water (C701 bit3), not a C416 value.
+;  Holy water is item_holy_water (C701 bit3), not either byte.
 ; ===========================================================================
 
 equip_leather:           equ 0x00

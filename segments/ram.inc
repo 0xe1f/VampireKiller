@@ -13,8 +13,8 @@ btn_held:                equ 0xC007
 title_btn_edge:          equ 0xC400
 title_btn_held:          equ 0xC401
 
-; Player stats (0xC400-0xC41F).  Unused holes C402-C404, C40B, C40E-C40F,
-; C414 have no code xrefs and stay unnamed.
+; Player stats (0xC400-0xC41F).  Unused holes C402-C404, C40B, C40E-C40F
+; have no code xrefs and stay unnamed.
 score:                   equ 0xC405  ; 3-byte packed BCD, low pair
 score_mid:               equ 0xC406
 score_hi:                equ 0xC407
@@ -26,8 +26,9 @@ replay_bgm:              equ 0xC40D  ; force stage BGM replay
 lives:                   equ 0xC410  ; packed BCD
 hud_stage:               equ 0xC411  ; packed BCD STAGE
 stay_in_play:            equ 0xC413  ; 1 = play, 0 = leave (attract / death)
+subweapon:               equ 0xC414  ; 0 none, else equip_knife/axe/cross
 health:                  equ 0xC415  ; Simon HP, full 0x20
-weapon_id:               equ 0xC416  ; equip_* (leather..cross)
+weapon_id:               equ 0xC416  ; equip_leather / equip_chain only
 hearts:                  equ 0xC417  ; packed BCD
 enemy_meter:             equ 0xC418  ; enemy/boss bar, full 0x80
 bonus_id:                equ 0xC419  ; last-collected item_*
@@ -39,7 +40,7 @@ permit_left:             equ 0xC41E
 permit_right:            equ 0xC41F
 
 ; Simon.  Pixel X/Y are the high bytes of simon_x16 / simon_y16.
-; C430, C432–C433, C437–C438, C43D, C43F, C441+ stay unnamed.
+; C430, C432–C433, C437–C438, C43F, C441+ stay unnamed.
 simon_action:            equ 0xC420  ; 0 grounded .. 7 portal wait; logo wipe divider
 simon_jump_dir:          equ 0xC421  ; 0 aim, 1 up, 2 left, 3 right; logo wipe rows
 simon_whip:              equ 0xC422  ; whip phase 0..4; logo wipe-done
@@ -64,6 +65,7 @@ simon_on_plat:           equ 0xC439  ; C598 slot id; 0 = none
 blue_gem:                equ 0xC43A  ; bonus 8 timer; skip contact hits; SAT flash white
 hourglass_timer:         equ 0xC43B  ; bonus 10 freeze duration; sets D010 bit0
 hurt_facing:             equ 0xC43C  ; 0/1 from attacker Xvel; copied to simon_facing
+shift_latch:             equ 0xC43D  ; previous SHIFT (row 6 bit0); cleared each room
 backdrop_flash:          equ 0xC43E  ; CHGCLR 0x0E/0 ticks (cross / boss kill)
 rosary_timer:            equ 0xC440  ; bonus 6; nonzero -> room_spawner idle
 

@@ -65,20 +65,21 @@ After a clone with the submodule, link generic agent skills into this repo
 
 ```sh
 make skills     # tools/workbench/bin/install-skills -> .cursor/skills/
-make verify     # assemble, then SHA-1 check against VampireKiller.sha1
+make verify     # assemble; SHA-1 check against VampireKiller.sha1 on master only
 make coverage   # local Shields JSON under generated/badges/
 ```
 
 `make` alone produces `VampireKiller.rom` in the repo root (gitignored).
-`VampireKiller.sha1` is the SHA-1 of the original 128 KiB MSX2 ROM; `make verify`
-rebuilds and confirms the output matches it.
+`VampireKiller.sha1` is the SHA-1 of the original 128 KiB MSX2 ROM. `make verify`
+rebuilds the ROM and, on `master`, confirms the output matches it. Any other
+branch skips the hash check.
 
 ## How it works
 
 128 KiB = 16 × 8 KiB segments (Konami4 mapping). Segment 0 is always resident at
 `0x4000-0x5FFF`; segments are converted from raw binary into commented
-disassembly one at a time, and after every change the ROM is rebuilt and SHA-1
-checked so it stays byte-for-byte identical.
+disassembly one at a time. On `master`, the ROM is rebuilt and SHA-1 checked so
+that branch stays byte-for-byte identical to the original.
 
 Text is stored as `ASCII - 0x10` (HUD/title) or plain ASCII (credits); the
 `vk` / `cr` macros in `VampireKiller.asm` let strings be written as readable

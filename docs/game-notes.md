@@ -759,7 +759,7 @@ death flame (type 12).
 
 - **lowest**: leather whip, thrown knife
 - **normal**: chain whip, boomerang cross
-- **strong**: boomerang axe
+- **strong**: arcing axe
 
 The HP-bar table (`hpbar_dmg_weak` / `hpbar_dmg_strong`) treats **axe and cross both as strong**
 (same 1.5× row as the chain whip). Fodder (`fodder_dmg_tbl`) is knife 1 / axe 4 / cross 2
@@ -767,19 +767,21 @@ The HP-bar table (`hpbar_dmg_weak` / `hpbar_dmg_strong`) treats **axe and cross 
 
 Weapon behaviour (ROM):
 - **Whips** (leather `C416=0`, chain `=1`) stay with Simon — SPACE is the whip.
-- **Knife** (`C416=2`, bonus `0x1B`, vendor 50 hearts). SPACE, unlimited ammo,
+- **Knife** (`C416=2`, bonus `0x1B`, vendor 50 hearts). SPACE, costs 1 heart,
   straight `velX` ±5, no return. `projectile_alloc` may fill **both** C450 and
   C460. A hit despawns that knife (`projectile_clear_hl`); missing just leaves
-  the screen. Does not spend hearts.
+  the screen. The weapon stays equipped. No hearts, no throw.
 - **Axe** (`C416=3`, bonus `0x1C`, world drop — not in the vendor table).
-  SPACE, `velX` ±3, 24-frame outbound then the shared boomerang (`boomerang_back`
-  decelerates and reverses). Overlap Simon (`proj_overlap_simon`) = catch (keep
-  `C416`). Flying into the X wrap zone = `lose_weapon` (back to leather).
-  `axe_drop_unequip` can also spawn bonus `0x1C` at the projectile and unequip when `C433`
-  is 2 or 3 that frame.
-- **Cross** (`C416=4`, bonus `0x1D`, vendor 20 hearts). Same boomerang as the
-  axe but `velX` ±5, so the 24-frame outbound covers more of the screen
-  (~120 px from a centred throw vs ~72 px). Same catch-or-lose. SAT colours
+  SPACE, one in flight, costs 1 heart. Castlevania arc: `velX` ±2,
+  initial `velY` −5.5, then +0.25 px/frame² each flight frame (8.8 fixed
+  point, down-positive; the fraction lives in slot +9 and the Y fraction in
+  +7). Spin is unchanged (`(frame >> 1) & 3`, `sfx_axe_fly` every 8 frames).
+  It is not caught. Leaving the screen, including the top (`Y >= 0xF0`),
+  despawns it and keeps `C416`. A breakable block still breaks; the axe
+  flies through and stays equipped.
+- **Cross** (`C416=4`, bonus `0x1D`, vendor 20 hearts). Boomerang, costs 1 heart, `velX` ±5.
+  24-frame outbound (~120 px from a centred throw), then `boomerang_back`.
+  Overlap Simon keeps `C416`; the X wrap calls `lose_weapon`. SAT colours
   `0x0F`/`0x0E` (type 4 only).
 - **Holy water** is not `C416`; jump+LEFT/RIGHT, see below.
 
@@ -792,17 +794,18 @@ Weapon behaviour (ROM):
   (holy water). Chain `0x1A` → 1 was runtime-confirmed; knife `0x1B` → 2 is the
   vendor dagger (despawn-on-hit, two slots). Axe vs cross is **3 = axe
   (`0x1C`), 4 = cross (`0x1D`)** from throw speed + vendor stock (the cross is
-  the one for sale; type 4 is the faster ±5 boomerang). HUD tiles agree
+  the one for sale; type 4 is the ±5 boomerang, type 3 is the arcing throw). HUD tiles agree
   (`gfx/tilesets/hud_weapon_key_tiles.png`): axe is a hand-axe, cross is the
   diagonal four-arm cross with a **blue** fill (palette index 15, same slot as
-  the thrown SAT `0x0F`). Type 3's lose path hardcodes a `0x1C` world drop —
-  that is this weapon's own bonus id, not a second item.
+  the thrown SAT `0x0F`). The original block-hit path dropped bonus `0x1C`
+  (this weapon's own id) and unequipped; this branch does not take it.
 - **Damage table split** (`weapon_hit_damage` 0x7E33): leather and knife use
   `hpbar_dmg_weak` (`04 08 08 04 04 04 10`); chain/axe/cross use `hpbar_dmg_strong`
   (`06 0C 0C 06 06 06 18`). Index = enemy type − 0x11. Type 0x17 with weapon
   ≥ 2 quarters the hit.
-- On death (`inv_reset_life`) `C416` is cleared to 0. Missing a cross/axe catch also
-  returns to leather (`lose_weapon` 0x8E9A) without waiting for death.
+- On death (`inv_reset_life`) `C416` is cleared to 0. Missing a cross catch also
+  returns to leather (`lose_weapon` 0x8E9A) without waiting for death. An axe
+  that leaves the screen does not.
 - Thrown-weapon **patterns** come from seg10 via `load_weapon_sprites` (0x559A)
   / `weapon_sprite_ptr` (0x55DE). Packed order in `data/enemy_sprite_rle.asm`
   is knife, cross, skull pile, flying skull, then axe — not a contiguous
@@ -841,12 +844,12 @@ keeps only `C701` bit 7 (map); the vial is lost. Vendor row **`0x1E`** is this
 item (30 / 10 / 50 hearts).
 
 **How to throw.** While **jumping** (`C420==1`) and SPACE is **not** a new-press
-(`simon_try_air_item`), **LEFT** or **RIGHT** new-press (`C006` bits 2/3). Costs **5 hearts**
-(BCD) and needs `C461==0` (one vial at a time). `holy_water_use` (seg1 **0x7154**)
+(`simon_try_air_item`), **LEFT** or **RIGHT** new-press (`C006` bits 2/3). Costs **1 heart**
+(BCD) and needs `C461==0` (one vial at a time). `holy_water_use` (seg1 **0x7165**)
 writes throw dir to `C468` (1=left, 0=right), sets projectile slot `C460` type
 **5**, and spends the hearts. Jump+DOWN is the hourglass if you also have bit 6.
 
-**Arc and flame.** `holy_water_tick` (0x73AB) on the **C460** slot (type at
+**Arc and flame.** `holy_water_tick` (0x73C0) on the **C460** slot (type at
 `C461`). Spawn copies Simon (`C425`/`C427`) with `velX` ±2 and `velY` 0. In flight
 (state 2) each frame does `Y += 2*arc_dy_tbl[phase]` — `arc_dy_tbl` is the signed dY
 table also used by hurt knockback — and `X += velX` (`projectile_integrate`). It lands when

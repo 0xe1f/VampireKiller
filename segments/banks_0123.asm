@@ -7776,11 +7776,17 @@ attack_latch:
 	ld a,b
 	ld (swing_weapon),a    ; latch for pose + projectile
 	cp equip_knife
-	jr c,whip_begin        ; leather/chain: no slot
+	jr c,whip_begin        ; leather/chain: no slot, no heart
+	ld a,(hearts)
+	cp 001h
+	ret c                  ; subweapon costs 1 heart
 	call projectile_alloc
 	ld a,b
 	and a
 	ret z                  ; no free C450/C460
+	ld b,001h
+	call spend_hearts
+	ld hl,simon_whip       ; spend_hearts reuses HL
 whip_begin:                     ; (0x713A) whip phase 1
 	ld (hl),001h
 	ret
@@ -7801,11 +7807,11 @@ simon_try_air_item:            ; (0x713D) jump + C701: holy water then hourglass
 	call c,hourglass_use
 	ret
 ; holy_water_use (seg1 0x7154): C701 bit3 (bonus 0x1E).  Only while jumping
-; (C420==1) and SPACE is not a new-press.  LEFT or RIGHT new-press, 5 hearts,
+; (C420==1) and SPACE is not a new-press.  LEFT or RIGHT new-press, 1 heart,
 ; and C461==0 (one vial in flight).  Does not replace C416.
 holy_water_use:
 	ld a,(hearts)
-	cp 005h
+	cp 001h
 	ret c
 	ld a,(btn_edge)
 	rra
@@ -7859,12 +7865,12 @@ holy_water_throw_right:        ; (0x71A8) C468=0, then throw
 	ret nz
 	xor a
 	ld (0c468h),a
-holy_water_throw:              ; (0x71B1) arm C460 slot as type 5, spend 5 hearts
+holy_water_throw:              ; arm C460 slot as type 5, spend 1 heart
 	call actors_rearm_hittable
 	ld a,005h
 	ld (0c461h),a          ; projectile type 5 (one in flight)
 	ld a,(hearts)
-	sub 005h
+	sub 001h
 	daa
 	ld (hearts),a
 	jp draw_hearts_hud
@@ -8004,6 +8010,8 @@ proj_arm_next:                  ; next 0x10-byte slot
 	ret
 ; C450 / C460 projectile slots (stride 0x10): +0 state, +1 type (C416 or 5),
 ; +2 velY, +3 velX, +4 Y, +5 X, +6 pattern, +7 phase, +8 facing.
+; Axe only: +2/+9 are an 8.8 down-positive velocity (integer/fraction) and
+; +7 is the Y fraction.  projectile_integrate still adds the integer.
 projectile_tick:               ; (0x72B9) both slots: motion, integrate, clip, SAT
 	ld ix,0c450h
 	call projectile_tick_slot
@@ -8025,11 +8033,9 @@ projectile_motion:
 	defw axe_tick
 	defw cross_tick
 	defw holy_water_tick   ; type 5 (C461; not a C416 weapon)
-cross_tick:                    ; (0x72E5) C416=4, bonus 0x1D; vel ±5, SAT 0x0F/0x0E
-	ld a,(0c003h)
-	ld c,a
-	rra
-	rra
+; spin_pat: pattern from frame in C (already shifted), sfx id in B.
+; Axe shifts the frame once; the cross shifts it twice, so the cross spins faster.
+spin_pat:
 	and 003h
 	add a,a
 	add a,a
@@ -8038,9 +8044,16 @@ cross_tick:                    ; (0x72E5) C416=4, bonus 0x1D; vel ±5, SAT 0x0F/
 	ld (ix+006h),a
 	ld a,c
 	and 007h
-	jr nz,cross_state
-	ld a,sfx_cross_fly
-	call play_sound
+	ret nz
+	ld a,b
+	jp play_sound
+cross_tick:                    ; C416=4, bonus 0x1D; vel ±5, SAT 0x0F/0x0E
+	ld a,(0c003h)
+	ld c,a
+	rra
+	rra
+	ld b,sfx_cross_fly
+	call spin_pat
 cross_state:                    ; DISPATCH throw/out/back/catch
 	ld a,(ix+000h)
 	dec a
@@ -8049,24 +8062,28 @@ cross_state:                    ; DISPATCH throw/out/back/catch
 	defw boomerang_out
 	defw boomerang_back
 	defw boomerang_catch
-boomerang_throw:               ; (0x730E) copy Simon pos; velX ±3 (axe) / ±5 (cross)
+; proj_spawn_y: Y = Simon Y + (stand -16 / crouch -10); X = Simon X.
+proj_spawn_y:
 	ld a,(simon_action)
 	cp act_crouch
 	ld a,(simon_y)
-	ld b,0f0h
-	jr nz,boom_throw_y
-	ld b,0f6h
-boom_throw_y:                   ; Y = Simon Y + (stand -16 / crouch -10)
-	add a,b
+	jr nz,proj_spawn_ystand
+	add a,006h             ; crouch offset is 6 above the stand offset
+proj_spawn_ystand:
+	add a,0f0h
 	ld (ix+004h),a
-	xor a
-	ld (ix+002h),a
+	ld a,(simon_x)
+	ld (ix+005h),a
+	ret
+boomerang_throw:               ; copy Simon pos; velX ±2 (axe) / ±5 (cross)
+	call proj_spawn_y
+	ld (ix+002h),000h
 	ld a,(ix+001h)
-	cp 003h
-	ld b,003h
+	cp equip_axe
+	ld b,002h
 	jr z,boom_spd
 	ld b,005h
-boom_spd:                       ; speed 3 axe / 5 cross
+boom_spd:                       ; speed 2 axe / 5 cross
 	ld a,(ix+008h)
 	and a
 	ld a,b
@@ -8074,10 +8091,8 @@ boom_spd:                       ; speed 3 axe / 5 cross
 	neg
 boom_xvel:                      ; store velX (neg if facing left)
 	ld (ix+003h),a
-	ld a,(simon_x)
-	ld (ix+005h),a
-	jp boom_turn
-boomerang_out:                 ; (0x7344) 24 frames or screen-edge, then turn
+	jr boom_turn
+boomerang_out:                 ; (0x734B) 24 frames or screen-edge, then turn
 	ld a,(ix+005h)
 	sub 00ah
 	cp 0ech
@@ -8103,7 +8118,7 @@ boom_dx:
 	ld (ix+003h),a
 	ld (ix+007h),000h
 	jp actors_rearm_hittable
-boomerang_back:                ; (0x737A) decelerate, reverse; overlap Simon = catch
+boomerang_back:                ; (0x7381) decelerate, reverse; overlap Simon = catch
 	call proj_overlap_simon
 	jp c,projectile_clear
 	ld a,(ix+005h)
@@ -8124,12 +8139,12 @@ boomerang_back:                ; (0x737A) decelerate, reverse; overlap Simon = c
 boom_accel:                     ; facing left: INC velX
 	inc (ix+003h)
 	ret
-boomerang_catch:               ; (0x73A4) overlap Simon -> despawn (keep C416)
+boomerang_catch:               ; (0x73AB) overlap Simon -> despawn (keep C416)
 	call proj_overlap_simon
 	ret nc
 	jp projectile_clear
-; holy_water_tick (seg1 0x73AB): C460 slot type 5.  State 0/1 spawn at Simon
-; (Y=C425+offset, X=C427, velX=±2 from C468, velY=0).  State 2 = arc
+; holy_water_tick: C460 slot type 5.  State 0/1 spawn at Simon
+; (proj_spawn_y, velX=±2 from facing, velY=0).  State 2 = arc
 ; (Y += 2*arc_dy_tbl[phase], land via map_solid_pair tile_is_solid).  State 3 =
 ; floor flame (24 frames, SAT colour 8, patterns 0xF4/0xF8 — same
 ; actor_flame sheet as a falling heart; pixels in gfx_rle_a185).
@@ -8140,17 +8155,8 @@ holy_water_tick:
 	jr z,holy_water_arc    ; state 2
 	dec a
 	jr z,holy_water_flame  ; state 3
-	ld a,(simon_action)
-	cp act_crouch
-	ld a,(simon_y)
-	ld b,0f0h
-	jr nz,holy_throw_y
-	ld b,0f6h
-holy_throw_y:                   ; Y = Simon Y + crouch offset
-	add a,b
-	ld (ix+004h),a
-	xor a
-	ld (ix+002h),a
+	call proj_spawn_y
+	ld (ix+002h),000h
 	ld a,(ix+008h)
 	and a
 	ld a,002h
@@ -8158,11 +8164,9 @@ holy_throw_y:                   ; Y = Simon Y + crouch offset
 	ld a,0feh
 holy_throw_xvel:                ; velX +2 / -2
 	ld (ix+003h),a
-	ld a,(simon_x)
-	ld (ix+005h),a
 	ld (ix+006h),038h
 	jp boom_turn
-holy_water_arc:                ; (0x73E5) Y += 2*arc_dy_tbl[ix+7]; land -> flame
+holy_water_arc:                ; (0x73D7) Y += 2*arc_dy_tbl[ix+7]; land -> flame
 	ld a,(ix+007h)
 	ld hl,arc_dy_tbl
 	call ADD_HL_A
@@ -8188,7 +8192,7 @@ holy_arc_floor:                 ; map_solid_pair; land -> flame
 	ld (ix+007h),a
 	ld a,sfx_holy_water
 	jp play_sound
-holy_water_flame:              ; (0x7420) 0x18 frames burning on the floor, then despawn
+holy_water_flame:              ; (0x7412) 0x18 frames burning on the floor, then despawn
 	ld a,(0c003h)
 	and 004h
 	ld a,0f4h
@@ -8202,19 +8206,11 @@ holy_flame_pat:                 ; pattern F4/F8; 24 frames then clear
 	cp 018h
 	ret c
 	jp projectile_clear
-knife_tick:                    ; (0x743D) C416=2, bonus 0x1B; straight ±5, 1 or 2 slots
+knife_tick:                    ; C416=2, bonus 0x1B; straight ±5, 1 or 2 slots
 	ld a,(ix+000h)
 	dec a
 	ret nz
-	ld a,(simon_action)
-	cp act_crouch
-	ld a,(simon_y)
-	ld b,0f0h
-	jr nz,knife_throw_y
-	ld b,0f6h
-knife_throw_y:                  ; Y = Simon Y + crouch offset
-	add a,b
-	ld (ix+004h),a
+	call proj_spawn_y
 	xor a
 	ld (ix+002h),a
 	ld a,(ix+008h)
@@ -8227,49 +8223,44 @@ knife_throw_y:                  ; Y = Simon Y + crouch offset
 knife_throw_xvel:               ; velX +5 / -5; pattern 0x20 / 0x18
 	ld (ix+003h),a
 	ld (ix+006h),b
-	ld a,(simon_x)
-	ld (ix+005h),a
 	inc (ix+000h)
 	ld a,sfx_knife_throw
 	jp play_sound
-axe_tick:                      ; (0x747A) C416=3, bonus 0x1C; vel ±3, smaller throw
+axe_tick:                      ; C416=3, bonus 0x1C; NES arc, spin unchanged
 	ld a,(0c003h)
 	ld c,a
 	rra
-	and 003h
-	add a,a
-	add a,a
-	add a,a
-	add a,018h
-	ld (ix+006h),a
-	ld a,c
-	and 007h
-	jr nz,axe_state
-	ld a,sfx_axe_fly
-	call play_sound
-axe_state:                      ; DISPATCH throw/out/back/catch
-	ld hl,0c433h
-	ld a,(hl)
-	sub 002h
-	cp 002h
-	jr c,axe_drop_unequip
+	ld b,sfx_axe_fly
+	call spin_pat
+axe_state:
+	ds 10, 0               ; was the C433 block test; the axe flies through
 	ld a,(ix+000h)
 	dec a
-	call DISPATCH_A
-	defw boomerang_throw
-	defw boomerang_out
-	defw boomerang_back
-	defw boomerang_catch
-axe_drop_unequip:              ; (0x74AC) C433 in {2,3}: drop axe, unequip
-	ld (hl),000h           ; clear C433
-	ld b,item_axe          ; world drop = this weapon's bonus id
-	ld d,(ix+005h)         ; drop X = projectile X
-	ld a,(ix+004h)
-	sub 010h
-	ld e,a                 ; drop Y = projectile Y - 16
-	call scenery_drop_slot ; flame + C500 at projectile XY
-	call projectile_clear
-	jp lose_weapon         ; C416 = leather
+	jr z,axe_spawn         ; state 1: leave the hand
+	call axe_grav
+	ld a,(ix+004h)         ; Y after this frame's step
+	add a,(ix+002h)
+	cp 0f0h
+	ret c                  ; still on screen; integrate applies velX/velY
+	jr projectile_clear    ; off the top: despawn, keep C416
+axe_spawn:
+	call boomerang_throw   ; position, velX ±2, state 2, rearm
+	ld (ix+002h),0fah      ; -5.5 px/frame, down-positive
+	ld (ix+009h),080h
+axe_grav:                       ; +0.25 px/frame², then add the fraction into Y
+	ld l,(ix+009h)
+	ld h,(ix+002h)
+	ld de,00040h
+	add hl,de
+	ld (ix+009h),l
+	ld (ix+002h),h
+	ld a,(ix+007h)
+	add a,l
+	ld (ix+007h),a
+	ret nc
+	inc (ix+004h)
+	ret
+	ds 16, 0               ; was the block-hit drop; keeps projectile_integrate put
 projectile_integrate:
 	ld a,(ix+004h)
 	add a,(ix+002h)
@@ -8287,10 +8278,11 @@ projectile_clip:
 	sub 0fbh
 	cp 00ah
 	ret nc
-	ld a,(ix+001h)         ; axe/cross leaving the X wrap: drop subweapon
-	sub 003h
-	cp equip_knife
-	call c,lose_weapon     ; knife/holy do not unequip
+	ld a,(ix+001h)         ; cross leaving the X wrap: drop subweapon
+	cp equip_cross
+	call z,lose_weapon     ; knife, axe, and holy water stay equipped
+	nop
+	nop
 projectile_clear:
 	push ix
 	pop hl

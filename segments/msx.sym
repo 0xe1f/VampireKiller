@@ -838,26 +838,26 @@ simon_dying_leave: equ 0x70c6	; wipe timers; stay_in_play=0 -> death_respawn
 simon_portal_wait: equ 0x7102	; C420=7: wait C42D after crouch+UP on pad, then C41B=0xFF
 inv_reset_life: equ 0x70e3	; new-life/death: keep C701 bit7 (map); clear weapon/keys/sub
 simon_attack_tick: equ 0x7114	; try/start whip + tick + emit SAT
-simon_torso_from_weapon: equ 0x7213	; C42F from swing_weapon (leather 6 / chain 9 / thrown 0x0C)
-torso_store: equ 0x7224	; leather 6 / chain 9 then mirror
+simon_torso_from_weapon: equ 0x7224	; C42F from swing_weapon (leather 6 / chain 9 / thrown 0x0C)
+torso_store: equ 0x7235	; leather 6 / chain 9 then mirror
 simon_attack_start: equ 0x711d	; SPACE new-press: whip or throw; jump+dir holy water/hourglass
-whip_begin: equ 0x713A	; latch simon_whip=1 after alloc (or melee)
-simon_try_air_item: equ 0x713d	; jump + C701: holy water (bit3) then hourglass (bit6)
-hourglass_arm: equ 0x718E	; store C43B; D010 bit0 freeze; BGM 0xFB
-projectile_alloc_go: equ 0x71CF	; scan C450/C460 for free +1
-proj_alloc_slot: equ 0x71d3	; free C450/C460 -> state 1
-proj_alloc_next: equ 0x71df	; next 0x10-byte slot
-whip_tick: equ 0x71e7	; dispatch 0xC422 whip phase
-whip_phase_1: equ 0x7201	; legs + torso + whip sfx
-whip_legs_set: equ 0x7210	; legs 0 stand / 6 crouch
-whip_thrown_pose: equ 0x7231	; load_weapon_sprites; torso 0x0C
-whip_timer_set: equ 0x723F	; A -> simon_whip_timer, then phase++
-whip_phase_next: equ 0x7242	; inc simon_whip
-whip_phase_2: equ 0x7247	; inc torso; thrown reloads SAT
-whip_phase_3: equ 0x7257	; melee rearm+timer=4; thrown jumps to phase 2
-whip_phase_4: equ 0x7269	; thrown projectile_arm; melee wait timer
-simon_attack_end: equ 0x7275	; clear C422/C429; torso 0, or 2 on stairs
-whip_idle_torso: equ 0x7287	; store C42F then simon_mirror_frames
+whip_begin: equ 0x714B	; latch simon_whip=1 after alloc (or melee)
+simon_try_air_item: equ 0x714E	; jump + C701: holy water (bit3) then hourglass (bit6)
+hourglass_arm: equ 0x719F	; store C43B; D010 bit0 freeze; BGM 0xFB
+projectile_alloc_go: equ 0x71E0	; scan C450/C460 for free +1
+proj_alloc_slot: equ 0x71E4	; free C450/C460 -> state 1
+proj_alloc_next: equ 0x71F0	; next 0x10-byte slot
+whip_tick: equ 0x71F8	; dispatch 0xC422 whip phase
+whip_phase_1: equ 0x7212	; legs + torso + whip sfx
+whip_legs_set: equ 0x7221	; legs 0 stand / 6 crouch
+whip_thrown_pose: equ 0x7242	; load_weapon_sprites; torso 0x0C
+whip_timer_set: equ 0x724F	; A -> simon_whip_timer, then phase++
+whip_phase_next: equ 0x7252	; inc simon_whip
+whip_phase_2: equ 0x7257	; inc torso; thrown reloads SAT
+whip_phase_3: equ 0x7267	; melee rearm+timer=4; thrown jumps to phase 2
+whip_phase_4: equ 0x7279	; thrown projectile_arm; melee wait timer
+simon_attack_end: equ 0x7285	; clear C422/C429; torso 0, or 2 on stairs
+whip_idle_torso: equ 0x7297	; store C42F then simon_mirror_frames
 whip_slots_clear: equ 0x751a	; zero 0xC450 whip slots + hide SAT
 simon_mirror_frames: equ 0x7666	; facing-left: C42E/C42F += 0x0A/0x0F
 mirror_legs_ok: equ 0x7676	; legs already mirrored or +0x0A done
@@ -866,47 +866,47 @@ tile_layout_draw: equ 0x7b39	; blit title_layout stream (FF=end, FE=next row)
 layout_byte: equ 0x7b3a
 layout_tile: equ 0x7b4e
 layout_end: equ 0x7b57
-holy_water_use: equ 0x7154	; C701 bit3: jump+LEFT/RIGHT, 5 hearts, one vial (C461)
-holy_water_throw_left: equ 0x719B
-holy_water_throw_right: equ 0x71A8
-holy_water_throw: equ 0x71B1	; C461=5, spend 5 hearts
-holy_water_tick: equ 0x73AB	; C460 type 5: spawn, arc (arc_dy_tbl), floor flame
-holy_throw_y: equ 0x73c3	; Y = Simon Y + crouch offset
-holy_throw_xvel: equ 0x73d5	; velX +2 / -2
+holy_water_use: equ 0x7165	; C701 bit3: jump+LEFT/RIGHT, 1 heart, one vial (C461)
+holy_water_throw_left: equ 0x71AC
+holy_water_throw_right: equ 0x71B9
+holy_water_throw: equ 0x71C2	; C461=5, spend 1 heart
+holy_water_tick: equ 0x73C0	; C460 type 5: spawn, arc (arc_dy_tbl), floor flame
+holy_throw_xvel: equ 0x73DB	; velX +2 / -2
 holy_water_arc: equ 0x73E5
 holy_arc_floor: equ 0x7404	; map_solid_pair; land -> flame
 arc_dy_tbl: equ 0x7084	; signed dY[22]; knockback + holy-water arc (doubled)
 holy_water_flame: equ 0x7420	; 24 frames on floor, SAT colour 8, patterns F4/F8
-holy_flame_pat: equ 0x742e	; pattern F4/F8; 24 frames then clear
-projectile_alloc: equ 0x71C5	; free C450/C460 slot; knife may take two
-projectile_arm: equ 0x728D	; whip phase 4: swing_weapon -> slot type
-proj_arm_slot: equ 0x7299	; waiting state 1: copy swing_weapon
-proj_arm_next: equ 0x72b1	; next 0x10-byte slot
-projectile_tick: equ 0x72B9	; both slots: motion + integrate + clip + SAT
+holy_flame_pat: equ 0x742E	; pattern F4/F8; 24 frames then clear
+projectile_alloc: equ 0x71D6	; free C450/C460 slot; knife may take two
+projectile_arm: equ 0x729D	; whip phase 4: swing_weapon -> slot type
+proj_arm_slot: equ 0x72A9	; waiting state 1: copy swing_weapon
+proj_arm_next: equ 0x72C1	; next 0x10-byte slot
+projectile_tick: equ 0x72C9	; both slots: motion + integrate + clip + SAT
 knife_tick: equ 0x743D		; C416=2 / bonus 0x1B; straight ±5
-knife_throw_y: equ 0x7450	; Y = Simon Y + crouch offset
-knife_throw_xvel: equ 0x7466	; velX +5 / -5; pattern 0x20 / 0x18
-axe_tick: equ 0x747A		; C416=3 / bonus 0x1C; boomerang ±3
-axe_state: equ 0x7493	; DISPATCH throw/out/back/catch
-axe_drop_unequip: equ 0x74ac	; C433 in {2,3}: scenery_drop_slot axe, lose_weapon
-cross_tick: equ 0x72E5		; C416=4 / bonus 0x1D; boomerang ±5, SAT 0x0F/0x0E
-cross_state: equ 0x72ff	; DISPATCH throw/out/back/catch
-boomerang_throw: equ 0x730E
-boom_throw_y: equ 0x731c	; Y = Simon Y + (stand -16 / crouch -10)
-boom_spd: equ 0x732f	; speed 3 axe / 5 cross
-boom_xvel: equ 0x7338	; store velX (neg if facing left)
-boomerang_out: equ 0x7344
-boom_turn: equ 0x7356	; 24 frames: reverse
-boom_edge: equ 0x7360	; X off-screen
-boom_flip: equ 0x7363
-boom_dx: equ 0x7370	; ±5
-boomerang_back: equ 0x737A
-boom_accel: equ 0x73a0	; facing left: INC velX
-boomerang_catch: equ 0x73A4	; overlap Simon -> despawn, keep C416
-projectile_integrate: equ 0x74C2
-projectile_clip: equ 0x74D5	; offscreen; cross/axe X-wrap -> lose_weapon
-projectile_clear: equ 0x74F0
-projectile_clear_hl: equ 0x74F3
+knife_throw_xvel: equ 0x7457	; velX +5 / -5; pattern 0x20 / 0x18
+axe_tick: equ 0x7465		; C416=3 / bonus 0x1C; arc ±2, gravity 0.25
+axe_state: equ 0x746F	; spawn or grav; block-hit drop is disabled
+axe_spawn: equ 0x748D	; velY -5.5, then one gravity step
+axe_grav: equ 0x7498	; +0x40 to the 8.8 velocity, carry into Y
+spin_pat: equ 0x72F5		; (frame already shifted) & 3 -> pattern; sfx every 8
+cross_tick: equ 0x7307		; C416=4 / bonus 0x1D; boomerang ±5, SAT 0x0F/0x0E
+cross_state: equ 0x7312	; DISPATCH throw/out/back/catch
+proj_spawn_y: equ 0x7321	; Y = Simon Y + (stand -16 / crouch -10); X = Simon X
+boomerang_throw: equ 0x7339	; velX ±2 axe / ±5 cross
+boom_spd: equ 0x734B	; speed 2 axe / 5 cross
+boom_xvel: equ 0x7354	; store velX (neg if facing left)
+boomerang_out: equ 0x7359
+boom_turn: equ 0x736B	; 24 frames: reverse
+boom_edge: equ 0x7375	; X off-screen
+boom_flip: equ 0x7378
+boom_dx: equ 0x7385	; ±5
+boomerang_back: equ 0x738F
+boom_accel: equ 0x73B5	; facing left: INC velX
+boomerang_catch: equ 0x73B9	; overlap Simon -> despawn, keep C416
+projectile_integrate: equ 0x74C4
+projectile_clip: equ 0x74D7	; offscreen; cross X-wrap -> lose_weapon
+projectile_clear: equ 0x74F2
+projectile_clear_hl: equ 0x74F5
 proj_hide_c460: equ 0x750e	; hide C460 SAT pair Y=0xE0
 proj_hide_pat: equ 0x7514	; slot+4 = hide Y
 sat_fill: equ 0x7597	; fill B bytes at HL with A (SAT colour run)
@@ -1196,7 +1196,7 @@ hittable_next: equ 0x99bc	; next slot, stride DE
 yellow_shield_tick: equ 0x8617	; absorb enemy shots while C701 bit5
 yshield_slot: equ 0x8623	; one D700 vs yellow shield
 yshield_next: equ 0x8649	; next 0x80-byte slot
-hourglass_use: equ 0x7166	; jump+DOWN + 5 hearts -> hourglass_timer / D010 freeze
+hourglass_use: equ 0x7177	; jump+DOWN + 5 hearts -> hourglass_timer / D010 freeze
 brazier_tick_all: equ 0x8678	; per-frame update of the 8 C470 candle/block slots
 brazier_slot: equ 0x867e	; tick one live C470 slot
 brazier_tick: equ 0x8693	; one C470 slot: first frame stamps, hit -> destroyed

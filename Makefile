@@ -1,7 +1,7 @@
 # Vampire Killer (MSX2, 128 KiB Konami MegaROM) disassembly build.
 #
 #   make            assemble VampireKiller.asm -> VampireKiller.rom
-#   make verify     SHA-1 check against VampireKiller.sha1
+#   make verify     assemble; SHA-1 check on master only
 #   make coverage   Shields.io JSON under generated/badges/ (does not edit README)
 #   make segments   drop leftover .bin files (all banks are source)
 #   make gfx        PNG sheets + annotated stage composites
@@ -25,8 +25,17 @@ SHA1SUM  ?= $(shell command -v sha1sum 2>/dev/null || echo "shasum -a 1")
 all: $(SRC)
 	$(ASM) $(SRC)
 
+# VampireKiller.sha1 is the original ROM. Feature branches may diverge;
+# the hash is enforced only on master. Actions checks out a detached HEAD,
+# so GITHUB_REF_NAME supplies the branch there.
 verify: all
-	@$(SHA1SUM) -c $(SHA1FILE)
+	@branch="$$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"; \
+	if [ "$$branch" = HEAD ] || [ -z "$$branch" ]; then branch="$${GITHUB_REF_NAME:-}"; fi; \
+	if [ "$$branch" = master ]; then \
+		$(SHA1SUM) -c $(SHA1FILE); \
+	else \
+		echo "Skipping SHA-1 check on branch '$$branch' (enforced on master only)"; \
+	fi
 
 coverage:
 	python3 tools/workbench/msx/coverage.py --badges generated/badges
